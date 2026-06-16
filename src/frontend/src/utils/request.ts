@@ -3,6 +3,10 @@ import axios from "axios"
 
 import { OpenAPI } from "@/client"
 import { handleUnauthorized } from "./auth"
+import { notifyRefresh } from "./updateNotify"
+
+/** Gateway statuses that indicate the backend is restarting during a deploy. */
+const DEPLOYING_STATUSES = new Set([502, 503, 504])
 
 export const initOpenApi = () => {
   OpenAPI.BASE = import.meta.env.VITE_API_URL
@@ -11,6 +15,10 @@ export const initOpenApi = () => {
   }
 
   OpenAPI.interceptors.response.use(async (response: AxiosResponse) => {
+    if (DEPLOYING_STATUSES.has(response.status)) {
+      notifyRefresh("deploying")
+      return response
+    }
     if (response.status === 401) {
       const originalRequest = response.config
       if (originalRequest.url?.includes("/login/refresh-token")) {

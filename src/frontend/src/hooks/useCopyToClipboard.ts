@@ -10,8 +10,9 @@ function fallbackCopyText(text: string): boolean {
   // of document.body, so Radix Dialog's focus trap / inert siblings don't
   // block the selection. Falls back to body when no dialog is active.
   const container =
-    (document.activeElement?.closest("[role='dialog']") as HTMLElement | null) ??
-    document.body
+    (document.activeElement?.closest(
+      "[role='dialog']",
+    ) as HTMLElement | null) ?? document.body
 
   const textarea = document.createElement("textarea")
   textarea.value = text

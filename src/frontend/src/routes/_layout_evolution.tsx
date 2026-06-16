@@ -859,7 +859,9 @@ function Layout() {
                       sideOffset={8}
                       className="max-w-[340px] space-y-1 px-3 py-2"
                     >
-                      <p className="font-semibold leading-snug">{projectName}</p>
+                      <p className="font-semibold leading-snug">
+                        {projectName}
+                      </p>
                       <p className="text-background/80 leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">
                         {description}
                       </p>

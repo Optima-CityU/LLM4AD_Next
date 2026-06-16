@@ -42,7 +42,10 @@ export default function EvaluatorSection() {
             <FormItem className="col-span-2">
               <FormLabel>{t("configForm.evaluator.module")}</FormLabel>
               <FormControl>
-                <Input placeholder={t("configForm.evaluator.modulePlaceholder")} {...field} />
+                <Input
+                  placeholder={t("configForm.evaluator.modulePlaceholder")}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -98,14 +101,18 @@ export default function EvaluatorSection() {
                   onCheckedChange={field.onChange}
                 />
               </FormControl>
-              <FormLabel className="font-normal">{t("configForm.evaluator.parallel")}</FormLabel>
+              <FormLabel className="font-normal">
+                {t("configForm.evaluator.parallel")}
+              </FormLabel>
             </FormItem>
           )}
         />
       </div>
 
       <div className="space-y-2">
-        <span className="text-sm font-medium">{t("configForm.evaluator.metrics")}</span>
+        <span className="text-sm font-medium">
+          {t("configForm.evaluator.metrics")}
+        </span>
         {fields.map((field, index) => (
           <div key={field.id} className="flex items-center gap-2">
             <FormField
@@ -114,7 +121,10 @@ export default function EvaluatorSection() {
               render={({ field }) => (
                 <FormItem className="flex-1">
                   <FormControl>
-                    <Input placeholder={t("configForm.evaluator.metricPlaceholder")} {...field} />
+                    <Input
+                      placeholder={t("configForm.evaluator.metricPlaceholder")}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -212,7 +222,9 @@ export default function EvaluatorSection() {
                     onCheckedChange={field.onChange}
                   />
                 </FormControl>
-                <FormLabel className="font-normal">{t("configForm.evaluator.recursive")}</FormLabel>
+                <FormLabel className="font-normal">
+                  {t("configForm.evaluator.recursive")}
+                </FormLabel>
               </FormItem>
             )}
           />

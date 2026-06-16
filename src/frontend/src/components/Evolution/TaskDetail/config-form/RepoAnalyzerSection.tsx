@@ -35,7 +35,9 @@ export default function RepoAnalyzerSection() {
         name="repo_analyzer.context_lines_before"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t("configForm.repoAnalyzer.contextLinesBefore")}</FormLabel>
+            <FormLabel>
+              {t("configForm.repoAnalyzer.contextLinesBefore")}
+            </FormLabel>
             <FormControl>
               <Input type="number" min={0} {...field} />
             </FormControl>
@@ -48,7 +50,9 @@ export default function RepoAnalyzerSection() {
         name="repo_analyzer.context_lines_after"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t("configForm.repoAnalyzer.contextLinesAfter")}</FormLabel>
+            <FormLabel>
+              {t("configForm.repoAnalyzer.contextLinesAfter")}
+            </FormLabel>
             <FormControl>
               <Input type="number" min={0} {...field} />
             </FormControl>
@@ -61,7 +65,9 @@ export default function RepoAnalyzerSection() {
         name="repo_analyzer.include"
         render={({ field }) => (
           <FormItem className="col-span-2">
-            <FormLabel>{t("configForm.repoAnalyzer.includePatterns")}</FormLabel>
+            <FormLabel>
+              {t("configForm.repoAnalyzer.includePatterns")}
+            </FormLabel>
             <FormControl>
               <Input
                 value={Array.isArray(field.value) ? field.value.join(", ") : ""}
@@ -85,7 +91,9 @@ export default function RepoAnalyzerSection() {
         name="repo_analyzer.exclude"
         render={({ field }) => (
           <FormItem className="col-span-2">
-            <FormLabel>{t("configForm.repoAnalyzer.excludePatterns")}</FormLabel>
+            <FormLabel>
+              {t("configForm.repoAnalyzer.excludePatterns")}
+            </FormLabel>
             <FormControl>
               <Input
                 value={Array.isArray(field.value) ? field.value.join(", ") : ""}

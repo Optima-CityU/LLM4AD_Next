@@ -2,8 +2,8 @@ import path from "node:path"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import react from "@vitejs/plugin-react-swc"
-import { defineConfig, loadEnv } from "vite"
 import { visualizer } from "rollup-plugin-visualizer"
+import { defineConfig, loadEnv } from "vite"
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -47,7 +47,10 @@ export default defineConfig(({ mode }) => {
             // vendor-monaco, forcing the entry to statically import the whole
             // Monaco editor just to grab the preload helper, so every page
             // (including the landing page) downloaded Monaco.
-            if (id.includes("vite/preload-helper") || id.includes("commonjsHelpers"))
+            if (
+              id.includes("vite/preload-helper") ||
+              id.includes("commonjsHelpers")
+            )
               return "vendor-helpers"
             if (!id.includes("node_modules")) return
             if (id.includes("/d3") || id.includes("\\d3")) return "vendor-d3"

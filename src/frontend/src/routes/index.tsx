@@ -531,7 +531,9 @@ function DemoSection() {
   const { resolvedTheme } = useTheme()
   const { ref, visible } = useReveal<HTMLDivElement>()
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const variant = i18n.language?.startsWith("zh") ? DEMO_VIDEO.zh : DEMO_VIDEO.en
+  const variant = i18n.language?.startsWith("zh")
+    ? DEMO_VIDEO.zh
+    : DEMO_VIDEO.en
   const videoSrc = variant.src
   // Swap to the light-mode cover so the poster matches the active theme.
   const posterSrc =

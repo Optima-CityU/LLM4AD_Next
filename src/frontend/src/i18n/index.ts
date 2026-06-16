@@ -10,8 +10,7 @@ const detectLang = (): "zh" | "en" => {
   const saved = localStorage.getItem(STORAGE_KEY) as "zh" | "en" | null
   if (saved) return saved
   // First visit: use browser language. Chinese -> zh, otherwise -> en.
-  const browserLang =
-    typeof navigator !== "undefined" ? navigator.language : ""
+  const browserLang = typeof navigator !== "undefined" ? navigator.language : ""
   return browserLang.toLowerCase().startsWith("zh") ? "zh" : "en"
 }
 

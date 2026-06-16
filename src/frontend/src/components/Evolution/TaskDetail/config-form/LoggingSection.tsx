@@ -105,7 +105,9 @@ export default function LoggingSection() {
                   onCheckedChange={field.onChange}
                 />
               </FormControl>
-              <FormLabel className="font-normal">{t("configForm.logging.console")}</FormLabel>
+              <FormLabel className="font-normal">
+                {t("configForm.logging.console")}
+              </FormLabel>
             </FormItem>
           )}
         />
@@ -120,7 +122,9 @@ export default function LoggingSection() {
                   onCheckedChange={field.onChange}
                 />
               </FormControl>
-              <FormLabel className="font-normal">{t("configForm.logging.jsonFormat")}</FormLabel>
+              <FormLabel className="font-normal">
+                {t("configForm.logging.jsonFormat")}
+              </FormLabel>
             </FormItem>
           )}
         />

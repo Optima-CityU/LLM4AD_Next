@@ -26,7 +26,9 @@ export default function WorkspaceSection() {
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="font-normal">{t("configForm.workspace.autoCreate")}</FormLabel>
+            <FormLabel className="font-normal">
+              {t("configForm.workspace.autoCreate")}
+            </FormLabel>
           </FormItem>
         )}
       />

@@ -37,7 +37,9 @@ export default function VersionControlSection() {
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="font-normal">{t("configForm.versionControl.enabled")}</FormLabel>
+            <FormLabel className="font-normal">
+              {t("configForm.versionControl.enabled")}
+            </FormLabel>
           </FormItem>
         )}
       />
@@ -121,7 +123,9 @@ export default function VersionControlSection() {
         name="version_control.default_branch"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t("configForm.versionControl.defaultBranch")}</FormLabel>
+            <FormLabel>
+              {t("configForm.versionControl.defaultBranch")}
+            </FormLabel>
             <FormControl>
               <Input {...field} />
             </FormControl>
@@ -134,7 +138,9 @@ export default function VersionControlSection() {
         name="version_control.max_worktree_age_days"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t("configForm.versionControl.maxWorktreeAgeDays")}</FormLabel>
+            <FormLabel>
+              {t("configForm.versionControl.maxWorktreeAgeDays")}
+            </FormLabel>
             <FormControl>
               <Input type="number" {...field} />
             </FormControl>
@@ -160,7 +166,9 @@ export default function VersionControlSection() {
         name="version_control.commit_message_template"
         render={({ field }) => (
           <FormItem className="col-span-2">
-            <FormLabel>{t("configForm.versionControl.commitMessageTemplate")}</FormLabel>
+            <FormLabel>
+              {t("configForm.versionControl.commitMessageTemplate")}
+            </FormLabel>
             <FormControl>
               <Input {...field} />
             </FormControl>
@@ -179,7 +187,9 @@ export default function VersionControlSection() {
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="font-normal">{t("configForm.versionControl.autoInitialize")}</FormLabel>
+            <FormLabel className="font-normal">
+              {t("configForm.versionControl.autoInitialize")}
+            </FormLabel>
           </FormItem>
         )}
       />
@@ -194,7 +204,9 @@ export default function VersionControlSection() {
                 onCheckedChange={field.onChange}
               />
             </FormControl>
-            <FormLabel className="font-normal">{t("configForm.versionControl.autoCleanup")}</FormLabel>
+            <FormLabel className="font-normal">
+              {t("configForm.versionControl.autoCleanup")}
+            </FormLabel>
           </FormItem>
         )}
       />

@@ -17,7 +17,13 @@ function processQueue(error: unknown, token: string | null) {
   failedQueue = []
 }
 
-export const AUTH_PAGES = ["/login", "/signup", "/verify-email", "/recover-password", "/reset-password"]
+export const AUTH_PAGES = [
+  "/login",
+  "/signup",
+  "/verify-email",
+  "/recover-password",
+  "/reset-password",
+]
 
 export function buildLoginRedirectUrl(): string {
   const currentPath = window.location.pathname

@@ -80,7 +80,9 @@ export default function PlannerSection() {
       </div>
 
       <div className="space-y-3">
-        <span className="text-sm font-medium">{t("configForm.planner.samplers")}</span>
+        <span className="text-sm font-medium">
+          {t("configForm.planner.samplers")}
+        </span>
         {fields.map((field, index) => (
           <div
             key={field.id}

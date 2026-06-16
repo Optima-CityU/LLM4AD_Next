@@ -38,6 +38,18 @@
     "goToLastPage": "跳转到最后一页",
     "reset": "重置"
   },
+  "update": {
+    "deploying": {
+      "title": "系统正在更新",
+      "desc": "服务正在升级，请稍后刷新页面重试。"
+    },
+    "staleAssets": {
+      "title": "页面已更新",
+      "desc": "检测到新版本，请刷新以继续使用。"
+    },
+    "refresh": "立即刷新",
+    "dismiss": "稍后"
+  },
   "validation": {
     "passwordRequired": "请输入密码",
     "passwordMinLength": "密码至少 8 个字符",

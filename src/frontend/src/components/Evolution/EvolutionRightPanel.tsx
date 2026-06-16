@@ -25,7 +25,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { TaskResponse } from "@/client"
 import { Llm4AdTasksService } from "@/client"
-import { Button } from "@/components/ui/button"
 import PanelErrorBoundary from "@/components/Common/PanelErrorBoundary"
 import {
   AlertDialog,
@@ -37,6 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
 import {
   Tooltip,
   TooltipContent,
@@ -564,7 +564,9 @@ function NodeLink({
   const node = nodeMap.get(nodeId)
   const nodeIsland = node?.island ?? -1
   const isCrossIsland = nodeIsland !== currentIsland && nodeIsland >= 0
-  const ariaLabel = node ? `${node.name} (${formatScore(node.rawScore)})` : nodeId
+  const ariaLabel = node
+    ? `${node.name} (${formatScore(node.rawScore)})`
+    : nodeId
 
   return (
     <div

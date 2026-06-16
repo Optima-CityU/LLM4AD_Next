@@ -197,7 +197,9 @@ export default function EvolutionSection() {
         name="evolution.early_stop_threshold"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t("configForm.evolution.earlyStopThreshold")}</FormLabel>
+            <FormLabel>
+              {t("configForm.evolution.earlyStopThreshold")}
+            </FormLabel>
             <FormControl>
               <Input type="number" step="0.000001" {...field} />
             </FormControl>
@@ -210,7 +212,9 @@ export default function EvolutionSection() {
         name="evolution.checkpoint_interval"
         render={({ field }) => (
           <FormItem>
-            <FormLabel>{t("configForm.evolution.checkpointInterval")}</FormLabel>
+            <FormLabel>
+              {t("configForm.evolution.checkpointInterval")}
+            </FormLabel>
             <FormControl>
               <Input type="number" {...field} />
             </FormControl>

@@ -68,15 +68,24 @@ export default function AppConfigForm({
         )}
         className="space-y-4"
       >
-        <CollapsibleSection title={t("configForm.sections.general")} defaultOpen>
+        <CollapsibleSection
+          title={t("configForm.sections.general")}
+          defaultOpen
+        >
           <GeneralSection />
         </CollapsibleSection>
 
-        <CollapsibleSection title={t("configForm.sections.providers")} defaultOpen>
+        <CollapsibleSection
+          title={t("configForm.sections.providers")}
+          defaultOpen
+        >
           <ProvidersSection />
         </CollapsibleSection>
 
-        <CollapsibleSection title={t("configForm.sections.evaluator")} defaultOpen>
+        <CollapsibleSection
+          title={t("configForm.sections.evaluator")}
+          defaultOpen
+        >
           <EvaluatorSection />
         </CollapsibleSection>
 

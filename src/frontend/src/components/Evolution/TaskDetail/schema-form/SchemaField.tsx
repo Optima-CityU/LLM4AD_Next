@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -12,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import FieldLabel from "./FieldLabel"
 import type { JsonSchema } from "./resolveSchema"
 import {

@@ -27,8 +27,8 @@ import {
 } from "@/components/ui/tooltip"
 
 import FileTreeView from "../FileTreeView"
-import { getCommentStyle, getLanguageFromPath } from "./types"
 import type { EvolveBlockPosition } from "./types"
+import { getCommentStyle, getLanguageFromPath } from "./types"
 import {
   countEvolveBlocksInContent,
   parseEvolveBlocks,

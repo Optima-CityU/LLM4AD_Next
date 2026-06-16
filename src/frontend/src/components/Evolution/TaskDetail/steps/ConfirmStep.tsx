@@ -55,8 +55,14 @@ export default function ConfirmStep({
     queryFn: () => Llm4AdTasksService.getTaskDataTree({ taskId }),
     enabled: !!taskId,
   })
-  const hasFile = (nodes: { type: string; children?: unknown[] | null }[]): boolean =>
-    nodes.some((n) => n.type === "file" || (n.children && hasFile(n.children as typeof nodes)))
+  const hasFile = (
+    nodes: { type: string; children?: unknown[] | null }[],
+  ): boolean =>
+    nodes.some(
+      (n) =>
+        n.type === "file" ||
+        (n.children && hasFile(n.children as typeof nodes)),
+    )
   const dataEmpty = !treeLoading && !hasFile(treeData?.tree ?? [])
 
   // --- YAML editor state ---

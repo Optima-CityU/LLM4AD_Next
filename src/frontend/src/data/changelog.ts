@@ -1,4 +1,12 @@
-export type ChangeType = "feat" | "fix" | "improve" | "breaking" | "perf" | "ref" | "add" | "other"
+export type ChangeType =
+  | "feat"
+  | "fix"
+  | "improve"
+  | "breaking"
+  | "perf"
+  | "ref"
+  | "add"
+  | "other"
 
 export interface Change {
   type: ChangeType
@@ -64,14 +72,11 @@ const CHANGE_TYPE_MAP: Record<string, ChangeType> = {
   "fix/perf": "perf",
 }
 
-const CHANGE_ITEM_RE =
-  /^- \*\*([^*]+)\*\*[：:]\s*(.+)/
+const CHANGE_ITEM_RE = /^- \*\*([^*]+)\*\*[：:]\s*(.+)/
 
-const RELEASE_HEADER_RE =
-  /^## \[?(.+?)\]?\s*[—–-]\s*(.+)/
+const RELEASE_HEADER_RE = /^## \[?(.+?)\]?\s*[—–-]\s*(.+)/
 
-const MONTH_HEADER_RE =
-  /^## (.+)/
+const MONTH_HEADER_RE = /^## (.+)/
 
 const DATE_LIKE_RE =
   /\d{4}|\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b|[一二三四五六七八九十]+月|\d+\s*月/i
@@ -160,8 +165,7 @@ function parseChangelog(raw: string): ChangelogData {
       flush()
       const rawTitle = releaseMatch[1].trim()
       const dateStr = releaseMatch[2].trim()
-      const isUnreleased =
-        rawTitle === "Unreleased" || rawTitle === "未发布"
+      const isUnreleased = rawTitle === "Unreleased" || rawTitle === "未发布"
 
       current = {
         kind: "release",
@@ -196,7 +200,7 @@ function parseChangelog(raw: string): ChangelogData {
     }
 
     if (currentMd) {
-      currentMd.content += line + "\n"
+      currentMd.content += `${line}\n`
       continue
     }
 
@@ -237,13 +241,13 @@ function parseChangelog(raw: string): ChangelogData {
       !currentCategory
     ) {
       if (current.summary) {
-        current.summary += " " + trimmed
+        current.summary += ` ${trimmed}`
       } else {
         current.summary = trimmed
         collectingSummary = true
       }
     } else if (collectingSummary && trimmed) {
-      current.summary += " " + trimmed
+      current.summary += ` ${trimmed}`
     }
   }
 

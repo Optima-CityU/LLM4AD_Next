@@ -25,9 +25,9 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import type {
   ChangeCategory,
-  ChangeType,
   ChangelogData,
   ChangelogSection,
+  ChangeType,
   MonthRelease,
 } from "@/data/changelog"
 import { loadChangelog } from "@/data/changelog"
@@ -239,7 +239,11 @@ function ChangelogPage() {
   )
 }
 
-function MarkdownCard({ section }: { section: { title: string; content: string } }) {
+function MarkdownCard({
+  section,
+}: {
+  section: { title: string; content: string }
+}) {
   return (
     <div className="relative flex gap-6">
       <div className="relative z-10 hidden shrink-0 md:flex md:w-[30px] md:justify-center">
@@ -250,7 +254,9 @@ function MarkdownCard({ section }: { section: { title: string; content: string }
 
       <Card className="flex-1 transition-all hover:shadow-md hover:border-border/80">
         <CardHeader className="gap-1 pb-3">
-          <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
+          <h3 className="text-sm font-medium text-foreground">
+            {section.title}
+          </h3>
         </CardHeader>
         <CardContent className="pt-0 prose prose-sm dark:prose-invert max-w-none prose-p:my-1 prose-li:my-0.5 prose-a:text-primary">
           <Markdown remarkPlugins={[remarkGfm]}>{section.content}</Markdown>
@@ -345,7 +351,8 @@ function CategorySection({
       )}
       <ul className="space-y-1.5">
         {category.changes.map((change, i) => {
-          const config = CHANGE_TYPE_CONFIG[change.type] ?? CHANGE_TYPE_CONFIG.other
+          const config =
+            CHANGE_TYPE_CONFIG[change.type] ?? CHANGE_TYPE_CONFIG.other
           const Icon = config.icon
           return (
             <li key={i} className="flex items-start gap-2.5">

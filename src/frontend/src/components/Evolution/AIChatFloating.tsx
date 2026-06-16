@@ -15,14 +15,7 @@ import {
   Target,
   X,
 } from "lucide-react"
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import Markdown from "react-markdown"
 import { toast } from "sonner"
@@ -34,6 +27,22 @@ import type {
   ProviderResponse,
 } from "@/client"
 import { Llm4AdChatTuneService } from "@/client"
+import {
+  CardRenderer,
+  ExpandableError,
+  formatUserSubmissionText,
+  parsePayloadToCard,
+  stripOptionsBlock,
+} from "@/components/Evolution/TaskDetail/ChatTuneView"
+import type {
+  AssistantCard,
+  CardSubmission,
+} from "@/components/Evolution/TaskDetail/chat-tune-mock"
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  makeMarkdownComponents,
+} from "@/components/markdown/markdownComponents"
 import { Badge } from "@/components/ui/badge"
 import {
   Popover,
@@ -46,22 +55,6 @@ import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { INPUT_LIMITS } from "@/lib/inputLimits"
 import { cn, handleComposerEnter } from "@/lib/utils"
-import type {
-  AssistantCard,
-  CardSubmission,
-} from "@/components/Evolution/TaskDetail/chat-tune-mock"
-import {
-  CardRenderer,
-  ExpandableError,
-  formatUserSubmissionText,
-  parsePayloadToCard,
-  stripOptionsBlock,
-} from "@/components/Evolution/TaskDetail/ChatTuneView"
-import {
-  MARKDOWN_REHYPE_PLUGINS,
-  MARKDOWN_REMARK_PLUGINS,
-  makeMarkdownComponents,
-} from "@/components/markdown/markdownComponents"
 
 /* ─────────────────── Helpers ──────────────────── */
 
@@ -305,12 +298,20 @@ function FloatingChatImpl({
     setStreamingMsgId(generating.id)
     connectStream(taskId, turnId, generating.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionDetail?.session.id, open])
+  }, [
+    sessionDetail?.session.id,
+    open,
+    connectStream,
+    sessionDetail.session.active_turn_id,
+    taskId,
+    sessionDetail.messages,
+    sessionDetail,
+  ])
 
   // Auto-scroll messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -319,7 +320,7 @@ function FloatingChatImpl({
       cancelAnimationFrame(streamRafId.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [stream.disconnect])
 
   const connectStream = useCallback(
     (tid: string, turnId: string, msgId: string) => {

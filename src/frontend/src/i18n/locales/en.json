@@ -38,6 +38,18 @@
     "goToLastPage": "Go to last page",
     "reset": "Reset"
   },
+  "update": {
+    "deploying": {
+      "title": "System updating",
+      "desc": "The service is being upgraded. Please refresh the page and try again in a moment."
+    },
+    "staleAssets": {
+      "title": "Page updated",
+      "desc": "A new version is available. Please refresh to continue."
+    },
+    "refresh": "Refresh now",
+    "dismiss": "Later"
+  },
   "validation": {
     "passwordRequired": "Password is required",
     "passwordMinLength": "Password must be at least 8 characters",

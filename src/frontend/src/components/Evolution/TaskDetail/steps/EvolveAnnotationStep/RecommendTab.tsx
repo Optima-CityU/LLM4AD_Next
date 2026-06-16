@@ -294,8 +294,7 @@ export default function RecommendTab({ taskId, readOnly }: RecommendTabProps) {
                       DEFAULT
                     </Badge>
                     <span className="text-muted-foreground">
-                      {reportHint ||
-                        t("evolution.providerSelect.useDefault")}
+                      {reportHint || t("evolution.providerSelect.useDefault")}
                     </span>
                   </div>
                 </SelectItem>

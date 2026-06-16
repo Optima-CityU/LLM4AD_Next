@@ -98,7 +98,8 @@ function RouteComponent() {
             projectId={projectId}
             onCreated={(task) => {
               setSelectedTask(task)
-              if (window.innerWidth < AUTO_COLLAPSE_WIDTH) setLeftCollapsed(true)
+              if (window.innerWidth < AUTO_COLLAPSE_WIDTH)
+                setLeftCollapsed(true)
             }}
             variant="large"
           />

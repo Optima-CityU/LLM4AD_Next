@@ -116,11 +116,7 @@ function Admin() {
 
         {/* Table */}
         {!isLoading && tableData.length > 0 && (
-          <DataTable
-            columns={columns}
-            data={tableData}
-            manualPagination
-          />
+          <DataTable columns={columns} data={tableData} manualPagination />
         )}
       </div>
 

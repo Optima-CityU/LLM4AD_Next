@@ -161,11 +161,7 @@ export default function OnboardingTour({
             const r2 = getRect(el)
             setRect(r2)
             setTooltipPos(
-              computeTooltipPosition(
-                r2,
-                currentStep.placement,
-                tooltipHeight,
-              ),
+              computeTooltipPosition(r2, currentStep.placement, tooltipHeight),
             )
           })
         } else {
@@ -215,7 +211,7 @@ export default function OnboardingTour({
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [active, stepIndex, tooltipHeight])
+  }, [tooltipHeight])
 
   if (!active || !currentStep || !rect || !tooltipPos) return null
 

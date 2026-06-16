@@ -82,7 +82,9 @@ export default function TechBackground() {
           const distSq = dx * dx + dy * dy
           if (distSq < CONNECTION_DIST_SQ) {
             const alpha =
-              (1 - Math.sqrt(distSq) / CONNECTION_DISTANCE) * 0.08 * opacityScale
+              (1 - Math.sqrt(distSq) / CONNECTION_DISTANCE) *
+              0.08 *
+              opacityScale
             ctx.beginPath()
             ctx.moveTo(particles[i].x, particles[i].y)
             ctx.lineTo(particles[j].x, particles[j].y)

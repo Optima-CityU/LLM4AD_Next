@@ -29,7 +29,7 @@ export default function TaskDetail({ taskId }: TaskDetailProps) {
   // task's "switched to stepper" state leaks into a freshly created AI task.
   useEffect(() => {
     setTuneMode("chat")
-  }, [taskId])
+  }, [])
   const { data: task, isLoading } = useQuery({
     queryKey: ["getTask", taskId],
     queryFn: () => Llm4AdTasksService.getTask({ taskId }),

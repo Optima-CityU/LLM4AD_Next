@@ -64,13 +64,13 @@ import type {
   TaskResponse,
 } from "@/client"
 import { Llm4AdChatTuneService, Llm4AdTasksService } from "@/client"
-import OnboardingTour from "@/components/Onboarding/OnboardingTour"
-import { useTheme } from "@/components/theme-provider"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
   makeMarkdownComponents,
 } from "@/components/markdown/markdownComponents"
+import OnboardingTour from "@/components/Onboarding/OnboardingTour"
+import { useTheme } from "@/components/theme-provider"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -367,8 +367,7 @@ export default function ChatTuneView({
     // `fresh` (not the closure `messages`) — the setMessages above is async,
     // so the closure still holds the prior, possibly-stale set.
     const activeTurn = sessionDetail.session.active_turn_id ?? null
-    if (!activeTurn || activeTurn === activeTurnId || stream.isStreaming)
-      return
+    if (!activeTurn || activeTurn === activeTurnId || stream.isStreaming) return
     const generatingMsg = fresh.find(
       (m) =>
         m.role === "assistant" &&
@@ -380,7 +379,15 @@ export default function ChatTuneView({
     setStreamingMsgId(generatingMsg.id)
     connectToStream(task.id, activeTurn, generatingMsg.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionDetail])
+  }, [
+    sessionDetail,
+    connectToStream,
+    sessionInited,
+    task.id,
+    streamingMsgId,
+    stream.isStreaming,
+    activeTurnId,
+  ])
 
   /* ──────────── Auto-scroll ──────────── */
 
@@ -419,7 +426,7 @@ export default function ChatTuneView({
       cancelAnimationFrame(streamRafId.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [stream.disconnect])
 
   /* ──────────── Sync stage statuses from session ──────────── */
 
@@ -1475,10 +1482,7 @@ const ChatMessageRow = memo(
       <div className="flex gap-2 animate-in fade-in slide-in-from-bottom-1 duration-200">
         {/* Left avatar: AI or placeholder */}
         <div
-          className={cn(
-            "shrink-0 size-7 rounded-lg",
-            isUser && "invisible",
-          )}
+          className={cn("shrink-0 size-7 rounded-lg", isUser && "invisible")}
         >
           {!isUser && (
             <div className="size-full flex items-center justify-center bg-primary/10 border border-primary/20 rounded-lg">
@@ -1577,10 +1581,7 @@ const ChatMessageRow = memo(
 
         {/* Right avatar: User or placeholder */}
         <div
-          className={cn(
-            "shrink-0 size-7 rounded-lg",
-            !isUser && "invisible",
-          )}
+          className={cn("shrink-0 size-7 rounded-lg", !isUser && "invisible")}
         >
           {isUser && (
             <div className="size-full flex items-center justify-center bg-secondary border border-border/50 rounded-lg">
@@ -1932,7 +1933,15 @@ function ChoiceCardBody({
         setIsUploading(false)
       }
     },
-    [taskId, messageId, card.cardId, card.options, onPayloadUpdate, validateFiles, t],
+    [
+      taskId,
+      messageId,
+      card.cardId,
+      card.options,
+      onPayloadUpdate,
+      validateFiles,
+      t,
+    ],
   )
 
   const handleFileChange = useCallback(
@@ -1967,8 +1976,9 @@ function ChoiceCardBody({
         const isUploadOpt = needsUpload(opt)
         const optUploadedPath = isUploadOpt ? getUploadedPath(opt) : undefined
         const optHasPath = !!optUploadedPath
-        const isActive = activeUploadOpt === opt.value
-          || (optHasPath && !activeUploadOpt && !customActiveValue)
+        const isActive =
+          activeUploadOpt === opt.value ||
+          (optHasPath && !activeUploadOpt && !customActiveValue)
 
         const hasPendingAction = !!activeUploadOpt || !!customActiveValue
         const isSelected = selectedValue === opt.value && !hasPendingAction
@@ -2017,9 +2027,7 @@ function ChoiceCardBody({
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span
-                    className="inline-block text-xs font-mono font-medium px-1.5 py-0.5 rounded bg-muted text-foreground break-all text-left"
-                  >
+                  <span className="inline-block text-xs font-mono font-medium px-1.5 py-0.5 rounded bg-muted text-foreground break-all text-left">
                     {opt.label}
                   </span>
                   {opt.description && (
@@ -2031,7 +2039,10 @@ function ChoiceCardBody({
               </div>
 
               {isActive && (
-                <div className="mt-2 ml-6 space-y-2" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className="mt-2 ml-6 space-y-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {optUploadedPath && (
                     <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/20">
                       <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
@@ -2514,7 +2525,8 @@ function PreviewPanel({
     queryFn: () => Llm4AdTasksService.getTaskDataTree({ taskId }),
     enabled: !!taskId,
   })
-  const isFetchingTree = useIsFetching({ queryKey: ["taskDataTree", taskId] }) > 0
+  const isFetchingTree =
+    useIsFetching({ queryKey: ["taskDataTree", taskId] }) > 0
   const tree = treeData?.tree ?? []
 
   return (
@@ -2638,7 +2650,8 @@ function PreviewPanel({
                 disabled={isFetchingTree}
                 className={cn(
                   "p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
-                  isFetchingTree && "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground",
+                  isFetchingTree &&
+                    "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted-foreground",
                 )}
                 onClick={() =>
                   queryClient.invalidateQueries({
@@ -3356,10 +3369,17 @@ const OPTIONS_OPEN_RE = /\[OPTIONS_START\][\s\S]*$/i
  * @returns The text with any options block(s) removed and trailing whitespace trimmed.
  */
 export function stripOptionsBlock(content: string): string
-export function stripOptionsBlock(content: string | undefined): string | undefined
-export function stripOptionsBlock(content: string | undefined): string | undefined {
+export function stripOptionsBlock(
+  content: string | undefined,
+): string | undefined
+export function stripOptionsBlock(
+  content: string | undefined,
+): string | undefined {
   if (!content) return content
-  return content.replace(OPTIONS_BLOCK_RE, "").replace(OPTIONS_OPEN_RE, "").trimEnd()
+  return content
+    .replace(OPTIONS_BLOCK_RE, "")
+    .replace(OPTIONS_OPEN_RE, "")
+    .trimEnd()
 }
 
 export function parsePayloadToCard(

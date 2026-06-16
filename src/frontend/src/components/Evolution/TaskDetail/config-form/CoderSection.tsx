@@ -66,7 +66,9 @@ export default function CoderSection({ coderType }: CoderSectionProps) {
   return (
     <div className="space-y-4">
       <div>
-        <label className="text-sm font-medium">{t("configForm.coder.coderType")}</label>
+        <label className="text-sm font-medium">
+          {t("configForm.coder.coderType")}
+        </label>
         <Select
           value={coderType}
           onValueChange={(val) => {
@@ -124,7 +126,9 @@ export default function CoderSection({ coderType }: CoderSectionProps) {
                   onCheckedChange={field.onChange}
                 />
               </FormControl>
-              <FormLabel className="font-normal">{t("configForm.coder.logToConsole")}</FormLabel>
+              <FormLabel className="font-normal">
+                {t("configForm.coder.logToConsole")}
+              </FormLabel>
             </FormItem>
           )}
         />
@@ -154,7 +158,9 @@ export default function CoderSection({ coderType }: CoderSectionProps) {
             name="coder.mutation_prompt_template"
             render={({ field }) => (
               <FormItem className="col-span-2">
-                <FormLabel>{t("configForm.coder.mutationPromptTemplate")}</FormLabel>
+                <FormLabel>
+                  {t("configForm.coder.mutationPromptTemplate")}
+                </FormLabel>
                 <FormControl>
                   <Input
                     {...field}
@@ -267,7 +273,9 @@ export default function CoderSection({ coderType }: CoderSectionProps) {
             name="coder.anthropic_auth_token"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>{t("configForm.coder.anthropicAuthToken")}</FormLabel>
+                <FormLabel>
+                  {t("configForm.coder.anthropicAuthToken")}
+                </FormLabel>
                 <FormControl>
                   <Input type="password" {...field} />
                 </FormControl>

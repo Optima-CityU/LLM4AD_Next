@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next"
 import { z } from "zod"
 
 import { type UserCreate, UsersService } from "@/client"
-import i18n from "@/i18n"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -31,11 +30,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
+import i18n from "@/i18n"
 import { handleError } from "@/utils"
 
 const formSchema = z
   .object({
-    email: z.email({ message: i18n.t("admin.validation.invalidEmail") }).max(255),
+    email: z
+      .email({ message: i18n.t("admin.validation.invalidEmail") })
+      .max(255),
     full_name: z.string().max(255).optional(),
     password: z
       .string()
@@ -139,7 +141,11 @@ const AddUser = () => {
                   <FormItem>
                     <FormLabel>{t("admin.fullNameLabel")}</FormLabel>
                     <FormControl>
-                      <Input placeholder={t("admin.fullNameLabel")} type="text" {...field} />
+                      <Input
+                        placeholder={t("admin.fullNameLabel")}
+                        type="text"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

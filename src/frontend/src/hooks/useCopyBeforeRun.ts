@@ -11,12 +11,8 @@ import { useEvolution } from "@/hooks/useEvolution"
 import { taskKeys } from "@/lib/task-queries"
 
 export function useCopyBeforeRun(task: TaskResponse) {
-  const {
-    setSelectedChildTaskId,
-    projectId,
-    selectedTask,
-    setSelectedTask,
-  } = useEvolution()
+  const { setSelectedChildTaskId, projectId, selectedTask, setSelectedTask } =
+    useEvolution()
   const queryClient = useQueryClient()
   const [isCopying, setIsCopying] = useState(false)
 
@@ -94,7 +90,14 @@ export function useCopyBeforeRun(task: TaskResponse) {
         setIsCopying(false)
       }
     },
-    [task, setSelectedChildTaskId, queryClient, projectId, selectedTask, setSelectedTask],
+    [
+      task,
+      setSelectedChildTaskId,
+      queryClient,
+      projectId,
+      selectedTask,
+      setSelectedTask,
+    ],
   )
 
   return { withCopyIfNeeded, isCopying }

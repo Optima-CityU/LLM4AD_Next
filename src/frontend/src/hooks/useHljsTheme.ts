@@ -1,5 +1,5 @@
-import hljsDarkCss from "highlight.js/styles/github-dark.css?raw"
 import hljsLightCss from "highlight.js/styles/github.css?raw"
+import hljsDarkCss from "highlight.js/styles/github-dark.css?raw"
 import { useEffect } from "react"
 
 import { useTheme } from "@/components/theme-provider"
