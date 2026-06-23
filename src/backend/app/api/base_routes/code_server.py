@@ -8,7 +8,7 @@ Code-Server 管理路由。
 import asyncio
 from datetime import timedelta
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.deps import CurrentUser
 from app.core import security
@@ -64,6 +64,11 @@ async def get_code_token(
 
     # 新启动的容器在事件循环里异步等待服务就绪，不占用线程池 worker
     if started_at is not None:
-        await wait_for_service_ready(container, since=started_at)
+        ready = await wait_for_service_ready(container, since=started_at)
+        if not ready:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Code Server 启动超时，请稍后重试",
+            )
 
     return response

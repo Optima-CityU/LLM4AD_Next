@@ -18,11 +18,14 @@ from app.core.constants import (
     APP_CONFIG_FILENAME,
     CHAT_TUNE_CONTAINER_DATA_DIR,
     CHAT_TUNE_CONTAINER_NAME_PREFIX,
-    DOCKER_NETWORK_NAME,
     TASK_CONTAINER_DATA_DIR,
     TASK_CONTAINER_NAME_PREFIX,
 )
-from app.core.docker import get_docker_client
+from app.core.docker import (
+    ensure_chat_tune_container_network,
+    ensure_task_container_network,
+    get_docker_client,
+)
 from app.tasks import task_config_crypto
 
 
@@ -106,6 +109,8 @@ def create_and_start_task_container(data: dict) -> str:
             f"Build it first: docker build -f src/backend/Dockerfile.task -t {settings.TASK_RUNNER_IMAGE} ."
         )
 
+    runtime_network = ensure_task_container_network()
+
     container = get_docker_client().containers.run(
         settings.TASK_RUNNER_IMAGE,
         name=name,
@@ -119,7 +124,10 @@ def create_and_start_task_container(data: dict) -> str:
         mem_limit=settings.TASK_CONTAINER_MEMORY_LIMIT,
         nano_cpus=int(settings.TASK_CONTAINER_CPU_LIMIT * 1e9),
         security_opt=["no-new-privileges"],
-        network=DOCKER_NETWORK_NAME,
+        cap_drop=["ALL"],
+        pids_limit=512,
+        tmpfs={"/tmp": "rw,nosuid,nodev,size=512m"},
+        network=runtime_network,
         environment={
             "PYTHONUNBUFFERED": "1",
             "NO_COLOR": "1",
@@ -346,8 +354,10 @@ def start_chat_tune_container(session_id: str, host_workdir: str) -> str:
     port = settings.CHAT_TUNE_CONTAINER_PORT
 
     network_kwargs: dict = {}
+    chat_tune_network: str | None = None
     if use_network:
-        network_kwargs["network"] = DOCKER_NETWORK_NAME
+        chat_tune_network = ensure_chat_tune_container_network()
+        network_kwargs["network"] = chat_tune_network
     else:
         network_kwargs["ports"] = {f"{port}/tcp": ("127.0.0.1", port)}
 
@@ -366,6 +376,9 @@ def start_chat_tune_container(session_id: str, host_workdir: str) -> str:
         mem_limit=settings.CHAT_TUNE_CONTAINER_MEMORY_LIMIT,
         nano_cpus=int(settings.CHAT_TUNE_CONTAINER_CPU_LIMIT * 1e9),
         security_opt=["no-new-privileges"],
+        cap_drop=["ALL"],
+        pids_limit=256,
+        tmpfs={"/tmp": "rw,nosuid,nodev,size=256m"},
         **network_kwargs,
         environment={
             "PYTHONUNBUFFERED": "1",
@@ -374,6 +387,30 @@ def start_chat_tune_container(session_id: str, host_workdir: str) -> str:
             "CHAT_TUNE_DATA_DIR": CHAT_TUNE_CONTAINER_DATA_DIR,
         },
     )
+
+    if use_network:
+        try:
+            task_network = ensure_task_container_network()
+            if task_network != chat_tune_network:
+                get_docker_client().networks.get(task_network).connect(container)
+                logger.info(
+                    "Chat-tune container connected to provider network: name={}, network={}",
+                    name,
+                    task_network,
+                )
+        except Exception:
+            try:
+                container.remove(force=True, v=True)
+            except Exception:
+                logger.exception(
+                    "Failed to remove chat-tune container after provider network attach failure: {}",
+                    name,
+                )
+            logger.exception(
+                "Failed to attach chat-tune container to provider network: name={}",
+                name,
+            )
+            raise
 
     logger.info(f"Chat-tune container started: name={name}, id={container.id[:12]}")
     return container.id
@@ -406,6 +443,27 @@ def cleanup_chat_tune_container(container_id: str) -> None:
         pass
     except Exception as e:
         logger.error(f"清理调参容器 {container_id[:12]} 失败: {e}")
+
+
+def get_chat_tune_container_diagnostics(
+    container_id: str, *, log_tail: int = 80, max_log_chars: int = 4000
+) -> dict[str, object]:
+    """读取调参容器状态和尾部日志，用于启动失败诊断。"""
+    container = get_docker_client().containers.get(container_id)
+    container.reload()
+    state = container.attrs.get("State") or {}
+    raw_logs = container.logs(stdout=True, stderr=True, tail=log_tail)
+    logs = raw_logs.decode("utf-8", errors="replace")
+    if len(logs) > max_log_chars:
+        logs = logs[-max_log_chars:]
+    return {
+        "id": container.id[:12],
+        "name": container.name,
+        "status": container.status,
+        "exit_code": state.get("ExitCode"),
+        "error": state.get("Error"),
+        "logs": logs,
+    }
 
 
 def cleanup_chat_tune_workdir(docker_path: str) -> None:

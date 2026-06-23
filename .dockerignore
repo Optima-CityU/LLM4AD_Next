@@ -1,0 +1,12 @@
+.git
+.cache
+.ruff_cache
+.venv
+.superpowers
+
+docker/app-data
+docker/litellm-data
+docker/litellm-db
+
+src/frontend/node_modules
+src/frontend/dist

@@ -1,0 +1,332 @@
+name: ${PROJECT_NAME}
+
+networks:
+  default:
+    name: ${PROJECT_NAME}_default
+  task_runtime:
+    name: ${TASK_CONTAINER_NETWORK_NAME}
+    internal: ${TASK_RUNTIME_NETWORK_INTERNAL:-false}
+  code_runtime:
+    name: ${CODE_SERVER_NETWORK_NAME}
+    internal: true
+  chat_tune_runtime:
+    name: ${CHAT_TUNE_CONTAINER_NETWORK_NAME}
+    internal: true
+
+x-shared-env: &shared-env
+  # PostgreSQL
+  POSTGRES_SERVER: ${POSTGRES_SERVER:-db}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  POSTGRES_DB: ${POSTGRES_DB:-app}
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Cp2gNInOWGjiDyDnNHuUGGOSN2F7PeMb83nfRnRRJ08}
+  # Redis
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-llm4ad}
+  # rustfs
+  RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-TUrUmyqlLXM171BV8IFJh03xoQmqfRtETUmyLAmtPWk}
+  RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-iCu9YcNdtAHVYFgd0jSk5E5_hCPE87pSEeYGJvLEdI0}
+  RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-http://rustfs:9000}
+  # SMTP
+  SMTP_HOST: ${SMTP_HOST:-mailcatcher}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  EMAILS_FROM_EMAIL: ${EMAILS_FROM_EMAIL:-info@example.com}
+  SMTP_TLS: ${SMTP_TLS:-False}
+  SMTP_SSL: ${SMTP_SSL:-False}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+
+x-backend-common: &backend-common
+  image: "${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}"
+  pull_policy: never
+  build:
+    context: ../
+    network: host
+    dockerfile: src/backend/Dockerfile
+    args:
+      UV_INDEX_URL: ${UV_INDEX_URL:-}
+  env_file:
+    - .env
+  environment:
+    <<: *shared-env
+
+services:
+  # ============================================================
+  # 基础设施服务
+  # ============================================================
+
+  db:
+    image: postgres:18
+    restart: always
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    volumes:
+      - ./app-data/db:/var/lib/postgresql/data/pgdata
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Cp2gNInOWGjiDyDnNHuUGGOSN2F7PeMb83nfRnRRJ08}
+
+  redis:
+    image: redis:latest
+    restart: always
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - ./app-data/redis/data:/data
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: always
+    security_opt:
+      - "no-new-privileges:true"
+    environment:
+      - RUSTFS_VOLUMES=/data/rustfs0
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}
+      - RUSTFS_OBS_LOGGER_LEVEL=info
+    volumes:
+      - ./app-data/rustfs/data/pro:/data
+      - ./app-data/rustfs/logs:/app/logs
+      - ./app-data/rustfs/data/certs/:/opt/tls
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://127.0.0.1:9000/health && curl -f http://127.0.0.1:9001/rustfs/console/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  adminer:
+    image: adminer
+    restart: always
+    profiles: [ "debug" ]
+    depends_on:
+      - db
+    environment:
+      - ADMINER_DESIGN=pepa-linha-dark
+
+  mailcatcher:
+    image: schickling/mailcatcher
+    restart: always
+    profiles: [ "debug" ]
+
+  # ============================================================
+  # 应用服务
+  # ============================================================
+
+  prestart:
+    <<: *backend-common
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      task-runner:
+        condition: service_completed_successfully
+    command: bash scripts/prestart.sh
+
+  backend:
+    <<: *backend-common
+    restart: always
+    networks:
+      - default
+      - chat_tune_runtime
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      redis:
+        condition: service_healthy
+      prestart:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8000/api/v1/utils/health-check/",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
+
+  worker:
+    <<: *backend-common
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: celery -A app.core.celery worker --loglevel=info --concurrency=8
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
+
+  flower:
+    <<: *backend-common
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    command: celery -A app.core.celery flower --port=5555
+
+  task-runner:
+    image: llm4ad-task-runner:latest
+    pull_policy: never
+    build:
+      context: ../
+      network: host
+      dockerfile: src/backend/Dockerfile.task
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
+        UV_INDEX_URL: ${UV_INDEX_URL:-}
+    restart: "no"
+    entrypoint: [ "true" ]
+
+  frontend:
+    image: "${DOCKER_IMAGE_FRONTEND?Variable not set}:${TAG-latest}"
+    pull_policy: never
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+    build:
+      context: ../
+      network: host
+      dockerfile: src/frontend/Dockerfile
+      args:
+        - VITE_API_URL=
+        - VITE_CODE_SERVER_URL=${VITE_CODE_SERVER_URL:-/code_ide}
+        - VITE_PLAUSIBLE_ENABLED=${VITE_PLAUSIBLE_ENABLED:-true}
+        - VITE_PLAUSIBLE_DOMAIN=${VITE_PLAUSIBLE_DOMAIN:-}
+        - VITE_PLAUSIBLE_ENDPOINT=${VITE_PLAUSIBLE_ENDPOINT:-https://plausible.dadastory.com/api/event}
+        - VITE_PLAUSIBLE_AUTO_CAPTURE_PAGEVIEWS=${VITE_PLAUSIBLE_AUTO_CAPTURE_PAGEVIEWS:-false}
+        - VITE_PLAUSIBLE_HASH_BASED_ROUTING=${VITE_PLAUSIBLE_HASH_BASED_ROUTING:-false}
+        - VITE_PLAUSIBLE_OUTBOUND_LINKS=${VITE_PLAUSIBLE_OUTBOUND_LINKS:-false}
+        - VITE_PLAUSIBLE_FILE_DOWNLOADS=${VITE_PLAUSIBLE_FILE_DOWNLOADS:-false}
+        - VITE_PLAUSIBLE_FORM_SUBMISSIONS=${VITE_PLAUSIBLE_FORM_SUBMISSIONS:-false}
+        - VITE_PLAUSIBLE_CAPTURE_ON_LOCALHOST=${VITE_PLAUSIBLE_CAPTURE_ON_LOCALHOST:-false}
+        - VITE_PLAUSIBLE_LOGGING=${VITE_PLAUSIBLE_LOGGING:-true}
+        - VITE_PLAUSIBLE_BIND_TO_WINDOW=${VITE_PLAUSIBLE_BIND_TO_WINDOW:-true}
+        - VITE_ADMIN_ANALYTICS_URL=${VITE_ADMIN_ANALYTICS_URL:-}
+        - NODE_ENV=production
+    volumes:
+      - ../src/frontend/extra-cloud-conf:/etc/nginx/extra-conf.d
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  litellm:
+    image: hwdsl2/litellm-server
+    container_name: litellm
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - SERVER_ROOT_PATH=/litellm
+      - GENERAL_SETTINGS_UI_ACCESS_MODE=admin_only
+      - STORE_MODEL_IN_DB=True
+      - LITELLM_LOG_LEVEL=${LITELLM_LOG_LEVEL:-INFO}
+      - LITELLM_DATABASE_URL=${LITELLM_DATABASE_URL:-postgresql://litellm:litellm@litellm-db:5432/litellm}
+      - LITELLM_MASTER_KEY=${LITELLM_AUTH_TOKEN:-sk-my-master-key}
+      - LITELLM_PORT=${LITELLM_PORT:-4000}
+    volumes:
+      - ./litellm-data:/etc/litellm
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:${LITELLM_PORT:-4000}/health/readiness', timeout=5)\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  litellm-db:
+    image: postgres:18
+    container_name: litellm-db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${LITELLM_DATABASE_USER:-litellm}
+      POSTGRES_PASSWORD: ${LITELLM_DATABASE_PASSWORD:-litellm}
+      POSTGRES_DB: ${LITELLM_DATABASE_NAME:-litellm}
+    volumes:
+      - ./litellm-db:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U litellm" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  gateway:
+    container_name: gateway
+    build:
+      context: ../src/gateway
+      network: host
+      dockerfile: Dockerfile
+    image: gateway:latest
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+      - JAVA_OPTS=-Xms512m -Xmx512m
+    networks:
+      - default
+      - task_runtime
+      - code_runtime
+    restart: always
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider http://127.0.0.1:${GATEWAY_SERVER_PORT:-9090}/actuator/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

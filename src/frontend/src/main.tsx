@@ -13,6 +13,7 @@ import "./i18n"
 import { ThemeProvider } from "./components/theme-provider"
 import { Toaster } from "./components/ui/sonner"
 import "./index.css"
+import { setupAnalytics } from "./lib/analytics"
 import { routeTree } from "./routeTree.gen"
 import { initOpenApi } from "./utils/request"
 
@@ -50,6 +51,8 @@ const queryClient = new QueryClient({
 })
 
 const router = createRouter({ routeTree })
+setupAnalytics(router)
+
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router

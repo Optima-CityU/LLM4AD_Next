@@ -6,7 +6,7 @@ Supports official Anthropic Claude API for code generation and chat.
 import json
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, NoReturn
 
 from pydantic import BaseModel
 
@@ -15,9 +15,11 @@ from llm4ad.infra.provider.base import (
     ChatMessage,
     ContentPart,
     GenerationResult,
+    ProviderRequestError,
     StreamResponse,
     ToolCall,
     ToolDefinition,
+    build_provider_error_message,
 )
 from llm4ad.infra.timing import ExecutionTiming
 
@@ -225,8 +227,10 @@ class AnthropicProvider(BaseProvider):
             k: v for k, v in kwargs.items() if k not in ("schema", "request_stage")
         })
 
-        # Call API
-        response = await self.client.messages.create(**request_kwargs)
+        try:
+            response = await self.client.messages.create(**request_kwargs)
+        except Exception as e:
+            self._raise_provider_error(e)
 
         latency_ms = (time.time() - start_time) * 1000
 
@@ -321,46 +325,62 @@ class AnthropicProvider(BaseProvider):
         # Add any user-provided kwargs
         request_kwargs.update(kwargs)
 
-        # Call API with streaming enabled
-        raw_stream = await self.client.messages.create(**request_kwargs)
+        try:
+            raw_stream = await self.client.messages.create(**request_kwargs)
+        except Exception as e:
+            self._raise_provider_error(e)
         response = StreamResponse()
 
         async def _generate() -> AsyncIterator[str]:
             current_tool: dict[str, str] | None = None
-            async for event in raw_stream:
-                if event.type == "content_block_start":
-                    if (
-                        hasattr(event, "content_block")
-                        and hasattr(event.content_block, "type")
-                        and event.content_block.type == "tool_use"
-                    ):
-                        current_tool = {
-                            "id": event.content_block.id,
-                            "name": event.content_block.name,
-                            "input_json": "",
-                        }
-                elif event.type == "content_block_delta":
-                    if hasattr(event.delta, "text"):
-                        yield event.delta.text
-                    elif hasattr(event.delta, "partial_json") and current_tool is not None:
-                        current_tool["input_json"] += event.delta.partial_json
-                elif event.type == "content_block_stop" and current_tool is not None:
-                    args = (
-                        json.loads(current_tool["input_json"])
-                        if current_tool["input_json"]
-                        else {}
-                    )
-                    response.tool_calls.append(
-                        ToolCall(
-                            id=current_tool["id"],
-                            name=current_tool["name"],
-                            arguments=args,
+            try:
+                async for event in raw_stream:
+                    if event.type == "content_block_start":
+                        if (
+                            hasattr(event, "content_block")
+                            and hasattr(event.content_block, "type")
+                            and event.content_block.type == "tool_use"
+                        ):
+                            current_tool = {
+                                "id": event.content_block.id,
+                                "name": event.content_block.name,
+                                "input_json": "",
+                            }
+                    elif event.type == "content_block_delta":
+                        if hasattr(event.delta, "text"):
+                            yield event.delta.text
+                        elif hasattr(event.delta, "partial_json") and current_tool is not None:
+                            current_tool["input_json"] += event.delta.partial_json
+                    elif event.type == "content_block_stop" and current_tool is not None:
+                        args = (
+                            json.loads(current_tool["input_json"])
+                            if current_tool["input_json"]
+                            else {}
                         )
-                    )
-                    current_tool = None
+                        response.tool_calls.append(
+                            ToolCall(
+                                id=current_tool["id"],
+                                name=current_tool["name"],
+                                arguments=args,
+                            )
+                        )
+                        current_tool = None
+            except Exception as e:
+                self._raise_provider_error(e)
 
         response._gen = _generate()
         return response
+
+    def _raise_provider_error(self, error: BaseException) -> NoReturn:
+        if isinstance(error, ProviderRequestError):
+            raise error
+        message = build_provider_error_message(
+            error,
+            provider_type="anthropic",
+            model=self.model,
+            base_url=self.base_url,
+        )
+        raise ProviderRequestError(message) from error
 
     async def count_tokens(self, text: str) -> int:
         """Count tokens in text using Anthropic's tokenizer."""

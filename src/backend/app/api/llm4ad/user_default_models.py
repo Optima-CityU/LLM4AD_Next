@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, TokenDep
 from app.schemas import user_default_model as schemas
 from app.services import user_default_model_service
 
@@ -20,7 +20,9 @@ router = APIRouter(prefix="/user-default-models", tags=["llm4ad.user-default-mod
     summary="获取当前用户的默认模型配置",
 )
 def get_user_default_model(
-    db: SessionDep, current_user: CurrentUser,
+    db: SessionDep,
+    current_user: CurrentUser,
+    token: TokenDep,
 ):
     """获取当前用户的默认模型配置，若不存在则自动创建。
 
@@ -31,7 +33,7 @@ def get_user_default_model(
     Returns:
         UserDefaultModelResponse: 用户的默认模型配置。
     """
-    return user_default_model_service.get_user_default_model(db, current_user.id)
+    return user_default_model_service.get_user_default_model(db, current_user.id, token)
 
 
 @router.put(
@@ -43,6 +45,7 @@ def update_user_default_model(
     update_in: schemas.UserDefaultModelUpdate,
     db: SessionDep,
     current_user: CurrentUser,
+    token: TokenDep,
 ):
     """更新当前用户的默认模型配置。
 
@@ -58,5 +61,8 @@ def update_user_default_model(
     """
     update_data = update_in.model_dump(exclude_unset=True)
     return user_default_model_service.update_user_default_model(
-        db, current_user.id, update_data,
+        db,
+        current_user.id,
+        update_data,
+        token,
     )

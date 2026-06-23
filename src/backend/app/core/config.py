@@ -189,6 +189,8 @@ class Settings(BaseSettings):
 
     # ---- 第三方 API 密钥 ----
     JINA_API_KEY: str = ""
+    TEAM_ID: str = ""
+    EMBEDDING_MODEL: str = "jina-embeddings-v4"
 
     # ---- 内置试用供应商（如 LiteLLM 网关） ----
     BUILTIN_PROVIDER_NAME: str = "builtin-trial"
@@ -197,9 +199,15 @@ class Settings(BaseSettings):
     BUILTIN_PROVIDER_MODELS: str = "" # 多模型分号分隔
     BUILTIN_PROVIDER_MAX_TOKENS: int = 16384
     BUILTIN_PROVIDER_DEFAULT_MODEL: str = "" # 为空则取 MODELS 中的第一个
+    LITELLM_BASE_URL: str = ""
+    LITELLM_AUTH_TOKEN: str = ""
 
     # ---- Docker 连接配置 ----
     DOCKER_HOST: str = ""  # Docker daemon address; empty = local socket, e.g. ssh://user@remote-host
+    DOCKER_NETWORK_NAME: str = ""  # Backward-compatible fallback for dynamic containers
+    TASK_CONTAINER_NETWORK_NAME: str = ""  # Network for task runner containers to reach gateway
+    CODE_SERVER_NETWORK_NAME: str = ""  # Network for gateway to reach code-server containers
+    CHAT_TUNE_CONTAINER_NETWORK_NAME: str = ""  # Network for backend to reach chat-tune containers
 
     # ---- 文件路径配置 ----
     HOST_PROJECT_HOME: str = r"D:/data/project_home/"  # 宿主机：用户项目目录绝对路径，用于动态创建容器挂载
@@ -225,6 +233,9 @@ class Settings(BaseSettings):
     # ---- Code-Server 空闲清理 ----
     CODE_SERVER_IDLE_TIMEOUT_SECONDS: int = 24 * 60 * 60  # 容器空闲超过该时长则停止
     CODE_SERVER_CLEANUP_INTERVAL_SECONDS: int = 10 * 60  # 后台清理任务执行间隔
+
+    # ---- Gateway ----
+    GATEWAY_SERVER_PORT: int = 9090
 
 
 settings = Settings()  # type: ignore

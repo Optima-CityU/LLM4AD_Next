@@ -1,0 +1,541 @@
+package com.dadastory.omni_ai_router.manager;
+
+import com.dadastory.omni_ai_router.dto.Result;
+import com.dadastory.omni_ai_router.entity.AuthUser;
+import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Reactive client for LiteLLM administrative APIs used by the gateway.
+ */
+@Slf4j
+@Service
+public class LiteLLMManager {
+
+    @Resource
+    private WebClient litellmWebClient;
+
+    /**
+     * Creates a LiteLLM user and assigns it to the requested team.
+     *
+     * @param user backend user to create
+     * @param teamId team id to assign
+     * @return LiteLLM result payload
+     */
+    public Mono<Result<?>> createUserAndAssignTeam(AuthUser user, String teamId) {
+        String userId = user.getId();
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("user_id", userId);
+        requestBody.put("teams", List.of(teamId));
+        requestBody.put("user_role", "internal_user_viewer");
+        if (StringUtils.hasText(user.getEmail())) {
+            requestBody.put("user_email", user.getEmail());
+        }
+        if (StringUtils.hasText(user.getFullName())) {
+            requestBody.put("user_alias", user.getFullName());
+        }
+        requestBody.put("metadata", Map.of(
+                "email_verified", user.isEmailVerified(),
+                "is_superuser", user.isSuperuser(),
+                "source", "backend-users-me"
+        ));
+
+        return litellmWebClient.post()
+                .uri("/user/new")
+                .bodyValue(requestBody)
+                .exchangeToMono(this::handleResponse) // 复用响应处理逻辑
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM create user. user={}, team={}", userId, teamId))
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM create user request failed. user={}, team={}", userId, teamId, e);
+                    return Mono.just(Result.failure(500, "Create User Request failed: " + e.getMessage()));
+                });
+    }
+
+    /**
+     * Regenerates a LiteLLM API key and caps the key budget to the user's
+     * currently available quota.
+     *
+     * @param userInfoResult LiteLLM user info result used to derive remaining quota
+     * @param userId LiteLLM user id
+     * @param teamId LiteLLM team id
+     * @return LiteLLM key generation result, or a failure when quota is exhausted/unavailable
+     */
+    public Mono<Result<?>> regenerateApiKeyWithinUserBudget(
+            Result<?> userInfoResult,
+            String userId,
+            String teamId
+    ) {
+        Double remainingBudget = extractRemainingBudget(userInfoResult);
+        if (remainingBudget == null) {
+            log.warn("Cannot generate LiteLLM key because user quota is unavailable. user={}, team={}", userId, teamId);
+            return Mono.just(Result.failure(402,
+                    "User quota is unavailable. Cannot generate LiteLLM key without max_budget."));
+        }
+        if (remainingBudget <= 0) {
+            log.warn("Cannot generate LiteLLM key because user quota is exhausted. user={}, team={}, remaining={}",
+                    userId, teamId, remainingBudget);
+            return Mono.just(Result.failure(402, "User quota is exhausted."));
+        }
+        return regenerateApiKey(userId, teamId, remainingBudget);
+    }
+
+    private Mono<Result<?>> regenerateApiKey(String userId, String teamId, double maxBudget) {
+        Map<String, Object> requestBody = new LinkedHashMap<>();
+        requestBody.put("user_id", userId);
+        requestBody.put("team_id", teamId);
+        requestBody.put("max_budget", maxBudget);
+
+        return litellmWebClient.post()
+                .uri("/key/generate")
+                .bodyValue(requestBody)
+                .exchangeToMono(this::handleResponse) // 复用响应处理逻辑
+                .doOnNext(result -> cleanupOtherApiKeysAfterGenerate(result, userId, teamId))
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM regenerate key. user={}, team={}", userId, teamId))
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM regenerate key request failed. user={}, team={}", userId, teamId, e);
+                    return Mono.just(Result.failure(500, "Regenerated User Api Key failed: " + e.getMessage()));
+                });
+    }
+
+    /**
+     * Queries LiteLLM user metadata.
+     *
+     * @param userId LiteLLM user id
+     * @return LiteLLM result payload
+     */
+    public Mono<Result<?>> getUserInfo(String userId) {
+        return litellmWebClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/user/info")
+                        .queryParam("user_id", userId)
+                        .build())
+                .exchangeToMono(this::handleResponse) // 复用响应处理逻辑
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM get user info. user={}", userId))
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM get user info request failed. user={}", userId, e);
+                    return Mono.just(Result.failure(500, "Get User Info Request failed: " + e.getMessage()));
+                });
+    }
+
+    /**
+     * Queries LiteLLM team metadata.
+     *
+     * @param team_id LiteLLM team id
+     * @return LiteLLM result payload
+     */
+    public Mono<Result<?>> getTeamInfo(String team_id) {
+        return litellmWebClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/team/info")
+                        .queryParam("team_id", team_id)
+                        .build())
+                .exchangeToMono(this::handleResponse) // 复用响应处理逻辑
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM get team info. team={}", team_id))
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM get team info request failed. team={}", team_id, e);
+                    return Mono.just(Result.failure(500, "Get Team Info Request failed: " + e.getMessage()));
+                });
+    }
+
+    /**
+     * Checks whether a LiteLLM virtual key still exists and can be inspected by the admin API.
+     *
+     * @param apiKey LiteLLM virtual key
+     * @param userId expected owner user id
+     * @param teamId expected team id
+     * @return {@code true} when the key is accepted and belongs to the expected owner/team when those fields are present
+     */
+    public Mono<Boolean> isApiKeyValid(String apiKey, String userId, String teamId) {
+        if (!StringUtils.hasText(apiKey)) {
+            return Mono.just(false);
+        }
+
+        return litellmWebClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/key/info")
+                        .queryParam("key", apiKey)
+                        .build())
+                .exchangeToMono(this::handleResponse)
+                .map(result -> isKeyInfoValid(result, userId, teamId))
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM key validation. user={}, team={}",
+                        userId, teamId))
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM key validation request failed. user={}, team={}", userId, teamId, e);
+                    return Mono.just(false);
+                });
+    }
+
+    /**
+     * Deletes previous LiteLLM virtual keys for the same user/team without blocking
+     * the current key generation response.
+     *
+     * @param userId LiteLLM user id
+     * @param teamId LiteLLM team id
+     * @param currentApiKey newly generated key or token that must be kept
+     * @return completion signal after best-effort cleanup
+     */
+    public Mono<Void> cleanupOtherApiKeysForUser(String userId, String teamId, String currentApiKey) {
+        Set<String> currentKeyIdentifiers = new HashSet<>();
+        return expandCurrentKeyIdentifiers(currentApiKey, currentKeyIdentifiers)
+                .flatMap(expandedIdentifiers -> cleanupOtherApiKeysForUser(userId, teamId, expandedIdentifiers));
+    }
+
+    private void cleanupOtherApiKeysAfterGenerate(Result<?> result, String userId, String teamId) {
+        if (result == null || result.getCode() < 200 || result.getCode() >= 300) {
+            return;
+        }
+        Object rawData = result.getData();
+        if (!(rawData instanceof JsonNode jsonNode)) {
+            return;
+        }
+
+        Set<String> currentKeyIdentifiers = extractCurrentKeyIdentifiers(jsonNode);
+        if (currentKeyIdentifiers.isEmpty()) {
+            log.warn("Skipping LiteLLM key cleanup because generated key response has no key identifiers. user={}, team={}",
+                    userId, teamId);
+            return;
+        }
+
+        String currentApiKey = firstTextField(jsonNode, List.of("key", "api_key"));
+        Mono<Void> cleanup = StringUtils.hasText(currentApiKey)
+                ? expandCurrentKeyIdentifiers(currentApiKey, currentKeyIdentifiers)
+                .flatMap(expandedIdentifiers -> cleanupOtherApiKeysForUser(userId, teamId, expandedIdentifiers))
+                : cleanupOtherApiKeysForUser(userId, teamId, currentKeyIdentifiers);
+        cleanup
+                .subscribe(
+                        unused -> {
+                        },
+                        error -> log.warn("Async LiteLLM old key cleanup failed. user={}, team={}",
+                                userId, teamId, error)
+                );
+    }
+
+    private Mono<Void> cleanupOtherApiKeysForUser(String userId, String teamId, Set<String> currentKeyIdentifiers) {
+        if (!StringUtils.hasText(userId) || !StringUtils.hasText(teamId) || currentKeyIdentifiers.isEmpty()) {
+            return Mono.empty();
+        }
+
+        return listApiKeysForDeletion(userId, teamId, currentKeyIdentifiers, 1, new ArrayList<>())
+                .flatMap(keysToDelete -> {
+                    if (keysToDelete.isEmpty()) {
+                        log.debug("No old LiteLLM API keys to delete. user={}, team={}", userId, teamId);
+                        return Mono.empty();
+                    }
+                    Map<String, Object> requestBody = new LinkedHashMap<>();
+                    requestBody.put("keys", keysToDelete);
+                    return litellmWebClient.post()
+                            .uri("/key/delete")
+                            .bodyValue(requestBody)
+                            .exchangeToMono(this::handleResponse)
+                            .doOnSuccess(result -> logApiKeyCleanupResult(result, userId, teamId, keysToDelete.size()))
+                            .then();
+                })
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM old API key cleanup request failed. user={}, team={}", userId, teamId, e);
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Set<String>> expandCurrentKeyIdentifiers(String currentApiKey, Set<String> currentKeyIdentifiers) {
+        if (!StringUtils.hasText(currentApiKey)) {
+            return Mono.just(currentKeyIdentifiers);
+        }
+
+        return litellmWebClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/key/info")
+                        .queryParam("key", currentApiKey)
+                        .build())
+                .exchangeToMono(this::handleResponse)
+                .map(result -> {
+                    if (result != null && result.getCode() >= 200 && result.getCode() < 300
+                            && result.getData() instanceof JsonNode jsonNode) {
+                        currentKeyIdentifiers.add(currentApiKey);
+                        currentKeyIdentifiers.addAll(extractCurrentKeyIdentifiers(jsonNode));
+                    } else {
+                        log.warn("LiteLLM current key lookup returned failure before cleanup. Skipping cleanup unless generated key identifiers are available. result={}",
+                                result);
+                    }
+                    return currentKeyIdentifiers;
+                })
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM current key lookup failed before cleanup. Skipping cleanup unless generated key identifiers are available.", e);
+                    return Mono.just(currentKeyIdentifiers);
+                });
+    }
+
+    private Mono<List<String>> listApiKeysForDeletion(
+            String userId,
+            String teamId,
+            Set<String> currentKeyIdentifiers,
+            int page,
+            List<String> accumulator
+    ) {
+        return fetchApiKeyListPage(userId, teamId, page)
+                .flatMap(keyListPage -> {
+                    for (JsonNode keyNode : keyListPage.keys()) {
+                        String keyToDelete = extractKeyForDeletion(keyNode, userId, teamId, currentKeyIdentifiers);
+                        if (StringUtils.hasText(keyToDelete) && !accumulator.contains(keyToDelete)) {
+                            accumulator.add(keyToDelete);
+                        }
+                    }
+                    if (page < keyListPage.totalPages()) {
+                        return listApiKeysForDeletion(userId, teamId, currentKeyIdentifiers, page + 1, accumulator);
+                    }
+                    return Mono.just(accumulator);
+                });
+    }
+
+    private Mono<KeyListPage> fetchApiKeyListPage(String userId, String teamId, int page) {
+        return litellmWebClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/key/list")
+                        .queryParam("user_id", userId)
+                        .queryParam("team_id", teamId)
+                        .queryParam("page", page)
+                        .queryParam("size", 100)
+                        .queryParam("return_full_object", true)
+                        .build())
+                .exchangeToMono(this::handleResponse)
+                .map(result -> parseKeyListPage(result, page));
+    }
+
+    private KeyListPage parseKeyListPage(Result<?> result, int page) {
+        if (result == null || result.getCode() < 200 || result.getCode() >= 300) {
+            return new KeyListPage(List.of(), page);
+        }
+        Object rawData = result.getData();
+        if (!(rawData instanceof JsonNode jsonNode)) {
+            return new KeyListPage(List.of(), page);
+        }
+
+        List<JsonNode> keys = new ArrayList<>();
+        collectArrayItems(keys, jsonNode.get("keys"));
+        collectArrayItems(keys, jsonNode.get("data"));
+
+        int totalPages = jsonNode.path("total_pages").asInt(page);
+        return new KeyListPage(keys, Math.max(page, totalPages));
+    }
+
+    private Set<String> extractCurrentKeyIdentifiers(JsonNode jsonNode) {
+        Set<String> identifiers = new HashSet<>();
+        addKeyIdentifierFields(identifiers, jsonNode);
+        JsonNode infoNode = jsonNode.get("info");
+        if (infoNode != null && infoNode.isObject()) {
+            addKeyIdentifierFields(identifiers, infoNode);
+        }
+        return identifiers;
+    }
+
+    private void addKeyIdentifierFields(Set<String> identifiers, JsonNode jsonNode) {
+        addTextField(identifiers, jsonNode, "key");
+        addTextField(identifiers, jsonNode, "token");
+        addTextField(identifiers, jsonNode, "api_key");
+        addTextField(identifiers, jsonNode, "token_id");
+        addTextField(identifiers, jsonNode, "key_alias");
+        addTextField(identifiers, jsonNode, "key_name");
+    }
+
+    private String extractKeyForDeletion(
+            JsonNode keyNode,
+            String userId,
+            String teamId,
+            Set<String> currentKeyIdentifiers
+    ) {
+        if (keyNode == null || keyNode.isNull()) {
+            return null;
+        }
+        if (keyNode.isTextual()) {
+            String key = keyNode.asString();
+            return currentKeyIdentifiers.contains(key) ? null : key;
+        }
+
+        String keyUserId = keyNode.path("user_id").asString(null);
+        if (StringUtils.hasText(keyUserId) && !keyUserId.equals(userId)) {
+            return null;
+        }
+
+        String keyTeamId = keyNode.path("team_id").asString(null);
+        if (StringUtils.hasText(keyTeamId) && !keyTeamId.equals(teamId)) {
+            return null;
+        }
+
+        if (hasCurrentKeyIdentifier(keyNode, currentKeyIdentifiers)) {
+            return null;
+        }
+
+        String key = firstTextField(keyNode, List.of("token_id", "token", "key", "api_key", "key_alias", "key_name"));
+        if (!StringUtils.hasText(key)) {
+            return null;
+        }
+        return key;
+    }
+
+    private boolean hasCurrentKeyIdentifier(JsonNode keyNode, Set<String> currentKeyIdentifiers) {
+        for (String fieldName : List.of("token_id", "token", "key", "api_key", "key_alias", "key_name")) {
+            String value = keyNode.path(fieldName).asString(null);
+            if (StringUtils.hasText(value) && currentKeyIdentifiers.contains(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void collectArrayItems(List<JsonNode> items, JsonNode arrayNode) {
+        if (arrayNode == null || !arrayNode.isArray()) {
+            return;
+        }
+        for (JsonNode item : arrayNode) {
+            items.add(item);
+        }
+    }
+
+    private void logApiKeyCleanupResult(Result<?> result, String userId, String teamId, int requestedCount) {
+        if (result == null || result.getCode() < 200 || result.getCode() >= 300) {
+            log.warn("LiteLLM old API key cleanup returned failure. user={}, team={}, requested={}, result={}",
+                    userId, teamId, requestedCount, result);
+            return;
+        }
+        log.info("Submitted old LiteLLM API key cleanup. user={}, team={}, requested={}",
+                userId, teamId, requestedCount);
+    }
+
+    private void addTextField(Set<String> values, JsonNode node, String fieldName) {
+        String value = node.path(fieldName).asString(null);
+        if (StringUtils.hasText(value)) {
+            values.add(value);
+        }
+    }
+
+    private String firstTextField(JsonNode node, List<String> fieldNames) {
+        for (String fieldName : fieldNames) {
+            String value = node.path(fieldName).asString(null);
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private boolean isKeyInfoValid(Result<?> result, String userId, String teamId) {
+        if (result == null || result.getCode() < 200 || result.getCode() >= 300) {
+            return false;
+        }
+
+        Object rawData = result.getData();
+        if (!(rawData instanceof JsonNode jsonNode)) {
+            return false;
+        }
+
+        String keyUserId = jsonNode.path("user_id").asString(null);
+        if (StringUtils.hasText(keyUserId) && !keyUserId.equals(userId)) {
+            return false;
+        }
+
+        String keyTeamId = jsonNode.path("team_id").asString(null);
+        if (StringUtils.hasText(keyTeamId) && !keyTeamId.equals(teamId)) {
+            return false;
+        }
+
+        if (jsonNode.has("blocked") && jsonNode.get("blocked").asBoolean(false)) {
+            return false;
+        }
+
+        Double keyBudget = findFirstNumber(jsonNode, List.of("max_budget", "budget"));
+        return keyBudget != null && keyBudget > 0;
+    }
+
+    private boolean isSuccessResult(Result<?> result) {
+        return result != null && result.getCode() >= 200 && result.getCode() < 300;
+    }
+
+    private Double extractRemainingBudget(Result<?> userInfoResult) {
+        if (userInfoResult == null || userInfoResult.getCode() < 200 || userInfoResult.getCode() >= 300) {
+            return null;
+        }
+        Object rawData = userInfoResult.getData();
+        if (!(rawData instanceof JsonNode jsonNode)) {
+            return null;
+        }
+
+        Double spend = findFirstNumber(jsonNode, List.of("spend", "user_spend"));
+        Double budget = findFirstNumber(jsonNode, List.of("max_budget", "budget", "user_budget"));
+        if (spend == null || budget == null) {
+            return null;
+        }
+        return budget - spend;
+    }
+
+    private Double findFirstNumber(JsonNode node, List<String> keys) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+
+        for (String key : keys) {
+            JsonNode value = node.get(key);
+            Double parsed = parseNumber(value);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+
+        for (JsonNode child : node) {
+            Double parsed = findFirstNumber(child, keys);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    private Double parseNumber(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+
+        String raw = value.asString(null);
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+
+        try {
+            double parsed = Double.parseDouble(raw);
+            return Double.isFinite(parsed) ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 统一处理 WebClient 响应数据的公共方法
+     *
+     * @param response LiteLLM HTTP response
+     * @return normalized result wrapper
+     */
+    private Mono<Result<?>> handleResponse(ClientResponse response) {
+        return response.bodyToMono(JsonNode.class)
+                .map(jsonNode -> {
+                    if (jsonNode.has("error") || response.statusCode().isError()) {
+                        JsonNode errorNode = jsonNode.has("error") ? jsonNode.get("error") : jsonNode;
+                        String message = errorNode.path("message").asString("Unknown error");
+                        int code = errorNode.path("code").asInt(response.statusCode().value());
+                        log.warn("LiteLLM returned error response. status={}, code={}, message={}",
+                                response.statusCode(), code, message);
+                        return Result.failure(code, message);
+                    }
+                    return Result.success(jsonNode);
+                })
+                .defaultIfEmpty(Result.failure(response.statusCode().value(), "No response body"));
+    }
+
+    private record KeyListPage(List<JsonNode> keys, int totalPages) {
+    }
+}

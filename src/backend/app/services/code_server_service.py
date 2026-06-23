@@ -21,18 +21,53 @@ from app.core.constants import (
     CODE_SERVER_CPU_LIMIT,
     CODE_SERVER_IMAGE,
     CODE_SERVER_MEMORY_LIMIT,
-    DOCKER_NETWORK_NAME,
     get_code_server_vscode_settings,
 )
-from app.core.docker import get_docker_client
+from app.core.docker import ensure_code_server_network, get_docker_client
 from app.core.redis import pop_idle_code_users
 
-# code-server 启动完成的日志特征
-_SERVICE_READY_MARKER = b"Session server listening on"
+# code-server 启动完成的日志特征。不同 code-server 版本日志略有差异。
+_SERVICE_READY_MARKERS = (
+    b"HTTP server listening on",
+    b"Session server listening on",
+)
 # 等待服务就绪的最长时间（秒）
 _SERVICE_READY_TIMEOUT = 60
 # 轮询日志的间隔（秒）
 _SERVICE_READY_POLL_INTERVAL = 0.5
+_CODE_SERVER_HOME = "/data/project_home"
+_CODE_SERVER_CONFIG_HOME = f"{_CODE_SERVER_HOME}/.config"
+_CODE_SERVER_DATA_HOME = f"{_CODE_SERVER_HOME}/.local/share"
+_CODE_SERVER_CACHE_HOME = f"{_CODE_SERVER_HOME}/.cache"
+_CODE_SERVER_USER_DATA_DIR = f"{_CODE_SERVER_DATA_HOME}/code-server"
+_CODE_SERVER_SETTINGS_PATH = f"{_CODE_SERVER_USER_DATA_DIR}/User/settings.json"
+_CURRENT_RUNTIME_ENV_MARKER = f"HOME={_CODE_SERVER_HOME}"
+
+
+def _ensure_container_network(container: Container, network_name: str) -> None:
+    """Keep an existing code-server container only on the code-server network."""
+    container.reload()
+    networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+    if network_name in networks:
+        logger.debug(f"code-server 容器 {container.name} 已在 Docker 网络: {network_name}")
+    else:
+        get_docker_client().networks.get(network_name).connect(container, aliases=[container.name])
+        logger.info(f"已将 code-server 容器 {container.name} 接入 Docker 网络: {network_name}")
+        container.reload()
+        networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+
+    for old_network in list(networks):
+        if old_network == network_name:
+            continue
+        try:
+            get_docker_client().networks.get(old_network).disconnect(container)
+            logger.info(
+                f"已将 code-server 容器 {container.name} 从旧 Docker 网络断开: {old_network}"
+            )
+        except docker.errors.APIError as exc:
+            logger.warning(
+                f"断开 code-server 容器 {container.name} 的旧网络 {old_network} 失败: {exc}"
+            )
 
 
 def ensure_user_workspace(container_name: str, user_email: str, dark: bool = True) -> str:
@@ -46,7 +81,7 @@ def ensure_user_workspace(container_name: str, user_email: str, dark: bool = Tru
     Returns:
         用户工作空间的绝对路径
     """
-    user_home = f"{settings.DOCKER_PROJECT_HOME.rstrip("/")}/{container_name}/"
+    user_home = f"{settings.DOCKER_PROJECT_HOME.rstrip('/')}/{container_name}/"
     os.makedirs(user_home, exist_ok=True)
 
     # 创建 README（仅首次）
@@ -57,7 +92,11 @@ def ensure_user_workspace(container_name: str, user_email: str, dark: bool = Tru
             f.write(f"- {user_email}：`{container_name}`\n\n")
 
     # 创建或更新 VS Code 配置文件
-    settings_path = os.path.join(user_home, ".env_code.json")
+    os.makedirs(os.path.join(user_home, ".config"), exist_ok=True)
+    os.makedirs(os.path.join(user_home, ".cache"), exist_ok=True)
+    settings_dir = os.path.join(user_home, ".local", "share", "code-server", "User")
+    os.makedirs(settings_dir, exist_ok=True)
+    settings_path = os.path.join(settings_dir, "settings.json")
     vscode_settings = get_code_server_vscode_settings(dark=dark)
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(vscode_settings, f, ensure_ascii=False)
@@ -88,10 +127,15 @@ def _get_started_at(container: Container) -> datetime:
     return datetime.fromisoformat(iso)
 
 
+def _uses_current_runtime_config(container: Container) -> bool:
+    env = container.attrs.get("Config", {}).get("Env") or []
+    return _CURRENT_RUNTIME_ENV_MARKER in env
+
+
 async def wait_for_service_ready(
     container: Container,
     since: datetime,
-    marker: bytes = _SERVICE_READY_MARKER,
+    markers: tuple[bytes, ...] = _SERVICE_READY_MARKERS,
     timeout: int = _SERVICE_READY_TIMEOUT,
     interval: float = _SERVICE_READY_POLL_INTERVAL,
 ) -> bool:
@@ -107,7 +151,7 @@ async def wait_for_service_ready(
         container: Docker 容器对象。
         since: 起始时间点，应来自 Docker daemon 自身记录的 StartedAt，
             确保与日志时间戳同源。
-        marker: 表示服务已启动的日志关键字节串。
+        markers: 表示服务已启动的日志关键字节串。
         timeout: 最长等待时间（秒）。
         interval: 轮询间隔（秒）。
 
@@ -124,7 +168,7 @@ async def wait_for_service_ready(
         except docker.errors.APIError as exc:
             logger.warning(f"读取容器日志失败: {exc}")
             return False
-        if marker in logs:
+        if any(marker in logs for marker in markers):
             return True
         await asyncio.sleep(interval)
     logger.warning(
@@ -154,14 +198,24 @@ def get_or_start_container(container_name: str) -> tuple[Container, datetime | N
     """
     client = get_docker_client()
     try:
-        client.networks.get(DOCKER_NETWORK_NAME)
-        logger.debug(f"使用现有网络: {DOCKER_NETWORK_NAME}")
+        runtime_network = ensure_code_server_network()
+        logger.debug(f"使用 Docker code-server 网络: {runtime_network}")
     except NotFound:
-        raise HTTPException(status_code=404, detail=f"Docker 网络不存在: {DOCKER_NETWORK_NAME}")
+        network_name = (
+            settings.CODE_SERVER_NETWORK_NAME
+            or settings.DOCKER_NETWORK_NAME
+            or f"{settings.PROJECT_NAME}_default"
+        )
+        raise HTTPException(status_code=404, detail=f"Docker 网络不存在: {network_name}")
 
     # 检查容器是否已存在
     try:
         container = client.containers.get(container_name)
+        if not _uses_current_runtime_config(container):
+            logger.info(f"code-server 容器 {container.name} 使用旧运行配置，正在重建")
+            container.remove(force=True, v=True)
+            raise docker.errors.NotFound("stale code-server container")
+        _ensure_container_network(container, runtime_network)
         if container.status == "running":
             return container, None
         container.start()
@@ -177,21 +231,32 @@ def get_or_start_container(container_name: str) -> tuple[Container, datetime | N
         environment={
             "DOCKER_USER": "root",
             "DOCKER_PASSWORD": "",
+            "HOME": _CODE_SERVER_HOME,
+            "XDG_CONFIG_HOME": _CODE_SERVER_CONFIG_HOME,
+            "XDG_DATA_HOME": _CODE_SERVER_DATA_HOME,
+            "XDG_CACHE_HOME": _CODE_SERVER_CACHE_HOME,
         },
-        command=["--auth", "none", "/data/project_home"],
-        network=DOCKER_NETWORK_NAME,
+        command=[
+            "--auth",
+            "none",
+            "--user-data-dir",
+            _CODE_SERVER_USER_DATA_DIR,
+            _CODE_SERVER_HOME,
+        ],
+        working_dir=_CODE_SERVER_HOME,
+        network=runtime_network,
         detach=True,
         restart_policy={"Name": "always"},
         mem_limit=CODE_SERVER_MEMORY_LIMIT,
         nano_cpus=int(CODE_SERVER_CPU_LIMIT * 1e9),
+        security_opt=["no-new-privileges"],
+        cap_drop=["ALL"],
+        pids_limit=256,
+        tmpfs={"/tmp": "rw,nosuid,nodev,size=256m"},
         volumes={
             # 宿主上用户目录挂载到 VS Code 服务主目录
             f"{settings.HOST_PROJECT_HOME}{container_name}/": {
-                "bind": "/data/project_home/",
-                "mode": "rw",
-            },
-            f"{settings.HOST_PROJECT_HOME}{container_name}/.env_code.json": {
-                "bind": "/root/.local/share/code-server/User/settings.json",
+                "bind": _CODE_SERVER_HOME,
                 "mode": "rw",
             },
         },

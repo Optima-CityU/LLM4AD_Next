@@ -41,6 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import useCustomToast from "@/hooks/useCustomToast"
 import {
   useProviders,
+  providersQueryKey,
   userDefaultModelsQueryKey,
   useUserDefaultModels,
 } from "@/hooks/useProviders"
@@ -254,6 +255,12 @@ export default function DefaultModelSettings({
     useUserDefaultModels()
 
   const { data: providers, isLoading: isLoadingProviders } = useProviders()
+
+  useEffect(() => {
+    if (isOpen) {
+      queryClient.invalidateQueries({ queryKey: providersQueryKey })
+    }
+  }, [isOpen, queryClient])
 
   useEffect(() => {
     if (defaults && isOpen) {

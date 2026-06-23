@@ -128,3 +128,16 @@ class ProviderTestResponse(BaseModel):
     success: bool
     message: str
     data: Any = None
+
+
+class BuiltinProviderQuotaResponse(BaseModel):
+    """内置供应商额度信息响应。"""
+
+    available: bool = False
+    provider_id: uuid.UUID | None = None
+    provider_name: str | None = None
+    spend: float | None = None
+    budget: float | None = None
+    remaining: float | None = None
+    currency: str = "USD"
+    message: str = ""

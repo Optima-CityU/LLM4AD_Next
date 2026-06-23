@@ -1,7 +1,7 @@
 """code-server 的认证转发端点支持。
 
 校验 code-server 的 cookie token，刷新用户活跃时间，并以响应头形式返回
-用户 ID 供网关使用。
+用户身份头供网关使用。
 """
 
 from fastapi import HTTPException, Request, Response, status
@@ -13,14 +13,14 @@ from app.models import User
 
 
 def verify_code_auth(request: Request, db: Session) -> Response:
-    """验证 code-server 的 cookie token 并返回带 X-User-ID 头的响应。
+    """验证 code-server 的 cookie token 并返回用户身份头。
 
     Args:
         request: HTTP 请求对象
         db: 数据库会话
 
     Returns:
-        包含 X-User-ID 头的 200 响应
+        包含 X-User-ID / X-User-Email 头的 200 响应
 
     Raises:
         HTTPException: 缺少 token（401）、token 无效（401）或用户不存在（401）
@@ -40,7 +40,8 @@ def verify_code_auth(request: Request, db: Session) -> Response:
     # 刷新活跃时间，供后台空闲清理任务判断；失败已在内部记录日志
     touch_code_user_active(user.id)
 
-    # 认证成功，将 user_id 放在响应头中
+    # 认证成功，将用户身份放在响应头中，供网关后续过滤器使用。
     response = Response(status_code=200)
     response.headers["X-User-ID"] = str(user.id)
+    response.headers["X-User-Email"] = user.email
     return response

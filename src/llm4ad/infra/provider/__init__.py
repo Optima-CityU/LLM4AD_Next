@@ -9,6 +9,7 @@ from llm4ad.infra.provider.base import (
     ChatMessage,
     ContentPart,
     GenerationResult,
+    ProviderRequestError,
     ProviderType,
     StreamResponse,
     ToolCall,
@@ -20,6 +21,7 @@ from llm4ad.infra.provider.openai_compatible import OpenAICompatibleProvider
 __all__ = [
     "BaseProvider",
     "GenerationResult",
+    "ProviderRequestError",
     "ChatMessage",
     "ContentPart",
     "ProviderType",

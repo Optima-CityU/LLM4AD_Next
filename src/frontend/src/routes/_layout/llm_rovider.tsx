@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Unplug } from "lucide-react"
+import { RefreshCw, Unplug, WalletCards } from "lucide-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -10,6 +10,8 @@ import { PageNumbers } from "@/components/Common/PageNumbers"
 import AddProvider from "@/components/LlmProvider/AddProvider"
 import { columns } from "@/components/LlmProvider/columns"
 import DefaultModelSettings from "@/components/LlmProvider/DefaultModelSettings"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Select,
   SelectContent,
@@ -18,8 +20,97 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useBuiltinProviderQuota } from "@/hooks/useProviders"
 
 const DEFAULT_PAGE_SIZE = 10
+
+function formatQuotaValue(value: number | null | undefined, currency: string) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "-"
+  }
+  return `${value.toFixed(value >= 1 ? 2 : 4)} ${currency}`
+}
+
+function BuiltinQuotaBar() {
+  const { t } = useTranslation()
+  const { data, isLoading, isFetching, refetch } = useBuiltinProviderQuota()
+
+  if (isLoading) {
+    return <Skeleton className="h-10 w-full rounded-md" />
+  }
+
+  if (!data?.provider_id) {
+    return null
+  }
+
+  const remaining =
+    data.remaining ??
+    (data.budget !== null &&
+    data.budget !== undefined &&
+    data.spend !== null &&
+    data.spend !== undefined
+      ? data.budget - data.spend
+      : null)
+  const percent =
+    data.budget && remaining !== null && remaining !== undefined
+      ? Math.min(100, Math.max(0, (remaining / data.budget) * 100))
+      : null
+  const remainingTone: "destructive" | "secondary" | "outline" =
+    data.available && data.remaining !== null && data.remaining !== undefined
+      ? data.remaining <= 0
+        ? "destructive"
+        : "secondary"
+      : "outline"
+
+  return (
+    <div className="mb-3 flex flex-col gap-2 rounded-md border bg-card px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-3">
+        <WalletCards className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{t("llmProvider.quota.title")}</span>
+            <Badge variant={remainingTone}>
+              {data.available
+                ? t("llmProvider.quota.remaining", {
+                    value: formatQuotaValue(remaining, data.currency),
+                  })
+                : t("llmProvider.quota.unavailable")}
+            </Badge>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {data.available
+              ? t("llmProvider.quota.detail", {
+                  spend: formatQuotaValue(data.spend, data.currency),
+                  budget: formatQuotaValue(data.budget, data.currency),
+                })
+              : data.message || t("llmProvider.quota.unavailableHint")}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 sm:min-w-40">
+        {percent !== null && (
+          <div className="h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          onClick={() => refetch()}
+          disabled={isFetching}
+          title={t("common.refresh")}
+        >
+          <RefreshCw className={`size-4 ${isFetching ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 export const Route = createFileRoute("/_layout/llm_rovider")({
   component: LlmProvider,
@@ -65,6 +156,8 @@ function LlmProvider() {
 
       {/* Scrollable content area */}
       <div className="flex-1 min-h-0 overflow-y-auto pr-1 pt-2">
+        <BuiltinQuotaBar />
+
         {/* Loading skeleton */}
         {isLoading && (
           <div className="rounded-md border">

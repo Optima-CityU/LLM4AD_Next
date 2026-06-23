@@ -8,7 +8,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, NoReturn
 
 from loguru import logger
 from openai import APIStatusError, AsyncOpenAI
@@ -19,9 +19,11 @@ from llm4ad.infra.provider.base import (
     ChatMessage,
     ContentPart,
     GenerationResult,
+    ProviderRequestError,
     StreamResponse,
     ToolCall,
     ToolDefinition,
+    build_provider_error_message,
 )
 from llm4ad.infra.timing import ExecutionTiming
 
@@ -329,7 +331,10 @@ class OpenAICompatibleProvider(BaseProvider):
 
         # If no schema, just call API once without retry logic
         if schema is None:
-            response = await self.client.chat.completions.create(**create_kwargs)
+            try:
+                response = await self.client.chat.completions.create(**create_kwargs)
+            except Exception as e:
+                self._raise_provider_error(e)
 
             latency_ms = (time.time() - start_time) * 1000
             prompt_tokens = response.usage.prompt_tokens if response.usage else 0
@@ -460,13 +465,16 @@ class OpenAICompatibleProvider(BaseProvider):
                     start_time = time.time()
                     continue
                 logger.error(f"API call failed: {e}")
-                raise
+                self._raise_provider_error(e)
             except Exception as e:
                 logger.error(f"API call failed: {e}")
-                raise
+                self._raise_provider_error(e)
 
         # Fallback: all retries exhausted, return result with parsed=None
-        response = await self.client.chat.completions.create(**create_kwargs)
+        try:
+            response = await self.client.chat.completions.create(**create_kwargs)
+        except Exception as e:
+            self._raise_provider_error(e)
 
         latency_ms = (time.time() - start_time) * 1000
         prompt_tokens = response.usage.prompt_tokens if response.usage else 0
@@ -524,32 +532,38 @@ class OpenAICompatibleProvider(BaseProvider):
         if tools:
             create_kwargs["tools"] = self._convert_tools(tools)
 
-        raw_stream = await self.client.chat.completions.create(**create_kwargs)
+        try:
+            raw_stream = await self.client.chat.completions.create(**create_kwargs)
+        except Exception as e:
+            self._raise_provider_error(e)
         response = StreamResponse()
 
         async def _generate() -> AsyncIterator[str]:
             tool_call_accum: dict[int, dict[str, str]] = {}
             reasoning_parts: list[str] = []
-            async for chunk in raw_stream:
-                if chunk.choices and (content := getattr(chunk.choices[0].delta, "content", None)):
-                    yield content
-                # Accumulate reasoning_content for DeepSeek thinking mode
-                if chunk.choices:
-                    rc = getattr(chunk.choices[0].delta, "reasoning_content", None)
-                    if rc:
-                        reasoning_parts.append(rc)
-                # Accumulate tool call deltas
-                if chunk.choices and getattr(chunk.choices[0].delta, "tool_calls", None):
-                    for tc_delta in chunk.choices[0].delta.tool_calls:
-                        idx = tc_delta.index
-                        if idx not in tool_call_accum:
-                            tool_call_accum[idx] = {"id": "", "name": "", "arguments": ""}
-                        if tc_delta.id:
-                            tool_call_accum[idx]["id"] = tc_delta.id
-                        if tc_delta.function and tc_delta.function.name:
-                            tool_call_accum[idx]["name"] = tc_delta.function.name
-                        if tc_delta.function and tc_delta.function.arguments:
-                            tool_call_accum[idx]["arguments"] += tc_delta.function.arguments
+            try:
+                async for chunk in raw_stream:
+                    if chunk.choices and (content := getattr(chunk.choices[0].delta, "content", None)):
+                        yield content
+                    # Accumulate reasoning_content for DeepSeek thinking mode
+                    if chunk.choices:
+                        rc = getattr(chunk.choices[0].delta, "reasoning_content", None)
+                        if rc:
+                            reasoning_parts.append(rc)
+                    # Accumulate tool call deltas
+                    if chunk.choices and getattr(chunk.choices[0].delta, "tool_calls", None):
+                        for tc_delta in chunk.choices[0].delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_call_accum:
+                                tool_call_accum[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc_delta.id:
+                                tool_call_accum[idx]["id"] = tc_delta.id
+                            if tc_delta.function and tc_delta.function.name:
+                                tool_call_accum[idx]["name"] = tc_delta.function.name
+                            if tc_delta.function and tc_delta.function.arguments:
+                                tool_call_accum[idx]["arguments"] += tc_delta.function.arguments
+            except Exception as e:
+                self._raise_provider_error(e)
             # Capture reasoning_content for DeepSeek thinking mode
             if reasoning_parts:
                 response.reasoning_content = "".join(reasoning_parts)
@@ -563,6 +577,18 @@ class OpenAICompatibleProvider(BaseProvider):
 
         response._gen = _generate()
         return response
+
+    def _raise_provider_error(self, error: BaseException) -> NoReturn:
+        if isinstance(error, ProviderRequestError):
+            raise error
+        message = build_provider_error_message(
+            error,
+            provider_type="openai_compatible",
+            model=self.model,
+            base_url=self.base_url,
+        )
+        logger.error(message)
+        raise ProviderRequestError(message) from error
 
     @staticmethod
     def _parse_tool_calls(message: Any) -> list[ToolCall] | None:

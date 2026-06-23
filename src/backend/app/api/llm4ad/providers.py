@@ -64,6 +64,7 @@ def create_provider(
 def list_providers(
     db: SessionDep,
     current_user: CurrentUser,
+    token: TokenDep,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=0, le=200),
 ):
@@ -79,11 +80,25 @@ def list_providers(
         PaginatedProviderResponse: 分页结果，包含数据项与总数。
     """
     providers, total = provider_service.list_providers(
-        db, current_user.id, skip, limit
+        db, current_user.id, skip, limit, token
     )
     return schemas.PaginatedProviderResponse(
         items=providers, total=total, skip=skip, limit=limit
     )
+
+
+@router.get(
+    "/builtin/quota",
+    response_model=schemas.BuiltinProviderQuotaResponse,
+    summary="查询当前用户的内置供应商额度",
+)
+def get_builtin_provider_quota(
+    db: SessionDep,
+    current_user: CurrentUser,
+    token: TokenDep,
+):
+    """Get current user's built-in provider quota when LiteLLM admin API is configured."""
+    return provider_service.get_builtin_provider_quota(db, current_user, token)
 
 
 @router.get(

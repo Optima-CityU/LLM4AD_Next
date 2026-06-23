@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: omni-ai-router
+  data:
+    redis:
+      database: 0
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            websocket:
+              max-frame-payload-length: 104857600
+          x-forwarded:
+            host-enabled: true
+            port-enabled: true
+            proto-enabled: true
+            prefix-enabled: true
+server:
+  port: ${GATEWAY_SERVER_PORT:9090}
+litellm:
+  auth-token: ${LITELLM_AUTH_TOKEN}
+  base-url: ${LITELLM_BASE_URL}
+gateway:
+  user-me-url: ${GATEWAY_USER_ME_URL}

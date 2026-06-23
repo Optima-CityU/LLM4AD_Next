@@ -141,6 +141,7 @@
     "replayTour": "Replay guided tour",
     "replayTourReset": "All walkthroughs reset — they'll show up again as you visit each page",
     "userManual": "User Manual",
+    "analytics": "Analytics",
     "liveCode": "WeChat Group QR"
   },
   "sidebar": {
@@ -152,6 +153,7 @@
     "userManual": "User Manual",
     "admin": "Admin",
     "userManagement": "Users",
+    "analytics": "Analytics",
     "changelog": "Changelog",
     "feedback": "Feedback",
     "liveCode": "Group QR"
@@ -243,6 +245,16 @@
       "passwordMismatch": "The passwords don't match"
     }
   },
+  "adminAnalytics": {
+    "title": "Visitor Analytics",
+    "subtitle": "Review traffic trends, page views, and visitor details.",
+    "statusReady": "Configured",
+    "statusMissing": "Missing",
+    "openExternal": "Open",
+    "iframeTitle": "Visitor analytics details",
+    "emptyTitle": "Analytics URL is not configured",
+    "emptyDescription": "Set VITE_ADMIN_ANALYTICS_URL in the frontend build environment."
+  },
   "settings": {
     "pageTitle": "Account Settings",
     "subtitle": "Manage your account information, password, and other settings.",
@@ -290,7 +302,7 @@
     "builtin": "Built-in",
     "builtinHint": "Ready-to-use built-in model — no API key needed, with a one-time 1M-token free quota. Great for a quick trial.",
     "builtinReadonlyDescription": "Built-in provider configuration (read-only).",
-    "builtinReadonlyHint": "Built-in provider — ready to use with no API key required, plus a one-time 1M-token free quota for a quick trial. Its configuration is read-only (cannot be edited or deleted); only connectivity testing is available.",
+    "builtinReadonlyHint": "Built-in provider — ready to use with no API key required, plus a one-time 1M-token free quota for a quick trial. Its configuration is read-only (cannot be edited or deleted); only connectivity testing is available. Remaining quota is shown on the provider list page.",
     "updateSuccess": "Provider updated successfully",
     "deleteProvider": "Delete Provider",
     "deleteProviderConfirmation": "This provider configuration will be permanently deleted. This action cannot be undone. Are you sure?",
@@ -306,6 +318,13 @@
       "failed": "Connection failed",
       "response": "Model response",
       "requestError": "Request error. Please check your network connection."
+    },
+    "quota": {
+      "title": "Built-in provider quota",
+      "remaining": "{{value}} remaining",
+      "detail": "{{spend}} used / {{budget}} budget",
+      "unavailable": "Unavailable",
+      "unavailableHint": "Quota is unavailable. Please retry later or contact your administrator."
     },
     "defaultModelPrompt": {
       "title": "Configure Default Models",

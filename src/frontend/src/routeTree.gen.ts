@@ -28,6 +28,7 @@ import { Route as LayoutGuideRouteImport } from './routes/_layout/guide'
 import { Route as LayoutFeedbackRouteImport } from './routes/_layout/feedback'
 import { Route as LayoutConfig_templateRouteImport } from './routes/_layout/config_template'
 import { Route as LayoutChangelogRouteImport } from './routes/_layout/changelog'
+import { Route as LayoutAnalyticsRouteImport } from './routes/_layout/analytics'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
@@ -123,6 +124,11 @@ const LayoutChangelogRoute = LayoutChangelogRouteImport.update({
   path: '/changelog',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAnalyticsRoute = LayoutAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
+  '/analytics': typeof LayoutAnalyticsRoute
   '/changelog': typeof LayoutChangelogRoute
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
@@ -156,6 +163,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
+  '/analytics': typeof LayoutAnalyticsRoute
   '/changelog': typeof LayoutChangelogRoute
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
@@ -179,6 +187,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/analytics': typeof LayoutAnalyticsRoute
   '/_layout/changelog': typeof LayoutChangelogRoute
   '/_layout/config_template': typeof LayoutConfig_templateRoute
   '/_layout/feedback': typeof LayoutFeedbackRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/admin'
+    | '/analytics'
     | '/changelog'
     | '/config_template'
     | '/feedback'
@@ -219,6 +229,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/admin'
+    | '/analytics'
     | '/changelog'
     | '/config_template'
     | '/feedback'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/_layout/admin'
+    | '/_layout/analytics'
     | '/_layout/changelog'
     | '/_layout/config_template'
     | '/_layout/feedback'
@@ -400,6 +412,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutChangelogRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/analytics': {
+      id: '/_layout/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof LayoutAnalyticsRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/admin': {
       id: '/_layout/admin'
       path: '/admin'
@@ -412,6 +431,7 @@ declare module '@tanstack/react-router' {
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutAnalyticsRoute: typeof LayoutAnalyticsRoute
   LayoutChangelogRoute: typeof LayoutChangelogRoute
   LayoutConfig_templateRoute: typeof LayoutConfig_templateRoute
   LayoutFeedbackRoute: typeof LayoutFeedbackRoute
@@ -424,6 +444,7 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutAnalyticsRoute: LayoutAnalyticsRoute,
   LayoutChangelogRoute: LayoutChangelogRoute,
   LayoutConfig_templateRoute: LayoutConfig_templateRoute,
   LayoutFeedbackRoute: LayoutFeedbackRoute,

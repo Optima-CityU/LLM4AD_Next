@@ -8,7 +8,7 @@ from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_chunk import Choice as ChunkChoice
 from pydantic import BaseModel, Field
 
-from llm4ad.infra.provider.base import ChatMessage, GenerationResult
+from llm4ad.infra.provider.base import ChatMessage, GenerationResult, ProviderRequestError
 from llm4ad.infra.provider.openai_compatible import OpenAICompatibleProvider
 
 
@@ -213,6 +213,104 @@ async def test_generate(provider):
         stream=False,
         temperature=0.5,
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_quota_error_uses_friendly_message(provider):
+    """Quota/budget errors should be actionable instead of raw SDK text."""
+
+    class QuotaError(Exception):
+        status_code = 429
+        body = {"error": {"message": "insufficient_quota: exceeded current quota"}}
+
+    provider.base_url = "http://proxy.example/tenant/abcdefghijklmnopqrstuvwxyz123456/v1"
+    provider.client.chat.completions.create.side_effect = QuotaError("raw quota failure")
+
+    with pytest.raises(ProviderRequestError) as exc_info:
+        await provider.chat([ChatMessage(role="user", content="Hello")])
+
+    message = str(exc_info.value)
+    assert "额度或预算已用完" in message
+    assert "quota or budget is exhausted" in message
+    assert "联系管理员" in message
+    assert "contact your administrator" in message
+    assert "LiteLLM" not in message
+    assert "abcdefghijklmnopqrstuvwxyz123456" not in message
+    assert "base_url=http://proxy.example/tenant/***/v1" in message
+
+
+@pytest.mark.asyncio
+async def test_chat_litellm_budget_error_uses_quota_guidance(provider):
+    """LiteLLM budget_exceeded errors should be shown as quota/budget issues."""
+
+    class LiteLLMBudgetError(Exception):
+        status_code = 429
+        body = {
+            "error": {
+                "message": (
+                    "ExceededBudget: User=0f43dafb-8690-49fd-bf34-eaed650f2f5a "
+                    "over budget. Spend=0.017652400000000002, Budget=0.01"
+                ),
+                "type": "budget_exceeded",
+                "param": None,
+                "code": "429",
+            }
+        }
+
+    provider.base_url = "http://gateway:9090/litellm_proxy/team-id/user-token/v1"
+    provider.client.chat.completions.create.side_effect = LiteLLMBudgetError(
+        "Error code: 429 - budget_exceeded"
+    )
+
+    with pytest.raises(ProviderRequestError) as exc_info:
+        await provider.chat([ChatMessage(role="user", content="Hello")])
+
+    message = str(exc_info.value)
+    assert "额度或预算已用完" in message
+    assert "quota or budget is exhausted" in message
+    assert "检查 LiteLLM key/team 的预算和消费日志" in message
+    assert "check the LiteLLM key/team budget and spend logs" in message
+    assert "0f43dafb-8690-49fd-bf34-eaed650f2f5a" not in message
+    assert "base_url=http://gateway:9090/litellm_proxy/team-id/user-token/v1" in message
+
+
+@pytest.mark.asyncio
+async def test_chat_auth_error_uses_external_provider_guidance(provider):
+    """External provider key errors should get generic auth guidance."""
+
+    class AuthError(Exception):
+        status_code = 401
+        body = {"error": {"message": "invalid api key"}}
+
+    provider.base_url = "https://api.vendor.example/v1"
+    provider.client.chat.completions.create.side_effect = AuthError("invalid api key")
+
+    with pytest.raises(ProviderRequestError) as exc_info:
+        await provider.chat([ChatMessage(role="user", content="Hello")])
+
+    message = str(exc_info.value)
+    assert "认证或权限校验失败" in message
+    assert "authentication or permission check failed" in message
+    assert "联系管理员" in message
+    assert "contact your administrator" in message
+    assert "base_url=https://api.vendor.example/v1" in message
+
+
+@pytest.mark.asyncio
+async def test_chat_connection_error_uses_network_guidance(provider):
+    """Network failures should be distinguished from unclear provider errors."""
+    provider.base_url = "http://gateway:9090/litellm_proxy/team-id/user-token/v1"
+    provider.client.chat.completions.create.side_effect = Exception("Connection error.")
+
+    with pytest.raises(ProviderRequestError) as exc_info:
+        await provider.chat([ChatMessage(role="user", content="Hello")])
+
+    message = str(exc_info.value)
+    assert "供应商或网关不可达" in message
+    assert "provider or gateway is unreachable" in message
+    assert "容器网络" in message
+    assert "container networking" in message
+    assert "原因未明确" not in message
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
   FolderKanban,
+  LineChart,
   MessageSquareText,
   QrCode,
   ScrollText,
@@ -107,6 +108,7 @@ export function AppSidebar() {
 
   const adminItems: Item[] = [
     { icon: Users, title: t("sidebar.userManagement"), path: "/admin" },
+    { icon: LineChart, title: t("sidebar.analytics"), path: "/analytics" },
     { icon: QrCode, title: t("sidebar.liveCode"), path: "/live-codes" },
   ]
 

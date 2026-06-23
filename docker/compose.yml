@@ -221,7 +221,6 @@ services:
         - VITE_CODE_SERVER_URL=${VITE_CODE_SERVER_URL:-/code_ide}
         - NODE_ENV=production
     volumes:
-      - ../src/frontend/nginx-api-proxy.conf:/etc/nginx/extra-conf.d/api-proxy.conf:ro
-      - ../src/frontend/nginx-code-ide-proxy.conf:/etc/nginx/extra-conf.d/code-ide-proxy.conf:ro
+      - ../src/frontend/extra-conf:/etc/nginx/extra-conf.d
     ports:
       - "${FRONTEND_PORT:-80}:80"

@@ -81,8 +81,8 @@ def seed_builtin_provider() -> models.LLMProvider | None:
     Returns:
         新建或更新后的 LLMProvider 记录；若配置未填则返回 None。
     """
-    if not settings.BUILTIN_PROVIDER_BASE_URL or not settings.BUILTIN_PROVIDER_MODELS:
-        logger.info("BUILTIN_PROVIDER_BASE_URL 或 BUILTIN_PROVIDER_MODELS 未配置，跳过内置供应商 seed")
+    if not settings.BUILTIN_PROVIDER_BASE_URL:
+        logger.info("BUILTIN_PROVIDER_BASE_URL 未配置，跳过内置供应商 seed")
         return None
 
     with Session(engine) as session:
@@ -161,8 +161,8 @@ def backfill_user_default_models() -> tuple[int, int]:
     """
     from app.services.user_default_model_service import build_default_init_kwargs
 
-    if not settings.BUILTIN_PROVIDER_BASE_URL or not settings.BUILTIN_PROVIDER_MODELS:
-        logger.info("BUILTIN_PROVIDER_BASE_URL 或 BUILTIN_PROVIDER_MODELS 未配置，跳过 backfill UserDefaultModel")
+    if not settings.BUILTIN_PROVIDER_BASE_URL:
+        logger.info("BUILTIN_PROVIDER_BASE_URL 未配置，跳过 backfill UserDefaultModel")
         return 0, 0
 
     slot_prefixes = ("planner", "coder", "report", "other")

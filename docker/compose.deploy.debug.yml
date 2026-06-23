@@ -25,3 +25,11 @@ services:
   flower:
     ports:
       - "5555:5555"
+
+  gateway:
+    ports:
+      - "9090:9090"
+
+  litellm:
+    ports:
+      - "4000:4000"

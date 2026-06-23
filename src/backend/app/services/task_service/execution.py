@@ -34,7 +34,8 @@ def _resolve_providers(
     """解析供应商列表并处理 planner/coder 中的供应商引用，用于构建 run_args。
 
     1. 从当前用户的 LLMProvider 记录构建 ``input_args["providers"]``。
-       每个供应商可包含多个模型（以 ``;`` 分隔），每个模型拆分为独立的
+       内置供应商通过 LiteLLM 按当前用户/团队动态查询可用模型；非内置
+       供应商使用数据库中以 ``;`` 分隔的模型列表。每个模型拆分为独立的
        ProviderConfig，name 格式为 ``{provider.id}{model}``。
     2. 解析 ``planner.provider`` / ``coder.provider`` / ``evaluator.provider``：
        - ``"default"`` 或空：从 UserDefaultModel 读取默认配置
@@ -53,6 +54,7 @@ def _resolve_providers(
         处理后的 *input_args* 字典。
     """
     from app.models import LLMProvider
+    from app.services.provider_service import fetch_builtin_provider_models, resolve_builtin_base_url
     from app.services.user_default_model_service import get_user_default_model
 
     input_args["providers"] = []
@@ -67,11 +69,21 @@ def _resolve_providers(
 
     provider_configs: list[dict] = []
     provider_configs_map: dict[str, dict] = {}
+    builtin_embedding_provider: LLMProvider | None = None
     for p in providers:
         base_url = p.base_url
-        if p.is_builtin and base_url and access_token:
-            base_url = base_url.replace("{accessToken}", access_token)
-        models_list = [m.strip() for m in p.model.split(";") if m.strip()]
+        if p.is_builtin:
+            base_url = resolve_builtin_base_url(base_url, access_token)
+            if builtin_embedding_provider is None and base_url:
+                builtin_embedding_provider = p
+        if p.is_builtin:
+            models_list = fetch_builtin_provider_models(
+                p,
+                access_token,
+                user_id=str(current_user.id),
+            )
+        else:
+            models_list = [m.strip() for m in p.model.split(";") if m.strip()]
         for model_name in models_list:
             model_data = {
                 "name": f"{p.id}{model_name}",
@@ -119,7 +131,7 @@ def _resolve_providers(
         or (not coder_provider or coder_provider == "default")
         or (not evaluator_provider or evaluator_provider == "default")
     )
-    defaults = get_user_default_model(db, current_user.id) if need_defaults else None
+    defaults = get_user_default_model(db, current_user.id, access_token) if need_defaults else None
 
     if not planner_provider or planner_provider == "default":
         if defaults and defaults.planner_provider_id and defaults.planner_model_name:
@@ -161,27 +173,43 @@ def _resolve_providers(
 
     # 按需追加实际用到的 provider configs（按 name 去重，避免 planner/coder/evaluator 使用同一 provider 时重复添加）
     seen_provider_names: set[str] = set()
-    for name in (
-        planner_config.get("provider"),
-        coder_config.get("provider"),
-        evaluator_config.get("provider"),
+    for role, name in (
+        ("Planner", planner_config.get("provider")),
+        ("Coder", coder_config.get("provider")),
+        ("Evaluator", evaluator_config.get("provider")),
     ):
-        if name and name in provider_configs_map and name not in seen_provider_names:
+        if not name:
+            continue
+        if name not in provider_configs_map:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{role} provider/model {name} is not available in LiteLLM provider models",
+            )
+        if name not in seen_provider_names:
             seen_provider_names.add(name)
             input_args["providers"].append(provider_configs_map[name])
     input_args["planner"] = planner_config
     input_args["coder"] = coder_config
     input_args["evaluator"] = evaluator_config
-    # 运行强制使用默认的 embedding 模型（未配置 JINA_API_KEY 时不传 api_key）
+    # 运行强制使用默认的 embedding 模型。云部署优先复用内置 LiteLLM 网关，
+    # 未配置内置网关时回退到公开 Jina 地址。
+    embedding_base_url = "https://api.jinaai.cn/v1"
+    embedding_api_key = settings.JINA_API_KEY
+    if builtin_embedding_provider and builtin_embedding_provider.base_url and access_token:
+        embedding_base_url = resolve_builtin_base_url(
+            builtin_embedding_provider.base_url,
+            access_token,
+        ) or embedding_base_url
+        embedding_api_key = builtin_embedding_provider.api_key or embedding_api_key
     embedding_kwargs: dict = {
         "type": "openai_compatible",
-        "base_url": "https://api.jinaai.cn/v1",
-        "model": "jina-embeddings-v4",
+        "base_url": embedding_base_url,
+        "model": settings.EMBEDDING_MODEL,
         "dim": 2048,
         "embedding_func_max_async": 2,
     }
-    if settings.JINA_API_KEY:
-        embedding_kwargs["api_key"] = settings.JINA_API_KEY
+    if embedding_api_key:
+        embedding_kwargs["api_key"] = embedding_api_key
     input_args["embedding"] = EmbeddingConfig(**embedding_kwargs).model_dump()
     return input_args
 
