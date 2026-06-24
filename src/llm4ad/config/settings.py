@@ -119,10 +119,11 @@ def merge_with_global_settings(
 ) -> dict[str, Any]:
     """Merge global settings into task configuration.
 
-    For each provider entry in ``task_data["providers"]``, if a provider
-    with the same name exists in ``global_data["providers"]``, the global
-    definition is used as the base and task-level fields are overlaid on
-    top (task takes precedence).
+    If task configuration omits ``providers``, the global providers are
+    used directly.  Otherwise, for each provider entry in
+    ``task_data["providers"]``, if a provider with the same name exists in
+    ``global_data["providers"]``, the global definition is used as the base
+    and task-level fields are overlaid on top (task takes precedence).
 
     Args:
         global_data: Raw dict from the global settings file.
@@ -149,7 +150,9 @@ def merge_with_global_settings(
 
     task_providers = task_data.get("providers")
     if task_providers is None:
-        return task_data
+        result = dict(task_data)
+        result["providers"] = list(global_providers)
+        return result
 
     merged_providers = []
     for task_provider in task_providers:
