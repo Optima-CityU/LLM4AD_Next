@@ -5,7 +5,7 @@ services:
     image: nginx:latest
     restart: always
     ports:
-      - "18041:80"
+      - "${MAINTENANCE_GATEWAY_PORT:-18080}:80"
     # 让容器内可用 host.docker.internal 访问宿主发布的 frontend 端口。
     # Linux 需 host-gateway 映射；Docker Desktop(Win/Mac) 原生支持。
     extra_hosts:

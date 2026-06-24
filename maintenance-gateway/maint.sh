@@ -25,7 +25,7 @@ reload_nginx() {
 case "${1:-}" in
   up)
     "${COMPOSE[@]}" up -d
-    printf '维护网关已启动（占用宿主 80 端口）\n'
+    printf '维护网关已启动（宿主端口：%s）\n' "${MAINTENANCE_GATEWAY_PORT:-18080}"
     ;;
   down)
     "${COMPOSE[@]}" down
