@@ -1,0 +1,21 @@
+name: llm4ad-maint
+
+services:
+  edge:
+    image: nginx:latest
+    restart: always
+    ports:
+      - "18041:80"
+    # 让容器内可用 host.docker.internal 访问宿主发布的 frontend 端口。
+    # Linux 需 host-gateway 映射；Docker Desktop(Win/Mac) 原生支持。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./maintenance.html:/usr/share/nginx/html/maintenance.html:ro
+      - ./flag:/flag           # 维护标志目录（可写），touch/rm MAINTENANCE 切换
+    healthcheck:
+      test: ["CMD", "service", "nginx", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
