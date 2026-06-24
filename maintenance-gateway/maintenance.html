@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <noscript><meta http-equiv="refresh" content="30" /></noscript>
+    <meta name="robots" content="noindex" />
+    <title>系统维护中 · LLM4AD_Next</title>
+
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("llm4ad-theme");
+          // 应用默认强制 dark；无偏好时同样默认 dark。
+          if (theme !== "light") {
+            document.documentElement.classList.add("dark");
+          }
+          var lang = localStorage.getItem("llm4ad-language");
+          if (lang !== "zh" && lang !== "en") {
+            lang = (navigator.language || "zh").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+          }
+          document.documentElement.setAttribute("lang", lang);
+          document.documentElement.setAttribute("data-lang", lang);
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --fg: #0f172a;
+        --card: #ffffff;
+        --muted-fg: #475569;
+        --border: #cbd5e1;
+        --primary: #2563eb;
+        --primary-2: #3b82f6;
+        --glow: rgba(37, 99, 235, 0.18);
+        --card-bg: rgba(255, 255, 255, 0.72);
+        --halo-1: #dbeafe;
+        --halo-2: #f8fafc;
+        --halo-3: #eef2ff;
+      }
+      :root.dark {
+        --bg: #060b1a;
+        --fg: #e0e8ff;
+        --card: #0d1a2d;
+        --muted-fg: #6b8ab0;
+        --border: #1e3a5f;
+        --primary: #00d4ff;
+        --primary-2: #2563eb;
+        --glow: rgba(0, 212, 255, 0.16);
+        --card-bg: rgba(13, 26, 45, 0.55);
+        --halo-1: #1e3a5f;
+        --halo-2: #0f172a;
+        --halo-3: #060b1a;
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--fg);
+        background:
+          radial-gradient(1100px 720px at 50% -12%, var(--halo-1) 0%, var(--halo-2) 46%, var(--halo-3) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100%;
+        padding: clamp(16px, 4vw, 32px);
+        padding-bottom: max(clamp(16px, 4vw, 32px), env(safe-area-inset-bottom));
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+
+      .card {
+        position: relative;
+        width: 100%;
+        max-width: 540px;
+        text-align: center;
+        padding: clamp(32px, 6vw, 56px) clamp(24px, 5vw, 48px);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: clamp(18px, 3vw, 24px);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18);
+      }
+      :root.dark .card { box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5); }
+
+      .badge {
+        width: clamp(64px, 16vw, 84px);
+        height: clamp(64px, 16vw, 84px);
+        margin: 0 auto clamp(20px, 4vw, 30px);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #ffffff;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
+        box-shadow: 0 0 0 10px var(--glow), 0 10px 30px rgba(0, 0, 0, 0.2);
+        animation: pulse 2.8s ease-in-out infinite;
+      }
+      .badge svg {
+        width: 50%;
+        height: 50%;
+        animation: spin 8s linear infinite;
+      }
+      /* 光晕呼吸：仅外圈光环扩散/收敛，图标位置不动，避免上下抖动的毛躁感。 */
+      @keyframes pulse {
+        0%, 100% { box-shadow: 0 0 0 8px var(--glow), 0 10px 30px rgba(0, 0, 0, 0.2); }
+        50% { box-shadow: 0 0 0 16px transparent, 0 10px 30px rgba(0, 0, 0, 0.2); }
+      }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      h1 {
+        font-size: clamp(22px, 5vw, 30px);
+        font-weight: 800;
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+        margin-bottom: clamp(10px, 2vw, 16px);
+        background: linear-gradient(90deg, var(--primary), var(--fg) 75%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      p {
+        font-size: clamp(14px, 3.4vw, 16px);
+        line-height: 1.75;
+        color: var(--muted-fg);
+        max-width: 40ch;
+        margin-inline: auto;
+      }
+      p + p { margin-top: 8px; }
+
+      .dots { display: inline-flex; gap: 3px; margin-inline-start: 2px; vertical-align: middle; }
+      .dots i {
+        width: 4px; height: 4px; border-radius: 50%;
+        background: var(--primary);
+        display: inline-block;
+        animation: blink 1.4s infinite both;
+      }
+      .dots i:nth-child(2) { animation-delay: 0.2s; }
+      .dots i:nth-child(3) { animation-delay: 0.4s; }
+      @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+      .actions { margin-top: clamp(24px, 5vw, 32px); }
+      .retry {
+        appearance: none;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--primary);
+        padding: 11px 26px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: transparent;
+        transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease;
+      }
+      .retry:hover {
+        border-color: var(--primary);
+        background: var(--glow);
+      }
+      .retry:active { transform: scale(0.97); }
+      .retry:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+      .meta {
+        margin-top: clamp(22px, 4vw, 28px);
+        padding-top: clamp(16px, 3vw, 20px);
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+        color: var(--muted-fg);
+      }
+      .brand { font-weight: 800; letter-spacing: 0.4px; color: var(--primary); }
+
+      @media (prefers-reduced-motion: reduce) {
+        .badge, .badge svg, .dots i { animation: none !important; }
+      }
+
+      /* ---- 语言切换：默认显示中文，data-lang="en" 时切英文 ---- */
+      [data-en] { display: none; }
+      html[data-lang="en"] [data-zh] { display: none; }
+      html[data-lang="en"] [data-en] { display: inline; }
+    </style>
+  </head>
+
+  <body>
+    <main class="card" role="alert" aria-live="polite">
+      <div class="badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </div>
+
+      <h1>
+        <span data-zh>系统升级维护中</span>
+        <span data-en>Under Maintenance</span>
+      </h1>
+
+      <p>
+        <span data-zh>我们正在部署新版本，为你带来更好的体验</span>
+        <span data-en>We're deploying a new version to improve your experience</span>
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      </p>
+      <p>
+        <span data-zh>预计很快恢复，本页面将自动重连，无需手动操作。</span>
+        <span data-en>We'll be back shortly. This page reconnects automatically.</span>
+      </p>
+
+      <div class="actions">
+        <button class="retry" type="button" onclick="location.reload()">
+          <span data-zh>立即重试</span>
+          <span data-en>Retry now</span>
+        </button>
+      </div>
+
+      <div class="meta">
+        <span data-zh>感谢你的耐心等待</span>
+        <span data-en>Thanks for your patience</span>
+        · <span class="brand">LLM4AD_Next</span>
+      </div>
+    </main>
+
+    <!-- 智能自动重连：维护期间 nginx 对所有路径返回 503，因此周期性探活当前页，
+         一旦响应不再是 5xx（服务真正恢复，避开部署中途的 502/503）即整页重载，
+         无需用户手动刷新。探测失败（网络/容器重启中）静默重试。 -->
+    <script>
+      (function () {
+        var INTERVAL = 5000; // ms
+        var probing = false;
+
+        async function probe() {
+          if (probing || document.hidden) return;
+          probing = true;
+          try {
+            var res = await fetch(window.location.href, {
+              method: "HEAD",
+              cache: "no-store",
+              redirect: "manual",
+            });
+            // < 500 表示已由真实应用响应（含 200/3xx/404），维护结束。
+            if (res.status && res.status < 500) {
+              window.location.reload();
+              return;
+            }
+          } catch (e) {
+            /* 部署窗口内的连接错误属预期，继续轮询 */
+          } finally {
+            probing = false;
+          }
+        }
+
+        setInterval(probe, INTERVAL);
+        // 用户切回标签页时立即探一次，恢复体验更跟手。
+        document.addEventListener("visibilitychange", function () {
+          if (!document.hidden) probe();
+        });
+      })();
+    </script>
+  </body>
+</html>
