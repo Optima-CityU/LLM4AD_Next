@@ -64,3 +64,30 @@ def test_verify_code_auth_returns_identity_headers(monkeypatch):
 
     assert response.headers["X-User-ID"] == str(user_id)
     assert response.headers["X-User-Email"] == "test@admin.com"
+    assert response.headers["X-Is-Admin"] == "false"
+
+
+def test_verify_code_auth_returns_admin_header_for_superuser(monkeypatch):
+    code_auth = _load_code_auth_module()
+    user_id = uuid4()
+    user = User(
+        id=user_id,
+        email="superuser@example.com",
+        hashed_password="not-used",
+        is_active=True,
+        is_superuser=True,
+    )
+    token = create_access_token(user_id, timedelta(minutes=5), scope="code")
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(b"cookie", f"code_token={token}".encode())],
+        }
+    )
+    monkeypatch.setattr(
+        code_auth, "touch_code_user_active", lambda _user_id: None
+    )
+
+    response = code_auth.verify_code_auth(request, _FakeDB(user))
+
+    assert response.headers["X-Is-Admin"] == "true"

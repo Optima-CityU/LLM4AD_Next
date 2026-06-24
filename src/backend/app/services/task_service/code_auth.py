@@ -20,7 +20,7 @@ def verify_code_auth(request: Request, db: Session) -> Response:
         db: 数据库会话
 
     Returns:
-        包含 X-User-ID / X-User-Email 头的 200 响应
+        包含 X-User-ID / X-User-Email / X-Is-Admin 头的 200 响应
 
     Raises:
         HTTPException: 缺少 token（401）、token 无效（401）或用户不存在（401）
@@ -44,4 +44,5 @@ def verify_code_auth(request: Request, db: Session) -> Response:
     response = Response(status_code=200)
     response.headers["X-User-ID"] = str(user.id)
     response.headers["X-User-Email"] = user.email
+    response.headers["X-Is-Admin"] = "true" if user.is_superuser else "false"
     return response
