@@ -199,8 +199,7 @@ class Settings(BaseSettings):
     BUILTIN_PROVIDER_MODELS: str = "" # 多模型分号分隔
     BUILTIN_PROVIDER_MAX_TOKENS: int = 16384
     BUILTIN_PROVIDER_DEFAULT_MODEL: str = "" # 为空则取 MODELS 中的第一个
-    LITELLM_BASE_URL: str = ""
-    LITELLM_AUTH_TOKEN: str = ""
+    LITELLM_GATEWAY_BASE_URL: str = "http://gateway:9090"
 
     # ---- Docker 连接配置 ----
     DOCKER_HOST: str = ""  # Docker daemon address; empty = local socket, e.g. ssh://user@remote-host

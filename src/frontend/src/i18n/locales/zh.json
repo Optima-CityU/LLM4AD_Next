@@ -142,7 +142,8 @@
     "replayTourReset": "已重置所有引导 — 访问对应页面时会再次出现",
     "userManual": "使用手册",
     "analytics": "访客统计",
-    "liveCode": "微信群活码"
+    "liveCode": "微信群活码",
+    "litellmQuotas": "LiteLLM 额度"
   },
   "sidebar": {
     "projectManagement": "项目管理",
@@ -156,7 +157,8 @@
     "analytics": "访客统计",
     "changelog": "版本记录",
     "feedback": "意见反馈",
-    "liveCode": "群活码"
+    "liveCode": "群活码",
+    "litellmQuotas": "LiteLLM 额度"
   },
   "projects": {
     "pageTitle": "项目 - LLM4AD_Next",
@@ -254,6 +256,22 @@
     "iframeTitle": "访客统计详情",
     "emptyTitle": "访客统计地址未配置",
     "emptyDescription": "请在前端构建环境中配置 VITE_ADMIN_ANALYTICS_URL。"
+  },
+  "litellmQuotas": {
+    "title": "LiteLLM 用户额度",
+    "subtitle": "查看 LiteLLM 中已存在用户的预算、已用额度和剩余额度。",
+    "statusReady": "已同步",
+    "statusUnavailable": "不可用",
+    "searchPlaceholder": "搜索用户、邮箱或团队",
+    "unavailableTitle": "暂无法查询 LiteLLM 额度",
+    "unavailableDescription": "请检查 gateway 与 LiteLLM 管理接口配置。",
+    "columns": {
+      "user": "全名",
+      "spend": "已用",
+      "budget": "预算",
+      "remaining": "剩余",
+      "teams": "团队"
+    }
   },
   "settings": {
     "pageTitle": "账户设置",

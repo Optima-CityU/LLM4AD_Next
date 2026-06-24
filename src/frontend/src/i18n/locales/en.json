@@ -142,7 +142,8 @@
     "replayTourReset": "All walkthroughs reset — they'll show up again as you visit each page",
     "userManual": "User Manual",
     "analytics": "Analytics",
-    "liveCode": "WeChat Group QR"
+    "liveCode": "WeChat Group QR",
+    "litellmQuotas": "LiteLLM Quotas"
   },
   "sidebar": {
     "projectManagement": "Projects",
@@ -156,7 +157,8 @@
     "analytics": "Analytics",
     "changelog": "Changelog",
     "feedback": "Feedback",
-    "liveCode": "Group QR"
+    "liveCode": "Group QR",
+    "litellmQuotas": "LiteLLM Quotas"
   },
   "projects": {
     "pageTitle": "Projects - LLM4AD_Next",
@@ -254,6 +256,22 @@
     "iframeTitle": "Visitor analytics details",
     "emptyTitle": "Analytics URL is not configured",
     "emptyDescription": "Set VITE_ADMIN_ANALYTICS_URL in the frontend build environment."
+  },
+  "litellmQuotas": {
+    "title": "LiteLLM User Quotas",
+    "subtitle": "Review budgets, spend, and remaining quota for users already present in LiteLLM.",
+    "statusReady": "Synced",
+    "statusUnavailable": "Unavailable",
+    "searchPlaceholder": "Search user, email, or team",
+    "unavailableTitle": "LiteLLM quotas are unavailable",
+    "unavailableDescription": "Check the gateway and LiteLLM admin API configuration.",
+    "columns": {
+      "user": "Full Name",
+      "spend": "Used",
+      "budget": "Budget",
+      "remaining": "Remaining",
+      "teams": "Teams"
+    }
   },
   "settings": {
     "pageTitle": "Account Settings",

@@ -14,28 +14,103 @@ def setup_function():
         clear_cache()
 
 
-def test_litellm_allowed_models_are_refetched_from_team(monkeypatch):
+def test_litellm_team_models_are_fetched_through_gateway(monkeypatch):
     calls: list[tuple[str, dict[str, str]]] = []
 
-    def fake_fetch_litellm_admin_json(path, params):
-        calls.append((path, params))
-        assert path == "/team/info"
-        return {"team_info": {"models": [f"team-model-{len(calls)}"]}}
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
 
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
+        def json(self):
+            return {"data": ["gpt-4o", "gpt-4o-mini"]}
 
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["team-model-1"]
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["team-model-2"]
-    assert provider_service._fetch_litellm_allowed_models("user-b") == ["team-model-3"]
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            return None
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get(self, url, headers):
+            calls.append((url, headers))
+            return FakeResponse()
+
+    monkeypatch.setattr(provider_service.settings, "LITELLM_GATEWAY_BASE_URL", "http://gateway:9090")
+    monkeypatch.setattr(provider_service.httpx, "Client", FakeClient)
+
+    assert provider_service._fetch_litellm_team_models_via_gateway("user-token") == ["gpt-4o", "gpt-4o-mini"]
     assert calls == [
-        ("/team/info", {"team_id": "team-1"}),
-        ("/team/info", {"team_id": "team-1"}),
-        ("/team/info", {"team_id": "team-1"}),
+        (
+            "http://gateway:9090/internal/litellm/team/models",
+            {"Authorization": "Bearer user-token"},
+        )
     ]
+
+
+def test_litellm_team_models_do_not_use_direct_admin_settings(monkeypatch):
+    monkeypatch.setattr(provider_service.settings, "LITELLM_GATEWAY_BASE_URL", "http://gateway:9090")
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        provider_service,
+        "_fetch_gateway_json",
+        lambda path, token: calls.append((path, token)) or {"data": ["team-model"]},
+    )
+
+    assert provider_service._fetch_litellm_team_models_via_gateway("user-token") == ["team-model"]
+    assert calls == [("/internal/litellm/team/models", "user-token")]
+
+
+def test_fetch_builtin_provider_models_prefers_gateway_team_models(monkeypatch):
+    provider = SimpleNamespace(
+        id=uuid4(),
+        base_url="http://gateway:9090/litellm_proxy/team/{accessToken}/v1",
+        api_key="sk-test",
+    )
+    calls: list[str] = []
+
+    def fake_team_models(access_token):
+        calls.append("internal-gateway")
+        assert access_token == "user-token"
+        return ["team-model"]
+
+    def fake_proxy_models(*_args, **_kwargs):
+        calls.append("proxy-models")
+        return ["proxy-model"]
+
+    monkeypatch.setattr(provider_service, "_fetch_litellm_team_models_via_gateway", fake_team_models)
+    monkeypatch.setattr(provider_service, "_fetch_builtin_provider_models_via_gateway", fake_proxy_models)
+
+    assert provider_service.fetch_builtin_provider_models(
+        provider,
+        access_token="user-token",
+        user_id="user-a",
+    ) == ["team-model"]
+    assert calls == ["internal-gateway"]
+
+
+def test_fetch_builtin_provider_models_falls_back_to_gateway_proxy_models(monkeypatch):
+    provider = SimpleNamespace(
+        id=uuid4(),
+        base_url="http://gateway:9090/litellm_proxy/team/{accessToken}/v1",
+        api_key="sk-test",
+    )
+
+    monkeypatch.setattr(provider_service, "_fetch_litellm_team_models_via_gateway", lambda _token: [])
+    monkeypatch.setattr(
+        provider_service,
+        "_fetch_builtin_provider_models_via_gateway",
+        lambda _provider, base_url, access_token: [base_url, access_token],
+    )
+
+    assert provider_service.fetch_builtin_provider_models(
+        provider,
+        access_token="user-token",
+        user_id="user-a",
+    ) == ["http://gateway:9090/litellm_proxy/team/user-token/v1", "user-token"]
 
 
 def test_gateway_models_are_refetched_by_resolved_base_url(monkeypatch):
@@ -156,354 +231,6 @@ def test_gateway_model_discovery_filters_litellm_wildcard_and_embeddings():
     }
 
     assert provider_service._extract_llm_model_ids(payload) == ["gpt-4o-mini"]
-
-
-def test_gateway_wildcard_expands_to_admin_model_info(monkeypatch):
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "data": [
-                    {"id": "jina-embeddings-v4", "object": "model"},
-                    {"id": "all-proxy-models", "object": "model"},
-                ]
-            }
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            return None
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return None
-
-        def get(self, url, headers):
-            return FakeResponse()
-
-    provider = LLMProvider(
-        id=uuid4(),
-        user_id=None,
-        name="builtin",
-        type=ProviderType.OPENAI_COMPATIBLE,
-        api_key="sk-test",
-        base_url="http://gateway:9090/litellm_proxy/team/user-token/v1",
-        model="",
-        is_builtin=True,
-        visible_to_all=True,
-    )
-
-    def fake_fetch_litellm_admin_json(path, params):
-        assert path == "/model/info"
-        assert params == {}
-        return {
-            "data": [
-                {
-                    "model_name": "jina-embeddings-v4",
-                    "model_info": {"mode": "embedding"},
-                },
-                {
-                    "model_name": "gpt-4o-mini",
-                    "model_info": {"mode": "chat"},
-                },
-            ]
-        }
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.httpx, "Client", FakeClient)
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_builtin_provider_models_via_gateway(
-        provider,
-        "http://gateway:9090/litellm_proxy/team/user-token/v1",
-        "user-token",
-    ) == ["gpt-4o-mini"]
-
-
-def test_fetch_builtin_provider_models_provisions_via_gateway_before_admin(monkeypatch):
-    provider = SimpleNamespace(
-        id=uuid4(),
-        base_url="http://gateway:9090/litellm_proxy/team/{accessToken}/v1",
-        api_key="sk-test",
-    )
-    calls: list[str] = []
-
-    def fake_fetch_via_gateway(_provider, base_url, access_token):
-        calls.append("gateway")
-        assert base_url == "http://gateway:9090/litellm_proxy/team/user-token/v1"
-        assert access_token == "user-token"
-        return ["team-model"]
-
-    def fake_fetch_allowed_models(user_id):
-        calls.append("admin")
-        assert user_id == "user-a"
-        return ["user-model"]
-
-    monkeypatch.setattr(provider_service, "_fetch_builtin_provider_models_via_gateway", fake_fetch_via_gateway)
-    monkeypatch.setattr(provider_service, "_fetch_litellm_allowed_models", fake_fetch_allowed_models)
-
-    assert provider_service.fetch_builtin_provider_models(
-        provider,
-        access_token="user-token",
-        user_id="user-a",
-    ) == ["user-model"]
-    assert calls == ["gateway", "admin"]
-
-
-def test_litellm_allowed_models_expands_team_wildcard_without_access_token(monkeypatch):
-    calls: list[tuple[str, dict[str, str]]] = []
-
-    def fake_fetch_litellm_admin_json(path, params):
-        calls.append((path, params))
-        if path == "/team/info":
-            return {"team_info": {"models": ["all-proxy-models"]}}
-        if path == "/model/info":
-            return {
-                "data": [
-                    {
-                        "model_name": "jina-embeddings-v4",
-                        "model_info": {"mode": "embedding"},
-                    },
-                    {
-                        "model_name": "gpt-4o-mini",
-                        "model_info": {"mode": "chat"},
-                    },
-                ]
-            }
-        raise AssertionError(f"unexpected path {path}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o-mini"]
-    assert calls == [
-        ("/team/info", {"team_id": "team-1"}),
-        ("/model/info", {}),
-    ]
-
-
-def test_litellm_allowed_models_use_configured_team_only(monkeypatch):
-    calls: list[tuple[str, dict[str, str]]] = []
-
-    def fake_fetch_litellm_admin_json(path, params):
-        calls.append((path, params))
-        if path == "/team/info" and params == {"team_id": "team-1"}:
-            return {"team_info": {"models": ["current-team-model"]}}
-        if path == "/team/info" and params == {"team_id": "other-team"}:
-            return {"team_info": {"models": ["other-team-model"]}}
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["current-team-model"]
-    assert calls == [
-        ("/team/info", {"team_id": "team-1"}),
-    ]
-
-
-def test_litellm_allowed_models_do_not_query_user_models(monkeypatch):
-    calls: list[tuple[str, dict[str, str]]] = []
-
-    def fake_fetch_litellm_admin_json(path, params):
-        calls.append((path, params))
-        if path == "/team/info":
-            return {"team_info": {"models": ["gpt-4o"]}}
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o"]
-    assert calls == [
-        ("/team/info", {"team_id": "team-1"}),
-    ]
-
-
-def test_litellm_allowed_models_ignore_nested_member_key_wildcards(monkeypatch):
-    calls: list[tuple[str, dict[str, str]]] = []
-
-    def fake_fetch_litellm_admin_json(path, params):
-        calls.append((path, params))
-        if path == "/team/info":
-            return {
-                "team_info": {
-                    "models": ["gpt-4o"],
-                    "team_memberships": [
-                        {
-                            "user_id": "user-a",
-                            "keys": [{"models": ["all-proxy-models"]}],
-                        }
-                    ],
-                }
-            }
-        if path == "/model/info":
-            return {"data": [{"model_name": "gpt-4o-mini", "model_info": {"mode": "chat"}}]}
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o"]
-    assert calls == [
-        ("/team/info", {"team_id": "team-1"}),
-    ]
-
-
-def test_litellm_allowed_models_ignore_model_aliases_when_models_are_explicit(monkeypatch):
-    def fake_fetch_litellm_admin_json(path, params):
-        if path == "/team/info":
-            return {
-                "team_info": {
-                    "models": ["gpt-4o"],
-                    "model_aliases": {"gpt-4o-mini": "openai/gpt-4o-mini"},
-                }
-            }
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o"]
-
-
-def test_litellm_allowed_models_ignore_member_models_and_use_team_models(monkeypatch):
-    def fake_fetch_litellm_admin_json(path, params):
-        if path == "/team/info":
-            return {
-                "team_info": {
-                    "models": ["gpt-4o"],
-                    "team_memberships": [
-                        {
-                            "user_id": "user-a",
-                            "allowed_models": ["gpt-4o", "gpt-4o-mini"],
-                        }
-                    ],
-                }
-            }
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o"]
-
-
-def test_litellm_allowed_models_empty_member_models_do_not_affect_team_models(monkeypatch):
-    def fake_fetch_litellm_admin_json(path, params):
-        if path == "/team/info":
-            return {
-                "team_info": {
-                    "models": ["gpt-4o", "gpt-4o-mini"],
-                    "team_memberships": [
-                        {
-                            "user_id": "user-a",
-                            "allowed_models": [],
-                        }
-                    ],
-                }
-            }
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o", "gpt-4o-mini"]
-
-
-def test_litellm_allowed_models_team_wildcard_ignores_member_models(monkeypatch):
-    def fake_fetch_litellm_admin_json(path, params):
-        if path == "/team/info":
-            return {
-                "team_info": {
-                    "models": ["all-proxy-models"],
-                    "team_memberships": [
-                        {
-                            "user_id": "user-a",
-                            "allowed_models": ["gpt-4o-mini"],
-                        }
-                    ],
-                }
-            }
-        if path == "/model/info":
-            return {
-                "data": [
-                    {"model_name": "gpt-4o", "model_info": {"mode": "chat"}},
-                    {"model_name": "gpt-4o-mini", "model_info": {"mode": "chat"}},
-                ]
-            }
-        raise AssertionError(f"unexpected request {path} {params}")
-
-    monkeypatch.setattr(provider_service.settings, "LITELLM_BASE_URL", "http://litellm:4000")
-    monkeypatch.setattr(provider_service.settings, "LITELLM_AUTH_TOKEN", "sk-test")
-    monkeypatch.setattr(provider_service.settings, "TEAM_ID", "team-1")
-    monkeypatch.setattr(provider_service, "_fetch_litellm_admin_json", fake_fetch_litellm_admin_json)
-
-    assert provider_service._fetch_litellm_allowed_models("user-a") == ["gpt-4o", "gpt-4o-mini"]
-
-
-def test_fetch_builtin_provider_models_prefers_authoritative_allowed_models(monkeypatch):
-    provider = SimpleNamespace(
-        id=uuid4(),
-        base_url="http://gateway:9090/litellm_proxy/team/user-token/v1",
-        api_key="sk-test",
-    )
-
-    monkeypatch.setattr(
-        provider_service,
-        "_fetch_litellm_allowed_models",
-        lambda user_id: ["shared-model", "extra-model"],
-    )
-    monkeypatch.setattr(
-        provider_service,
-        "_fetch_builtin_provider_models_via_gateway",
-        lambda *_args, **_kwargs: ["shared-model", "team-model"],
-    )
-
-    assert provider_service.fetch_builtin_provider_models(
-        provider,
-        access_token="user-token",
-        user_id="user-a",
-    ) == ["shared-model", "extra-model"]
-
-
-def test_fetch_builtin_provider_models_returns_shared_models_without_user_extra(monkeypatch):
-    provider = SimpleNamespace(
-        id=uuid4(),
-        base_url="http://gateway:9090/litellm_proxy/team/user-token/v1",
-        api_key="sk-test",
-    )
-
-    monkeypatch.setattr(provider_service, "_fetch_litellm_allowed_models", lambda user_id: [])
-    monkeypatch.setattr(
-        provider_service,
-        "_fetch_builtin_provider_models_via_gateway",
-        lambda *_args, **_kwargs: ["team-model"],
-    )
-
-    assert provider_service.fetch_builtin_provider_models(
-        provider,
-        access_token="user-token",
-        user_id="user-a",
-    ) == ["team-model"]
 
 
 def test_format_connectivity_error_reports_builtin_quota_exhausted():

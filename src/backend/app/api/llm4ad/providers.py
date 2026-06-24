@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import CurrentUser, SessionDep, TokenDep
+from app.api.deps import CurrentActiveSuperuserUser, CurrentUser, SessionDep, TokenDep
 from app.models import Message
 from app.schemas import provider as schemas
 from app.services import provider_service
@@ -97,8 +97,22 @@ def get_builtin_provider_quota(
     current_user: CurrentUser,
     token: TokenDep,
 ):
-    """Get current user's built-in provider quota when LiteLLM admin API is configured."""
+    """Get current user's built-in provider quota through the gateway."""
     return provider_service.get_builtin_provider_quota(db, current_user, token)
+
+
+@router.get(
+    "/admin/litellm-user-quotas",
+    response_model=schemas.LiteLLMUserQuotaListResponse,
+    summary="管理员查询 LiteLLM 已存在用户额度",
+)
+def get_litellm_user_quotas(
+    db: SessionDep,
+    _current_user: CurrentActiveSuperuserUser,
+    token: TokenDep,
+):
+    """Query LiteLLM user quota rows through the gateway admin endpoint."""
+    return provider_service.fetch_litellm_user_quotas_via_gateway(db, token)
 
 
 @router.get(

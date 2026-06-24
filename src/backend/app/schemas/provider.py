@@ -141,3 +141,27 @@ class BuiltinProviderQuotaResponse(BaseModel):
     remaining: float | None = None
     currency: str = "USD"
     message: str = ""
+
+
+class LiteLLMUserQuotaItem(BaseModel):
+    """LiteLLM 用户额度列表项。"""
+
+    user_id: str | None = None
+    user_email: str | None = None
+    full_name: str | None = None
+    user_alias: str | None = None
+    spend: float | None = None
+    budget: float | None = None
+    remaining: float | None = None
+    teams: list[str] = []
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class LiteLLMUserQuotaListResponse(BaseModel):
+    """LiteLLM 用户额度列表响应。"""
+
+    available: bool = False
+    items: list[LiteLLMUserQuotaItem] = []
+    total: int = 0
+    message: str = ""

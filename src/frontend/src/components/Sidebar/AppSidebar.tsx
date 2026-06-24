@@ -2,6 +2,7 @@ import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
 import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
+  Coins,
   FolderKanban,
   LineChart,
   MessageSquareText,
@@ -108,6 +109,7 @@ export function AppSidebar() {
 
   const adminItems: Item[] = [
     { icon: Users, title: t("sidebar.userManagement"), path: "/admin" },
+    { icon: Coins, title: t("sidebar.litellmQuotas"), path: "/litellm-quotas" },
     { icon: LineChart, title: t("sidebar.analytics"), path: "/analytics" },
     { icon: QrCode, title: t("sidebar.liveCode"), path: "/live-codes" },
   ]

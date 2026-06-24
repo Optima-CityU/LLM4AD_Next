@@ -318,6 +318,130 @@ class LiteLLMManagerTest {
                 .doesNotContain("new-token-hash", "sk-...mVIA");
     }
 
+    @Test
+    void listUserQuotasNormalizesLiteLlmUserListPayload() {
+        List<CapturedRequest> requests = new ArrayList<>();
+        ExchangeFunction exchangeFunction = request -> {
+            requests.add(CapturedRequest.from(request));
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/list")) {
+                return Mono.just(jsonResponse("""
+                        {
+                          "users": [
+                            {
+                              "user_id": "user-1",
+                              "user_email": "user@example.com",
+                              "user_alias": "User One",
+                              "spend": 2.5,
+                              "max_budget": 10,
+                              "teams": ["team-1"],
+                              "created_at": "2026-06-01T00:00:00Z",
+                              "updated_at": "2026-06-02T00:00:00Z"
+                            }
+                          ]
+                        }
+                        """));
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).build());
+        };
+
+        LiteLLMManager manager = newManager(exchangeFunction);
+
+        StepVerifier.create(manager.listUserQuotas())
+                .assertNext(quotas -> {
+                    assertThat(quotas).hasSize(1);
+                    assertThat(quotas.get(0).getUserId()).isEqualTo("user-1");
+                    assertThat(quotas.get(0).getUserEmail()).isEqualTo("user@example.com");
+                    assertThat(quotas.get(0).getUserAlias()).isEqualTo("User One");
+                    assertThat(quotas.get(0).getSpend()).isEqualTo(2.5);
+                    assertThat(quotas.get(0).getBudget()).isEqualTo(10.0);
+                    assertThat(quotas.get(0).getRemaining()).isEqualTo(7.5);
+                    assertThat(quotas.get(0).getTeams()).containsExactly("team-1");
+                })
+                .verifyComplete();
+
+        assertThat(requests).hasSize(1);
+        assertThat(requests.get(0).path()).isEqualTo("/user/list");
+    }
+
+    @Test
+    void listTeamModelsExpandsWildcardAndFiltersNonChatModels() {
+        List<CapturedRequest> requests = new ArrayList<>();
+        ExchangeFunction exchangeFunction = request -> {
+            requests.add(CapturedRequest.from(request));
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/team/info")) {
+                return Mono.just(jsonResponse("""
+                        {
+                          "team_info": {
+                            "models": ["all-proxy-models"]
+                          }
+                        }
+                        """));
+            }
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/model/info")) {
+                return Mono.just(jsonResponse("""
+                        {
+                          "data": [
+                            {"model_name": "jina-embeddings-v4", "model_info": {"mode": "embedding"}},
+                            {"model_name": "gpt-4o", "model_info": {"mode": "chat"}},
+                            {"model_name": "gpt-4o-mini", "litellm_params": {"mode": "completion"}}
+                          ]
+                        }
+                        """));
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).build());
+        };
+
+        LiteLLMManager manager = newManager(exchangeFunction);
+
+        StepVerifier.create(manager.listTeamModels("team-1"))
+                .assertNext(models -> assertThat(models).containsExactly("gpt-4o", "gpt-4o-mini"))
+                .verifyComplete();
+
+        assertThat(requests).hasSize(2);
+        assertThat(requests.get(0).path()).isEqualTo("/team/info");
+        assertThat(requests.get(0).query()).isEqualTo("team_id=team-1");
+        assertThat(requests.get(1).path()).isEqualTo("/model/info");
+    }
+
+    @Test
+    void getUserQuotaNormalizesLiteLlmUserInfoPayload() {
+        List<CapturedRequest> requests = new ArrayList<>();
+        ExchangeFunction exchangeFunction = request -> {
+            requests.add(CapturedRequest.from(request));
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/info")) {
+                return Mono.just(jsonResponse("""
+                        {
+                          "user_id": "user-1",
+                          "user_email": "user@example.com",
+                          "user_alias": "User One",
+                          "spend": 3,
+                          "max_budget": 10,
+                          "teams": ["team-1"]
+                        }
+                        """));
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).build());
+        };
+
+        LiteLLMManager manager = newManager(exchangeFunction);
+
+        StepVerifier.create(manager.getUserQuota("user-1"))
+                .assertNext(quota -> {
+                    assertThat(quota.getUserId()).isEqualTo("user-1");
+                    assertThat(quota.getUserEmail()).isEqualTo("user@example.com");
+                    assertThat(quota.getUserAlias()).isEqualTo("User One");
+                    assertThat(quota.getSpend()).isEqualTo(3.0);
+                    assertThat(quota.getBudget()).isEqualTo(10.0);
+                    assertThat(quota.getRemaining()).isEqualTo(7.0);
+                    assertThat(quota.getTeams()).containsExactly("team-1");
+                })
+                .verifyComplete();
+
+        assertThat(requests).hasSize(1);
+        assertThat(requests.get(0).path()).isEqualTo("/user/info");
+        assertThat(requests.get(0).query()).isEqualTo("user_id=user-1");
+    }
+
     private static ClientResponse jsonResponse(String body) {
         return ClientResponse.create(HttpStatus.OK)
                 .header("Content-Type", "application/json")

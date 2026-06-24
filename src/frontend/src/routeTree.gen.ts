@@ -24,6 +24,7 @@ import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutLlm_roviderRouteImport } from './routes/_layout/llm_rovider'
 import { Route as LayoutLiveCodesRouteImport } from './routes/_layout/live-codes'
+import { Route as LayoutLitellmQuotasRouteImport } from './routes/_layout/litellm-quotas'
 import { Route as LayoutGuideRouteImport } from './routes/_layout/guide'
 import { Route as LayoutFeedbackRouteImport } from './routes/_layout/feedback'
 import { Route as LayoutConfig_templateRouteImport } from './routes/_layout/config_template'
@@ -104,6 +105,11 @@ const LayoutLiveCodesRoute = LayoutLiveCodesRouteImport.update({
   path: '/live-codes',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutLitellmQuotasRoute = LayoutLitellmQuotasRouteImport.update({
+  id: '/litellm-quotas',
+  path: '/litellm-quotas',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutGuideRoute = LayoutGuideRouteImport.update({
   id: '/guide',
   path: '/guide',
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
   '/guide': typeof LayoutGuideRoute
+  '/litellm-quotas': typeof LayoutLitellmQuotasRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
   '/projects': typeof LayoutProjectsRoute
@@ -168,6 +175,7 @@ export interface FileRoutesByTo {
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
   '/guide': typeof LayoutGuideRoute
+  '/litellm-quotas': typeof LayoutLitellmQuotasRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
   '/projects': typeof LayoutProjectsRoute
@@ -192,6 +200,7 @@ export interface FileRoutesById {
   '/_layout/config_template': typeof LayoutConfig_templateRoute
   '/_layout/feedback': typeof LayoutFeedbackRoute
   '/_layout/guide': typeof LayoutGuideRoute
+  '/_layout/litellm-quotas': typeof LayoutLitellmQuotasRoute
   '/_layout/live-codes': typeof LayoutLiveCodesRoute
   '/_layout/llm_rovider': typeof LayoutLlm_roviderRoute
   '/_layout/projects': typeof LayoutProjectsRoute
@@ -214,6 +223,7 @@ export interface FileRouteTypes {
     | '/config_template'
     | '/feedback'
     | '/guide'
+    | '/litellm-quotas'
     | '/live-codes'
     | '/llm_rovider'
     | '/projects'
@@ -234,6 +244,7 @@ export interface FileRouteTypes {
     | '/config_template'
     | '/feedback'
     | '/guide'
+    | '/litellm-quotas'
     | '/live-codes'
     | '/llm_rovider'
     | '/projects'
@@ -257,6 +268,7 @@ export interface FileRouteTypes {
     | '/_layout/config_template'
     | '/_layout/feedback'
     | '/_layout/guide'
+    | '/_layout/litellm-quotas'
     | '/_layout/live-codes'
     | '/_layout/llm_rovider'
     | '/_layout/projects'
@@ -384,6 +396,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutLiveCodesRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/litellm-quotas': {
+      id: '/_layout/litellm-quotas'
+      path: '/litellm-quotas'
+      fullPath: '/litellm-quotas'
+      preLoaderRoute: typeof LayoutLitellmQuotasRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/guide': {
       id: '/_layout/guide'
       path: '/guide'
@@ -436,6 +455,7 @@ interface LayoutRouteChildren {
   LayoutConfig_templateRoute: typeof LayoutConfig_templateRoute
   LayoutFeedbackRoute: typeof LayoutFeedbackRoute
   LayoutGuideRoute: typeof LayoutGuideRoute
+  LayoutLitellmQuotasRoute: typeof LayoutLitellmQuotasRoute
   LayoutLiveCodesRoute: typeof LayoutLiveCodesRoute
   LayoutLlm_roviderRoute: typeof LayoutLlm_roviderRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
@@ -449,6 +469,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutConfig_templateRoute: LayoutConfig_templateRoute,
   LayoutFeedbackRoute: LayoutFeedbackRoute,
   LayoutGuideRoute: LayoutGuideRoute,
+  LayoutLitellmQuotasRoute: LayoutLitellmQuotasRoute,
   LayoutLiveCodesRoute: LayoutLiveCodesRoute,
   LayoutLlm_roviderRoute: LayoutLlm_roviderRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,

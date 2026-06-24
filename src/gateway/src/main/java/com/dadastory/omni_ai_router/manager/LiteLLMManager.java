@@ -1,6 +1,7 @@
 package com.dadastory.omni_ai_router.manager;
 
 import com.dadastory.omni_ai_router.dto.Result;
+import com.dadastory.omni_ai_router.dto.LiteLLMUserQuota;
 import com.dadastory.omni_ai_router.entity.AuthUser;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,12 @@ import java.util.Set;
 @Slf4j
 @Service
 public class LiteLLMManager {
+
+    private static final Set<String> MODEL_WILDCARDS = Set.of(
+            "all-proxy-models",
+            "all-team-models",
+            "no-default-models"
+    );
 
     @Resource
     private WebClient litellmWebClient;
@@ -145,6 +152,71 @@ public class LiteLLMManager {
                 .onErrorResume(e -> {
                     log.warn("LiteLLM get team info request failed. team={}", team_id, e);
                     return Mono.just(Result.failure(500, "Get Team Info Request failed: " + e.getMessage()));
+                });
+    }
+
+    /**
+     * Lists LiteLLM users and normalizes quota fields for the admin UI.
+     *
+     * @return normalized user quota rows
+     */
+    public Mono<List<LiteLLMUserQuota>> listUserQuotas() {
+        return litellmWebClient.get()
+                .uri("/user/list")
+                .exchangeToMono(this::handleResponse)
+                .flatMap(result -> {
+                    if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
+                        String message = result == null ? "Unknown LiteLLM user list error." : result.getMessage();
+                        return Mono.error(new IllegalStateException(message));
+                    }
+                    return Mono.just(parseUserQuotas(jsonNode));
+                })
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM list users for quota admin page."));
+    }
+
+    /**
+     * Lists chat models allowed for a LiteLLM team.
+     *
+     * @param teamId LiteLLM team id
+     * @return normalized model ids
+     */
+    public Mono<List<String>> listTeamModels(String teamId) {
+        return litellmWebClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/team/info")
+                        .queryParam("team_id", teamId)
+                        .build())
+                .exchangeToMono(this::handleResponse)
+                .flatMap(result -> {
+                    if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
+                        String message = result == null ? "Unknown LiteLLM team info error." : result.getMessage();
+                        return Mono.error(new IllegalStateException(message));
+                    }
+                    List<String> explicitModels = extractDirectAllowedModelIds(jsonNode);
+                    if (!explicitModels.isEmpty()) {
+                        return Mono.just(explicitModels);
+                    }
+                    if (directAllowedModelFieldsContainWildcard(jsonNode)) {
+                        return listProxyModelInfoModels();
+                    }
+                    return Mono.just(List.<String>of());
+                })
+                .doOnSubscribe(subscription -> log.debug("Calling LiteLLM list team models. team={}", teamId));
+    }
+
+    /**
+     * Queries and normalizes the quota for one LiteLLM user.
+     *
+     * @param userId LiteLLM user id
+     * @return normalized quota row
+     */
+    public Mono<LiteLLMUserQuota> getUserQuota(String userId) {
+        return getUserInfo(userId)
+                .flatMap(result -> {
+                    if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
+                        String message = result == null ? "Unknown LiteLLM user info error." : result.getMessage();
+                        return Mono.error(new IllegalStateException(message));
+                    }
+                    return Mono.just(parseUserQuota(jsonNode));
                 });
     }
 
@@ -396,6 +468,231 @@ public class LiteLLMManager {
         for (JsonNode item : arrayNode) {
             items.add(item);
         }
+    }
+
+    private List<LiteLLMUserQuota> parseUserQuotas(JsonNode payload) {
+        List<JsonNode> userNodes = new ArrayList<>();
+        collectUserListNodes(userNodes, payload);
+
+        List<LiteLLMUserQuota> quotas = new ArrayList<>();
+        for (JsonNode userNode : userNodes) {
+            quotas.add(parseUserQuota(userNode));
+        }
+        return quotas;
+    }
+
+    private LiteLLMUserQuota parseUserQuota(JsonNode userNode) {
+        LiteLLMUserQuota quota = new LiteLLMUserQuota();
+        quota.setUserId(firstTextField(userNode, List.of("user_id", "id")));
+        quota.setUserEmail(firstTextField(userNode, List.of("user_email", "email")));
+        quota.setUserAlias(firstTextField(userNode, List.of("user_alias", "alias", "name")));
+        quota.setSpend(findFirstNumber(userNode, List.of("spend", "user_spend")));
+        quota.setBudget(findFirstNumber(userNode, List.of("max_budget", "budget", "user_budget")));
+        if (quota.getSpend() != null && quota.getBudget() != null) {
+            quota.setRemaining(quota.getBudget() - quota.getSpend());
+        }
+        quota.setTeams(extractTeams(userNode));
+        quota.setCreatedAt(firstTextField(userNode, List.of("created_at", "created_time", "created")));
+        quota.setUpdatedAt(firstTextField(userNode, List.of("updated_at", "updated_time", "updated")));
+        return quota;
+    }
+
+    private Mono<List<String>> listProxyModelInfoModels() {
+        return litellmWebClient.get()
+                .uri("/model/info")
+                .exchangeToMono(this::handleResponse)
+                .flatMap(result -> {
+                    if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
+                        String message = result == null ? "Unknown LiteLLM model info error." : result.getMessage();
+                        return Mono.error(new IllegalStateException(message));
+                    }
+                    return Mono.just(extractLlmModelIds(jsonNode));
+                });
+    }
+
+    private List<String> extractDirectAllowedModelIds(JsonNode payload) {
+        List<String> rawModels = new ArrayList<>();
+        for (JsonNode candidate : wrappedObjectCandidates(payload, List.of("team_info", "team", "data"))) {
+            collectDirectModelFieldValues(rawModels, candidate);
+            if (!rawModels.isEmpty()) {
+                return normalizeModelIds(rawModels);
+            }
+        }
+        return List.of();
+    }
+
+    private boolean directAllowedModelFieldsContainWildcard(JsonNode payload) {
+        List<String> rawModels = new ArrayList<>();
+        for (JsonNode candidate : wrappedObjectCandidates(payload, List.of("team_info", "team", "data"))) {
+            collectDirectModelFieldValues(rawModels, candidate);
+            for (String modelId : rawModels) {
+                if (isModelWildcard(modelId)) {
+                    return true;
+                }
+            }
+            rawModels.clear();
+        }
+        return false;
+    }
+
+    private List<JsonNode> wrappedObjectCandidates(JsonNode payload, List<String> wrapperKeys) {
+        if (payload == null || !payload.isObject()) {
+            return List.of();
+        }
+        List<JsonNode> candidates = new ArrayList<>();
+        candidates.add(payload);
+        for (String key : wrapperKeys) {
+            JsonNode child = payload.get(key);
+            if (child != null && child.isObject()) {
+                candidates.add(child);
+            }
+        }
+        return candidates;
+    }
+
+    private void collectDirectModelFieldValues(List<String> rawModels, JsonNode payload) {
+        for (String key : List.of("models", "allowed_models", "model_names", "team_models")) {
+            JsonNode value = payload.get(key);
+            if (value == null || !value.isArray()) {
+                continue;
+            }
+            for (JsonNode item : value) {
+                String modelId = extractModelId(item);
+                if (StringUtils.hasText(modelId)) {
+                    rawModels.add(modelId);
+                }
+            }
+        }
+    }
+
+    private List<String> extractLlmModelIds(JsonNode payload) {
+        JsonNode data = payload != null && payload.isObject() && payload.get("data") != null
+                ? payload.get("data")
+                : payload;
+        if (data == null || !data.isArray()) {
+            return List.of();
+        }
+        List<String> rawModels = new ArrayList<>();
+        for (JsonNode item : data) {
+            String modelId = extractModelId(item);
+            if (StringUtils.hasText(modelId) && !isEmbeddingOrNonLlmModel(item, modelId)) {
+                rawModels.add(modelId);
+            }
+        }
+        return normalizeModelIds(rawModels);
+    }
+
+    private List<String> normalizeModelIds(List<String> rawModels) {
+        List<String> models = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String rawModel : rawModels) {
+            if (!StringUtils.hasText(rawModel)) {
+                continue;
+            }
+            String modelId = rawModel.trim();
+            if (isModelWildcard(modelId) || !seen.add(modelId)) {
+                continue;
+            }
+            models.add(modelId);
+        }
+        return models;
+    }
+
+    private String extractModelId(JsonNode item) {
+        if (item == null || item.isNull()) {
+            return "";
+        }
+        if (item.isTextual()) {
+            String value = item.asString(null);
+            return StringUtils.hasText(value) ? value.trim() : "";
+        }
+        if (!item.isObject()) {
+            return "";
+        }
+        return firstTextField(item, List.of("id", "model_name", "model"));
+    }
+
+    private boolean isModelWildcard(String modelId) {
+        return StringUtils.hasText(modelId) && MODEL_WILDCARDS.contains(modelId.trim().toLowerCase());
+    }
+
+    private boolean isEmbeddingOrNonLlmModel(JsonNode item, String modelId) {
+        List<String> modes = new ArrayList<>();
+        collectModeValues(modes, item);
+        for (String mode : modes) {
+            if (Set.of("embedding", "embeddings", "rerank", "image", "audio").contains(mode)) {
+                return true;
+            }
+        }
+        String lowered = modelId.toLowerCase();
+        for (String keyword : List.of("embedding", "embeddings", "embed", "rerank", "bge-reranker", "jina-embeddings")) {
+            if (lowered.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void collectModeValues(List<String> modes, JsonNode item) {
+        if (item == null || !item.isObject()) {
+            return;
+        }
+        for (String key : List.of("mode", "model_type", "type")) {
+            String value = item.path(key).asString(null);
+            if (StringUtils.hasText(value)) {
+                modes.add(value.toLowerCase());
+            }
+        }
+        for (String nestedKey : List.of("litellm_params", "model_info", "metadata")) {
+            JsonNode nested = item.get(nestedKey);
+            if (nested == null || !nested.isObject()) {
+                continue;
+            }
+            for (String key : List.of("mode", "model_type", "type")) {
+                String value = nested.path(key).asString(null);
+                if (StringUtils.hasText(value)) {
+                    modes.add(value.toLowerCase());
+                }
+            }
+        }
+    }
+
+    private void collectUserListNodes(List<JsonNode> userNodes, JsonNode payload) {
+        if (payload == null || payload.isNull()) {
+            return;
+        }
+        if (payload.isArray()) {
+            collectArrayItems(userNodes, payload);
+            return;
+        }
+        for (String fieldName : List.of("users", "data", "results", "items")) {
+            JsonNode arrayNode = payload.get(fieldName);
+            if (arrayNode != null && arrayNode.isArray()) {
+                collectArrayItems(userNodes, arrayNode);
+                return;
+            }
+        }
+    }
+
+    private List<String> extractTeams(JsonNode userNode) {
+        JsonNode teamsNode = userNode.get("teams");
+        if (teamsNode == null || teamsNode.isNull()) {
+            return List.of();
+        }
+        List<String> teams = new ArrayList<>();
+        if (teamsNode.isArray()) {
+            for (JsonNode teamNode : teamsNode) {
+                String teamId = teamNode.isObject()
+                        ? firstTextField(teamNode, List.of("team_id", "id", "team_alias", "name"))
+                        : teamNode.asString(null);
+                if (StringUtils.hasText(teamId)) {
+                    teams.add(teamId);
+                }
+            }
+            return teams;
+        }
+        String singleTeam = teamsNode.asString(null);
+        return StringUtils.hasText(singleTeam) ? List.of(singleTeam) : List.of();
     }
 
     private void logApiKeyCleanupResult(Result<?> result, String userId, String teamId, int requestedCount) {

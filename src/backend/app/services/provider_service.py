@@ -11,7 +11,6 @@ import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urljoin
 
 import httpx
 from fastapi import HTTPException
@@ -125,16 +124,16 @@ def fetch_builtin_provider_models(
 ) -> list[str]:
     """Fetch models allowed for the built-in provider team.
 
-    Prefer LiteLLM team metadata so over-budget users can still choose a model.
-    The user-key /models endpoint remains a fallback for deployments without
-    LiteLLM admin metadata.
+    Prefer the gateway-owned LiteLLM team metadata endpoint so over-budget users
+    can still choose a model. The user-key /models endpoint remains a fallback
+    for deployments without the gateway internal endpoint.
     """
+    _ = user_id
     base_url = resolve_builtin_base_url(provider.base_url, access_token)
-    gateway_models = _fetch_builtin_provider_models_via_gateway(provider, base_url, access_token)
-    admin_models = _fetch_litellm_allowed_models(user_id)
-    if admin_models:
-        return admin_models
-    return gateway_models
+    team_models = _fetch_litellm_team_models_via_gateway(access_token)
+    if team_models:
+        return team_models
+    return _fetch_builtin_provider_models_via_gateway(provider, base_url, access_token)
 
 
 def _get_cached_provider_models(cache_key: tuple[Any, ...]) -> list[str] | None:
@@ -190,8 +189,6 @@ def _fetch_builtin_provider_models_via_gateway(
         return []
 
     discovered = _extract_llm_model_ids(payload)
-    if not discovered and _payload_contains_litellm_model_wildcard(payload):
-        discovered = _fetch_litellm_proxy_model_info_models()
     if not discovered:
         logger.warning(
             "Builtin provider models response from %s contained no chat models",
@@ -200,91 +197,20 @@ def _fetch_builtin_provider_models_via_gateway(
     return discovered
 
 
-def _fetch_litellm_proxy_model_info_models() -> list[str]:
-    if not settings.LITELLM_BASE_URL or not settings.LITELLM_AUTH_TOKEN:
-        return []
-    cache_key = (
-        "litellm_proxy_model_info",
-        settings.LITELLM_BASE_URL,
-        settings.LITELLM_AUTH_TOKEN,
-    )
-    cached_models = _get_cached_provider_models(cache_key)
-    if cached_models is not None:
-        return cached_models
-
-    try:
-        payload = _fetch_litellm_admin_json("/model/info", {})
-    except Exception as exc:  # noqa: BLE001 - dynamic model discovery should degrade gracefully
-        logger.warning("Failed to expand LiteLLM wildcard models: %s", exc.__class__.__name__)
-        return []
-
-    models = _extract_llm_model_ids(payload)
-    _set_cached_provider_models(cache_key, models)
-    return models
-
-
-def _fetch_litellm_allowed_models(_user_id: str | None = None) -> list[str]:
-    if not settings.TEAM_ID or not settings.LITELLM_BASE_URL or not settings.LITELLM_AUTH_TOKEN:
+def _fetch_litellm_team_models_via_gateway(access_token: str | None) -> list[str]:
+    if not access_token:
         return []
 
     try:
-        team_info = _fetch_litellm_admin_json("/team/info", {"team_id": settings.TEAM_ID})
+        payload = _fetch_gateway_json("/internal/litellm/team/models", access_token)
     except Exception as exc:  # noqa: BLE001 - dynamic model discovery should degrade gracefully
-        logger.warning(
-            "Failed to fetch LiteLLM team model metadata for team %s: %s",
-            settings.TEAM_ID,
-            exc.__class__.__name__,
-        )
+        logger.warning("Failed to fetch LiteLLM team models through gateway: %s", exc.__class__.__name__)
         return []
 
-    team_models = _extract_direct_allowed_model_ids(team_info, ("team_info", "team", "data"))
-    if team_models:
-        return team_models
-    if _direct_allowed_model_fields_contain_wildcard(team_info, ("team_info", "team", "data")):
-        return _fetch_litellm_proxy_model_info_models()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, list):
+        return _normalize_model_ids(data)
     return []
-
-
-def _extract_direct_allowed_model_ids(payload: Any, wrapper_keys: tuple[str, ...]) -> list[str]:
-    for candidate in _iter_wrapped_dicts(payload, wrapper_keys):
-        models = _extract_direct_model_fields(candidate)
-        if models:
-            return models
-    return []
-
-
-def _direct_allowed_model_fields_contain_wildcard(payload: Any, wrapper_keys: tuple[str, ...]) -> bool:
-    for candidate in _iter_wrapped_dicts(payload, wrapper_keys):
-        for item in _iter_direct_model_field_values(candidate):
-            model_id = _extract_model_id(item)
-            if model_id and _is_litellm_model_wildcard(model_id):
-                return True
-    return False
-
-
-def _iter_wrapped_dicts(payload: Any, wrapper_keys: tuple[str, ...]) -> list[dict[str, Any]]:
-    if not isinstance(payload, dict):
-        return []
-
-    candidates: list[dict[str, Any]] = [payload]
-    for key in wrapper_keys:
-        child = payload.get(key)
-        if isinstance(child, dict):
-            candidates.append(child)
-    return candidates
-
-
-def _extract_direct_model_fields(payload: dict[str, Any]) -> list[str]:
-    return _normalize_model_ids(list(_iter_direct_model_field_values(payload)))
-
-
-def _iter_direct_model_field_values(payload: dict[str, Any]):
-    raw_models: list[Any] = []
-    for key in ("models", "allowed_models", "model_names", "team_models"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            raw_models.extend(value)
-    return raw_models
 
 
 def _normalize_model_ids(items: list[Any]) -> list[str]:
@@ -336,19 +262,6 @@ def _extract_llm_model_ids(payload: Any) -> list[str]:
         seen.add(model_id)
         models.append(model_id)
     return models
-
-
-def _payload_contains_litellm_model_wildcard(payload: Any) -> bool:
-    if isinstance(payload, str):
-        return _is_litellm_model_wildcard(payload)
-    if isinstance(payload, dict):
-        model_id = _extract_model_id(payload)
-        if model_id and _is_litellm_model_wildcard(model_id):
-            return True
-        return any(_payload_contains_litellm_model_wildcard(value) for value in payload.values())
-    if isinstance(payload, list):
-        return any(_payload_contains_litellm_model_wildcard(item) for item in payload)
-    return False
 
 
 def _is_litellm_model_wildcard(model_id: str) -> bool:
@@ -416,20 +329,17 @@ def get_builtin_provider_quota(
         provider_name=provider.name,
     )
     fetch_builtin_provider_models(provider, access_token, user_id=str(current_user.id))
-    if not settings.LITELLM_BASE_URL or not settings.LITELLM_AUTH_TOKEN:
+    if not access_token:
         base_response.message = (
-            "暂无法查询剩余额度：未配置 LiteLLM 管理接口。"
-            "Quota is unavailable because LiteLLM admin API is not configured."
+            "暂无法查询剩余额度：缺少访问令牌。"
+            "Quota is unavailable because the access token is missing."
         )
         return base_response
 
     try:
-        user_info = _fetch_litellm_admin_json(
-            "/user/info",
-            {"user_id": str(current_user.id)},
-        )
+        user_info = _fetch_current_litellm_quota_via_gateway(access_token)
     except Exception as exc:  # noqa: BLE001 - quota display should degrade gracefully
-        logger.warning("Failed to fetch LiteLLM user quota: %s", exc)
+        logger.warning("Failed to fetch LiteLLM user quota through gateway: %s", exc)
         base_response.message = (
             "暂无法查询剩余额度，请稍后重试或联系管理员。"
             "Quota is unavailable. Please retry later or contact your administrator."
@@ -457,11 +367,119 @@ def get_builtin_provider_quota(
     )
 
 
-def _fetch_litellm_admin_json(path: str, params: dict[str, str]) -> Any:
-    url = urljoin(settings.LITELLM_BASE_URL.rstrip("/") + "/", path.lstrip("/"))
-    headers = {"Authorization": f"Bearer {settings.LITELLM_AUTH_TOKEN}"}
+def fetch_litellm_user_quotas_via_gateway(db: Session, access_token: str) -> dict[str, Any]:
+    """Return LiteLLM user quotas through the gateway admin endpoint."""
+    gateway_base_url = settings.LITELLM_GATEWAY_BASE_URL.rstrip("/")
+    if not gateway_base_url:
+        return {
+            "available": False,
+            "items": [],
+            "total": 0,
+            "message": "LiteLLM gateway is not configured.",
+        }
+
+    url = f"{gateway_base_url}/internal/litellm/users/quotas"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    try:
+        with httpx.Client(timeout=8.0, trust_env=False) as client:
+            response = client.get(url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:  # noqa: BLE001 - admin UI should show a controlled error
+        logger.warning("Failed to fetch LiteLLM user quotas through gateway: %s", exc)
+        return {
+            "available": False,
+            "items": [],
+            "total": 0,
+            "message": f"Failed to fetch LiteLLM user quotas through gateway: {exc}",
+        }
+
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        items = _attach_backend_user_full_names(db, payload["data"])
+        return {
+            "available": True,
+            "items": items,
+            "total": len(items),
+            "message": str(payload.get("message") or "success"),
+        }
+
+    return {
+        "available": False,
+        "items": [],
+        "total": 0,
+        "message": "Gateway returned an unexpected LiteLLM user quota response.",
+    }
+
+
+def _attach_backend_user_full_names(db: Session, items: list[Any]) -> list[Any]:
+    user_ids: set[uuid.UUID] = set()
+    emails: set[str] = set()
+    normalized_items: list[Any] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            normalized_items.append(item)
+            continue
+
+        normalized_items.append(item)
+        user_id = item.get("user_id")
+        if isinstance(user_id, str):
+            try:
+                user_ids.add(uuid.UUID(user_id))
+            except ValueError:
+                pass
+
+        email = item.get("user_email")
+        if isinstance(email, str) and email:
+            emails.add(email.lower())
+
+    if not user_ids and not emails:
+        return normalized_items
+
+    clauses = []
+    if user_ids:
+        clauses.append(models.User.id.in_(user_ids))  # type: ignore[attr-defined]
+    if emails:
+        clauses.append(func.lower(models.User.email).in_(emails))  # type: ignore[attr-defined]
+
+    users = db.exec(select(models.User).where(or_(*clauses))).all()
+    users_by_id = {str(user.id): user for user in users}
+    users_by_email = {user.email.lower(): user for user in users}
+
+    for item in normalized_items:
+        if not isinstance(item, dict):
+            continue
+        user = None
+        user_id = item.get("user_id")
+        if isinstance(user_id, str):
+            user = users_by_id.get(user_id)
+        email = item.get("user_email")
+        if user is None and isinstance(email, str):
+            user = users_by_email.get(email.lower())
+        if user and user.full_name:
+            item["full_name"] = user.full_name
+        else:
+            item.setdefault("full_name", None)
+
+    return normalized_items
+
+
+def _fetch_current_litellm_quota_via_gateway(access_token: str) -> dict[str, Any]:
+    payload = _fetch_gateway_json("/internal/litellm/users/me/quota", access_token)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(data, dict):
+        return data
+    raise ValueError("Gateway returned an unexpected current LiteLLM quota response.")
+
+
+def _fetch_gateway_json(path: str, access_token: str) -> Any:
+    gateway_base_url = settings.LITELLM_GATEWAY_BASE_URL.rstrip("/")
+    if not gateway_base_url:
+        raise ValueError("LiteLLM gateway is not configured.")
+    url = f"{gateway_base_url}/{path.lstrip('/')}"
+    headers = {"Authorization": f"Bearer {access_token}"}
     with httpx.Client(timeout=8.0, trust_env=False) as client:
-        response = client.get(url, params=params, headers=headers)
+        response = client.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
 

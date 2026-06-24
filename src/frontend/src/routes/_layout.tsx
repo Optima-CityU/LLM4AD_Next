@@ -52,6 +52,7 @@ function usePageTitle() {
     "/config_template": t("layout.configTemplate"),
     "/llm_rovider": t("layout.llmProvider"),
     "/live-codes": t("layout.liveCode"),
+    "/litellm-quotas": t("layout.litellmQuotas"),
     "/admin": t("layout.userManagement"),
     "/settings": t("layout.accountSettings"),
     "/changelog": t("layout.changelog"),
@@ -78,7 +79,8 @@ function HeaderUserMenu() {
     resetAllTours()
     showSuccessToast(
       t("layout.replayTourReset", {
-        defaultValue: "Walkthroughs reset — they'll show up again as you visit each page.",
+        defaultValue:
+          "Walkthroughs reset — they'll show up again as you visit each page.",
       }),
     )
   }

@@ -22,4 +22,4 @@ WORKDIR /app
 COPY --from=builder /build/target/*.jar app.jar
 EXPOSE 8080
 ENV JAVA_OPTS="-Xms512m -Xmx512m -Djava.security.egd=file:/dev/./urandom"
-ENTRYPOINT java $JAVA_OPTS -jar app.jar
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

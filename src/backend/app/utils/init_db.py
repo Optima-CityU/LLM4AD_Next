@@ -84,6 +84,10 @@ def seed_builtin_provider() -> models.LLMProvider | None:
     if not settings.BUILTIN_PROVIDER_BASE_URL:
         logger.info("BUILTIN_PROVIDER_BASE_URL 未配置，跳过内置供应商 seed")
         return None
+    if "/litellm_proxy/" not in settings.BUILTIN_PROVIDER_BASE_URL:
+        logger.warning(
+            "BUILTIN_PROVIDER_BASE_URL 未指向 gateway litellm_proxy，内置模型请求可能绕过统一网关鉴权"
+        )
 
     with Session(engine) as session:
         stmt = select(models.LLMProvider).where(
