@@ -15,9 +15,35 @@ import { Toaster } from "./components/ui/sonner"
 import "./index.css"
 import { setupAnalytics } from "./lib/analytics"
 import { routeTree } from "./routeTree.gen"
+import { checkMaintenance, showMaintenanceOverlay } from "./utils/maintenance"
 import { initOpenApi } from "./utils/request"
 
 initOpenApi()
+
+// Lazily-loaded route chunks are fetched via dynamic import(), which bypasses
+// the axios interceptor. When such a chunk 503s behind the maintenance gateway,
+// Vite fires `vite:preloadError` instead. preventDefault() must run
+// synchronously to swallow the default rethrow (which would surface the router
+// error page); we then probe the cause:
+//   - maintenance  -> show the overlay
+//   - stale deploy -> reload to pick up the new chunk hashes. Throttled by a
+//     timestamp (not a one-shot flag) so a later deploy in the same tab can
+//     still self-heal, while a tight reload loop is still prevented.
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault()
+  void checkMaintenance().then((isMaintenance) => {
+    if (isMaintenance) {
+      showMaintenanceOverlay()
+      return
+    }
+    const RELOAD_KEY = "llm4ad-chunk-reload-ts"
+    const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0)
+    if (Date.now() - last > 10_000) {
+      sessionStorage.setItem(RELOAD_KEY, String(Date.now()))
+      window.location.reload()
+    }
+  })
+})
 
 const handleApiError = (error: Error) => {
   if (error instanceof ApiError && error.status === 403) {

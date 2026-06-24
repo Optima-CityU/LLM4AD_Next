@@ -102,7 +102,7 @@ const AddUser = () => {
           {t("admin.addUser")}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>{t("admin.addUser")}</DialogTitle>
           <DialogDescription>{t("admin.addUserDescription")}</DialogDescription>

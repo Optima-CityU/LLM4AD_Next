@@ -13,8 +13,10 @@ import {
   History,
   Info,
   Loader2,
+  MoreHorizontal,
   MousePointerClick,
   Network,
+  PanelRightOpen,
   Play,
   Search,
   Settings2,
@@ -25,7 +27,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { TaskResponse } from "@/client"
 import { Llm4AdTasksService } from "@/client"
-import { Button } from "@/components/ui/button"
 import PanelErrorBoundary from "@/components/Common/PanelErrorBoundary"
 import {
   AlertDialog,
@@ -37,6 +38,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Tooltip,
   TooltipContent,
@@ -109,15 +118,15 @@ function SectionHeader({
   )
 }
 
-function TaskInfoSection({
-  task,
-  isOpen,
-  onToggle,
-}: {
-  task: TaskResponse
-  isOpen: boolean
-  onToggle: () => void
-}) {
+type ConfirmAction = "run" | "copyRun" | "copyConfig" | "adjustChoice" | null
+
+/**
+ * Shared task action logic (mutations, derived status flags, confirm-dialog
+ * state and handlers) for a task. Consumed by both the in-panel
+ * `TaskInfoSection` and the collapsed-panel `CollapsedRightPanelActions` so the
+ * two surfaces stay behaviorally identical.
+ */
+function useTaskActions(task: TaskResponse) {
   const {
     projectId,
     effectiveTaskId,
@@ -219,9 +228,7 @@ function TaskInfoSection({
     copyAndConfigMutation.isPending ||
     isCopying
 
-  const [confirmAction, setConfirmAction] = useState<
-    "run" | "copyRun" | "copyConfig" | "adjustChoice" | null
-  >(null)
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
 
   const handleConfirm = () => {
     if (confirmAction === "run") runMutation.mutate()
@@ -244,6 +251,204 @@ function TaskInfoSection({
       desc: t("evolution.confirm.copyConfigDesc"),
     },
   }
+
+  // Which secondary actions apply. Adjust: uninitialized → edit directly;
+  // otherwise prompt edit-current vs. clone-child. Running tasks expose "view".
+  const showAdjust = (isUninitialized || canRerun) && !isConfiguring
+  const showViewParams = !isConfiguring
+  const showAiBuildHistory = !!displayTask.ai_built && !isConfiguring
+
+  const viewParams = () => {
+    setIsConfiguring(false)
+    setIsViewingParams(true)
+  }
+  const adjustParams = () => {
+    if (isUninitialized) {
+      setIsViewingParams(false)
+      setIsConfiguring(true)
+    } else {
+      setConfirmAction("adjustChoice")
+    }
+  }
+  const openAiBuildHistory = () => {
+    setIsConfiguring(false)
+    setIsViewingParams(false)
+    setIsViewingAiBuildHistory(true)
+  }
+  const adjustCurrent = () => {
+    setConfirmAction(null)
+    setIsViewingParams(false)
+    setIsConfiguring(true)
+  }
+  const adjustChild = () => {
+    setConfirmAction(null)
+    copyAndConfigMutation.mutate()
+  }
+
+  return {
+    displayTask,
+    status,
+    isCopying,
+    dataEmpty,
+    isConfiguring,
+    stopMutation,
+    runMutation,
+    copyAndRunMutation,
+    copyAndConfigMutation,
+    isRunning,
+    isUninitialized,
+    canRerun,
+    isActionPending,
+    confirmAction,
+    setConfirmAction,
+    handleConfirm,
+    confirmMessages,
+    showAdjust,
+    showViewParams,
+    showAiBuildHistory,
+    viewParams,
+    adjustParams,
+    openAiBuildHistory,
+    adjustCurrent,
+    adjustChild,
+  }
+}
+
+type TaskActions = ReturnType<typeof useTaskActions>
+
+/** Confirm dialogs shared by the in-panel and collapsed action surfaces. */
+function TaskActionDialogs({ actions }: { actions: TaskActions }) {
+  const { t } = useTranslation()
+  const {
+    confirmAction,
+    setConfirmAction,
+    handleConfirm,
+    confirmMessages,
+    isActionPending,
+    copyAndConfigMutation,
+    adjustCurrent,
+    adjustChild,
+  } = actions
+
+  return (
+    <>
+      <AlertDialog
+        open={!!confirmAction && confirmAction !== "adjustChoice"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmAction && confirmMessages[confirmAction]?.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmAction && confirmMessages[confirmAction]?.desc}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirm}>
+              {t("common.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Adjust params: two-choice dialog. Lets the user pick between editing
+       * the current task in place vs. cloning a child task to tune. */}
+      <AlertDialog
+        open={confirmAction === "adjustChoice"}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("evolution.confirm.adjustChoiceTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("evolution.confirm.adjustChoiceDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-2 py-1">
+            <button
+              type="button"
+              disabled={isActionPending}
+              onClick={adjustCurrent}
+              className="flex flex-col items-start gap-1 rounded-lg border-2 border-border/60 hover:border-primary/60 hover:bg-accent/40 p-3 text-left transition-colors disabled:opacity-50"
+            >
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Settings2 className="size-4 text-primary shrink-0" />
+                {t("evolution.confirm.adjustCurrentTitle")}
+              </span>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {t("evolution.confirm.adjustCurrentDesc")}
+              </p>
+            </button>
+            <button
+              type="button"
+              disabled={isActionPending}
+              onClick={adjustChild}
+              className="flex flex-col items-start gap-1 rounded-lg border-2 border-border/60 hover:border-primary/60 hover:bg-accent/40 p-3 text-left transition-colors disabled:opacity-50"
+            >
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                {copyAndConfigMutation.isPending ? (
+                  <Loader2 className="size-4 animate-spin text-primary shrink-0" />
+                ) : (
+                  <GitBranch className="size-4 text-primary shrink-0" />
+                )}
+                {t("evolution.confirm.adjustChildTitle")}
+              </span>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {t("evolution.confirm.adjustChildDesc")}
+              </p>
+            </button>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
+function TaskInfoSection({
+  task,
+  isOpen,
+  onToggle,
+}: {
+  task: TaskResponse
+  isOpen: boolean
+  onToggle: () => void
+}) {
+  const { t } = useTranslation()
+  const actions = useTaskActions(task)
+  const {
+    displayTask,
+    status,
+    isCopying,
+    dataEmpty,
+    isConfiguring,
+    stopMutation,
+    runMutation,
+    copyAndRunMutation,
+    copyAndConfigMutation,
+    isRunning,
+    isUninitialized,
+    canRerun,
+    isActionPending,
+    setConfirmAction,
+    showAdjust,
+    showViewParams,
+    showAiBuildHistory,
+    viewParams,
+    adjustParams,
+    openAiBuildHistory,
+  } = actions
 
   return (
     <div className="flex flex-col min-h-0 shrink-0">
@@ -323,13 +528,6 @@ function TaskInfoSection({
           <div data-tour="task-actions" className="flex flex-col gap-2 pt-1">
             {/* Secondary config-access actions (placed first for quick access) */}
             {(() => {
-              // Adjust params: uninitialized → edit directly; otherwise prompt
-              // the user to pick between editing the current task or cloning a
-              // child task. Running/pending tasks expose only "view".
-              const showAdjust = (isUninitialized || canRerun) && !isConfiguring
-              const showViewParams = !isConfiguring
-              const showAiBuildHistory =
-                !!displayTask.ai_built && !isConfiguring
               const count = Number(showAdjust) + Number(showViewParams)
               if (count === 0 && !showAiBuildHistory) return null
               return (
@@ -346,10 +544,7 @@ function TaskInfoSection({
                           variant="outline"
                           size="sm"
                           className="gap-1.5 text-xs"
-                          onClick={() => {
-                            setIsConfiguring(false)
-                            setIsViewingParams(true)
-                          }}
+                          onClick={viewParams}
                         >
                           <Eye className="size-3.5" />
                           {t("evolution.viewParams")}
@@ -361,14 +556,7 @@ function TaskInfoSection({
                           size="sm"
                           className="gap-1.5 text-xs"
                           disabled={isActionPending}
-                          onClick={() => {
-                            if (isUninitialized) {
-                              setIsViewingParams(false)
-                              setIsConfiguring(true)
-                            } else {
-                              setConfirmAction("adjustChoice")
-                            }
-                          }}
+                          onClick={adjustParams}
                         >
                           {copyAndConfigMutation.isPending ? (
                             <Loader2 className="size-3.5 animate-spin" />
@@ -386,11 +574,7 @@ function TaskInfoSection({
                       size="sm"
                       className="w-full gap-1.5 text-xs border-primary/30 text-primary bg-primary/5
                         hover:bg-primary/10 hover:border-primary/50"
-                      onClick={() => {
-                        setIsConfiguring(false)
-                        setIsViewingParams(false)
-                        setIsViewingAiBuildHistory(true)
-                      }}
+                      onClick={openAiBuildHistory}
                     >
                       <History className="size-3.5" />
                       {t("evolution.aiBuildHistory")}
@@ -453,95 +637,173 @@ function TaskInfoSection({
         </div>
       )}
 
-      <AlertDialog
-        open={!!confirmAction && confirmAction !== "adjustChoice"}
-        onOpenChange={(open) => {
-          if (!open) setConfirmAction(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmAction && confirmMessages[confirmAction]?.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmAction && confirmMessages[confirmAction]?.desc}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm}>
-              {t("common.confirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Adjust params: two-choice dialog. Lets the user pick between editing
-       * the current task in place vs. cloning a child task to tune. */}
-      <AlertDialog
-        open={confirmAction === "adjustChoice"}
-        onOpenChange={(open) => {
-          if (!open) setConfirmAction(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("evolution.confirm.adjustChoiceTitle")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("evolution.confirm.adjustChoiceDesc")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="flex flex-col gap-2 py-1">
-            <button
-              type="button"
-              disabled={isActionPending}
-              onClick={() => {
-                setConfirmAction(null)
-                setIsViewingParams(false)
-                setIsConfiguring(true)
-              }}
-              className="flex flex-col items-start gap-1 rounded-lg border-2 border-border/60 hover:border-primary/60 hover:bg-accent/40 p-3 text-left transition-colors disabled:opacity-50"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <Settings2 className="size-4 text-primary shrink-0" />
-                {t("evolution.confirm.adjustCurrentTitle")}
-              </span>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {t("evolution.confirm.adjustCurrentDesc")}
-              </p>
-            </button>
-            <button
-              type="button"
-              disabled={isActionPending}
-              onClick={() => {
-                setConfirmAction(null)
-                copyAndConfigMutation.mutate()
-              }}
-              className="flex flex-col items-start gap-1 rounded-lg border-2 border-border/60 hover:border-primary/60 hover:bg-accent/40 p-3 text-left transition-colors disabled:opacity-50"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                {copyAndConfigMutation.isPending ? (
-                  <Loader2 className="size-4 animate-spin text-primary shrink-0" />
-                ) : (
-                  <GitBranch className="size-4 text-primary shrink-0" />
-                )}
-                {t("evolution.confirm.adjustChildTitle")}
-              </span>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {t("evolution.confirm.adjustChildDesc")}
-              </p>
-            </button>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TaskActionDialogs actions={actions} />
     </div>
   )
+}
+
+/**
+ * Compact task actions for the top bar, shown while the right panel is
+ * collapsed. Mirrors the panel's primary action (run/stop) as a visible
+ * button, tucks the secondary actions into a "more" menu, and offers an
+ * explicit expand affordance.
+ */
+function CollapsedTaskActionButtons({
+  task,
+  onExpand,
+}: {
+  task: TaskResponse
+  onExpand: () => void
+}) {
+  const { t } = useTranslation()
+  const actions = useTaskActions(task)
+  const {
+    isCopying,
+    dataEmpty,
+    stopMutation,
+    runMutation,
+    copyAndRunMutation,
+    isRunning,
+    isUninitialized,
+    canRerun,
+    isActionPending,
+    setConfirmAction,
+    showAdjust,
+    showViewParams,
+    showAiBuildHistory,
+    viewParams,
+    adjustParams,
+    openAiBuildHistory,
+  } = actions
+
+  const hasMore = showViewParams || showAdjust || showAiBuildHistory
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {/* Primary action */}
+      {isRunning && (
+        <Button
+          variant="destructive"
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          disabled={stopMutation.isPending}
+          onClick={() => stopMutation.mutate()}
+        >
+          {stopMutation.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Square className="size-3.5" />
+          )}
+          <span className="hidden lg:inline">{t("evolution.stopTask")}</span>
+        </Button>
+      )}
+      {canRerun && (
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          disabled={isActionPending}
+          onClick={() => setConfirmAction("copyRun")}
+        >
+          {copyAndRunMutation.isPending || isCopying ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Play className="size-3.5" />
+          )}
+          <span className="hidden lg:inline">
+            {isCopying
+              ? t("evolution.versionTree.copyingAsChild")
+              : t("evolution.startTask")}
+          </span>
+        </Button>
+      )}
+      {isUninitialized && (
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 text-xs"
+          disabled={runMutation.isPending || dataEmpty}
+          onClick={() => runMutation.mutate()}
+        >
+          {runMutation.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Play className="size-3.5" />
+          )}
+          <span className="hidden lg:inline">{t("evolution.startTask")}</span>
+        </Button>
+      )}
+
+      {/* Overflow menu — secondary actions + expand */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 text-muted-foreground hover:text-primary"
+            aria-label={t("evolution.moreActions", {
+              defaultValue: "More actions",
+            })}
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[180px]">
+          {showViewParams && (
+            <DropdownMenuItem onClick={viewParams}>
+              <Eye className="size-3.5" />
+              {t("evolution.viewParams")}
+            </DropdownMenuItem>
+          )}
+          {showAdjust && (
+            <DropdownMenuItem onClick={adjustParams} disabled={isActionPending}>
+              <Settings2 className="size-3.5" />
+              {t("evolution.adjustParams")}
+            </DropdownMenuItem>
+          )}
+          {showAiBuildHistory && (
+            <DropdownMenuItem onClick={openAiBuildHistory}>
+              <History className="size-3.5" />
+              {t("evolution.aiBuildHistory")}
+            </DropdownMenuItem>
+          )}
+          {hasMore && <DropdownMenuSeparator />}
+          <DropdownMenuItem onClick={onExpand}>
+            <PanelRightOpen className="size-3.5" />
+            {t("evolution.expandPanel")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <TaskActionDialogs actions={actions} />
+    </div>
+  )
+}
+
+export function CollapsedRightPanelActions({
+  task,
+  onExpand,
+}: {
+  task: TaskResponse | null
+  onExpand: () => void
+}) {
+  const { t } = useTranslation()
+
+  // Without a task there are no actions — still offer the expand affordance.
+  if (!task) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-8 text-muted-foreground hover:text-primary"
+        onClick={onExpand}
+        aria-label={t("evolution.expandPanel")}
+        title={t("evolution.expandPanel")}
+      >
+        <PanelRightOpen className="size-4" />
+      </Button>
+    )
+  }
+
+  return <CollapsedTaskActionButtons task={task} onExpand={onExpand} />
 }
 
 function NodeLink({
@@ -564,7 +826,9 @@ function NodeLink({
   const node = nodeMap.get(nodeId)
   const nodeIsland = node?.island ?? -1
   const isCrossIsland = nodeIsland !== currentIsland && nodeIsland >= 0
-  const ariaLabel = node ? `${node.name} (${formatScore(node.rawScore)})` : nodeId
+  const ariaLabel = node
+    ? `${node.name} (${formatScore(node.rawScore)})`
+    : nodeId
 
   return (
     <div

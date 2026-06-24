@@ -166,7 +166,10 @@ const AddProvider = () => {
             {t("llmProvider.addProvider")}
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent
+          className="sm:max-w-2xl max-h-[85vh] overflow-y-auto"
+          preventOutsideClose
+        >
           <DialogHeader>
             <DialogTitle>{t("llmProvider.addProvider")}</DialogTitle>
             <DialogDescription>

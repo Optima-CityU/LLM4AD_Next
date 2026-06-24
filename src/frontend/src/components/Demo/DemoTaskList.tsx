@@ -262,6 +262,7 @@ function DemoCreateTaskDialog({
       <DialogContent
         data-tour="create-task-dialog"
         className="sm:max-w-lg"
+        preventOutsideClose
       >
         <DialogHeader>
           <DialogTitle>

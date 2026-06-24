@@ -30,6 +30,7 @@ def _resolve_providers(
     input_args: dict,
     current_user: models.User,
     access_token: str | None = None,
+    task_id: uuid.UUID | str | None = None,
 ) -> dict:
     """解析供应商列表并处理 planner/coder 中的供应商引用，用于构建 run_args。
 
@@ -43,12 +44,18 @@ def _resolve_providers(
        - 其他值：将供应商 ID 与对应模型名拼接。
     3. 内置供应商的 ``base_url`` 中的 ``{accessToken}`` 占位会被替换为当前
        登录 token；其他占位（如 ``{teamId}``）保留原样由上游处理。
+    4. 若启用 LLM 凭据代理（``settings.LLM_PROXY_ENABLE``）：把每个下发到容器的
+       供应商真实 ``api_key``/``auth_token`` 替换为一次性代理 token，``base_url``
+       改写为指向 backend 代理端点。真实凭据不再进入隔离容器，从根本上消除用户
+       评测脚本窃取大模型 key 的路径（详见 :mod:`app.services.credential_broker`）。
 
     Args:
         db: 数据库会话。
         input_args: task.input_args 的可变副本。
         current_user: 当前认证用户。
         access_token: 当前登录 token，用于替换内置供应商 URL 中的占位。
+        task_id: 业务任务 ID，用于把发放的代理 token 归集到该任务，便于结束时
+            批量吊销；为空时不启用代理改写。
 
     Returns:
         处理后的 *input_args* 字典。
@@ -85,8 +92,9 @@ def _resolve_providers(
         else:
             models_list = [m.strip() for m in p.model.split(";") if m.strip()]
         for model_name in models_list:
+            name = f"{p.id}{model_name}"
             model_data = {
-                "name": f"{p.id}{model_name}",
+                "name": name,
                 "type": p.type,
                 "api_key": p.api_key,
                 "auth_token": p.auth_token,
@@ -98,7 +106,7 @@ def _resolve_providers(
                 "max_retries": p.max_retries,
             }
             provider_configs.append(model_data)
-            provider_configs_map[f"{p.id}{model_name}"] = model_data
+            provider_configs_map[name] = model_data
     # 添加mock供应商
     mock_data = {
         "name": "mock",
@@ -211,7 +219,74 @@ def _resolve_providers(
     if embedding_api_key:
         embedding_kwargs["api_key"] = embedding_api_key
     input_args["embedding"] = EmbeddingConfig(**embedding_kwargs).model_dump()
+
+    # 启用凭据代理：把下发到容器的真实凭据替换为一次性代理 token + 代理 base_url。
+    # 必须覆盖所有进入容器配置的供应商（planner/coder/evaluator）与 embedding，
+    # 因为容器内任意一处真实 key 都会被恶意评测脚本读到。
+    if settings.LLM_PROXY_ENABLE and task_id is not None:
+        _apply_credential_proxy(input_args, current_user, task_id)
     return input_args
+
+
+def _apply_credential_proxy(
+    input_args: dict,
+    current_user: models.User,
+    task_id: uuid.UUID | str,
+) -> None:
+    """就地把 run_args 中各供应商的真实凭据替换为一次性代理 token。
+
+    对 ``input_args["providers"]`` 中每个非 mock 供应商，以及 embedding 供应商，
+    发放代理 token（真实凭据加密存入 Redis，由 broker 管理），并改写
+    ``api_key``/``auth_token``/``base_url``，使容器内代码经 backend 反向代理调用
+    大模型，真实凭据不下发。
+
+    Args:
+        input_args: 待改写的 run_args（原地修改）。
+        current_user: 当前用户，用于 token 归属。
+        task_id: 任务 ID，用于 token 归集与结束时吊销。
+    """
+    from app.services import credential_broker
+
+    if not settings.LLM_PROXY_BASE_URL:
+        # 纵深防御兜底：启动期 _enforce_llm_proxy_config 已拦截此配置错误。
+        # 正常路径不会触达此处；仅当 settings 在运行时被改写（settings 非 frozen）
+        # 时兜底，避免以空 base_url 静默改写出不可用的容器配置。
+        raise HTTPException(
+            status_code=500,
+            detail="LLM_PROXY_ENABLE 已开启但未配置 LLM_PROXY_BASE_URL，已阻止任务以明文凭据下发到容器",
+        )
+
+    proxy_base = settings.LLM_PROXY_BASE_URL.rstrip("/")
+    ttl = settings.LLM_PROXY_TOKEN_TTL
+
+    def _swap(provider_cfg: dict) -> None:
+        """用真实凭据换发一个代理 token，并就地改写 provider_cfg。"""
+        token = credential_broker.issue_token(
+            user_id=current_user.id,
+            task_id=task_id,
+            ttl=ttl,
+            provider_type=provider_cfg.get("type", "openai_compatible"),
+            base_url=provider_cfg.get("base_url") or "",
+            api_key=provider_cfg.get("api_key") or "",
+            auth_token=provider_cfg.get("auth_token") or "",
+            model=provider_cfg.get("model", ""),
+            timeout=provider_cfg.get("timeout") or 60.0,
+        )
+        provider_cfg["api_key"] = token
+        provider_cfg["auth_token"] = ""
+        provider_cfg["base_url"] = proxy_base
+
+    # 收集所有需脱敏的配置：非 mock 供应商 + 带 api_key 的 embedding（内置 jina）。
+    # 单点收集、单次遍历，避免遗漏任一处真实 key（漏一处即被恶意脚本读到）。
+    to_scrub: list[dict] = [
+        cfg for cfg in input_args.get("providers", []) if cfg.get("type") != "mock"
+    ]
+    embedding = input_args.get("embedding")
+    if isinstance(embedding, dict) and embedding.get("api_key"):
+        to_scrub.append(embedding)
+
+    for cfg in to_scrub:
+        _swap(cfg)
 
 
 def run_task(
@@ -241,7 +316,7 @@ def run_task(
 
     # 解析供应商列表及 evolution 中的供应商引用
     input_args = dict(task.input_args) if task.input_args else {}
-    input_args = _resolve_providers(db, input_args, current_user, access_token)
+    input_args = _resolve_providers(db, input_args, current_user, access_token, task_id=task_id)
 
     # 准备运行参数
     container_name = f"code_user-{current_user.id}"

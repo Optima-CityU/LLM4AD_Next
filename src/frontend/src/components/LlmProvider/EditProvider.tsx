@@ -160,7 +160,10 @@ const EditProvider = ({ provider, onSuccess }: EditProviderProps) => {
         <Pencil />
         {t("common.edit")}
       </DropdownMenuItem>
-      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent
+        className="sm:max-w-2xl max-h-[85vh] overflow-y-auto"
+        preventOutsideClose
+      >
         <Form {...form}>
           <form onSubmit={onSubmit} autoComplete="off">
             <DialogHeader>

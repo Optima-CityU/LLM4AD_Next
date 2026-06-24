@@ -396,6 +396,7 @@
     "collapseTaskList": "收起任务列表",
     "expandPanel": "展开面板",
     "collapsePanel": "收起面板",
+    "moreActions": "更多操作",
     "selectTask": "请选择一个任务",
     "cannotLoadTask": "无法加载任务数据",
     "taskStatus": {

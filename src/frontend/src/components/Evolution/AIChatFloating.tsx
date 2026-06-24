@@ -595,9 +595,12 @@ function FloatingChatImpl({
 
   // Button drag
   const btnRef = useRef<HTMLButtonElement>(null)
+  // Default position: stacked directly above the global help FAB
+  // (FeedbackFAB sits at right:14, bottom:118, 36px tall) so the two form a
+  // vertical button group in the bottom-right corner. 118 + 36 + 10 = 164.
   const btnDrag = useDrag(
     btnRef,
-    { right: 32, bottom: Math.round(window.innerHeight / 2 - 24) },
+    { right: 14, bottom: 164 },
     () => setOpen((v) => !v),
   )
 
@@ -607,7 +610,7 @@ function FloatingChatImpl({
 
   const DIALOG_W = 380
   const DIALOG_H = 520
-  const BTN_SIZE = 48
+  const BTN_SIZE = 36
   const GAP = 12
 
   // Position dialog relative to button on first open
@@ -659,7 +662,7 @@ function FloatingChatImpl({
         type="button"
         onPointerDown={btnDrag.onPointerDown}
         className={cn(
-          "group fixed z-50 flex items-center justify-center size-12 rounded-full cursor-grab active:cursor-grabbing select-none touch-none",
+          "group fixed z-50 flex items-center justify-center size-9 rounded-full cursor-grab active:cursor-grabbing select-none touch-none",
           "bg-gradient-to-br from-primary/20 to-blue-600/20 border border-primary/40",
           "shadow-[0_0_20px] shadow-primary/25 hover:shadow-[0_0_30px] hover:shadow-primary/45",
           "transition-shadow duration-300",
@@ -673,7 +676,7 @@ function FloatingChatImpl({
             <span className="absolute inset-[-3px] rounded-full animate-[spin_8s_linear_infinite] bg-[conic-gradient(from_0deg,transparent_0%,color-mix(in_srgb,var(--primary)_30%,transparent)_25%,transparent_50%)] opacity-0 group-hover:opacity-100 transition-opacity" />
           </>
         )}
-        <Sparkles className="size-5 text-primary drop-shadow-[0_0_6px] relative z-10" />
+        <Sparkles className="size-4 text-primary drop-shadow-[0_0_6px] relative z-10" />
       </button>
 
       {/* Chat dialog */}

@@ -89,7 +89,7 @@ export function TargetEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>{t("liveCode.edit.title")}</DialogTitle>
         </DialogHeader>

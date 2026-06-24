@@ -43,6 +43,11 @@ def _install_dependencies(data_dir: str) -> None:
     logger.info(f"Installing dependencies from {req_path}")
 
     try:
+        install_timeout = int(os.environ.get("TASK_DEP_INSTALL_TIMEOUT", "600"))
+    except ValueError:
+        install_timeout = 600
+
+    try:
         result = subprocess.run(
             [
                 "uv", "pip", "install",
@@ -52,11 +57,11 @@ def _install_dependencies(data_dir: str) -> None:
             ],
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=install_timeout,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(
-            "Dependency installation timed out after 600s"
+            f"Dependency installation timed out after {install_timeout}s"
         )
     if result.returncode != 0:
         logger.error(f"Dependency installation failed:\n{result.stderr}")

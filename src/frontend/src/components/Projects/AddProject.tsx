@@ -94,7 +94,7 @@ export default function AddProject() {
           {t("projects.addProject")}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>{t("projects.addProject")}</DialogTitle>
           <DialogDescription>

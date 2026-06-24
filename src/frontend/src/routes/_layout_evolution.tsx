@@ -29,7 +29,9 @@ import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import AIChatFloating from "@/components/Evolution/AIChatFloating"
 import ConnectionStatus from "@/components/Evolution/ConnectionStatus"
-import EvolutionRightPanel from "@/components/Evolution/EvolutionRightPanel"
+import EvolutionRightPanel, {
+  CollapsedRightPanelActions,
+} from "@/components/Evolution/EvolutionRightPanel"
 import EvolutionTaskList, {
   CreateTaskDialog,
   useInfiniteTasks,
@@ -458,7 +460,6 @@ function Layout() {
     typeof window !== "undefined" && window.innerWidth <= 1280,
   )
   const RIGHT_PANEL_MIN_WIDTH = 300
-  const RIGHT_PANEL_SNAP_THRESHOLD = 220
   const [rightWidth, setRightWidth] = usePersistentState(
     "evo:rightWidth",
     RIGHT_PANEL_MIN_WIDTH,
@@ -487,18 +488,7 @@ function Layout() {
         if (didDrag) {
           const next = window.innerWidth - ev.clientX
           const max = Math.floor(window.innerWidth / 2)
-          // Edge-snap: dragging below the snap threshold collapses the panel.
-          if (next < RIGHT_PANEL_SNAP_THRESHOLD) {
-            setRightWidth(RIGHT_PANEL_MIN_WIDTH)
-            setRightCollapsed(true)
-            // End drag to avoid an immediate re-expand on the next mousemove.
-            setIsResizingRight(false)
-            document.body.style.userSelect = ""
-            document.body.style.cursor = ""
-            document.removeEventListener("mousemove", onMove)
-            document.removeEventListener("mouseup", onUp)
-            return
-          }
+          // Drag only resizes (clamped to min/max); collapse is click-only.
           setRightWidth(Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(max, next)))
         }
       }
@@ -864,8 +854,12 @@ function Layout() {
           />
         )}
 
-        {/* Header — three-column grid keeps project name absolutely centered */}
-        <header className="relative z-10 grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4 px-3 sm:px-6 py-3 shrink-0 bg-background/95 backdrop-blur border-b border-border shadow-sm">
+        {/* Header — three-column grid. Side columns size to their content
+            (auto) so the logo/task-selector and the action buttons are always
+            fully visible; the center title takes the remaining space
+            (minmax(0,1fr)) and truncates when tight, so it can never overlap
+            either side. The title stays centered within that leftover space. */}
+        <header className="relative z-10 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:gap-4 px-3 sm:px-6 py-3 shrink-0 bg-background/95 backdrop-blur border-b border-border shadow-sm">
           {/* Left */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Link
@@ -953,8 +947,19 @@ function Layout() {
               })()}
           </div>
 
-          {/* Right: actions */}
-          <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground min-w-0">
+          {/* Right: actions. Sized by content (auto column) so the buttons are
+              always fully visible and never overlapped by the center title. */}
+          <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground">
+            {/* Collapsed right panel → surface its task actions in the top bar */}
+            {rightCollapsed && (
+              <>
+                <CollapsedRightPanelActions
+                  task={selectedTask}
+                  onExpand={() => setRightCollapsed(false)}
+                />
+                <div className="w-px h-5 bg-border/40" />
+              </>
+            )}
             {isDemo && (
               <Link
                 to="/projects"
@@ -1011,10 +1016,10 @@ function Layout() {
             >
               {leftCollapsed ? (
                 <ChevronRight className="size-4" />
-            ) : (
-              <ChevronLeft className="size-4" />
-            )}
-          </button>
+              ) : (
+                <ChevronLeft className="size-4" />
+              )}
+            </button>
           )}
 
           {/* Center - Main Content */}

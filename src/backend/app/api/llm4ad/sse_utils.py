@@ -10,6 +10,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from loguru import logger
 from starlette.responses import StreamingResponse
 
 
@@ -68,7 +69,11 @@ async def redis_sse_stream(
                 results = await asyncio.wait_for(coro, timeout=xread_timeout)
             else:
                 results = await coro
+        except TimeoutError:
+            results = []
         except Exception:
+            logger.warning("SSE 读取 Redis Stream 失败，将退避重试", exc_info=True)
+            await asyncio.sleep(1.0)
             results = []
 
         now = time.monotonic()

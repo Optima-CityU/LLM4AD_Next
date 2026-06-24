@@ -158,6 +158,21 @@ class Settings(BaseSettings):
                 raise ValueError(message)
         return self
 
+    @model_validator(mode="after")
+    def _enforce_llm_proxy_config(self) -> Self:
+        """校验启用 LLM 凭据代理时必须配置代理端点。
+
+        ``LLM_PROXY_ENABLE`` 为真却缺 ``LLM_PROXY_BASE_URL`` 是配置不变量错误：
+        缺端点则容器无处转发请求。在启动期 fail-closed，使服务拒绝以错误配置启动，
+        而非等到第一个任务运行才在请求路径里抛错。
+        """
+        if self.LLM_PROXY_ENABLE and not self.LLM_PROXY_BASE_URL:
+            raise ValueError(
+                "LLM_PROXY_ENABLE 已开启但未配置 LLM_PROXY_BASE_URL；"
+                "请设置容器内可达的代理基础 URL（如 http://<backend>:8000/api/v1/llm4ad/llmproxy）。"
+            )
+        return self
+
     # ---- S3 兼容存储（RustFS）配置 ----
     RUSTFS_ENDPOINT: str
     RUSTFS_ACCESS_KEY: str
@@ -186,6 +201,16 @@ class Settings(BaseSettings):
     def CELERY_BACKEND(self) -> str:
         """Celery 结果后端数据库"""
         return self.REDIS_BASE_URL + "/1"
+
+    @property
+    def LLM_PROXY_TOKEN_TTL(self) -> int:
+        """LLM 代理 token 有效期（秒）。
+
+        从任务硬超时派生：token 在任务开始时签发并倒计时，必须活得比任务全程更久，
+        否则跑满时限的任务在末尾请求时 token 已过期（401）。故在硬超时之外预留 1h
+        缓冲。任务结束时由 broker 主动吊销，缓冲仅在漏吊销时兜底，不影响安全性。
+        """
+        return self.TASK_TIME_LIMIT + 3600
 
     # ---- 第三方 API 密钥 ----
     JINA_API_KEY: str = ""
@@ -225,9 +250,31 @@ class Settings(BaseSettings):
     CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0   # 等待容器 SSE 服务就绪的超时（秒）
     CHAT_TUNE_CONTAINER_NETWORK: bool = True           # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
 
+    # ---- Celery 任务超时 ----
+    # 单一来源：Celery 配置与 LLM 代理 token TTL 均由此派生，避免多处魔法数字漂移。
+    TASK_TIME_LIMIT: int = 7 * 24 * 3600        # 任务硬超时（秒），默认 7 天
+    TASK_SOFT_TIME_LIMIT: int = 1 * 24 * 3600   # 任务软超时（秒），默认 1 天，超时抛 SoftTimeLimitExceeded
+
+    # ---- LLM 凭据代理（credential broker）----
+    # 演化任务在隔离容器内 import 执行用户提供的评测脚本，恶意脚本可从环境变量、
+    # 配置文件、被递交的 ProviderConfig、进程对象图等多条路径窃取真实 api_key。
+    # 开启后：下发给容器的配置里真实 key 被替换为一次性代理 token，base_url 指向
+    # 本端点；容器经此反向代理调用大模型，真实凭据只留在 backend 进程。
+    LLM_PROXY_ENABLE: bool = False
+    # 容器内可达的代理基础 URL（不含末尾斜杠）。生产环境走 Docker 用户网络，按
+    # backend 容器名 DNS 解析，例如 http://llm4ad-web-backend-1:8000/api/v1/llm4ad/llmproxy；
+    # 本地裸跑可用 http://host.docker.internal:8000/api/v1/llm4ad/llmproxy。
+    LLM_PROXY_BASE_URL: str = ""
+
     # ---- 任务文件存储限制 ----
     TASK_MAX_FILE_SIZE_MB: int = 50   # 单文件上传大小上限（MB）
     TASK_MAX_STORAGE_MB: int = 100    # 单任务输入数据总存储上限（MB）
+
+    # ---- 任务运行时其它限制 ----
+    # 容器内依赖安装（uv pip install -r requirements.txt）的超时（秒）
+    TASK_DEP_INSTALL_TIMEOUT: int = 600
+    # 任务实时日志 Redis Stream 的近似最大长度（XADD MAXLEN）。超出后最早的日志会被裁剪
+    TASK_LOGS_MAXLEN: int = 50000
 
     # ---- Code-Server 空闲清理 ----
     CODE_SERVER_IDLE_TIMEOUT_SECONDS: int = 24 * 60 * 60  # 容器空闲超过该时长则停止

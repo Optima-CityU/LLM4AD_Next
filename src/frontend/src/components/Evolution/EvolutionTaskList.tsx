@@ -392,6 +392,7 @@ export function CreateTaskDialog({
       <DialogContent
         data-tour="create-task-dialog"
         className="sm:max-w-lg"
+        preventOutsideClose
       >
         <DialogHeader>
           <DialogTitle>{t("evolution.createTaskTitle")}</DialogTitle>
@@ -788,7 +789,7 @@ function RenameTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>{t("evolution.renameTaskTitle")}</DialogTitle>
           <DialogDescription>

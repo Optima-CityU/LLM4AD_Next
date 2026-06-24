@@ -119,7 +119,7 @@ export function TestProviderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>{t("llmProvider.test.title")}</DialogTitle>
           <DialogDescription>

@@ -95,7 +95,7 @@ export default function SnapshotDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md" preventOutsideClose>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {t("research.snapshots.title")}

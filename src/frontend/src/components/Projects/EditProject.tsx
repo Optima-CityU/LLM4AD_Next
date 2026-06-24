@@ -100,7 +100,7 @@ export default function EditProject({ project, onSuccess }: EditProjectProps) {
         <Pencil className="size-4" />
         {t("projects.editProject")}
       </DropdownMenuItem>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <DialogHeader>

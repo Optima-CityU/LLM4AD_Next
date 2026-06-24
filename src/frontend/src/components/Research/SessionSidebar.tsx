@@ -326,7 +326,7 @@ export default function SessionSidebar({
 
       {/* Create group dialog */}
       <Dialog open={createGroupOpen} onOpenChange={setCreateGroupOpen}>
-        <DialogContent className="sm:max-w-[360px]">
+        <DialogContent className="sm:max-w-[360px]" preventOutsideClose>
           <DialogHeader>
             <DialogTitle>{t("research.sidebar.createGroup")}</DialogTitle>
           </DialogHeader>

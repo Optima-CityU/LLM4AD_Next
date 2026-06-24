@@ -107,7 +107,7 @@ function CreateTaskDialog({
           <Plus />
         </SidebarGroupAction>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>创建任务</DialogTitle>
           <DialogDescription>输入任务名称以创建新任务。</DialogDescription>
@@ -190,7 +190,7 @@ function RenameTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>重命名任务</DialogTitle>
           <DialogDescription>修改任务名称。</DialogDescription>

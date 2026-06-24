@@ -109,7 +109,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
         <Pencil />
         {t("admin.editUser")}
       </DropdownMenuItem>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <DialogHeader>

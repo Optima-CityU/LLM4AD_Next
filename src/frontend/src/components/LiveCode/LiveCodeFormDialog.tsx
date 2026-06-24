@@ -109,7 +109,10 @@ export function LiveCodeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="sm:max-w-lg max-h-[90vh] overflow-y-auto"
+        preventOutsideClose
+      >
         <DialogHeader>
           <DialogTitle>
             {isEdit

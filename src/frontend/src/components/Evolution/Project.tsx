@@ -101,7 +101,7 @@ function CreateProjectDialog({
           <Plus className="size-4" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>创建项目</DialogTitle>
           <DialogDescription>填写项目信息以创建新项目。</DialogDescription>
@@ -198,7 +198,7 @@ function EditProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>编辑项目</DialogTitle>
           <DialogDescription>修改项目名称和描述。</DialogDescription>

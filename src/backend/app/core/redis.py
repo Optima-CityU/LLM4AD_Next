@@ -15,7 +15,6 @@ from app.core.config import settings
 TASK_LOGS_PREFIX = "task_logs:"
 TASK_LOGS_DB = 2
 TASK_LOGS_TTL = 7 * 24 * 3600  # 7 days
-TASK_LOGS_MAXLEN = 50000  # approximate cap per stream
 
 
 def _build_url() -> str:
@@ -88,7 +87,7 @@ def push_log_entry(task_id: str | uuid.UUID, entry: dict) -> None:
         r = get_sync_redis()
         key = task_logs_key(task_id)
         payload = json.dumps(entry, ensure_ascii=False, default=str)
-        r.xadd(key, {"data": payload}, maxlen=TASK_LOGS_MAXLEN, approximate=True)
+        r.xadd(key, {"data": payload}, maxlen=settings.TASK_LOGS_MAXLEN, approximate=True)
         if r.ttl(key) == -1:
             r.expire(key, TASK_LOGS_TTL)
     except Exception:

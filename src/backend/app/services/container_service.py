@@ -133,6 +133,7 @@ def create_and_start_task_container(data: dict) -> str:
             "NO_COLOR": "1",
             "LOGURU_COLORIZE": "false",
             "LLM4AD_CONFIG_KEY": config_key,
+            "TASK_DEP_INSTALL_TIMEOUT": str(settings.TASK_DEP_INSTALL_TIMEOUT),
             **({"UV_INDEX_URL": uv_index} if (uv_index := os.environ.get("UV_INDEX_URL")) else {}),
         },
     )
@@ -145,7 +146,7 @@ def wait_for_container(
     container_id: str,
     check_cancelled=None,
     poll_interval: int = 1,
-    timeout: int = 7 * 24 * 3600,
+    timeout: int | None = None,
 ) -> dict:
     """轮询等待容器运行结束。
 
@@ -153,11 +154,13 @@ def wait_for_container(
         container_id: 容器 ID
         check_cancelled: 可选回调，返回 True 时取消容器
         poll_interval: 轮询间隔（秒）
-        timeout: 超时时间（秒）
+        timeout: 超时时间（秒）；为 None 时取 ``settings.TASK_TIME_LIMIT``
 
     Returns:
         {"exit_code": int, "timed_out": bool, "oom_killed": bool, "cancelled": bool}
     """
+    if timeout is None:
+        timeout = settings.TASK_TIME_LIMIT
     start_time = time.time()
 
     while True:

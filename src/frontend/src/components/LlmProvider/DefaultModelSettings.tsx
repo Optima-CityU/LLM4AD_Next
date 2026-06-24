@@ -326,7 +326,7 @@ export default function DefaultModelSettings({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl" preventOutsideClose>
         <DialogHeader>
           <DialogTitle>{t("llmProvider.defaultModel.title")}</DialogTitle>
           <DialogDescription className="flex items-center justify-between">
