@@ -18,7 +18,6 @@ interface ImportMetaEnv {
   readonly VITE_PLAUSIBLE_CAPTURE_ON_LOCALHOST?: string
   readonly VITE_PLAUSIBLE_LOGGING?: string
   readonly VITE_PLAUSIBLE_BIND_TO_WINDOW?: string
-  readonly VITE_ADMIN_ANALYTICS_URL?: string
 }
 
 interface ImportMeta {

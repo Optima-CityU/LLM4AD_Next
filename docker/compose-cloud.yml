@@ -239,7 +239,6 @@ services:
         - VITE_PLAUSIBLE_CAPTURE_ON_LOCALHOST=${VITE_PLAUSIBLE_CAPTURE_ON_LOCALHOST:-false}
         - VITE_PLAUSIBLE_LOGGING=${VITE_PLAUSIBLE_LOGGING:-true}
         - VITE_PLAUSIBLE_BIND_TO_WINDOW=${VITE_PLAUSIBLE_BIND_TO_WINDOW:-true}
-        - VITE_ADMIN_ANALYTICS_URL=${VITE_ADMIN_ANALYTICS_URL:-}
         - NODE_ENV=production
     volumes:
       - ../src/frontend/extra-cloud-conf:/etc/nginx/extra-conf.d
