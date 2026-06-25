@@ -8,6 +8,7 @@ API 路由聚合器。
 from fastapi import APIRouter
 
 from app.api.base_routes import (
+    admin_analytics,
     code_server,
     feedback,
     live_codes,
@@ -33,6 +34,7 @@ api_router = APIRouter()
 api_router.include_router(login.router)
 api_router.include_router(users.router)
 api_router.include_router(utils.router)
+api_router.include_router(admin_analytics.router)
 api_router.include_router(code_server.router)
 api_router.include_router(testing.router)
 api_router.include_router(permission.router)

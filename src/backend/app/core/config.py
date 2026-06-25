@@ -226,6 +226,15 @@ class Settings(BaseSettings):
     BUILTIN_PROVIDER_DEFAULT_MODEL: str = "" # 为空则取 MODELS 中的第一个
     LITELLM_GATEWAY_BASE_URL: str = "http://gateway:9090"
 
+    # ---- 管理员统计大屏 ----
+    ADMIN_ANALYTICS_CACHE_TTL_SECONDS: int = 300
+    GITHUB_REPOSITORY: str = "Optima-CityU/LLM4AD_Next"
+    GITHUB_TOKEN: str = ""
+    PLAUSIBLE_API_BASE_URL: str = ""
+    PLAUSIBLE_SITE_ID: str = ""
+    PLAUSIBLE_API_KEY: str = ""
+    PLAUSIBLE_DATE_RANGE: str = "30d"
+
     # ---- Docker 连接配置 ----
     DOCKER_HOST: str = ""  # Docker daemon address; empty = local socket, e.g. ssh://user@remote-host
     DOCKER_NETWORK_NAME: str = ""  # Backward-compatible fallback for dynamic containers

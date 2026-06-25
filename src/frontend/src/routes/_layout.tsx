@@ -54,6 +54,7 @@ function usePageTitle() {
     "/live-codes": t("layout.liveCode"),
     "/litellm-quotas": t("layout.litellmQuotas"),
     "/admin": t("layout.userManagement"),
+    "/analytics": t("layout.analytics"),
     "/settings": t("layout.accountSettings"),
     "/changelog": t("layout.changelog"),
     "/feedback": t("layout.feedback"),
