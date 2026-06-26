@@ -64,6 +64,10 @@ from .files import (
 from .logs import get_task_logs, has_persisted_logs
 from .stats import generate_result_render, get_config_schema, get_task_stats
 from .templates import EXAMPLES_DIR, list_example_templates
+from .workspace_download import (
+    download_task_workspace,
+    workspace_attachment_disposition,
+)
 
 __all__ = [
     # re-exported enum
@@ -111,6 +115,9 @@ __all__ = [
     "get_task_stats",
     "get_config_schema",
     "generate_result_render",
+    # workspace download
+    "download_task_workspace",
+    "workspace_attachment_disposition",
     # code-server auth
     "verify_code_auth",
     # chat tune upload

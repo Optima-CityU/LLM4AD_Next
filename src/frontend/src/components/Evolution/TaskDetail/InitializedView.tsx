@@ -1,6 +1,7 @@
 import {
   Activity,
   Code,
+  Download,
   Eye,
   Lightbulb,
   Loader2,
@@ -8,6 +9,7 @@ import {
 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import type { TaskResponse } from "@/client"
 import { UtilsCodeServerService } from "@/client"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
@@ -22,11 +24,25 @@ import {
 import { DEMO_BEST_CODE, isDemoTaskId } from "@/data/demoFixtures"
 import { useEvolution } from "@/hooks/useEvolution"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/utils/auth"
 import InsightsSplitView from "./InsightsSplitView"
 import MultiPanelLayout from "./MultiPanelLayout"
 import RenderSplitView from "./RenderSplitView"
 
 const REFRESH_COOLDOWN_MS = 3000
+
+function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded)
+    } catch {
+      return encoded
+    }
+  }
+  return header.match(/filename="([^"]+)"/i)?.[1] ?? null
+}
 
 interface InitializedViewProps {
   task: TaskResponse
@@ -40,6 +56,7 @@ export default function InitializedView({ task }: InitializedViewProps) {
   const [ideError, setIdeError] = useState<string>("")
   const [iframeKey, setIframeKey] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isDownloadingWorkspace, setIsDownloadingWorkspace] = useState(false)
   const { activeTab, setActiveTab, selectedNodes } = useEvolution()
   const { resolvedTheme } = useTheme()
 
@@ -86,6 +103,45 @@ export default function InitializedView({ task }: InitializedViewProps) {
     })
   }
 
+  const handleDownloadWorkspace = async () => {
+    if (isDownloadingWorkspace || isDemoTaskId(task.id)) return
+    setIsDownloadingWorkspace(true)
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || ""
+      const response = await authFetch(
+        `${baseUrl}/api/v1/llm4ad/tasks/${task.id}/workspace/download`,
+      )
+      if (!response.ok) {
+        let message = t("evolution.ideDownload.failed")
+        try {
+          const body = await response.json()
+          message = body?.detail || message
+        } catch {
+          // Keep the localized fallback for non-JSON errors.
+        }
+        throw new Error(message)
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download =
+        filenameFromContentDisposition(response.headers.get("Content-Disposition")) ??
+        "LLM4AD-workspace.zip"
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t("evolution.ideDownload.failed"),
+      )
+    } finally {
+      setIsDownloadingWorkspace(false)
+    }
+  }
+
   return (
     <Tabs
       value={activeTab}
@@ -115,69 +171,101 @@ export default function InitializedView({ task }: InitializedViewProps) {
           },
         ]}
       />
-      <TabsList
-        data-tour="result-tabs"
-        className="w-full h-11 p-1 rounded-lg shrink-0 bg-card border border-border"
-      >
-        <TabsTrigger
-          value="overview"
-          className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
+      <div className="flex shrink-0 items-center gap-2">
+        <TabsList
+          data-tour="result-tabs"
+          className="h-11 min-w-0 flex-1 p-1 rounded-lg bg-card border border-border"
         >
-          <Activity className="size-3.5" />
-          {t("evolution.tabs.overview")}
-        </TabsTrigger>
-        <TabsTrigger
-          value="render"
-          className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
-        >
-          <Eye className="size-3.5" />
-          {t("evolution.tabs.render")}
-        </TabsTrigger>
-        <TabsTrigger
-          value="insights"
-          className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
-        >
-          <Lightbulb className="size-3.5" />
-          {t("evolution.tabs.insights")}
-        </TabsTrigger>
-        <TabsTrigger
-          value="ide"
-          data-tour="demo-best-summary"
-          className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
-        >
-          <Code className="size-3.5" />
-          {t("evolution.tabs.ide")}
+          <TabsTrigger
+            value="overview"
+            className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
+          >
+            <Activity className="size-3.5" />
+            {t("evolution.tabs.overview")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="render"
+            className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
+          >
+            <Eye className="size-3.5" />
+            {t("evolution.tabs.render")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="insights"
+            className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
+          >
+            <Lightbulb className="size-3.5" />
+            {t("evolution.tabs.insights")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="ide"
+            data-tour="demo-best-summary"
+            className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
+          >
+            <Code className="size-3.5" />
+            {t("evolution.tabs.ide")}
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t("evolution.ideRefresh.label")}
+                    aria-disabled={isRefreshing}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleRefreshIDE()
+                    }}
+                    className={cn(
+                      "ml-1 inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                      isRefreshing && "cursor-not-allowed",
+                    )}
+                  >
+                    <RefreshCw
+                      className={cn("size-3", isRefreshing && "animate-spin")}
+                    />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent
+                  side="bottom"
+                  className="max-w-xs leading-relaxed"
+                >
+                  {t("evolution.ideRefresh.tooltip")}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </TabsTrigger>
+        </TabsList>
+        {!isDemoTaskId(task.id) && (
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  aria-label={t("evolution.ideRefresh.label")}
-                  aria-disabled={isRefreshing}
+                  aria-label={t("evolution.ideDownload.label")}
+                  disabled={isDownloadingWorkspace}
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleRefreshIDE()
+                    void handleDownloadWorkspace()
                   }}
-                  className={cn(
-                    "ml-1 inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                    isRefreshing && "cursor-not-allowed",
-                  )}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <RefreshCw
-                    className={cn("size-3", isRefreshing && "animate-spin")}
-                  />
+                  {isDownloadingWorkspace ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Download className="size-4" />
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent
                 side="bottom"
                 className="max-w-xs leading-relaxed"
               >
-                {t("evolution.ideRefresh.tooltip")}
+                {t("evolution.ideDownload.tooltip")}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-        </TabsTrigger>
-      </TabsList>
+        )}
+      </div>
 
       <TabsContent value="overview" className="mt-0 flex-1 min-h-0">
         <div

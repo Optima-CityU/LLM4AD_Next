@@ -9,6 +9,8 @@ import json
 import uuid
 
 from fastapi import APIRouter, File, Query, Request, UploadFile
+from starlette.background import BackgroundTask
+from starlette.responses import FileResponse
 
 from app.api.deps import CurrentUser, SessionDep, TokenDep
 from app.api.llm4ad.sse_utils import redis_sse_stream, sse_response
@@ -198,6 +200,25 @@ def get_config_schema(
 ):
     """获取参数配置的schema。"""
     return task_service.get_config_schema(db, task_id, current_user)
+
+
+@router.get("/{task_id}/workspace/download", summary="下载任务 IDE 工作区")
+def download_task_workspace(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+):
+    """Download the authorized task IDE workspace as a ZIP archive."""
+    archive_path, filename = task_service.download_task_workspace(db, task_id, current_user)
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": task_service.workspace_attachment_disposition(filename),
+            "X-Content-Type-Options": "nosniff",
+        },
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
 
 
 # ---- 数据文件管理 ----
