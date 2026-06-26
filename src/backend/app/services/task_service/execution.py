@@ -76,13 +76,10 @@ def _resolve_providers(
 
     provider_configs: list[dict] = []
     provider_configs_map: dict[str, dict] = {}
-    builtin_embedding_provider: LLMProvider | None = None
     for p in providers:
         base_url = p.base_url
         if p.is_builtin:
             base_url = resolve_builtin_base_url(base_url, access_token)
-            if builtin_embedding_provider is None and base_url:
-                builtin_embedding_provider = p
         if p.is_builtin:
             models_list = fetch_builtin_provider_models(
                 p,
@@ -199,16 +196,15 @@ def _resolve_providers(
     input_args["planner"] = planner_config
     input_args["coder"] = coder_config
     input_args["evaluator"] = evaluator_config
-    # 运行强制使用默认的 embedding 模型。云部署优先复用内置 LiteLLM 网关，
-    # 未配置内置网关时回退到公开 Jina 地址。
+    # 运行强制使用默认的 embedding 模型。云部署直接走本地 LiteLLM Gateway，
+    # 避免 embedding 被后续 LLM credential proxy 改写为 backend 回环地址。
     embedding_base_url = "https://api.jinaai.cn/v1"
-    embedding_api_key = settings.JINA_API_KEY
-    if builtin_embedding_provider and builtin_embedding_provider.base_url and access_token:
+    embedding_api_key = settings.BUILTIN_PROVIDER_API_KEY or settings.JINA_API_KEY
+    if settings.BUILTIN_PROVIDER_BASE_URL:
         embedding_base_url = resolve_builtin_base_url(
-            builtin_embedding_provider.base_url,
+            settings.BUILTIN_PROVIDER_BASE_URL,
             access_token,
         ) or embedding_base_url
-        embedding_api_key = builtin_embedding_provider.api_key or embedding_api_key
     embedding_kwargs: dict = {
         "type": "openai_compatible",
         "base_url": embedding_base_url,
@@ -220,9 +216,8 @@ def _resolve_providers(
         embedding_kwargs["api_key"] = embedding_api_key
     input_args["embedding"] = EmbeddingConfig(**embedding_kwargs).model_dump()
 
-    # 启用凭据代理：把下发到容器的真实凭据替换为一次性代理 token + 代理 base_url。
-    # 必须覆盖所有进入容器配置的供应商（planner/coder/evaluator）与 embedding，
-    # 因为容器内任意一处真实 key 都会被恶意评测脚本读到。
+    # 启用凭据代理：把下发到容器的真实 LLM 凭据替换为一次性代理 token + 代理 base_url。
+    # embedding 固定直连本地 gateway，不走 backend llmproxy，避免任务容器回连 backend。
     if settings.LLM_PROXY_ENABLE and task_id is not None:
         _apply_credential_proxy(input_args, current_user, task_id)
     return input_args
@@ -235,8 +230,8 @@ def _apply_credential_proxy(
 ) -> None:
     """就地把 run_args 中各供应商的真实凭据替换为一次性代理 token。
 
-    对 ``input_args["providers"]`` 中每个非 mock 供应商，以及 embedding 供应商，
-    发放代理 token（真实凭据加密存入 Redis，由 broker 管理），并改写
+    对 ``input_args["providers"]`` 中每个非 mock 供应商发放代理 token
+    （真实凭据加密存入 Redis，由 broker 管理），并改写
     ``api_key``/``auth_token``/``base_url``，使容器内代码经 backend 反向代理调用
     大模型，真实凭据不下发。
 
@@ -276,14 +271,11 @@ def _apply_credential_proxy(
         provider_cfg["auth_token"] = ""
         provider_cfg["base_url"] = proxy_base
 
-    # 收集所有需脱敏的配置：非 mock 供应商 + 带 api_key 的 embedding（内置 jina）。
-    # 单点收集、单次遍历，避免遗漏任一处真实 key（漏一处即被恶意脚本读到）。
+    # 收集所有需脱敏的 LLM 配置：非 mock 供应商。
+    # embedding 使用本地 gateway 的用户访问令牌，保持任务容器直连 gateway。
     to_scrub: list[dict] = [
         cfg for cfg in input_args.get("providers", []) if cfg.get("type") != "mock"
     ]
-    embedding = input_args.get("embedding")
-    if isinstance(embedding, dict) and embedding.get("api_key"):
-        to_scrub.append(embedding)
 
     for cfg in to_scrub:
         _swap(cfg)

@@ -128,7 +128,7 @@ def test_resolve_providers_routes_embedding_through_builtin_gateway(monkeypatch)
         name="Builtin LiteLLM",
         type=ProviderType.OPENAI_COMPATIBLE,
         api_key="sk-test",
-        base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        base_url="https://stale-provider.example.com/v1",
         model="deepseek-v4-flash",
         is_builtin=True,
         visible_to_all=True,
@@ -144,6 +144,18 @@ def test_resolve_providers_routes_embedding_through_builtin_gateway(monkeypatch)
     )
 
     monkeypatch.setattr(task_service.settings, "TEAM_ID", "team-123", raising=False)
+    monkeypatch.setattr(
+        task_service.settings,
+        "BUILTIN_PROVIDER_BASE_URL",
+        "http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        task_service.settings,
+        "BUILTIN_PROVIDER_API_KEY",
+        "gateway-key",
+        raising=False,
+    )
     monkeypatch.setattr(
         task_service.settings,
         "EMBEDDING_MODEL",
@@ -173,4 +185,92 @@ def test_resolve_providers_routes_embedding_through_builtin_gateway(monkeypatch)
     assert resolved["embedding"]["base_url"] == (
         "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
     )
+    assert resolved["embedding"]["api_key"] == "gateway-key"
     assert resolved["embedding"]["model"] == "jina-embeddings-v4"
+
+
+def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
+    user_id = uuid4()
+    provider_id = uuid4()
+    provider = LLMProvider(
+        id=provider_id,
+        user_id=None,
+        name="Builtin LiteLLM",
+        type=ProviderType.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        model="deepseek-v4-flash",
+        is_builtin=True,
+        visible_to_all=True,
+    )
+
+    default_model = SimpleNamespace(
+        planner_provider_id=provider_id,
+        planner_model_name="deepseek-v4-flash",
+        coder_provider_id=provider_id,
+        coder_model_name="deepseek-v4-flash",
+        other_provider_id=provider_id,
+        other_model_name="deepseek-v4-flash",
+    )
+
+    issued_tokens = []
+
+    def fake_issue_token(**kwargs):
+        issued_tokens.append(kwargs)
+        return f"proxy-token-{len(issued_tokens)}"
+
+    monkeypatch.setattr(task_service.settings, "TEAM_ID", "team-123", raising=False)
+    monkeypatch.setattr(
+        task_service.settings,
+        "BUILTIN_PROVIDER_BASE_URL",
+        "http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        task_service.settings,
+        "BUILTIN_PROVIDER_API_KEY",
+        "gateway-key",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        task_service.settings,
+        "LLM_PROXY_ENABLE",
+        True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        task_service.settings,
+        "LLM_PROXY_BASE_URL",
+        "http://backend:8000/api/v1/llm4ad/llmproxy",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.user_default_model_service.get_user_default_model",
+        lambda _db, _user_id, access_token=None: default_model,
+    )
+    monkeypatch.setattr(
+        "app.services.provider_service.fetch_builtin_provider_models",
+        lambda _provider, _access_token, user_id=None: ["deepseek-v4-flash"],
+    )
+    monkeypatch.setattr("app.services.credential_broker.issue_token", fake_issue_token)
+
+    resolved = task_service._resolve_providers(
+        _FakeDB([provider]),
+        {
+            "planner": {"provider": "default", "provider_model": ""},
+            "coder": {"provider": "default", "provider_model": ""},
+            "evaluator": {"provider": "default", "provider_model": ""},
+        },
+        SimpleNamespace(id=user_id),
+        access_token="user-token",
+        task_id=uuid4(),
+    )
+
+    assert [provider["base_url"] for provider in resolved["providers"]] == [
+        "http://backend:8000/api/v1/llm4ad/llmproxy"
+    ]
+    assert resolved["embedding"]["base_url"] == (
+        "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
+    )
+    assert resolved["embedding"]["api_key"] == "gateway-key"
+    assert [token["model"] for token in issued_tokens] == ["deepseek-v4-flash"]
