@@ -6,6 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+from fastapi import HTTPException
+
 from app.models import LLMProvider, ProviderType
 
 
@@ -119,7 +122,7 @@ def test_resolve_providers_uses_dynamic_builtin_models_for_default_slots(monkeyp
     assert all(p["model"] != "stale-db-model" for p in resolved["providers"])
 
 
-def test_resolve_providers_routes_embedding_through_builtin_gateway(monkeypatch):
+def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monkeypatch):
     user_id = uuid4()
     provider_id = uuid4()
     provider = LLMProvider(
@@ -147,13 +150,20 @@ def test_resolve_providers_routes_embedding_through_builtin_gateway(monkeypatch)
     monkeypatch.setattr(
         task_service.settings,
         "BUILTIN_PROVIDER_BASE_URL",
-        "http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        "https://external-provider.example.com/v1",
+        raising=False,
+    )
+    monkeypatch.setattr(task_service.settings, "LITELLM_GATEWAY_BASE_URL", "http://gateway:9090", raising=False)
+    monkeypatch.setattr(
+        task_service.settings,
+        "BUILTIN_PROVIDER_API_KEY",
+        "real-gateway-key",
         raising=False,
     )
     monkeypatch.setattr(
         task_service.settings,
-        "BUILTIN_PROVIDER_API_KEY",
-        "gateway-key",
+        "JINA_API_KEY",
+        "real-jina-key",
         raising=False,
     )
     monkeypatch.setattr(
@@ -185,7 +195,7 @@ def test_resolve_providers_routes_embedding_through_builtin_gateway(monkeypatch)
     assert resolved["embedding"]["base_url"] == (
         "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
     )
-    assert resolved["embedding"]["api_key"] == "gateway-key"
+    assert resolved["embedding"]["api_key"] == "EMPTY"
     assert resolved["embedding"]["model"] == "jina-embeddings-v4"
 
 
@@ -220,16 +230,17 @@ def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
         return f"proxy-token-{len(issued_tokens)}"
 
     monkeypatch.setattr(task_service.settings, "TEAM_ID", "team-123", raising=False)
+    monkeypatch.setattr(task_service.settings, "LITELLM_GATEWAY_BASE_URL", "http://gateway:9090", raising=False)
     monkeypatch.setattr(
         task_service.settings,
         "BUILTIN_PROVIDER_BASE_URL",
-        "http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        "",
         raising=False,
     )
     monkeypatch.setattr(
         task_service.settings,
         "BUILTIN_PROVIDER_API_KEY",
-        "gateway-key",
+        "real-gateway-key",
         raising=False,
     )
     monkeypatch.setattr(
@@ -272,5 +283,56 @@ def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
     assert resolved["embedding"]["base_url"] == (
         "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
     )
-    assert resolved["embedding"]["api_key"] == "gateway-key"
+    assert resolved["embedding"]["api_key"] == "EMPTY"
     assert [token["model"] for token in issued_tokens] == ["deepseek-v4-flash"]
+
+
+def test_resolve_providers_requires_gateway_embedding_context(monkeypatch):
+    user_id = uuid4()
+    provider_id = uuid4()
+    provider = LLMProvider(
+        id=provider_id,
+        user_id=None,
+        name="Builtin LiteLLM",
+        type=ProviderType.OPENAI_COMPATIBLE,
+        api_key="sk-test",
+        base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        model="deepseek-v4-flash",
+        is_builtin=True,
+        visible_to_all=True,
+    )
+
+    default_model = SimpleNamespace(
+        planner_provider_id=provider_id,
+        planner_model_name="deepseek-v4-flash",
+        coder_provider_id=provider_id,
+        coder_model_name="deepseek-v4-flash",
+        other_provider_id=provider_id,
+        other_model_name="deepseek-v4-flash",
+    )
+
+    monkeypatch.setattr(task_service.settings, "TEAM_ID", "", raising=False)
+    monkeypatch.setattr(task_service.settings, "LITELLM_GATEWAY_BASE_URL", "http://gateway:9090", raising=False)
+    monkeypatch.setattr(
+        "app.services.user_default_model_service.get_user_default_model",
+        lambda _db, _user_id, access_token=None: default_model,
+    )
+    monkeypatch.setattr(
+        "app.services.provider_service.fetch_builtin_provider_models",
+        lambda _provider, _access_token, user_id=None: ["deepseek-v4-flash"],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        task_service._resolve_providers(
+            _FakeDB([provider]),
+            {
+                "planner": {"provider": "default", "provider_model": ""},
+                "coder": {"provider": "default", "provider_model": ""},
+                "evaluator": {"provider": "default", "provider_model": ""},
+            },
+            SimpleNamespace(id=user_id),
+            access_token="user-token",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert "TEAM_ID" in exc_info.value.detail

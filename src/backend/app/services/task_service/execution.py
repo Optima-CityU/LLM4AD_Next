@@ -196,24 +196,17 @@ def _resolve_providers(
     input_args["planner"] = planner_config
     input_args["coder"] = coder_config
     input_args["evaluator"] = evaluator_config
-    # 运行强制使用默认的 embedding 模型。云部署直接走本地 LiteLLM Gateway，
-    # 避免 embedding 被后续 LLM credential proxy 改写为 backend 回环地址。
-    embedding_base_url = "https://api.jinaai.cn/v1"
-    embedding_api_key = settings.BUILTIN_PROVIDER_API_KEY or settings.JINA_API_KEY
-    if settings.BUILTIN_PROVIDER_BASE_URL:
-        embedding_base_url = resolve_builtin_base_url(
-            settings.BUILTIN_PROVIDER_BASE_URL,
-            access_token,
-        ) or embedding_base_url
+    # 运行强制使用默认 embedding 模型，并始终经 LiteLLM Gateway 注入用户 key。
+    # 不读取内置供应商 URL 或 Jina 直连 key，避免任务容器绕过统一网关鉴权。
+    embedding_base_url = _build_gateway_embedding_base_url(access_token)
     embedding_kwargs: dict = {
         "type": "openai_compatible",
         "base_url": embedding_base_url,
+        "api_key": "EMPTY",
         "model": settings.EMBEDDING_MODEL,
         "dim": 2048,
         "embedding_func_max_async": 2,
     }
-    if embedding_api_key:
-        embedding_kwargs["api_key"] = embedding_api_key
     input_args["embedding"] = EmbeddingConfig(**embedding_kwargs).model_dump()
 
     # 启用凭据代理：把下发到容器的真实 LLM 凭据替换为一次性代理 token + 代理 base_url。
@@ -221,6 +214,31 @@ def _resolve_providers(
     if settings.LLM_PROXY_ENABLE and task_id is not None:
         _apply_credential_proxy(input_args, current_user, task_id)
     return input_args
+
+
+def _build_gateway_embedding_base_url(access_token: str | None) -> str:
+    """Build the per-user LiteLLM Gateway URL used by task embedding calls."""
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少访问令牌，无法通过 LiteLLM Gateway 配置 embedding",
+        )
+
+    gateway_base_url = settings.LITELLM_GATEWAY_BASE_URL.strip().rstrip("/")
+    if not gateway_base_url:
+        raise HTTPException(
+            status_code=500,
+            detail="LITELLM_GATEWAY_BASE_URL 未配置，无法通过 LiteLLM Gateway 配置 embedding",
+        )
+
+    team_id = settings.TEAM_ID.strip()
+    if not team_id:
+        raise HTTPException(
+            status_code=500,
+            detail="TEAM_ID 未配置，无法通过 LiteLLM Gateway 配置 embedding",
+        )
+
+    return f"{gateway_base_url}/litellm_proxy/{team_id}/{access_token}/v1"
 
 
 def _apply_credential_proxy(
