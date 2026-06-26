@@ -37,6 +37,7 @@
     "echarts-for-react": "^3.0.6",
     "echarts-gl": "^2.0.9",
     "form-data": "4.0.5",
+    "i18n-iso-countries": "^7.14.0",
     "i18next": "^26.0.5",
     "install": "^0.13.0",
     "js-yaml": "^4.1.1",
@@ -59,6 +60,8 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.17",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2",
     "zod": "^4.2.1"
   },
   "devDependencies": {
@@ -72,6 +75,7 @@
     "@types/node": "^25.0.2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-react-swc": "^4.2.2",
     "dotenv": "^17.2.3",
     "rollup-plugin-visualizer": "^7.0.1",

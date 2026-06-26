@@ -7,10 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import desc
+from sqlalchemy import case, desc
 from sqlmodel import Session, func, select
 
-from app import models
 from app.core.config import settings
 from app.models import Feedback, LLMProvider, Project, Task, TaskStatus, User
 from app.services import provider_service
@@ -37,6 +36,52 @@ def build_analytics_overview(
         "github": fetch_github_summary(),
         "plausible": fetch_plausible_summary(normalized_range),
     }
+
+
+def build_operations_summary(db: Session) -> dict[str, Any]:
+    """Build stable operations inventory statistics."""
+    return {
+        "users": _build_user_stats(db),
+        "projects": _build_project_stats(db),
+        "providers": _build_provider_stats(db),
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def build_operations_tasks(db: Session) -> dict[str, Any]:
+    """Build task activity statistics."""
+    result = _build_task_stats(db)
+    result["generated_at"] = datetime.now(UTC).isoformat()
+    return result
+
+
+def build_operations_feedback(db: Session) -> dict[str, Any]:
+    """Build feedback statistics."""
+    result = _build_feedback_stats(db)
+    result["generated_at"] = datetime.now(UTC).isoformat()
+    return result
+
+
+def build_operations_litellm(db: Session, access_token: str) -> dict[str, Any]:
+    """Build LiteLLM quota and spend statistics."""
+    result = fetch_litellm_quota_summary(db, access_token)
+    result["generated_at"] = datetime.now(UTC).isoformat()
+    return result
+
+
+def build_visitors_plausible(date_range: str) -> dict[str, Any]:
+    """Build visitor analytics statistics."""
+    normalized_range = _normalize_range(date_range)
+    result = fetch_plausible_summary(normalized_range)
+    result["generated_at"] = datetime.now(UTC).isoformat()
+    return result
+
+
+def build_visitors_github() -> dict[str, Any]:
+    """Build GitHub repository statistics."""
+    result = fetch_github_summary()
+    result["generated_at"] = datetime.now(UTC).isoformat()
+    return result
 
 
 def _build_user_stats(db: Session) -> dict[str, Any]:
@@ -74,28 +119,56 @@ def _build_task_stats(db: Session) -> dict[str, Any]:
         if day is not None
     ]
 
-    top_users = [
-        {
-            "name": full_name or email or "Unknown",
-            "email": email,
-            "tasks": int(task_count or 0),
-            "projects": int(project_count or 0),
-        }
-        for full_name, email, task_count, project_count in db.exec(
-            select(
-                User.full_name,
-                User.email,
-                func.count(Task.id),
-                func.count(func.distinct(Project.id)),
-            )
-            .select_from(User)
-            .join(Project, Project.user_id == User.id, isouter=True)
-            .join(Task, Task.project_id == Project.id, isouter=True)
-            .group_by(User.id, User.full_name, User.email)
-            .order_by(desc(func.count(Task.id)))
-            .limit(8)
-        ).all()
-    ]
+    task_count = func.count(Task.id)
+    active_count = func.sum(case((Task.status.in_([TaskStatus.PENDING, TaskStatus.RUNNING]), 1), else_=0))
+    completed_count = func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0))
+    failed_count = func.sum(case((Task.status == TaskStatus.FAILED, 1), else_=0))
+    top_users = []
+    for (
+        user_id,
+        full_name,
+        email,
+        user_task_count,
+        project_count,
+        active_tasks,
+        completed_tasks,
+        failed_tasks,
+        latest_task_time,
+    ) in db.exec(
+        select(
+            User.id,
+            User.full_name,
+            User.email,
+            task_count,
+            func.count(func.distinct(Project.id)),
+            active_count,
+            completed_count,
+            failed_count,
+            func.max(Task.created_time),
+        )
+        .select_from(Task)
+        .join(Project, Task.project_id == Project.id)
+        .join(User, Project.user_id == User.id)
+        .group_by(User.id, User.full_name, User.email)
+        .order_by(desc(task_count))
+        .limit(8)
+    ).all():
+        top_users.append(
+            {
+                "user_id": str(user_id),
+                "full_name": full_name,
+                "name": full_name or email or "Unknown",
+                "email": email,
+                "tasks": int(user_task_count or 0),
+                "projects": int(project_count or 0),
+                "active_tasks": int(active_tasks or 0),
+                "completed_tasks": int(completed_tasks or 0),
+                "failed_tasks": int(failed_tasks or 0),
+                "latest_task_time": latest_task_time.isoformat()
+                if hasattr(latest_task_time, "isoformat")
+                else (str(latest_task_time) if latest_task_time else None),
+            }
+        )
 
     return {
         "total": total,
@@ -193,15 +266,18 @@ def fetch_litellm_quota_summary(db: Session, access_token: str) -> dict[str, Any
     result = provider_service.fetch_litellm_user_quotas_via_gateway(db, access_token)
     items = result.get("items") if isinstance(result, dict) else None
     if not result.get("available") or not isinstance(items, list):
+        detail = result.get("message", "LiteLLM quota is unavailable.") if isinstance(result, dict) else ""
         return {
             "available": False,
-            "total_spend": 0.0,
+            "total_spend": None,
             "total_budget": None,
             "remaining": None,
             "over_budget_users": 0,
             "near_limit_users": 0,
             "top_users": [],
-            "message": result.get("message", "LiteLLM quota is unavailable.") if isinstance(result, dict) else "",
+            "message": "LiteLLM quota data is temporarily unavailable.",
+            "detail": detail,
+            "unavailable_reason": "gateway_unavailable",
         }
 
     total_spend = sum(_num(item.get("spend")) or 0 for item in items if isinstance(item, dict))
@@ -347,16 +423,30 @@ def fetch_plausible_summary(date_range: str) -> dict[str, Any]:
         errors,
         "trend",
     )
-    pages = _plausible_breakdown(api_base_url, site_id, normalized_range, "event:page", errors, "top_pages")
-    sources = _plausible_breakdown(api_base_url, site_id, normalized_range, "visit:source", errors, "top_sources")
+    pages = _plausible_breakdown(api_base_url, site_id, normalized_range, ["event:page"], errors, "top_pages")
+    sources = _plausible_breakdown(api_base_url, site_id, normalized_range, ["visit:source"], errors, "top_sources")
     countries = _plausible_breakdown(
-        api_base_url, site_id, normalized_range, "visit:country_name", errors, "countries"
+        api_base_url,
+        site_id,
+        normalized_range,
+        ["visit:country", "visit:country_name"],
+        errors,
+        "countries",
+        _parse_plausible_country_row,
     )
-    cities = _plausible_breakdown(api_base_url, site_id, normalized_range, "visit:city_name", errors, "cities")
-    devices = _plausible_breakdown(api_base_url, site_id, normalized_range, "visit:device", errors, "devices")
-    browsers = _plausible_breakdown(api_base_url, site_id, normalized_range, "visit:browser", errors, "browsers")
+    cities = _plausible_breakdown(
+        api_base_url,
+        site_id,
+        normalized_range,
+        ["visit:country", "visit:country_name", "visit:city", "visit:city_name"],
+        errors,
+        "cities",
+        _parse_plausible_city_row,
+    )
+    devices = _plausible_breakdown(api_base_url, site_id, normalized_range, ["visit:device"], errors, "devices")
+    browsers = _plausible_breakdown(api_base_url, site_id, normalized_range, ["visit:browser"], errors, "browsers")
     operating_systems = _plausible_breakdown(
-        api_base_url, site_id, normalized_range, "visit:os", errors, "operating_systems"
+        api_base_url, site_id, normalized_range, ["visit:os"], errors, "operating_systems"
     )
 
     has_data = bool(aggregate or timeseries or pages or sources or countries or cities or devices or browsers or operating_systems)
@@ -389,9 +479,10 @@ def _plausible_breakdown(
     api_base_url: str,
     site_id: str,
     date_range: str,
-    dimension: str,
+    dimensions: list[str],
     errors: dict[str, str],
     section: str,
+    row_parser: Any | None = None,
 ) -> list[dict[str, Any]]:
     payload = _safe_plausible_query(
         api_base_url,
@@ -399,7 +490,7 @@ def _plausible_breakdown(
             "site_id": site_id,
             "metrics": ["visitors"],
             "date_range": date_range,
-            "dimensions": [dimension],
+            "dimensions": dimensions,
             "pagination": {"limit": 8, "offset": 0},
         },
         errors,
@@ -410,9 +501,37 @@ def _plausible_breakdown(
     for row in results or []:
         dimensions = row.get("dimensions") or []
         metrics = row.get("metrics") or []
+        value = metrics[0] if metrics else 0
+        if row_parser is not None:
+            rows.append(row_parser(dimensions, value))
+            continue
         name = str(dimensions[0]).strip() if dimensions else ""
-        rows.append({"name": name or "(not set)", "value": metrics[0] if metrics else 0})
+        rows.append({"name": name or "(not set)", "value": value})
     return rows
+
+
+def _parse_plausible_country_row(dimensions: list[Any], value: Any) -> dict[str, Any]:
+    code = str(dimensions[0]).strip().upper() if len(dimensions) > 0 and dimensions[0] else ""
+    name = str(dimensions[1]).strip() if len(dimensions) > 1 and dimensions[1] else code
+    return {
+        "code": code,
+        "name": name or "(not set)",
+        "value": value,
+    }
+
+
+def _parse_plausible_city_row(dimensions: list[Any], value: Any) -> dict[str, Any]:
+    country_code = str(dimensions[0]).strip().upper() if len(dimensions) > 0 and dimensions[0] else ""
+    country_name = str(dimensions[1]).strip() if len(dimensions) > 1 and dimensions[1] else country_code
+    city_name = str(dimensions[3]).strip() if len(dimensions) > 3 and dimensions[3] else ""
+    if not city_name and len(dimensions) > 2 and dimensions[2]:
+        city_name = str(dimensions[2]).strip()
+    return {
+        "country_code": country_code,
+        "country_name": country_name or "(not set)",
+        "name": city_name or "(not set)",
+        "value": value,
+    }
 
 
 def _safe_plausible_query(
@@ -450,10 +569,11 @@ def _resolve_plausible_site_id() -> str:
         return configured
     return ""
 
+
 def _extract_plausible_metrics(payload: dict[str, Any], metric_names: list[str]) -> dict[str, float]:
     results = payload.get("results") if isinstance(payload, dict) else None
     if not results:
-        return {name: 0 for name in metric_names}
+        return dict.fromkeys(metric_names, 0)
     metrics = results[0].get("metrics") if isinstance(results[0], dict) else []
     return {
         name: float(metrics[index] or 0) if index < len(metrics) else 0

@@ -33,10 +33,16 @@ export interface DashboardOverview {
     by_status: Record<string, number>
     trend: Array<{ date: string; count: number }>
     top_users: Array<{
+      user_id?: string
+      full_name?: string | null
       name: string
       email?: string | null
       tasks: number
       projects: number
+      active_tasks?: number
+      completed_tasks?: number
+      failed_tasks?: number
+      latest_task_time?: string | null
     }>
   }
   feedback: {
@@ -73,7 +79,7 @@ export interface DashboardOverview {
   }
   litellm: {
     available: boolean
-    total_spend: number
+    total_spend: number | null
     total_budget: number | null
     remaining: number | null
     over_budget_users: number
@@ -85,6 +91,8 @@ export interface DashboardOverview {
       budget?: number | null
       remaining?: number | null
     }>
+    detail?: string
+    unavailable_reason?: string
     message?: string
   }
   github: {
@@ -112,14 +120,46 @@ export interface DashboardOverview {
     trend?: Array<{ date: string; visitors: number; pageviews: number }>
     top_pages?: Array<{ name: string; value: number }>
     top_sources?: Array<{ name: string; value: number }>
-    countries?: Array<{ name: string; value: number }>
-    cities?: Array<{ name: string; value: number }>
+    countries?: Array<{ code?: string; name: string; value: number }>
+    cities?: Array<{
+      name: string
+      value: number
+      country_code?: string
+      country_name?: string
+    }>
     devices?: Array<{ name: string; value: number }>
     browsers?: Array<{ name: string; value: number }>
     operating_systems?: Array<{ name: string; value: number }>
     errors?: Record<string, string>
     message?: string
   }
+}
+
+export interface OperationsSummary {
+  generated_at?: string
+  users: DashboardOverview["users"]
+  projects: DashboardOverview["projects"]
+  providers: DashboardOverview["providers"]
+}
+
+export type OperationsTasks = DashboardOverview["tasks"] & {
+  generated_at?: string
+}
+
+export type OperationsFeedback = DashboardOverview["feedback"] & {
+  generated_at?: string
+}
+
+export type OperationsLiteLLM = DashboardOverview["litellm"] & {
+  generated_at?: string
+}
+
+export type VisitorsPlausible = DashboardOverview["plausible"] & {
+  generated_at?: string
+}
+
+export type VisitorsGithub = DashboardOverview["github"] & {
+  generated_at?: string
 }
 
 const emptyOverview: DashboardOverview = {
@@ -188,6 +228,23 @@ const emptyOverview: DashboardOverview = {
   },
 }
 
+export const emptyOperationsSummary: OperationsSummary = {
+  users: emptyOverview.users,
+  projects: emptyOverview.projects,
+  providers: emptyOverview.providers,
+}
+
+export const emptyOperationsTasks: OperationsTasks = emptyOverview.tasks
+
+export const emptyOperationsFeedback: OperationsFeedback =
+  emptyOverview.feedback
+
+export const emptyOperationsLiteLLM: OperationsLiteLLM = emptyOverview.litellm
+
+export const emptyVisitorsPlausible: VisitorsPlausible = emptyOverview.plausible
+
+export const emptyVisitorsGithub: VisitorsGithub = emptyOverview.github
+
 export function normalizeDashboardOverview(
   payload: Partial<DashboardOverview> | null | undefined,
 ): DashboardOverview {
@@ -244,6 +301,83 @@ export function normalizeDashboardOverview(
   }
 }
 
+export function normalizeOperationsSummary(
+  payload: Partial<OperationsSummary> | null | undefined,
+): OperationsSummary {
+  return {
+    generated_at: payload?.generated_at,
+    users: { ...emptyOverview.users, ...(payload?.users ?? {}) },
+    projects: { ...emptyOverview.projects, ...(payload?.projects ?? {}) },
+    providers: { ...emptyOverview.providers, ...(payload?.providers ?? {}) },
+  }
+}
+
+export function normalizeOperationsTasks(
+  payload: Partial<OperationsTasks> | null | undefined,
+): OperationsTasks {
+  return {
+    ...emptyOverview.tasks,
+    ...(payload ?? {}),
+    by_status: {
+      ...emptyOverview.tasks.by_status,
+      ...(payload?.by_status ?? {}),
+    },
+    trend: payload?.trend ?? [],
+    top_users: payload?.top_users ?? [],
+  }
+}
+
+export function normalizeOperationsFeedback(
+  payload: Partial<OperationsFeedback> | null | undefined,
+): OperationsFeedback {
+  return {
+    ...emptyOverview.feedback,
+    ...(payload ?? {}),
+    by_status: payload?.by_status ?? {},
+    by_type: payload?.by_type ?? {},
+    by_priority: payload?.by_priority ?? {},
+    recent_items: payload?.recent_items ?? [],
+  }
+}
+
+export function normalizeOperationsLiteLLM(
+  payload: Partial<OperationsLiteLLM> | null | undefined,
+): OperationsLiteLLM {
+  return {
+    ...emptyOverview.litellm,
+    ...(payload ?? {}),
+    top_users: payload?.top_users ?? [],
+  }
+}
+
+export function normalizeVisitorsPlausible(
+  payload: Partial<VisitorsPlausible> | null | undefined,
+): VisitorsPlausible {
+  return {
+    ...emptyOverview.plausible,
+    ...(payload ?? {}),
+    trend: payload?.trend ?? [],
+    top_pages: payload?.top_pages ?? [],
+    top_sources: payload?.top_sources ?? [],
+    countries: payload?.countries ?? [],
+    cities: payload?.cities ?? [],
+    devices: payload?.devices ?? [],
+    browsers: payload?.browsers ?? [],
+    operating_systems: payload?.operating_systems ?? [],
+    errors: payload?.errors ?? {},
+  }
+}
+
+export function normalizeVisitorsGithub(
+  payload: Partial<VisitorsGithub> | null | undefined,
+): VisitorsGithub {
+  return {
+    ...emptyOverview.github,
+    ...(payload ?? {}),
+    recent_issues: payload?.recent_issues ?? [],
+  }
+}
+
 export function formatCompactNumber(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-"
   return Intl.NumberFormat(undefined, {
@@ -281,25 +415,33 @@ export function getPlausibleStatus(plausible: DashboardOverview["plausible"]): {
 }
 
 export function getGithubIssueEmptyMessage(
-  github: Pick<DashboardOverview["github"], "available" | "message" | "recent_issues">,
+  github: Pick<
+    DashboardOverview["github"],
+    "available" | "message" | "recent_issues"
+  >,
   noOpenIssuesText: string,
 ): string {
   if (!github.available && github.message) return github.message
   return noOpenIssuesText
 }
 
-export function getTaskStatusRows(values: Record<string, number>): TaskStatusRow[] {
-  const knownRows = TASK_STATUS_ORDER
-    .map((key) => ({
-      key,
-      value: values[key] ?? 0,
-      labelKey: `adminAnalytics.dashboard.statusLabels.${key}`,
-      active: LIVE_TASK_STATUS.has(key),
-    }))
-    .filter((item) => item.value > 0)
+export function getTaskStatusRows(
+  values: Record<string, number>,
+): TaskStatusRow[] {
+  const knownRows = TASK_STATUS_ORDER.map((key) => ({
+    key,
+    value: values[key] ?? 0,
+    labelKey: `adminAnalytics.dashboard.statusLabels.${key}`,
+    active: LIVE_TASK_STATUS.has(key),
+  })).filter((item) => item.value > 0)
 
   const customRows = Object.entries(values)
-    .filter(([key, value]) => !TASK_STATUS_ORDER.includes(key as (typeof TASK_STATUS_ORDER)[number]) && value > 0)
+    .filter(
+      ([key, value]) =>
+        !TASK_STATUS_ORDER.includes(
+          key as (typeof TASK_STATUS_ORDER)[number],
+        ) && value > 0,
+    )
     .map(([key, value]) => ({
       key,
       value,

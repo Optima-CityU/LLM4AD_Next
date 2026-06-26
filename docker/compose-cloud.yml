@@ -152,6 +152,7 @@ services:
     networks:
       - default
       - chat_tune_runtime
+      - task_runtime
     depends_on:
       db:
         condition: service_healthy

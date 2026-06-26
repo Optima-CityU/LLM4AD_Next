@@ -35,7 +35,21 @@ class _FakeDb:
             _ScalarResult(4),  # tasks total
             _RowsResult([("completed", 3), ("failed", 1)]),
             _RowsResult([("2026-06-25", 2)]),
-            _RowsResult([("User A", "a@example.com", 3, 2)]),
+            _RowsResult(
+                [
+                    (
+                        UUID("00000000-0000-0000-0000-0000000000aa"),
+                        "User A",
+                        "a@example.com",
+                        3,
+                        2,
+                        1,
+                        1,
+                        1,
+                        datetime(2026, 6, 25, 10, 30, tzinfo=UTC),
+                    )
+                ]
+            ),
             _ScalarResult(5),  # feedback total
             _RowsResult([("pending", 4), ("resolved", 1)]),
             _RowsResult([("bug", 5)]),
@@ -109,6 +123,20 @@ def test_build_analytics_overview_combines_local_and_external_sections(monkeypat
         "completed": 3,
         "failed": 1,
     }
+    assert overview["tasks"]["top_users"] == [
+        {
+            "user_id": "00000000-0000-0000-0000-0000000000aa",
+            "full_name": "User A",
+            "name": "User A",
+            "email": "a@example.com",
+            "tasks": 3,
+            "projects": 2,
+            "active_tasks": 1,
+            "completed_tasks": 1,
+            "failed_tasks": 1,
+            "latest_task_time": "2026-06-25T10:30:00+00:00",
+        }
+    ]
     assert overview["feedback"]["pending"] == 4
     assert overview["feedback"]["recent_items"][0]["title"] == "Crash on dashboard"
     assert overview["feedback"]["recent_items"][0]["id"] == "00000000-0000-0000-0000-000000000001"
@@ -117,6 +145,30 @@ def test_build_analytics_overview_combines_local_and_external_sections(monkeypat
     assert overview["feedback"]["recent_items"][0]["browser_info"] == "Safari 18"
     assert overview["github"]["stars"] == 12
     assert overview["litellm"]["total_spend"] == 2.5
+
+
+def test_fetch_litellm_quota_summary_degrades_gateway_502(monkeypatch):
+    monkeypatch.setattr(
+        admin_analytics_service.provider_service,
+        "fetch_litellm_user_quotas_via_gateway",
+        lambda _db, _token: {
+            "available": False,
+            "items": [],
+            "total": 0,
+            "message": "Failed to fetch LiteLLM user quotas through gateway: Server error '502 Bad Gateway'",
+        },
+    )
+
+    summary = admin_analytics_service.fetch_litellm_quota_summary(object(), "admin-token")
+
+    assert summary["available"] is False
+    assert summary["total_spend"] is None
+    assert summary["total_budget"] is None
+    assert summary["remaining"] is None
+    assert summary["top_users"] == []
+    assert summary["message"] == "LiteLLM quota data is temporarily unavailable."
+    assert "502 Bad Gateway" in summary["detail"]
+    assert summary["unavailable_reason"] == "gateway_unavailable"
 
 
 def test_fetch_plausible_summary_requires_site_id(monkeypatch):
@@ -162,6 +214,12 @@ def test_fetch_plausible_summary_uses_official_api_configuration(monkeypatch):
                 return FakeResponse(
                     {"results": [{"dimensions": ["2026-06-25"], "metrics": [3, 9]}]}
                 )
+            if dimensions == ["visit:country", "visit:country_name"]:
+                return FakeResponse({"results": [{"dimensions": ["US", "United States"], "metrics": [7]}]})
+            if dimensions == ["visit:country", "visit:country_name", "visit:city", "visit:city_name"]:
+                return FakeResponse(
+                    {"results": [{"dimensions": ["US", "United States", "5128581", "New York"], "metrics": [4]}]}
+                )
             if dimensions:
                 return FakeResponse(
                     {"results": [{"dimensions": [f"{dimensions[0]} value"], "metrics": [7]}]}
@@ -181,8 +239,15 @@ def test_fetch_plausible_summary_uses_official_api_configuration(monkeypatch):
     assert summary["metrics"]["visitors"] == 5
     assert summary["metrics"]["visit_duration"] == 42
     assert summary["trend"] == [{"date": "2026-06-25", "visitors": 3, "pageviews": 9}]
-    assert summary["countries"] == [{"name": "visit:country_name value", "value": 7}]
-    assert summary["cities"] == [{"name": "visit:city_name value", "value": 7}]
+    assert summary["countries"] == [{"code": "US", "name": "United States", "value": 7}]
+    assert summary["cities"] == [
+        {
+            "country_code": "US",
+            "country_name": "United States",
+            "name": "New York",
+            "value": 4,
+        }
+    ]
     assert summary["devices"] == [{"name": "visit:device value", "value": 7}]
     assert summary["browsers"] == [{"name": "visit:browser value", "value": 7}]
     assert summary["operating_systems"] == [{"name": "visit:os value", "value": 7}]
