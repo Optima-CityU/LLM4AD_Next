@@ -21,7 +21,6 @@ from .auth import get_task_with_auth
 
 EXCLUDED_DIR_NAMES = {
     ".cache",
-    ".git",
     ".ipynb_checkpoints",
     ".mypy_cache",
     ".next",

@@ -1,6 +1,6 @@
+import re
 import uuid
 import zipfile
-import re
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -47,6 +47,9 @@ def test_build_workspace_archive_keeps_logs_and_excludes_dependencies_and_temp_f
     (workspace / "src").mkdir(parents=True)
     (workspace / "src" / "main.py").write_text("print('hello')\n")
     (workspace / "run.log").write_text("important diagnostic log\n")
+    (workspace / ".git" / "refs" / "heads").mkdir(parents=True)
+    (workspace / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (workspace / ".git" / "refs" / "heads" / "main").write_text("abc123\n")
     (workspace / "node_modules" / "pkg").mkdir(parents=True)
     (workspace / "node_modules" / "pkg" / "index.js").write_text("dependency\n")
     (workspace / ".venv" / "lib").mkdir(parents=True)
@@ -64,6 +67,8 @@ def test_build_workspace_archive_keeps_logs_and_excludes_dependencies_and_temp_f
 
     assert "src/main.py" in names
     assert "run.log" in names
+    assert ".git/HEAD" in names
+    assert ".git/refs/heads/main" in names
     assert "node_modules/pkg/index.js" not in names
     assert ".venv/lib/site.py" not in names
     assert "__pycache__/main.pyc" not in names

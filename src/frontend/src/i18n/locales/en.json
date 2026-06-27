@@ -666,9 +666,9 @@
       "tooltip": "If the IDE is idle for over 24 hours, the service stops automatically to save resources. Click here to restart it if the IDE is unresponsive."
     },
     "ideDownload": {
-      "label": "Download workspace",
-      "tooltip": "Download the current task IDE workspace, keeping logs and excluding dependencies, caches, and temporary files.",
-      "failed": "Failed to download workspace"
+      "label": "Export project",
+      "tooltip": "Download the current task IDE workspace, keeping logs and Git history while excluding dependencies, caches, and temporary files.",
+      "failed": "Failed to export project"
     },
     "progressBar": {
       "evolutionGeneration": "Generation",

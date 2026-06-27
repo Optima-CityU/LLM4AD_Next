@@ -386,9 +386,17 @@ function Layout() {
       exitDemo()
       // Clear any lingering demo task selection so a real project never
       // briefly renders against the simulated DEMO_TASK while its first list
-      // query is in flight.
-      setSelectedTaskRaw(null)
-      setSelectedChildTaskId(null)
+      // query is in flight. Only drop the selection when it actually points at
+      // a demo task — clearing unconditionally would race with the task list's
+      // auto-select effect (children run their effects before parents), wiping
+      // a freshly auto-selected real task on a warm-cache re-entry and leaving
+      // the list with nothing selected.
+      setSelectedTaskRaw((prev) =>
+        prev && isDemoTaskId(prev.id) ? null : prev,
+      )
+      setSelectedChildTaskId((prev) =>
+        prev && isDemoTaskId(prev) ? null : prev,
+      )
       return
     }
     enterDemo("uninitialized")

@@ -20,6 +20,7 @@ usage() {
     '' \
     'Environment variables:' \
     '  TAG                           Image tag to deploy, default: latest' \
+    '  COMPOSE_VERSION               Docker Compose version to auto-install, default: v2.32.4' \
     '  EXTRA_BACKEND_RUNTIME_IMAGES  Extra whitespace-separated images to pull'
 }
 
@@ -67,15 +68,20 @@ fi
 
 RUNTIME_IMAGES=()
 DYNAMIC_CONTAINER_PREFIXES=()
+COMPOSE_CMD=()
+COMPOSE_INSTALL_URL=""
+COMPOSE_LAST_ERROR=""
 
 add_runtime_image() {
   local image="$1"
   local existing
 
   [[ -n "$image" ]] || return 0
-  for existing in "${RUNTIME_IMAGES[@]}"; do
-    [[ "$existing" == "$image" ]] && return 0
-  done
+  if [[ "${#RUNTIME_IMAGES[@]}" -gt 0 ]]; then
+    for existing in "${RUNTIME_IMAGES[@]}"; do
+      [[ "$existing" == "$image" ]] && return 0
+    done
+  fi
   RUNTIME_IMAGES+=("$image")
 }
 
@@ -84,9 +90,11 @@ add_dynamic_container_prefix() {
   local existing
 
   [[ -n "$prefix" ]] || return 0
-  for existing in "${DYNAMIC_CONTAINER_PREFIXES[@]}"; do
-    [[ "$existing" == "$prefix" ]] && return 0
-  done
+  if [[ "${#DYNAMIC_CONTAINER_PREFIXES[@]}" -gt 0 ]]; then
+    for existing in "${DYNAMIC_CONTAINER_PREFIXES[@]}"; do
+      [[ "$existing" == "$prefix" ]] && return 0
+    done
+  fi
   DYNAMIC_CONTAINER_PREFIXES+=("$prefix")
 }
 
@@ -123,13 +131,150 @@ run() {
   fi
 }
 
+die() {
+  printf 'Error: %s\n' "$*" >&2
+  exit 1
+}
+
+print_compose_install_hint() {
+  local url="${COMPOSE_INSTALL_URL:-}"
+
+  printf '\nDocker Compose v2 is required but was not found or is incompatible with this project.\n' >&2
+  if [[ -n "$COMPOSE_LAST_ERROR" ]]; then
+    printf '\nLast compatibility error:\n%s\n' "$COMPOSE_LAST_ERROR" >&2
+  fi
+  if [[ -n "$url" ]]; then
+    printf 'Automatic download failed. Install it manually:\n' >&2
+    printf '  mkdir -p ~/.docker/cli-plugins\n' >&2
+    printf '  curl -fL %q -o ~/.docker/cli-plugins/docker-compose\n' "$url" >&2
+    printf '  chmod +x ~/.docker/cli-plugins/docker-compose\n' >&2
+    printf '  docker compose version\n' >&2
+  else
+    printf 'Install Docker Compose v2 manually, then rerun this script.\n' >&2
+  fi
+}
+
+install_docker_compose_plugin() {
+  local version="${COMPOSE_VERSION:-v2.32.4}"
+  local os arch plugin_dir plugin_path
+
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$os" in
+    linux)
+      ;;
+    *)
+      printf 'Unsupported OS for automatic Docker Compose install: %s\n' "$os" >&2
+      return 1
+      ;;
+  esac
+
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64)
+      arch="x86_64"
+      ;;
+    aarch64|arm64)
+      arch="aarch64"
+      ;;
+    *)
+      printf 'Unsupported architecture for automatic Docker Compose install: %s\n' "$arch" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ -z "${HOME:-}" ]]; then
+    printf 'HOME is not set; cannot choose Docker CLI plugin directory.\n' >&2
+    return 1
+  fi
+
+  plugin_dir="${DOCKER_CONFIG:-$HOME/.docker}/cli-plugins"
+  plugin_path="$plugin_dir/docker-compose"
+  COMPOSE_INSTALL_URL="https://github.com/docker/compose/releases/download/${version}/docker-compose-${os}-${arch}"
+
+  printf 'Docker Compose v2 is missing or incompatible. Installing %s to %s...\n' "$version" "$plugin_path" >&2
+  run mkdir -p "$plugin_dir" || return 1
+  if command -v curl >/dev/null 2>&1; then
+    run curl -fL "$COMPOSE_INSTALL_URL" -o "$plugin_path" || return 1
+  elif command -v wget >/dev/null 2>&1; then
+    run wget -O "$plugin_path" "$COMPOSE_INSTALL_URL" || return 1
+  else
+    printf 'Neither curl nor wget is available for automatic download.\n' >&2
+    return 1
+  fi
+  run chmod +x "$plugin_path" || return 1
+}
+
+compose_command_supports_project() {
+  local output command_display
+
+  if output="$("$@" "${COMPOSE_ARGS[@]}" config -q 2>&1)"; then
+    return 0
+  fi
+
+  printf -v command_display '%q ' "$@"
+  command_display="${command_display% }"
+  COMPOSE_LAST_ERROR="Command: ${command_display}
+${output}"
+  printf 'Skipping incompatible Docker Compose command: %s\n' "$command_display" >&2
+  return 1
+}
+
+select_compose_command() {
+  if "$@" version >/dev/null 2>&1 && compose_command_supports_project "$@"; then
+    COMPOSE_CMD=("$@")
+    return 0
+  fi
+  return 1
+}
+
+resolve_compose_command() {
+  if ! command -v docker >/dev/null 2>&1; then
+    die 'Docker CLI is not installed or not in PATH. Please install Docker first.'
+  fi
+
+  if select_compose_command docker compose; then
+    return 0
+  fi
+
+  if command -v docker-compose >/dev/null 2>&1 && select_compose_command docker-compose; then
+    return 0
+  fi
+
+  if install_docker_compose_plugin; then
+    if [[ "$DRY_RUN" -eq 1 ]] || select_compose_command docker compose; then
+      COMPOSE_CMD=(docker compose)
+      return 0
+    fi
+  fi
+
+  print_compose_install_hint
+  exit 1
+}
+
+show_compose_service_images() {
+  local output
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" config --images
+    return 0
+  fi
+
+  if output="$("${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" config --images 2>&1)"; then
+    printf '%s\n' "$output"
+    return 0
+  fi
+
+  printf 'Current Docker Compose does not support "config --images"; validating compose files instead.\n'
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" config -q
+}
+
 pull_required_images() {
   printf 'Image tag: %s\n' "${TAG:-latest}"
   printf 'Compose service images used by this deployment:\n'
-  run docker compose "${COMPOSE_ARGS[@]}" config --images
+  show_compose_service_images
 
   printf '\nPulling compose service images...\n'
-  run docker compose "${COMPOSE_ARGS[@]}" pull
+  run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" pull
 
   if [[ "${#RUNTIME_IMAGES[@]}" -gt 0 ]]; then
     printf '\nPulling backend runtime images...\n'
@@ -194,31 +339,32 @@ remove_dynamic_containers() {
 start_services() {
   pull_required_images
   printf '\nStarting services...\n'
-  run docker compose "${COMPOSE_ARGS[@]}" up -d
+  run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" up -d
 }
 
 stop_services() {
   printf '\nStopping compose services...\n'
-  run docker compose "${COMPOSE_ARGS[@]}" stop
+  run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" stop
   stop_dynamic_containers
 }
 
 remove_services() {
   printf '\nRemoving compose services...\n'
-  run docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans
+  run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" down --remove-orphans
   remove_dynamic_containers
 }
 
 upgrade_services() {
   pull_required_images
   printf '\nStopping compose services...\n'
-  run docker compose "${COMPOSE_ARGS[@]}" stop
+  run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" stop
   stop_dynamic_containers
   printf '\nRecreating services...\n'
-  run docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
+  run "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" up -d --remove-orphans
 }
 
 discover_backend_runtime_images
+resolve_compose_command
 if [[ -n "${EXTRA_BACKEND_RUNTIME_IMAGES:-}" ]]; then
   for image in ${EXTRA_BACKEND_RUNTIME_IMAGES}; do
     add_runtime_image "$image"

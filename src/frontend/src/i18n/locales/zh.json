@@ -666,9 +666,9 @@
       "tooltip": "若超过 24 小时未操作，IDE 服务会自动停止以节约资源。如遇 IDE 异常或无响应，可点击此按钮重启服务。"
     },
     "ideDownload": {
-      "label": "下载工作区",
-      "tooltip": "打包下载当前任务 IDE 工作区，保留日志并排除依赖、缓存和临时文件。",
-      "failed": "下载工作区失败"
+      "label": "导出工程",
+      "tooltip": "打包下载当前任务 IDE 工作区，保留日志和 Git 轨迹，并排除依赖、缓存和临时文件。",
+      "failed": "导出工程失败"
     },
     "progressBar": {
       "evolutionGeneration": "演化世代",

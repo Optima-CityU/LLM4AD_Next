@@ -129,6 +129,8 @@ services:
       db:
         condition: service_healthy
         restart: true
+      rustfs:
+        condition: service_healthy
       task-runner:
         condition: service_completed_successfully
     command: bash scripts/prestart.sh
@@ -141,6 +143,8 @@ services:
         condition: service_healthy
         restart: true
       redis:
+        condition: service_healthy
+      rustfs:
         condition: service_healthy
       prestart:
         condition: service_completed_successfully
