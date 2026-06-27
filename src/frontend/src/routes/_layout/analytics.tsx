@@ -4,6 +4,7 @@ import axios from "axios"
 import { geoCentroid } from "d3"
 import "echarts-gl"
 import ReactECharts from "echarts-for-react"
+import type { EChartsReactProps } from "echarts-for-react"
 import type { Feature, FeatureCollection, Geometry } from "geojson"
 import { alpha2ToNumeric } from "i18n-iso-countries"
 import type { LucideIcon } from "lucide-react"
@@ -84,6 +85,43 @@ const REFRESH_OPTIONS = [
   { value: "5m", ms: 5 * 60_000 },
   { value: "15m", ms: 15 * 60_000 },
 ] as const
+
+type DashboardTone = "blue" | "emerald" | "amber" | "rose"
+
+const DASHBOARD_TONE_STYLES: Record<
+  DashboardTone,
+  {
+    panel: string
+    icon: string
+    metric: string
+    pill: string
+  }
+> = {
+  blue: {
+    panel: "border-l-4 border-l-blue-500",
+    icon: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    metric: "text-blue-700 dark:text-blue-300",
+    pill: "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  },
+  emerald: {
+    panel: "border-l-4 border-l-emerald-500",
+    icon: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    metric: "text-emerald-700 dark:text-emerald-300",
+    pill: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  },
+  amber: {
+    panel: "border-l-4 border-l-amber-500",
+    icon: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    metric: "text-amber-700 dark:text-amber-300",
+    pill: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  },
+  rose: {
+    panel: "border-l-4 border-l-rose-500",
+    icon: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+    metric: "text-rose-700 dark:text-rose-300",
+    pill: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+  },
+}
 
 const ANALYTICS_AUTOSCROLL_CSS = `
 .admin-analytics-autoscroll {
@@ -358,10 +396,7 @@ function AnalyticsAdmin() {
         onValueChange={(value) => setScreen(value as ScreenTab)}
         className="min-h-0 flex-1 gap-0 overflow-hidden"
       >
-        <TabsContent
-          value="operations"
-          className="m-0 h-full min-h-0 overflow-y-auto pr-1"
-        >
+        <TabsContent value="operations" className="m-0 h-full min-h-0">
           <OperationsScreen
             summary={summary}
             tasks={tasks}
@@ -377,10 +412,7 @@ function AnalyticsAdmin() {
             isDark={isDark}
           />
         </TabsContent>
-        <TabsContent
-          value="visitors"
-          className="m-0 h-full min-h-0 overflow-y-auto pr-1"
-        >
+        <TabsContent value="visitors" className="m-0 h-full min-h-0">
           <VisitorsScreen
             plausible={plausible}
             github={github}
@@ -449,14 +481,16 @@ function OperationsScreen({
   )
 
   return (
-    <div className="flex min-h-full flex-col gap-3 pb-1">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_minmax(0,.95fr)] gap-3 overflow-hidden">
+      <section className="grid h-full min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <ModulePanel
           title={t("adminAnalytics.dashboard.totalUsers")}
           icon={Users}
           query={queries.summary}
+          tone="blue"
         >
           <MetricSummary
+            tone="blue"
             value={formatCompactNumber(summary.users.total)}
             items={[
               {
@@ -478,8 +512,10 @@ function OperationsScreen({
           title={t("adminAnalytics.dashboard.totalTasks")}
           icon={Activity}
           query={queries.tasks}
+          tone="emerald"
         >
           <MetricSummary
+            tone="emerald"
             value={formatCompactNumber(tasks.total)}
             items={[
               {
@@ -501,9 +537,11 @@ function OperationsScreen({
           title={t("adminAnalytics.dashboard.totalSpend")}
           icon={WalletCards}
           query={queries.litellm}
+          tone="amber"
         >
           {litellm.available ? (
             <MetricSummary
+              tone="amber"
               value={formatCurrencyValue(litellm.total_spend)}
               items={[
                 {
@@ -528,8 +566,10 @@ function OperationsScreen({
           title={t("adminAnalytics.dashboard.feedback")}
           icon={MessageSquareWarning}
           query={queries.feedback}
+          tone="rose"
         >
           <MetricSummary
+            tone="rose"
             value={formatCompactNumber(feedback.total)}
             items={[
               {
@@ -549,7 +589,7 @@ function OperationsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid min-h-[320px] gap-3 auto-rows-[minmax(280px,1fr)] xl:grid-cols-[1.35fr_.65fr]">
+      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-[1.35fr_.65fr]">
         <ModulePanel
           title={t("adminAnalytics.dashboard.taskTrend")}
           icon={BarChart3}
@@ -557,12 +597,7 @@ function OperationsScreen({
         >
           {tasks.trend.length ? (
             <ChartBox>
-              <ReactECharts
-                option={taskTrendOption}
-                style={{ height: "100%", width: "100%" }}
-                opts={{ renderer: "canvas" }}
-                notMerge
-              />
+              <ResponsiveEChart option={taskTrendOption} />
             </ChartBox>
           ) : (
             <EmptyPanelMessage message={t("adminAnalytics.dashboard.noData")} />
@@ -581,7 +616,7 @@ function OperationsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid min-h-[340px] gap-3 auto-rows-[minmax(300px,1fr)] xl:grid-cols-3">
+      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-3">
         <ModulePanel
           title={t("adminAnalytics.dashboard.topUsers")}
           icon={Users}
@@ -673,8 +708,8 @@ function VisitorsScreen({
   const osRows = plausible.operating_systems ?? []
 
   return (
-    <div className="flex min-h-full flex-col gap-3 pb-1">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_minmax(0,.9fr)] gap-3 overflow-hidden">
+      <section className="grid h-full min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <ModulePanel
           title={t("adminAnalytics.dashboard.plausible")}
           icon={Eye}
@@ -769,7 +804,7 @@ function VisitorsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid min-h-[320px] gap-3 auto-rows-[minmax(280px,1fr)] xl:grid-cols-[1.35fr_.65fr]">
+      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-[1.35fr_.65fr]">
         <ModulePanel
           title={t("adminAnalytics.dashboard.visitorTrend")}
           icon={BarChart3}
@@ -777,12 +812,7 @@ function VisitorsScreen({
         >
           {plausible.available && plausible.trend?.length ? (
             <ChartBox>
-              <ReactECharts
-                option={plausibleTrendOption}
-                style={{ height: "100%", width: "100%" }}
-                opts={{ renderer: "canvas" }}
-                notMerge
-              />
+              <ResponsiveEChart option={plausibleTrendOption} />
             </ChartBox>
           ) : (
             <PlausibleConfigNotice
@@ -806,7 +836,7 @@ function VisitorsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid min-h-[360px] gap-3 auto-rows-[minmax(320px,1fr)] xl:grid-cols-4">
+      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-4">
         <ModulePanel
           title={t("adminAnalytics.dashboard.geoTraffic")}
           icon={Globe2}
@@ -876,20 +906,29 @@ function ModulePanel({
   icon: Icon,
   query,
   right,
+  tone,
   children,
 }: {
   title: string
   icon: LucideIcon
   query: ModuleQuery
   right?: ReactNode
+  tone?: DashboardTone
   children: ReactNode
 }) {
   const { t } = useTranslation()
+  const toneStyles = tone ? DASHBOARD_TONE_STYLES[tone] : null
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+    <section
+      className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm ${toneStyles?.panel ?? ""}`}
+    >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Icon className="size-4 shrink-0 text-primary" />
+          <span
+            className={`flex size-6 shrink-0 items-center justify-center rounded-md ${toneStyles?.icon ?? "text-primary"}`}
+          >
+            <Icon className="size-4" />
+          </span>
           <h3 className="truncate text-sm font-semibold">{title}</h3>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -963,25 +1002,30 @@ function MetricGrid({
 }
 
 function MetricSummary({
+  tone,
   value,
   items,
 }: {
+  tone: DashboardTone
   value: string
   items: Array<{ label: string; value: string }>
 }) {
+  const toneStyles = DASHBOARD_TONE_STYLES[tone]
   return (
     <div className="flex h-full min-h-[76px] flex-col justify-between gap-3">
-      <p className="truncate text-2xl font-semibold tabular-nums text-foreground">
+      <p
+        className={`truncate text-2xl font-semibold tabular-nums ${toneStyles.metric}`}
+      >
         <AnimatedMetricValue value={value} />
       </p>
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => (
           <span
             key={item.label}
-            className="inline-flex max-w-full items-center gap-1 rounded border border-border bg-muted/35 px-2 py-1 text-[11px]"
+            className={`inline-flex max-w-full items-center gap-1 rounded border px-2 py-1 text-[11px] ${toneStyles.pill}`}
           >
-            <span className="truncate text-muted-foreground">{item.label}</span>
-            <span className="shrink-0 font-medium tabular-nums text-foreground">
+            <span className="truncate opacity-75">{item.label}</span>
+            <span className="shrink-0 font-semibold tabular-nums">
               {item.value}
             </span>
           </span>
@@ -1167,6 +1211,7 @@ function StatusList({
   const { t } = useTranslation()
   if (!rows.length) return <EmptyPanelMessage message={empty} />
   const max = Math.max(...rows.map((item) => item.value), 1)
+  const resetKey = rows.map((row) => `${row.key}:${row.value}`).join("|")
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_1fr] gap-3">
       <MetricGrid
@@ -1185,8 +1230,8 @@ function StatusList({
           },
         ]}
       />
-      <div className="min-h-0 space-y-2 overflow-hidden">
-        {rows.slice(0, 5).map((row) => {
+      <LoopScrollList className="space-y-2" resetKey={resetKey}>
+        {rows.map((row) => {
           const width = `${Math.max((row.value / max) * 100, row.value ? 6 : 0)}%`
           return (
             <div
@@ -1210,7 +1255,7 @@ function StatusList({
             </div>
           )
         })}
-      </div>
+      </LoopScrollList>
     </div>
   )
 }
@@ -1660,7 +1705,47 @@ function ModuleSkeleton() {
 }
 
 function ChartBox({ children }: { children: ReactNode }) {
-  return <div className="h-full min-h-[180px] w-full">{children}</div>
+  return <div className="h-full min-h-0 w-full">{children}</div>
+}
+
+function ResponsiveEChart({
+  option,
+  className,
+}: {
+  option: EChartsReactProps["option"]
+  className?: string
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<ReactECharts>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const resize = () => {
+      chartRef.current?.getEchartsInstance()?.resize()
+    }
+
+    resize()
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(resize)
+    })
+    observer.observe(container)
+
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <div ref={containerRef} className={`h-full min-h-0 w-full ${className ?? ""}`}>
+      <ReactECharts
+        ref={chartRef}
+        option={option}
+        style={{ height: "100%", width: "100%" }}
+        opts={{ renderer: "canvas" }}
+        notMerge
+      />
+    </div>
+  )
 }
 
 function GeoGlobe({
@@ -1695,12 +1780,7 @@ function GeoGlobe({
   return (
     <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,.58fr)] gap-2">
       {globeData.points.length ? (
-        <ReactECharts
-          option={option}
-          style={{ height: "100%", minHeight: 0, width: "100%" }}
-          opts={{ renderer: "canvas" }}
-          notMerge
-        />
+        <ResponsiveEChart option={option} />
       ) : (
         <EmptyPanelMessage message={empty} />
       )}
