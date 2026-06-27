@@ -172,6 +172,39 @@ export default function InitializedView({ task }: InitializedViewProps) {
         ]}
       />
       <div className="flex shrink-0 items-center gap-2">
+        {!isDemoTaskId(task.id) && (
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t("evolution.ideDownload.label")}
+                  disabled={isDownloadingWorkspace}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleDownloadWorkspace()
+                  }}
+                  className="inline-flex h-11 max-w-[42vw] shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isDownloadingWorkspace ? (
+                    <Loader2 className="size-4 shrink-0 animate-spin" />
+                  ) : (
+                    <Download className="size-4 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {t("evolution.ideDownload.label")}
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="max-w-xs leading-relaxed"
+              >
+                {t("evolution.ideDownload.tooltip")}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
         <TabsList
           data-tour="result-tabs"
           className="h-11 min-w-0 flex-1 p-1 rounded-lg bg-card border border-border"
@@ -235,36 +268,6 @@ export default function InitializedView({ task }: InitializedViewProps) {
             </TooltipProvider>
           </TabsTrigger>
         </TabsList>
-        {!isDemoTaskId(task.id) && (
-          <TooltipProvider delayDuration={200}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={t("evolution.ideDownload.label")}
-                  disabled={isDownloadingWorkspace}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void handleDownloadWorkspace()
-                  }}
-                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isDownloadingWorkspace ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Download className="size-4" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                className="max-w-xs leading-relaxed"
-              >
-                {t("evolution.ideDownload.tooltip")}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
       </div>
 
       <TabsContent value="overview" className="mt-0 flex-1 min-h-0">

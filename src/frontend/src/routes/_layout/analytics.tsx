@@ -358,7 +358,10 @@ function AnalyticsAdmin() {
         onValueChange={(value) => setScreen(value as ScreenTab)}
         className="min-h-0 flex-1 gap-0 overflow-hidden"
       >
-        <TabsContent value="operations" className="m-0 h-full min-h-0">
+        <TabsContent
+          value="operations"
+          className="m-0 h-full min-h-0 overflow-y-auto pr-1"
+        >
           <OperationsScreen
             summary={summary}
             tasks={tasks}
@@ -374,7 +377,10 @@ function AnalyticsAdmin() {
             isDark={isDark}
           />
         </TabsContent>
-        <TabsContent value="visitors" className="m-0 h-full min-h-0">
+        <TabsContent
+          value="visitors"
+          className="m-0 h-full min-h-0 overflow-y-auto pr-1"
+        >
           <VisitorsScreen
             plausible={plausible}
             github={github}
@@ -443,19 +449,16 @@ function OperationsScreen({
   )
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_minmax(0,.95fr)] gap-3 overflow-hidden">
-      <section className="grid h-full min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="flex min-h-full flex-col gap-3 pb-1">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <ModulePanel
           title={t("adminAnalytics.dashboard.totalUsers")}
           icon={Users}
           query={queries.summary}
         >
-          <MetricGrid
+          <MetricSummary
+            value={formatCompactNumber(summary.users.total)}
             items={[
-              {
-                label: t("adminAnalytics.dashboard.totalUsers"),
-                value: formatCompactNumber(summary.users.total),
-              },
               {
                 label: t("adminAnalytics.dashboard.active"),
                 value: formatCompactNumber(summary.users.active),
@@ -476,12 +479,9 @@ function OperationsScreen({
           icon={Activity}
           query={queries.tasks}
         >
-          <MetricGrid
+          <MetricSummary
+            value={formatCompactNumber(tasks.total)}
             items={[
-              {
-                label: t("adminAnalytics.dashboard.totalTasks"),
-                value: formatCompactNumber(tasks.total),
-              },
               {
                 label: t("adminAnalytics.dashboard.statusLabels.running"),
                 value: formatCompactNumber(tasks.by_status.running),
@@ -503,12 +503,9 @@ function OperationsScreen({
           query={queries.litellm}
         >
           {litellm.available ? (
-            <MetricGrid
+            <MetricSummary
+              value={formatCurrencyValue(litellm.total_spend)}
               items={[
-                {
-                  label: t("adminAnalytics.dashboard.totalSpend"),
-                  value: formatCurrencyValue(litellm.total_spend),
-                },
                 {
                   label: t("adminAnalytics.dashboard.overBudget"),
                   value: formatCompactNumber(litellm.over_budget_users),
@@ -532,12 +529,9 @@ function OperationsScreen({
           icon={MessageSquareWarning}
           query={queries.feedback}
         >
-          <MetricGrid
+          <MetricSummary
+            value={formatCompactNumber(feedback.total)}
             items={[
-              {
-                label: t("adminAnalytics.dashboard.feedbackTotal"),
-                value: formatCompactNumber(feedback.total),
-              },
               {
                 label: t("feedback.list.status.pending"),
                 value: formatCompactNumber(feedback.pending),
@@ -555,7 +549,7 @@ function OperationsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-[1.35fr_.65fr]">
+      <section className="grid min-h-[320px] gap-3 auto-rows-[minmax(280px,1fr)] xl:grid-cols-[1.35fr_.65fr]">
         <ModulePanel
           title={t("adminAnalytics.dashboard.taskTrend")}
           icon={BarChart3}
@@ -587,7 +581,7 @@ function OperationsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-3">
+      <section className="grid min-h-[340px] gap-3 auto-rows-[minmax(300px,1fr)] xl:grid-cols-3">
         <ModulePanel
           title={t("adminAnalytics.dashboard.topUsers")}
           icon={Users}
@@ -679,8 +673,8 @@ function VisitorsScreen({
   const osRows = plausible.operating_systems ?? []
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_minmax(0,.9fr)] gap-3 overflow-hidden">
-      <section className="grid h-full min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="flex min-h-full flex-col gap-3 pb-1">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <ModulePanel
           title={t("adminAnalytics.dashboard.plausible")}
           icon={Eye}
@@ -775,7 +769,7 @@ function VisitorsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-[1.35fr_.65fr]">
+      <section className="grid min-h-[320px] gap-3 auto-rows-[minmax(280px,1fr)] xl:grid-cols-[1.35fr_.65fr]">
         <ModulePanel
           title={t("adminAnalytics.dashboard.visitorTrend")}
           icon={BarChart3}
@@ -812,7 +806,7 @@ function VisitorsScreen({
         </ModulePanel>
       </section>
 
-      <section className="grid h-full min-h-0 gap-3 xl:grid-cols-4">
+      <section className="grid min-h-[360px] gap-3 auto-rows-[minmax(320px,1fr)] xl:grid-cols-4">
         <ModulePanel
           title={t("adminAnalytics.dashboard.geoTraffic")}
           icon={Globe2}
@@ -964,6 +958,35 @@ function MetricGrid({
           </p>
         </div>
       ))}
+    </div>
+  )
+}
+
+function MetricSummary({
+  value,
+  items,
+}: {
+  value: string
+  items: Array<{ label: string; value: string }>
+}) {
+  return (
+    <div className="flex h-full min-h-[76px] flex-col justify-between gap-3">
+      <p className="truncate text-2xl font-semibold tabular-nums text-foreground">
+        <AnimatedMetricValue value={value} />
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((item) => (
+          <span
+            key={item.label}
+            className="inline-flex max-w-full items-center gap-1 rounded border border-border bg-muted/35 px-2 py-1 text-[11px]"
+          >
+            <span className="truncate text-muted-foreground">{item.label}</span>
+            <span className="shrink-0 font-medium tabular-nums text-foreground">
+              {item.value}
+            </span>
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
