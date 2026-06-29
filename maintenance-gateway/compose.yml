@@ -13,9 +13,35 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./maintenance.html:/usr/share/nginx/html/maintenance.html:ro
-      - ./flag:/flag           # 维护标志目录（可写），touch/rm MAINTENANCE 切换
+      - ./flag:/flag           # 自动故障标志目录（monitor 写入 UPSTREAM_DOWN）
     healthcheck:
       test: ["CMD", "service", "nginx", "status"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  monitor:
+    image: nginx:latest
+    restart: always
+    # 与 edge 一致：Linux 下通过 host-gateway 访问宿主发布的 frontend 端口。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - UPSTREAM_URL=${UPSTREAM_URL:-http://host.docker.internal:18039/}
+      - CHECK_INTERVAL=${CHECK_INTERVAL:-5}
+      - CHECK_TIMEOUT=${CHECK_TIMEOUT:-3}
+    volumes:
+      - ./flag:/flag
+    command:
+      - sh
+      - -ec
+      - |
+        mkdir -p /flag
+        while true; do
+          if curl -fsS --max-time "$${CHECK_TIMEOUT}" -o /dev/null "$${UPSTREAM_URL}"; then
+            rm -f /flag/UPSTREAM_DOWN
+          else
+            date -Iseconds > /flag/UPSTREAM_DOWN
+          fi
+          sleep "$${CHECK_INTERVAL}"
+        done
