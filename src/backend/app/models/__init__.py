@@ -61,6 +61,10 @@ from app.models.live_code import (  # noqa: F401
 
 # LLM4AD 业务模型
 from app.models.llm4ad import (  # noqa: F401
+    EmbeddingMode,
+    EmbeddingProvider,
+    EmbeddingProviderBase,
+    EmbeddingProviderType,
     LLMProvider,
     LLMProviderBase,
     Project,

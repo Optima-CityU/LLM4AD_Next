@@ -21,7 +21,8 @@ class EmbeddingClient:
         - **standard** (openai, jina, openai_compatible) – Single client shared by both task types.
 
         For `local` mode, both `config.text_config` and `config.code_config` must be provided.
-        For `jina` mode, the base URL is forced to `https://api.jina.ai/v1`.
+        For `jina` mode, the configured base URL is used as-is so deployments can choose
+        the official or domestic endpoint.
 
         Args:
             config: Embedding configuration containing provider type, model names,
@@ -41,8 +42,8 @@ class EmbeddingClient:
         self._dim = config.dim
         self._semaphore = asyncio.Semaphore(config.embedding_func_max_async)
 
-        # We store clients in a mapping: {task_type: (client, model_name)}
-        self._task_clients: dict[str, tuple[AsyncOpenAI | None, str]] = {}
+        # We store clients in a mapping: {task_type: (client, model_name, task_hint, provider_type)}
+        self._task_clients: dict[str, tuple[AsyncOpenAI | None, str, str | None, str | None]] = {}
 
         if self._type == 'mock':
             logger.info("Initialized EmbeddingClient in MOCK mode.")
@@ -60,7 +61,9 @@ class EmbeddingClient:
                     timeout=config.text_config.timeout or config.timeout,
                     max_retries=0,
                 ),
-                config.text_config.model
+                config.text_config.model,
+                config.text_config.task,
+                config.text_config.type,
             )
             self._task_clients['code'] = (
                 AsyncOpenAI(
@@ -69,18 +72,18 @@ class EmbeddingClient:
                     timeout=config.code_config.timeout or config.timeout,
                     max_retries=0,
                 ),
-                config.code_config.model
+                config.code_config.model,
+                config.code_config.task,
+                config.code_config.type,
             )
         else:
             # Standard single-client initialization
             base_url = config.base_url
-            if self._type == 'jina':
-                base_url = "https://api.jina.ai/v1"
 
             client = AsyncOpenAI(api_key=config.api_key, base_url=base_url, timeout=config.timeout, max_retries=0)
             # Both task types use the same client/model
-            self._task_clients['text'] = (client, config.model)
-            self._task_clients['code'] = (client, config.model)
+            self._task_clients['text'] = (client, config.model, config.text_task, config.type)
+            self._task_clients['code'] = (client, config.model, config.code_task, config.type)
 
     async def _embed_batch_chunk(
             self,
@@ -107,7 +110,7 @@ class EmbeddingClient:
             return results
 
         # Get relevant client and model for the current task
-        client, model_name = self._task_clients.get(task_key, (None, ""))
+        client, model_name, configured_task, route_provider_type = self._task_clients.get(task_key, (None, "", None, None))
         if not client:
             raise RuntimeError(f"No client configured for task type: {task_key}")
 
@@ -116,12 +119,16 @@ class EmbeddingClient:
             "model": model_name
         }
 
-        # Handle Jina specific hints (only for non-local/standard Jina type)
-        # For local vLLM Jina, usually the task is handled by the model endpoint itself
-        if self._type == 'jina':
-            task_hint = 'text-matching' if task_type == 'text' else 'code.passage' if task_type == 'code' else None
+        # Handle provider task hints. For local vLLM Jina, task is usually handled by
+        # the endpoint/model itself and comes through configured_task.
+        if route_provider_type == 'jina':
+            task_hint = configured_task
+            if not task_hint:
+                task_hint = 'text-matching' if task_type == 'text' else 'code.passage' if task_type == 'code' else None
             if task_hint:
                 params["extra_body"] = {"task": task_hint, "late_chunking": False}
+        elif configured_task:
+            params["extra_body"] = {"task": configured_task}
 
         async with self._semaphore:
             for attempt in range(retries):
@@ -219,6 +226,6 @@ class EmbeddingClient:
     async def shutdown(self) -> None:
         """Close all unique OpenAI clients."""
         # Use set to avoid closing the same client multiple times
-        unique_clients = {c for c, m in self._task_clients.values() if c is not None}
+        unique_clients = {c for c, _m, _task, _provider_type in self._task_clients.values() if c is not None}
         for client in unique_clients:
             await client.close()

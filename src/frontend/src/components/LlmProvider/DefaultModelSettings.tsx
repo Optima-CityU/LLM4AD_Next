@@ -4,6 +4,7 @@ import {
   Code,
   ExternalLink,
   FileText,
+  GitBranch,
   Puzzle,
   RefreshCw,
   Settings,
@@ -18,6 +19,7 @@ import {
 } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -43,17 +45,30 @@ import {
   useProviders,
   providersQueryKey,
   userDefaultModelsQueryKey,
+  embeddingProvidersQueryKey,
+  useEmbeddingProviders,
   useUserDefaultModels,
 } from "@/hooks/useProviders"
 import { handleError } from "@/utils"
 
 type RoleKey = "planner" | "coder" | "report" | "other"
+type ModelSlotKey = RoleKey
+type ProviderField =
+  | "planner_provider_id"
+  | "coder_provider_id"
+  | "report_provider_id"
+  | "other_provider_id"
+type ModelField =
+  | "planner_model_name"
+  | "coder_model_name"
+  | "report_model_name"
+  | "other_model_name"
 
 interface RoleConfig {
-  key: RoleKey
+  key: ModelSlotKey
   icon: React.ReactNode
-  providerField: keyof UserDefaultModelUpdate
-  modelField: keyof UserDefaultModelUpdate
+  providerField: ProviderField
+  modelField: ModelField
 }
 
 const ROLES: RoleConfig[] = [
@@ -100,6 +115,8 @@ interface LocalState {
   report_model_name: string | null
   other_provider_id: string | null
   other_model_name: string | null
+  embedding_enabled: boolean
+  embedding_provider_id: string | null
 }
 
 const EMPTY_STATE: LocalState = {
@@ -111,11 +128,13 @@ const EMPTY_STATE: LocalState = {
   report_model_name: null,
   other_provider_id: null,
   other_model_name: null,
+  embedding_enabled: false,
+  embedding_provider_id: null,
 }
 
 function RoleRowSkeleton() {
   return (
-    <div className="grid grid-cols-[100px_1fr_1fr] items-center gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-[132px_1fr_1fr] items-center gap-3">
       <Skeleton className="h-5 w-16" />
       <Skeleton className="h-9 w-full" />
       <Skeleton className="h-9 w-full" />
@@ -132,6 +151,7 @@ interface RoleRowProps {
   onModelChange: (modelName: string) => void
   t: (key: string) => string
   highlightProviderId?: string
+  disabled?: boolean
 }
 
 function RoleRow({
@@ -143,20 +163,27 @@ function RoleRow({
   onModelChange,
   t,
   highlightProviderId,
+  disabled = false,
 }: RoleRowProps) {
   const selectedProvider = providers.find((p) => p.id === currentProviderId)
-  const availableModels = selectedProvider
-    ? parseModels(selectedProvider.model)
-    : []
+  const availableModels = selectedProvider ? parseModels(selectedProvider.model) : []
 
   return (
-    <div className="grid grid-cols-[100px_1fr_1fr] items-center gap-3">
+    <div
+      className={`grid grid-cols-1 sm:grid-cols-[132px_1fr_1fr] items-center gap-3 ${
+        disabled ? "opacity-60" : ""
+      }`}
+    >
       <div className="flex items-center gap-2 text-sm font-medium">
         {role.icon}
         <span>{t(`llmProvider.defaultModel.roles.${role.key}`)}</span>
       </div>
 
-      <Select value={currentProviderId ?? ""} onValueChange={onProviderChange}>
+      <Select
+        value={currentProviderId ?? ""}
+        onValueChange={onProviderChange}
+        disabled={disabled}
+      >
         <SelectTrigger className="w-full">
           <SelectValue
             placeholder={t("llmProvider.defaultModel.selectProvider")}
@@ -200,7 +227,9 @@ function RoleRow({
       <Select
         value={currentModelName ?? ""}
         onValueChange={onModelChange}
-        disabled={!currentProviderId || availableModels.length === 0}
+        disabled={
+          disabled || !currentProviderId || availableModels.length === 0
+        }
       >
         <SelectTrigger className="w-full">
           <SelectValue
@@ -255,6 +284,8 @@ export default function DefaultModelSettings({
     useUserDefaultModels()
 
   const { data: providers, isLoading: isLoadingProviders } = useProviders()
+  const { data: embeddingProviders, isLoading: isLoadingEmbeddingProviders } =
+    useEmbeddingProviders()
 
   useEffect(() => {
     if (isOpen) {
@@ -273,6 +304,8 @@ export default function DefaultModelSettings({
         report_model_name: defaults.report_model_name,
         other_provider_id: defaults.other_provider_id,
         other_model_name: defaults.other_model_name,
+        embedding_enabled: defaults.embedding_enabled,
+        embedding_provider_id: defaults.embedding_provider_id,
       })
     }
   }, [defaults, isOpen])
@@ -290,8 +323,10 @@ export default function DefaultModelSettings({
     onError: handleError.bind(showErrorToast),
   })
 
-  const isLoading = isLoadingDefaults || isLoadingProviders
+  const isLoading =
+    isLoadingDefaults || isLoadingProviders || isLoadingEmbeddingProviders
   const providerList = providers?.items ?? []
+  const embeddingProviderList = embeddingProviders?.items ?? []
 
   const handleProviderChange = (role: RoleConfig, providerId: string) => {
     const provider = providerList.find((p) => p.id === providerId)
@@ -326,7 +361,10 @@ export default function DefaultModelSettings({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-2xl" preventOutsideClose>
+      <DialogContent
+        className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"
+        preventOutsideClose
+      >
         <DialogHeader>
           <DialogTitle>{t("llmProvider.defaultModel.title")}</DialogTitle>
           <DialogDescription className="flex items-center justify-between">
@@ -342,48 +380,114 @@ export default function DefaultModelSettings({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-4 space-y-1">
-          <div className="grid grid-cols-[100px_1fr_1fr] gap-3 mb-3">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              {t("llmProvider.defaultModel.roleHeader")}
+        <div className="py-4 space-y-5">
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-[132px_1fr_1fr] gap-3">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {t("llmProvider.defaultModel.roleHeader")}
+              </div>
+              <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {t("llmProvider.defaultModel.providerHeader")}
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded"
+                  onClick={() => {
+                    queryClient.invalidateQueries({ queryKey: ["providers"] })
+                    queryClient.invalidateQueries({
+                      queryKey: embeddingProvidersQueryKey,
+                    })
+                  }}
+                >
+                  <RefreshCw className="size-3" />
+                </button>
+              </div>
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {t("llmProvider.defaultModel.modelHeader")}
+              </div>
             </div>
-            <div className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              {t("llmProvider.defaultModel.providerHeader")}
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded"
-                onClick={() => {
-                  queryClient.invalidateQueries({ queryKey: ["providers"] })
-                }}
-              >
-                <RefreshCw className="size-3" />
-              </button>
-            </div>
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              {t("llmProvider.defaultModel.modelHeader")}
+
+            <div className="space-y-3">
+              {isLoading
+                ? ROLES.map((role) => <RoleRowSkeleton key={role.key} />)
+                : ROLES.map((role) => (
+                    <RoleRow
+                      key={role.key}
+                      role={role}
+                      providers={providerList}
+                      currentProviderId={localState[role.providerField]}
+                      currentModelName={localState[role.modelField]}
+                      onProviderChange={(id) => handleProviderChange(role, id)}
+                      onModelChange={(model) => handleModelChange(role, model)}
+                      t={t}
+                      highlightProviderId={highlightProviderId}
+                    />
+                  ))}
             </div>
           </div>
 
-          <div className="space-y-3">
-            {isLoading
-              ? ROLES.map((role) => <RoleRowSkeleton key={role.key} />)
-              : ROLES.map((role) => (
-                  <RoleRow
-                    key={role.key}
-                    role={role}
-                    providers={providerList}
-                    currentProviderId={
-                      localState[role.providerField as keyof LocalState]
-                    }
-                    currentModelName={
-                      localState[role.modelField as keyof LocalState]
-                    }
-                    onProviderChange={(id) => handleProviderChange(role, id)}
-                    onModelChange={(model) => handleModelChange(role, model)}
-                    t={t}
-                    highlightProviderId={highlightProviderId}
-                  />
-                ))}
+          <div className="border-t border-border/60 pt-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+              <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                <Checkbox
+                  aria-label={t("llmProvider.defaultModel.embeddingTitle")}
+                  checked={localState.embedding_enabled}
+                  onCheckedChange={(checked) =>
+                    setLocalState((prev) => ({
+                      ...prev,
+                      embedding_enabled: checked === true,
+                    }))
+                  }
+                />
+                <GitBranch className="size-4 text-muted-foreground" />
+                <span>
+                  {localState.embedding_enabled
+                    ? t("llmProvider.defaultModel.embeddingEnabled")
+                    : t("llmProvider.defaultModel.embeddingDisabled")}
+                </span>
+              </div>
+              {isLoading ? (
+                <Skeleton className="h-9 w-full" />
+              ) : (
+                <Select
+                  value={localState.embedding_provider_id ?? ""}
+                  onValueChange={(providerId) =>
+                    setLocalState((prev) => ({
+                      ...prev,
+                      embedding_provider_id: providerId,
+                    }))
+                  }
+                  disabled={
+                    !localState.embedding_enabled ||
+                    embeddingProviderList.length === 0
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue
+                      placeholder={
+                        embeddingProviderList.length === 0
+                          ? t("llmProvider.defaultModel.noEmbeddingProviders")
+                          : t("llmProvider.defaultModel.selectEmbeddingProvider")
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>
+                        {t("llmProvider.defaultModel.embeddingProviderLabel")}
+                      </SelectLabel>
+                      {embeddingProviderList.map((provider) => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          {provider.name} · {provider.type} ·{" "}
+                          {provider.mode === "split"
+                            ? `${provider.text_model} / ${provider.code_model}`
+                            : provider.model}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
           </div>
         </div>
 

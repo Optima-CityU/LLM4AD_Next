@@ -10,6 +10,7 @@ import { PageNumbers } from "@/components/Common/PageNumbers"
 import AddProvider from "@/components/LlmProvider/AddProvider"
 import { columns } from "@/components/LlmProvider/columns"
 import DefaultModelSettings from "@/components/LlmProvider/DefaultModelSettings"
+import EmbeddingProviderSettings from "@/components/LlmProvider/EmbeddingProviderSettings"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -150,6 +151,7 @@ function LlmProvider() {
         </p>
         <div className="flex items-center gap-2">
           <DefaultModelSettings />
+          <EmbeddingProviderSettings />
           <AddProvider />
         </div>
       </div>

@@ -1,4 +1,5 @@
-# Use images already pushed to SWR instead of building locally.
+# Use remote deployment images instead of building locally.
+# start.sh sets SWR_REGISTRY from docker/version, --mirrors, or the environment.
 #
 # Example:
 #   ./start.sh

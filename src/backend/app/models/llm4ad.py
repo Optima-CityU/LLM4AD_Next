@@ -36,6 +36,23 @@ class ProviderType(StrEnum):
     MOCK = "mock"
 
 
+class EmbeddingProviderType(StrEnum):
+    """Embedding 供应商类型枚举。"""
+
+    OPENAI = "openai"
+    JINA = "jina"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    MOCK = "mock"
+    LOCAL = "local"
+
+
+class EmbeddingMode(StrEnum):
+    """Embedding text/code 配置模式。"""
+
+    SHARED = "shared"
+    SPLIT = "split"
+
+
 # ---- LLM 供应商 ----
 
 
@@ -81,6 +98,66 @@ class LLMProvider(LLMProviderBase, TimeMixin, table=True):
         default=None, foreign_key="user.id", ondelete="CASCADE",
     )
     user: Optional["User"] = Relationship(back_populates="providers")  # type: ignore[name-defined]  # noqa: F821
+
+
+# ---- Embedding 供应商 ----
+
+
+class EmbeddingProviderBase(SQLModel):
+    """Embedding 供应商基础 Schema，独立于 LLMProvider。"""
+
+    name: str = Field(default="embedding", max_length=255, description="Embedding 配置名称")
+    type: EmbeddingProviderType = Field(default=EmbeddingProviderType.JINA, description="Embedding 供应商类型")
+    api_key: str = Field(default="", sa_type=EncryptedString, description="API 密钥（加密存储）")
+    auth_token: str = Field(default="", sa_type=EncryptedString, description="认证令牌（加密存储）")
+    base_url: str | None = Field(default=None, max_length=512, description="Embedding API 基础 URL")
+    mode: EmbeddingMode = Field(default=EmbeddingMode.SHARED, description="text/code 共用或分流")
+    model: str = Field(default="", max_length=255, description="共用 embedding 模型名称")
+    dim: int = Field(default=3072, gt=0, description="Embedding 向量维度")
+    timeout: float = Field(default=60.0, gt=0, description="请求超时时间（秒）")
+    embedding_func_max_async: int = Field(default=2, ge=1, description="最大并发 embedding 请求数")
+    text_type: EmbeddingProviderType = Field(
+        default=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        description="文本 embedding 供应商类型",
+    )
+    text_base_url: str | None = Field(default=None, max_length=512, description="文本 embedding API 基础 URL")
+    text_api_key: str = Field(default="", sa_type=EncryptedString, description="文本 embedding API 密钥")
+    text_auth_token: str = Field(default="", sa_type=EncryptedString, description="文本 embedding 认证令牌")
+    text_model: str = Field(default="", max_length=255, description="文本 embedding 模型名称")
+    text_task: str = Field(default="text-matching", max_length=64, description="文本 embedding 任务模式")
+    code_type: EmbeddingProviderType = Field(
+        default=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        description="代码 embedding 供应商类型",
+    )
+    code_base_url: str | None = Field(default=None, max_length=512, description="代码 embedding API 基础 URL")
+    code_api_key: str = Field(default="", sa_type=EncryptedString, description="代码 embedding API 密钥")
+    code_auth_token: str = Field(default="", sa_type=EncryptedString, description="代码 embedding 认证令牌")
+    code_model: str = Field(default="", max_length=255, description="代码 embedding 模型名称")
+    code_task: str = Field(default="code.passage", max_length=64, description="代码 embedding 任务模式")
+    is_builtin: bool = Field(default=False, description="系统内置 embedding 供应商，仅 init_db 可修改")
+    visible_to_all: bool = Field(default=False, description="对所有用户可见可用")
+
+
+class EmbeddingProvider(EmbeddingProviderBase, TimeMixin, table=True):
+    """Embedding 配置；用户配置归属用户，系统内置配置 user_id 为 NULL。"""
+
+    __tablename__ = "embeddingprovider"
+    __table_args__ = (
+        Index(
+            "uq_embedding_provider_builtin_name",
+            "name",
+            unique=True,
+            postgresql_where=text("is_builtin = true"),
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="user.id",
+        ondelete="CASCADE",
+        index=True,
+    )
 
 
 # ---- 项目 ----
@@ -217,6 +294,11 @@ class UserDefaultModelBase(SQLModel):
     )
     other_model_name: str | None = Field(
         default=None, max_length=255, description="默认其它模型名称",
+    )
+    embedding_enabled: bool = Field(default=False, description="是否启用轨迹 embedding")
+    embedding_provider_id: uuid.UUID | None = Field(
+        default=None, foreign_key="embeddingprovider.id", ondelete="SET NULL",
+        description="默认 embedding 供应商 ID",
     )
 
 

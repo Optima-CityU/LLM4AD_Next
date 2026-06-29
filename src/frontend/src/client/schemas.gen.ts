@@ -3321,6 +3321,18 @@ export const ResultRenderGenerateResponseSchema = {
             type: 'string',
             title: 'Message'
         },
+        error_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Code',
+            description: '机器可读错误码'
+        },
         data: {
             title: 'Data',
             description: '结果渲染数据'
@@ -4465,10 +4477,40 @@ export const UserDefaultModelResponseSchema = {
                 }
             ],
             title: 'Other Model Name'
+        },
+        embedding_enabled: {
+            type: 'boolean',
+            title: 'Embedding Enabled',
+            description: '是否启用轨迹 embedding',
+            default: false
+        },
+        embedding_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Provider Id',
+            description: '默认 embedding 供应商 ID'
+        },
+        embedding_provider_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Provider Name'
         }
     },
     type: 'object',
-    required: ['id', 'created_time', 'updated_time', 'user_id', 'planner_provider_id', 'planner_model_name', 'coder_provider_id', 'coder_model_name', 'report_provider_id', 'report_model_name', 'other_provider_id', 'other_model_name'],
+    required: ['id', 'created_time', 'updated_time', 'user_id', 'planner_provider_id', 'planner_model_name', 'coder_provider_id', 'coder_model_name', 'report_provider_id', 'report_model_name', 'other_provider_id', 'other_model_name', 'embedding_enabled', 'embedding_provider_id'],
     title: 'UserDefaultModelResponse',
     description: '用户默认模型配置响应。'
 } as const;
@@ -4566,6 +4608,29 @@ export const UserDefaultModelUpdateSchema = {
                 }
             ],
             title: 'Other Model Name'
+        },
+        embedding_enabled: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Enabled'
+        },
+        embedding_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Provider Id'
         }
     },
     type: 'object',

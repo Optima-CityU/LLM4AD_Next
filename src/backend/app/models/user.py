@@ -90,6 +90,7 @@ class User(UserBase, TimeMixin, table=True):
     items: list["Item"] = Relationship(back_populates="owner", cascade_delete=True)  # type: ignore[name-defined]  # noqa: F821
     projects: list["Project"] = Relationship(back_populates="user", cascade_delete=True)  # type: ignore[name-defined]  # noqa: F821
     providers: list["LLMProvider"] = Relationship(back_populates="user", cascade_delete=True)  # type: ignore[name-defined]  # noqa: F821
+    embedding_providers: list["EmbeddingProvider"] = Relationship(cascade_delete=True)  # type: ignore[name-defined]  # noqa: F821
     default_model: Optional["UserDefaultModel"] = Relationship(back_populates="user", cascade_delete=True)  # type: ignore[name-defined]  # noqa: F821
 
 

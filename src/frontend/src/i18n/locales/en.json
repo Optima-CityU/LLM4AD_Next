@@ -379,6 +379,25 @@
     "selectProviderType": "Select provider type",
     "modelName": "Model Name",
     "modelNameHint": "Type a model name and press Enter to add. Multiple models supported.",
+    "embedding": {
+      "title": "Embedding Config",
+      "description": "Configure the embedding service used for trajectory analysis. Jina uses an API key and model name by default.",
+      "empty": "No embedding configs yet. Add one first.",
+      "add": "Add Config",
+      "createSuccess": "Embedding config created",
+      "deleteSuccess": "Embedding config deleted",
+      "mode": "Mode",
+      "modeShared": "Shared model",
+      "modeSplit": "Text / Code split",
+      "textConfig": "Text Embedding Config",
+      "codeConfig": "Code Embedding Config",
+      "textModel": "Text model",
+      "codeModel": "Code model",
+      "textTask": "Text task",
+      "codeTask": "Code task",
+      "dim": "Dimension",
+      "concurrency": "Concurrency"
+    },
     "timeout": "Timeout (seconds)",
     "maxRetries": "Max Retries",
     "apiKey": "API Key",
@@ -445,11 +464,21 @@
       "modelLabel": "Model",
       "updateSuccess": "Default model settings updated",
       "manageProviders": "Manage Providers",
+      "embeddingTitle": "Trajectory analysis",
+      "embeddingDescription": "When enabled, tasks use these embedding models to generate trajectory data.",
+      "embeddingEnabled": "Enable trajectory",
+      "embeddingDisabled": "Disable trajectory",
+      "embeddingProviderLabel": "Embedding config",
+      "selectEmbeddingProvider": "Select embedding config",
+      "noEmbeddingProviders": "Add an embedding config first",
+      "embeddingReuseHint": "Text embedding and code embedding can reuse the same model, but code embeddings may be less accurate.",
       "roles": {
         "planner": "Planner",
         "coder": "Coder",
         "report": "Report",
-        "other": "Other"
+        "other": "Other",
+        "text_embedding": "Text embedding",
+        "code_embedding": "Code embedding"
       }
     }
   },
@@ -620,6 +649,8 @@
       "trajectory.emptyHint": "Task has ended but no trajectory was generated. Click the button below to generate manually",
       "trajectory.notReady": "Trajectory not yet generated",
       "trajectory.notReadyHint": "Trajectory visualization will be generated automatically when the task completes. You can also click the button below to generate at any time",
+      "trajectory.unsupported": "Trajectory is not supported yet",
+      "trajectory.configureEmbeddingHint": "Configure an embedding model to use trajectory rendering",
       "trajectory.generate": "Generate Trajectory",
       "trajectory.regenerate": "Regenerate",
       "trajectory.title": "Evolutionary Strategy Embedding"

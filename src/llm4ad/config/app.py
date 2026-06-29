@@ -123,15 +123,18 @@ class ProviderConfig(BaseModel):
 
 class TaskSpecificConfig(BaseModel):
     """Configuration for a specific task type (text or code)."""
+    type: str | None = Field(default=None, description="Provider type for this task")
     model: str | None = Field(default=None, description="Model name for this specific task")
     base_url: str | None = Field(default=None, description="Custom base URL for this task")
     api_key: str | None = Field(default=None, description="API key for this task")
+    auth_token: str | None = Field(default=None, description="Auth token for this task")
     timeout: float | None = Field(default=None, gt=0, description="Request timeout in seconds for this task")
+    task: str | None = Field(default=None, description="Provider-specific embedding task mode")
 
 class EmbeddingConfig(BaseModel):
     """Embedding provider configuration.
 
-    Supports multiple named embedding providers, including a specialized 'local' mode.
+    Supports a single shared embedding model, or task-specific text/code models in local mode.
     """
 
     type: Literal["openai", "jina", "openai_compatible", "mock", "local"] | None = Field(
@@ -146,7 +149,10 @@ class EmbeddingConfig(BaseModel):
 
     base_url: str | None = Field(default=None)
     api_key: str = Field(default="")
-    model: str = Field(default="text-embedding-3-small")
+    auth_token: str = Field(default="")
+    model: str = Field(default="")
+    text_task: str | None = Field(default=None, description="Provider-specific task mode for text inputs")
+    code_task: str | None = Field(default=None, description="Provider-specific task mode for code inputs")
     dim: int = Field(default=3072, ge=1)
     timeout: float = Field(default=60.0, gt=0, description="Embedding request timeout in seconds")
     embedding_func_max_async: int = Field(default=2, ge=1)

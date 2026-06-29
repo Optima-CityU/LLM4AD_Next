@@ -379,6 +379,25 @@
     "selectProviderType": "选择供应商类型",
     "modelName": "模型名称",
     "modelNameHint": "输入模型名称后按 Enter 添加，支持配置多个模型",
+    "embedding": {
+      "title": "Embedding 配置",
+      "description": "配置轨迹分析使用的 embedding 服务。Jina 默认填写 API Key 和模型名。",
+      "empty": "暂无 embedding 配置，请先新增一条配置。",
+      "add": "添加配置",
+      "createSuccess": "Embedding 配置已创建",
+      "deleteSuccess": "Embedding 配置已删除",
+      "mode": "配置模式",
+      "modeShared": "共用模型",
+      "modeSplit": "Text / Code 分流",
+      "textConfig": "Text Embedding 配置",
+      "codeConfig": "Code Embedding 配置",
+      "textModel": "Text 模型",
+      "codeModel": "Code 模型",
+      "textTask": "Text 任务模式",
+      "codeTask": "Code 任务模式",
+      "dim": "维度",
+      "concurrency": "并发"
+    },
     "timeout": "超时时间(秒)",
     "maxRetries": "最大重试次数",
     "apiKey": "认证令牌",
@@ -445,11 +464,21 @@
       "modelLabel": "模型",
       "updateSuccess": "默认模型配置已更新",
       "manageProviders": "管理模型供应商",
+      "embeddingTitle": "轨迹分析",
+      "embeddingDescription": "开启后，任务会使用这里配置的 embedding 模型生成轨迹数据。",
+      "embeddingEnabled": "启用轨迹分析",
+      "embeddingDisabled": "关闭轨迹分析",
+      "embeddingProviderLabel": "Embedding 配置",
+      "selectEmbeddingProvider": "选择 embedding 配置",
+      "noEmbeddingProviders": "请先添加 embedding 配置",
+      "embeddingReuseHint": "Text embedding 和 Code embedding 可以复用同一个模型，但代码 embedding 可能不够准确。",
       "roles": {
         "planner": "规划器",
         "coder": "编码器",
         "report": "报告",
-        "other": "其他"
+        "other": "其他",
+        "text_embedding": "Text embedding",
+        "code_embedding": "Code embedding"
       }
     }
   },
@@ -611,7 +640,7 @@
     },
     "renderPlaceholder": "结果渲染 - 功能开发中...",
     "render": {
-      "trajectory": "轨迹可视化",
+      "trajectory": "轨迹分析",
       "placeholder": "功能开发中，敬请期待...",
       "selectNode": "选择节点",
       "trajectory.loading": "正在生成轨迹数据...",
@@ -619,7 +648,9 @@
       "trajectory.empty": "暂无轨迹数据",
       "trajectory.emptyHint": "任务已结束但未生成轨迹数据，请点击下方按钮手动生成",
       "trajectory.notReady": "轨迹数据尚未生成",
-      "trajectory.notReadyHint": "任务完成后将自动生成轨迹可视化，您也可以随时点击下方按钮手动生成",
+      "trajectory.notReadyHint": "任务完成后将自动生成轨迹分析，您也可以随时点击下方按钮手动生成",
+      "trajectory.unsupported": "暂不支持轨迹分析",
+      "trajectory.configureEmbeddingHint": "如需使用请配置 embedding 模型",
       "trajectory.generate": "生成轨迹数据",
       "trajectory.regenerate": "重新生成",
       "trajectory.title": "进化策略嵌入"

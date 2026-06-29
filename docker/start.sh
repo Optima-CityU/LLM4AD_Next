@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 usage() {
   printf '%s\n' \
-    'Usage: TAG=v1.0.0 ./start.sh [start|stop|remove|upgrade] [--debug] [--dry-run]' \
+    'Usage: TAG=v1.0.0 ./start.sh [start|stop|remove|upgrade] [--mirrors REGISTRY] [--debug] [--dry-run]' \
     '' \
     'Manage the image-based deployment.' \
     '' \
@@ -14,12 +14,15 @@ usage() {
     '  upgrade  Pull required images, stop runtime containers, then recreate services.' \
     '' \
     'Options:' \
+    '  --mirrors REGISTRY  Use a specific image registry namespace, for example docker.io/noah2012' \
     '  --debug    Include compose.deploy.debug.yml and the debug profile.' \
     '  --dry-run  Print commands without running them.' \
     '  -h, --help Show this help.' \
     '' \
     'Environment variables:' \
-    '  TAG                           Image tag to deploy, default: latest' \
+    '  TAG                           Image tag to deploy, default: VERSION from docker/version' \
+    '  SWR_REGISTRY                  Image registry namespace, default: DOCKER_REGISTRY from docker/version' \
+    '  VERSION_FILE                  Version config file, default: version' \
     '  COMPOSE_VERSION               Docker Compose version to auto-install, default: v2.32.4' \
     '  EXTRA_BACKEND_RUNTIME_IMAGES  Extra whitespace-separated images to pull'
 }
@@ -27,6 +30,7 @@ usage() {
 COMMAND="start"
 DEBUG=0
 DRY_RUN=0
+MIRRORS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     start|stop|remove|upgrade)
@@ -40,6 +44,15 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       DRY_RUN=1
       shift
+      ;;
+    --mirrors)
+      if [[ $# -lt 2 || "${2:0:1}" == "-" ]]; then
+        printf 'Missing value for --mirrors\n' >&2
+        usage >&2
+        exit 2
+      fi
+      MIRRORS="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -60,6 +73,21 @@ else
   SCRIPT_DIR="."
 fi
 cd "$SCRIPT_DIR"
+
+load_version_file() {
+  local version_file="${VERSION_FILE:-version}"
+
+  [[ -f "$version_file" ]] || return 0
+  # shellcheck disable=SC1090
+  . "$version_file"
+}
+
+load_version_file
+TAG="${TAG:-${VERSION:-latest}}"
+SWR_REGISTRY="${MIRRORS:-${SWR_REGISTRY:-${DOCKER_REGISTRY:-docker.io/noah2012}}}"
+SWR_REGISTRY="${SWR_REGISTRY%/}"
+export TAG
+export SWR_REGISTRY
 
 COMPOSE_ARGS=(-f compose.yml -f compose.swr.yml)
 if [[ "$DEBUG" -eq 1 ]]; then

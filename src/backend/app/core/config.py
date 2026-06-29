@@ -216,9 +216,12 @@ class Settings(BaseSettings):
     JINA_API_KEY: str = ""
     TEAM_ID: str = ""
     EMBEDDING_MODEL: str = "jina-embeddings-v4"
+    EMBEDDING_TEXT_MODEL: str = ""
+    EMBEDDING_CODE_MODEL: str = ""
 
     # ---- 内置试用供应商（如 LiteLLM 网关） ----
     BUILTIN_PROVIDER_NAME: str = "builtin-trial"
+    BUILTIN_EMBEDDING_PROVIDER_NAME: str = "builtin-embedding"
     BUILTIN_PROVIDER_BASE_URL: str = "" # 为空则跳过 seed，可以包含变量{accessToken}
     BUILTIN_PROVIDER_API_KEY: str = ""
     BUILTIN_PROVIDER_MODELS: str = "" # 多模型分号分隔

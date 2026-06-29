@@ -18,6 +18,13 @@ const providerTypeLabels: Record<string, string> = {
   mock: "Mock",
 }
 
+function parseModels(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
 export const columns: ColumnDef<ProviderResponse>[] = [
   {
     accessorKey: "name",
@@ -56,11 +63,8 @@ export const columns: ColumnDef<ProviderResponse>[] = [
     accessorKey: "model",
     header: i18n.t("llmProvider.columns.modelName"),
     cell: ({ row }) => {
-      const models = row.original.model
-        ?.split(";")
-        .map((s) => s.trim())
-        .filter(Boolean)
-      if (!models || models.length === 0) {
+      const models = parseModels(row.original.model)
+      if (models.length === 0) {
         return <span className="text-muted-foreground">-</span>
       }
       return (

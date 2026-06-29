@@ -45,4 +45,5 @@ class ResultRenderGenerateResponse(BaseModel):
     result_type: ResultRenderType
     status: ResultRenderStatus
     message: str
+    error_code: str | None = Field(default=None, description="机器可读错误码")
     data: Any = Field(default=None, description="结果渲染数据")

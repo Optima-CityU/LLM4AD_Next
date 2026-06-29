@@ -103,6 +103,58 @@ def get_config_schema(
     return schemas.AppConfigSchemaResponse(config_schema=AppConfig.model_json_schema())
 
 
+def _ensure_trajectory_embeddings(
+    db: Session,
+    defaults,
+    generated_dir: str,
+    embedding_dir: str,
+) -> None:
+    """Backfill missing trajectory embeddings from saved generated algorithms."""
+    import asyncio
+    from pathlib import Path
+
+    from llm4ad.config.app import EmbeddingConfig
+    from llm4ad.orchestrator.embedding_client import EmbeddingClient
+    from llm4ad.orchestrator.embedding_utils import save_algorithm_embeddings
+    from llm4ad.planner.base import Algorithm
+
+    from app.services.task_service.execution import _build_embedding_config
+
+    embedding_config = _build_embedding_config(db, defaults)
+    if not embedding_config:
+        raise ValueError("未找到可用的 embedding 配置")
+
+    generated_path = Path(generated_dir)
+    embedding_path = Path(embedding_dir)
+    if not generated_path.exists():
+        return
+    embedding_path.mkdir(parents=True, exist_ok=True)
+
+    missing_algorithms: list[Algorithm] = []
+    for json_path in sorted(generated_path.glob("*.json")):
+        try:
+            algorithm = Algorithm.load(json_path)
+        except Exception:
+            logger.debug(f"跳过无法还原的 generated JSON: {json_path}")
+            continue
+        if list(embedding_path.glob(f"*_{algorithm.id}.json")):
+            continue
+        missing_algorithms.append(algorithm)
+
+    if not missing_algorithms:
+        return
+
+    async def _backfill() -> None:
+        client = EmbeddingClient(EmbeddingConfig.model_validate(embedding_config))
+        try:
+            for algorithm in missing_algorithms:
+                await save_algorithm_embeddings(client, algorithm, embedding_path)
+        finally:
+            await client.shutdown()
+
+    asyncio.run(_backfill())
+
+
 def generate_result_render(
     db: Session,
     task_id: uuid.UUID,
@@ -134,6 +186,29 @@ def generate_result_render(
     rt = request.result_type.value
     cache_key = f"{rt}_{request.language}_{request.theme}"
 
+    if request.result_type.value == "trajectory":
+        from app.services.user_default_model_service import get_user_default_model
+
+        defaults = get_user_default_model(db, current_user.id)
+        if not defaults.embedding_enabled:
+            return ResultRenderGenerateResponse(
+                task_id=task.id,
+                result_type=request.result_type,
+                status=ResultRenderStatus.FAILED,
+                message="暂不支持轨迹分析，如需使用请配置 embedding 模型",
+                error_code="embedding_disabled",
+                data=None,
+            )
+        if not defaults.embedding_provider_id:
+            return ResultRenderGenerateResponse(
+                task_id=task.id,
+                result_type=request.result_type,
+                status=ResultRenderStatus.FAILED,
+                message="暂不支持轨迹分析，如需使用请配置 embedding 模型",
+                error_code="embedding_not_configured",
+                data=None,
+            )
+
     existing = (task.result_render or {}).get(cache_key)
     if not request.force and existing and existing.get("status") == ResultRenderStatus.COMPLETED:
         return ResultRenderGenerateResponse(
@@ -151,6 +226,13 @@ def generate_result_render(
         user_home = f"{settings.DOCKER_PROJECT_HOME}{container_name}/"
         run_dir = f"{user_home}{task_id}/"
         result_dir = f"{run_dir}llm4ad/run/"
+        if request.result_type.value == "trajectory":
+            _ensure_trajectory_embeddings(
+                db,
+                defaults,
+                generated_dir=f"{result_dir}generated",
+                embedding_dir=f"{result_dir}embedding",
+            )
         data = VisualizationAPI(
             generated_dir=f"{result_dir}generated", embedding_dir=f"{result_dir}embedding"
         ).generate_evaluation_trace_echarts_config(dark_mode=request.theme == "dark")

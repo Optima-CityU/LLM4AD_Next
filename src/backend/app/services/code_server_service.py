@@ -9,6 +9,7 @@ import json
 import os
 import time
 from datetime import datetime
+from pathlib import Path
 
 import docker
 from docker.errors import NotFound
@@ -25,6 +26,7 @@ from app.core.constants import (
 )
 from app.core.docker import ensure_code_server_network, get_docker_client
 from app.core.redis import pop_idle_code_users
+from app.services.container_service import validate_host_project_home
 
 # code-server 启动完成的日志特征。不同 code-server 版本日志略有差异。
 _SERVICE_READY_MARKERS = (
@@ -68,6 +70,11 @@ def _ensure_container_network(container: Container, network_name: str) -> None:
             logger.warning(
                 f"断开 code-server 容器 {container.name} 的旧网络 {old_network} 失败: {exc}"
             )
+
+
+def _code_server_host_path(container_name: str, *parts: str) -> str:
+    """Build a host path under HOST_PROJECT_HOME for code-server mounts."""
+    return str(Path(settings.HOST_PROJECT_HOME) / container_name / Path(*parts))
 
 
 def ensure_user_workspace(container_name: str, user_email: str, dark: bool = True) -> str:
@@ -196,6 +203,8 @@ def get_or_start_container(container_name: str) -> tuple[Container, datetime | N
     Raises:
         HTTPException: Docker 网络不存在（404）。
     """
+    validate_host_project_home()
+
     client = get_docker_client()
     try:
         runtime_network = ensure_code_server_network()
@@ -255,8 +264,12 @@ def get_or_start_container(container_name: str) -> tuple[Container, datetime | N
         tmpfs={"/tmp": "rw,nosuid,nodev,size=256m"},
         volumes={
             # 宿主上用户目录挂载到 VS Code 服务主目录
-            f"{settings.HOST_PROJECT_HOME}{container_name}/": {
+            _code_server_host_path(container_name): {
                 "bind": _CODE_SERVER_HOME,
+                "mode": "rw",
+            },
+            _code_server_host_path(container_name, ".env_code.json"): {
+                "bind": _CODE_SERVER_SETTINGS_PATH,
                 "mode": "rw",
             },
         },

@@ -9,8 +9,10 @@ import json
 import os
 import shutil
 import time
+from pathlib import PureWindowsPath
 
 from docker.errors import ImageNotFound, NotFound
+from fastapi import HTTPException
 from loguru import logger
 
 from app.core.config import settings
@@ -33,6 +35,33 @@ def _container_name(task_id: str) -> str:
     """生成容器名称，取 task_id 保持唯一。"""
     short_id = str(task_id).replace("-", "")
     return f"{TASK_CONTAINER_NAME_PREFIX}{short_id}"
+
+
+def _is_absolute_host_path(path: str) -> bool:
+    """Return True for POSIX or Windows absolute host paths."""
+    value = path.strip()
+    return os.path.isabs(value) or PureWindowsPath(value).is_absolute()
+
+
+def validate_host_project_home() -> None:
+    """Validate that HOST_PROJECT_HOME can be used as a Docker bind source."""
+    host_project_home = settings.HOST_PROJECT_HOME.strip()
+    if not host_project_home or not _is_absolute_host_path(host_project_home):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "HOST_PROJECT_HOME 必须配置为宿主机绝对路径，当前值为 "
+                f"{settings.HOST_PROJECT_HOME!r}。请在 docker/.env 中改为类似 "
+                "/absolute/path/to/LLM4AD/docker/app-data 后重新启动服务。"
+            ),
+        )
+
+
+def validate_task_container_host_path() -> None:
+    """Validate task container bind mounts when isolated task containers are enabled."""
+    if not settings.TASK_CONTAINER_ENABLE:
+        return
+    validate_host_project_home()
 
 
 def _resolve_host_path(docker_path: str) -> str:
@@ -70,6 +99,8 @@ def create_and_start_task_container(data: dict) -> str:
         docker.errors.ImageNotFound: 任务运行镜像未构建。
         docker.errors.APIError: Docker API 调用失败。
     """
+    validate_task_container_host_path()
+
     task_id = str(data["task_id"])
     run_dir = data["run_dir"]
     name = _container_name(task_id)

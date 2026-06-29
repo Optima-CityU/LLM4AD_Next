@@ -21,6 +21,7 @@ from app.api.base_routes import (
     utils,
 )
 from app.api.llm4ad import chat_tune as llm4ad_chat_tune
+from app.api.llm4ad import embedding_providers as llm4ad_embedding_providers
 from app.api.llm4ad import llm_proxy as llm4ad_llm_proxy
 from app.api.llm4ad import projects as llm4ad_projects
 from app.api.llm4ad import providers as llm4ad_providers
@@ -47,6 +48,7 @@ api_router.include_router(live_qr.router)
 api_router.include_router(llm4ad_projects.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_tasks.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_providers.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_embedding_providers.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_reports.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_user_default_models.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_chat_tune.router, prefix="/llm4ad")

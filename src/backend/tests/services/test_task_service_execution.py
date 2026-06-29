@@ -6,10 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-import pytest
-from fastapi import HTTPException
-
-from app.models import LLMProvider, ProviderType
+from app.models import (
+    EmbeddingMode,
+    EmbeddingProvider,
+    EmbeddingProviderType,
+    LLMProvider,
+    ProviderType,
+)
 
 
 def _load_execution_module():
@@ -59,11 +62,17 @@ class _ExecResult:
 
 
 class _FakeDB:
-    def __init__(self, providers):
+    def __init__(self, providers, embedding_provider=None):
         self._providers = providers
+        self._embedding_provider = embedding_provider
 
     def exec(self, _statement):
         return _ExecResult(self._providers)
+
+    def get(self, model, item_id):
+        if model is EmbeddingProvider and self._embedding_provider and self._embedding_provider.id == item_id:
+            return self._embedding_provider
+        return None
 
 
 def test_resolve_providers_uses_dynamic_builtin_models_for_default_slots(monkeypatch):
@@ -122,9 +131,10 @@ def test_resolve_providers_uses_dynamic_builtin_models_for_default_slots(monkeyp
     assert all(p["model"] != "stale-db-model" for p in resolved["providers"])
 
 
-def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monkeypatch):
+def test_resolve_providers_builds_builtin_split_embedding_through_litellm_gateway(monkeypatch):
     user_id = uuid4()
     provider_id = uuid4()
+    embedding_provider_id = uuid4()
     provider = LLMProvider(
         id=provider_id,
         user_id=None,
@@ -136,6 +146,26 @@ def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monke
         is_builtin=True,
         visible_to_all=True,
     )
+    embedding_provider = EmbeddingProvider(
+        id=embedding_provider_id,
+        user_id=None,
+        name="Builtin Embedding",
+        type=EmbeddingProviderType.LOCAL,
+        mode=EmbeddingMode.SPLIT,
+        is_builtin=True,
+        visible_to_all=True,
+        text_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        text_base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        text_api_key="EMPTY",
+        text_model="jina-text",
+        text_task="text-matching",
+        code_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        code_base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        code_api_key="EMPTY",
+        code_model="jina-code",
+        code_task="code.passage",
+        dim=2048,
+    )
 
     default_model = SimpleNamespace(
         planner_provider_id=provider_id,
@@ -144,6 +174,8 @@ def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monke
         coder_model_name="deepseek-v4-flash",
         other_provider_id=provider_id,
         other_model_name="deepseek-v4-flash",
+        embedding_enabled=True,
+        embedding_provider_id=embedding_provider_id,
     )
 
     monkeypatch.setattr(task_service.settings, "TEAM_ID", "team-123", raising=False)
@@ -161,18 +193,6 @@ def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monke
         raising=False,
     )
     monkeypatch.setattr(
-        task_service.settings,
-        "JINA_API_KEY",
-        "real-jina-key",
-        raising=False,
-    )
-    monkeypatch.setattr(
-        task_service.settings,
-        "EMBEDDING_MODEL",
-        "jina-embeddings-v4",
-        raising=False,
-    )
-    monkeypatch.setattr(
         "app.services.user_default_model_service.get_user_default_model",
         lambda _db, _user_id, access_token=None: default_model,
     )
@@ -182,7 +202,7 @@ def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monke
     )
 
     resolved = task_service._resolve_providers(
-        _FakeDB([provider]),
+        _FakeDB([provider], embedding_provider),
         {
             "planner": {"provider": "default", "provider_model": ""},
             "coder": {"provider": "default", "provider_model": ""},
@@ -192,16 +212,23 @@ def test_resolve_providers_routes_embedding_through_forced_litellm_gateway(monke
         access_token="user-token",
     )
 
-    assert resolved["embedding"]["base_url"] == (
+    assert resolved["embedding"]["type"] == "local"
+    assert resolved["embedding"]["text_config"]["base_url"] == (
         "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
     )
-    assert resolved["embedding"]["api_key"] == "EMPTY"
-    assert resolved["embedding"]["model"] == "jina-embeddings-v4"
+    assert resolved["embedding"]["code_config"]["base_url"] == (
+        "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
+    )
+    assert resolved["embedding"]["text_config"]["api_key"] == "EMPTY"
+    assert resolved["embedding"]["code_config"]["api_key"] == "EMPTY"
+    assert resolved["embedding"]["text_config"]["model"] == "jina-text"
+    assert resolved["embedding"]["code_config"]["model"] == "jina-code"
 
 
 def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
     user_id = uuid4()
     provider_id = uuid4()
+    embedding_provider_id = uuid4()
     provider = LLMProvider(
         id=provider_id,
         user_id=None,
@@ -213,6 +240,24 @@ def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
         is_builtin=True,
         visible_to_all=True,
     )
+    embedding_provider = EmbeddingProvider(
+        id=embedding_provider_id,
+        user_id=None,
+        name="Builtin Embedding",
+        type=EmbeddingProviderType.LOCAL,
+        mode=EmbeddingMode.SPLIT,
+        is_builtin=True,
+        visible_to_all=True,
+        text_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        text_base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        text_api_key="EMPTY",
+        text_model="jina-text",
+        code_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        code_base_url="http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1",
+        code_api_key="EMPTY",
+        code_model="jina-code",
+        dim=2048,
+    )
 
     default_model = SimpleNamespace(
         planner_provider_id=provider_id,
@@ -221,6 +266,8 @@ def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
         coder_model_name="deepseek-v4-flash",
         other_provider_id=provider_id,
         other_model_name="deepseek-v4-flash",
+        embedding_enabled=True,
+        embedding_provider_id=embedding_provider_id,
     )
 
     issued_tokens = []
@@ -266,7 +313,7 @@ def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
     monkeypatch.setattr("app.services.credential_broker.issue_token", fake_issue_token)
 
     resolved = task_service._resolve_providers(
-        _FakeDB([provider]),
+        _FakeDB([provider], embedding_provider),
         {
             "planner": {"provider": "default", "provider_model": ""},
             "coder": {"provider": "default", "provider_model": ""},
@@ -280,14 +327,18 @@ def test_resolve_providers_does_not_proxy_gateway_embedding(monkeypatch):
     assert [provider["base_url"] for provider in resolved["providers"]] == [
         "http://backend:8000/api/v1/llm4ad/llmproxy"
     ]
-    assert resolved["embedding"]["base_url"] == (
+    assert resolved["embedding"]["text_config"]["base_url"] == (
         "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
     )
-    assert resolved["embedding"]["api_key"] == "EMPTY"
+    assert resolved["embedding"]["code_config"]["base_url"] == (
+        "http://gateway:9090/litellm_proxy/team-123/user-token/v1"
+    )
+    assert resolved["embedding"]["text_config"]["api_key"] == "EMPTY"
+    assert resolved["embedding"]["code_config"]["api_key"] == "EMPTY"
     assert [token["model"] for token in issued_tokens] == ["deepseek-v4-flash"]
 
 
-def test_resolve_providers_requires_gateway_embedding_context(monkeypatch):
+def test_resolve_providers_omits_embedding_when_default_embedding_disabled(monkeypatch):
     user_id = uuid4()
     provider_id = uuid4()
     provider = LLMProvider(
@@ -309,6 +360,8 @@ def test_resolve_providers_requires_gateway_embedding_context(monkeypatch):
         coder_model_name="deepseek-v4-flash",
         other_provider_id=provider_id,
         other_model_name="deepseek-v4-flash",
+        embedding_enabled=False,
+        embedding_provider_id=None,
     )
 
     monkeypatch.setattr(task_service.settings, "TEAM_ID", "", raising=False)
@@ -322,17 +375,15 @@ def test_resolve_providers_requires_gateway_embedding_context(monkeypatch):
         lambda _provider, _access_token, user_id=None: ["deepseek-v4-flash"],
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        task_service._resolve_providers(
-            _FakeDB([provider]),
-            {
-                "planner": {"provider": "default", "provider_model": ""},
-                "coder": {"provider": "default", "provider_model": ""},
-                "evaluator": {"provider": "default", "provider_model": ""},
-            },
-            SimpleNamespace(id=user_id),
-            access_token="user-token",
-        )
+    resolved = task_service._resolve_providers(
+        _FakeDB([provider]),
+        {
+            "planner": {"provider": "default", "provider_model": ""},
+            "coder": {"provider": "default", "provider_model": ""},
+            "evaluator": {"provider": "default", "provider_model": ""},
+        },
+        SimpleNamespace(id=user_id),
+        access_token="user-token",
+    )
 
-    assert exc_info.value.status_code == 500
-    assert "TEAM_ID" in exc_info.value.detail
+    assert "embedding" not in resolved

@@ -1025,6 +1025,9 @@ export type ProviderCreate = {
      */
     model?: string;
     /**
+     * Embedding 模型名称，支持多个，使用;分割
+     */
+    /**
      * 采样温度
      */
     temperature?: number;
@@ -1332,6 +1335,10 @@ export type ResultRenderGenerateResponse = {
     result_type: ResultRenderType;
     status: ResultRenderStatus;
     message: string;
+    /**
+     * 机器可读错误码
+     */
+    error_code?: (string | null);
     /**
      * 结果渲染数据
      */
@@ -1680,6 +1687,9 @@ export type UserDefaultModelResponse = {
     other_provider_id: (string | null);
     other_provider_name?: (string | null);
     other_model_name: (string | null);
+    embedding_enabled: boolean;
+    embedding_provider_id: (string | null);
+    embedding_provider_name?: (string | null);
 };
 
 /**
@@ -1694,6 +1704,8 @@ export type UserDefaultModelUpdate = {
     report_model_name?: (string | null);
     other_provider_id?: (string | null);
     other_model_name?: (string | null);
+    embedding_enabled?: (boolean | null);
+    embedding_provider_id?: (string | null);
 };
 
 /**

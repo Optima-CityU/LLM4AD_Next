@@ -30,6 +30,8 @@ class UserDefaultModelUpdate(BaseModel):
     report_model_name: str | None = None
     other_provider_id: uuid.UUID | None = None
     other_model_name: str | None = None
+    embedding_enabled: bool | None = None
+    embedding_provider_id: uuid.UUID | None = None
 
 
 # ---- 响应 Schema ----
@@ -56,3 +58,6 @@ class UserDefaultModelResponse(BaseModel):
     other_provider_id: uuid.UUID | None
     other_provider_name: str | None = None
     other_model_name: str | None
+    embedding_enabled: bool
+    embedding_provider_id: uuid.UUID | None
+    embedding_provider_name: str | None = None

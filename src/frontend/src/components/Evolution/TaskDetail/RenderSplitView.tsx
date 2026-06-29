@@ -55,6 +55,9 @@ export default function RenderSplitView({ task }: RenderSplitViewProps) {
   > | null>(null)
   const [trajectoryLoading, setTrajectoryLoading] = useState(false)
   const [trajectoryError, setTrajectoryError] = useState<string | null>(null)
+  const [trajectoryErrorCode, setTrajectoryErrorCode] = useState<string | null>(
+    null,
+  )
 
   const taskId = effectiveTaskId || task.id
   const isTerminal = task.status === "completed" || task.status === "failed"
@@ -62,6 +65,7 @@ export default function RenderSplitView({ task }: RenderSplitViewProps) {
   useEffect(() => {
     setTrajectoryOptions(null)
     setTrajectoryError(null)
+    setTrajectoryErrorCode(null)
     setTrajectoryLoading(false)
   }, [])
 
@@ -69,6 +73,7 @@ export default function RenderSplitView({ task }: RenderSplitViewProps) {
     (force = false) => {
       setTrajectoryLoading(true)
       setTrajectoryError(null)
+      setTrajectoryErrorCode(null)
       setTrajectoryOptions(null)
 
       const lang = i18n.language?.startsWith("zh") ? "zh" : "en"
@@ -108,12 +113,14 @@ export default function RenderSplitView({ task }: RenderSplitViewProps) {
               reviveFunctions(options) as Record<string, unknown>,
             )
           } else {
+            setTrajectoryErrorCode(res.error_code ?? null)
             setTrajectoryError(
               res.message || t("evolution.render.trajectory.error"),
             )
           }
         })
         .catch((err) => {
+          setTrajectoryErrorCode(null)
           setTrajectoryError(
             err?.message || t("evolution.render.trajectory.error"),
           )
@@ -216,6 +223,7 @@ export default function RenderSplitView({ task }: RenderSplitViewProps) {
                 options={trajectoryOptions}
                 loading={trajectoryLoading}
                 error={trajectoryError}
+                errorCode={trajectoryErrorCode}
                 theme={resolvedTheme}
                 isTerminal={isTerminal}
                 onRegenerate={() => fetchTrajectory(true)}
@@ -232,6 +240,7 @@ function TrajectoryPanel({
   options,
   loading,
   error,
+  errorCode,
   theme,
   isTerminal,
   onRegenerate,
@@ -239,11 +248,15 @@ function TrajectoryPanel({
   options: Record<string, unknown> | null
   loading: boolean
   error: string | null
+  errorCode: string | null
   theme: string | undefined
   isTerminal: boolean
   onRegenerate: () => void
 }) {
   const { t } = useTranslation()
+  const isEmbeddingUnsupported =
+    errorCode === "embedding_disabled" ||
+    errorCode === "embedding_not_configured"
 
   if (loading) {
     return (
@@ -255,6 +268,29 @@ function TrajectoryPanel({
   }
 
   if (error) {
+    if (isEmbeddingUnsupported) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground px-6">
+          <ScatterChart className="size-12 opacity-20" />
+          <p className="text-sm font-medium">
+            {t("evolution.render.trajectory.unsupported")}
+          </p>
+          <p className="text-xs opacity-70 text-center">
+            {t("evolution.render.trajectory.configureEmbeddingHint")}
+          </p>
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
+              bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm mt-1"
+          >
+            <RefreshCw className="size-3.5" />
+            {t("evolution.render.trajectory.regenerate")}
+          </button>
+        </div>
+      )
+    }
+
     return (
       <div className="h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
         <p className="text-sm text-destructive max-w-[80%] text-center">

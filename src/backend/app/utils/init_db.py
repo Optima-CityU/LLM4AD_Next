@@ -139,10 +139,99 @@ def seed_builtin_provider() -> models.LLMProvider | None:
         return provider
 
 
+def seed_builtin_embedding_provider() -> models.EmbeddingProvider | None:
+    """Upsert 内置 split embedding 供应商，供云部署默认走统一网关。"""
+    base_url = settings.BUILTIN_PROVIDER_BASE_URL.strip()
+    text_model = settings.EMBEDDING_TEXT_MODEL.strip() or settings.EMBEDDING_MODEL.strip()
+    code_model = settings.EMBEDDING_CODE_MODEL.strip() or settings.EMBEDDING_MODEL.strip()
+    if not base_url:
+        logger.info("BUILTIN_PROVIDER_BASE_URL 未配置，跳过内置 embedding 供应商 seed")
+        return None
+    if not text_model or not code_model:
+        logger.info("EMBEDDING_*_MODEL 未配置，跳过内置 embedding 供应商 seed")
+        return None
+    if "/litellm_proxy/" not in base_url:
+        logger.warning(
+            "BUILTIN_PROVIDER_BASE_URL 未指向 gateway litellm_proxy，内置 embedding 可能绕过统一网关鉴权"
+        )
+
+    with Session(engine) as session:
+        stmt = select(models.EmbeddingProvider).where(
+            models.EmbeddingProvider.is_builtin.is_(True),  # type: ignore[union-attr]
+        )
+        existing = session.exec(stmt).all()
+        provider = existing[0] if existing else None
+        for dup in existing[1:]:
+            logger.warning(f"删除多余内置 embedding 供应商 {dup.name} (id={dup.id})")
+            session.delete(dup)
+        if len(existing) > 1:
+            session.flush()
+
+        fields = {
+            "name": settings.BUILTIN_EMBEDDING_PROVIDER_NAME,
+            "type": models.EmbeddingProviderType.LOCAL,
+            "api_key": "",
+            "auth_token": "",
+            "base_url": None,
+            "mode": models.EmbeddingMode.SPLIT,
+            "model": "",
+            "dim": 2048,
+            "timeout": 60.0,
+            "embedding_func_max_async": 2,
+            "text_type": models.EmbeddingProviderType.OPENAI_COMPATIBLE,
+            "text_base_url": base_url,
+            "text_api_key": "EMPTY",
+            "text_auth_token": "",
+            "text_model": text_model,
+            "text_task": "text-matching",
+            "code_type": models.EmbeddingProviderType.OPENAI_COMPATIBLE,
+            "code_base_url": base_url,
+            "code_api_key": "EMPTY",
+            "code_auth_token": "",
+            "code_model": code_model,
+            "code_task": "code.passage",
+        }
+        if provider:
+            changed = False
+            for k, v in fields.items():
+                if getattr(provider, k) != v:
+                    setattr(provider, k, v)
+                    changed = True
+            if not provider.visible_to_all:
+                provider.visible_to_all = True
+                changed = True
+            if provider.user_id is not None:
+                provider.user_id = None
+                changed = True
+            if changed:
+                provider.updated_time = datetime.now(UTC)
+                logger.info(
+                    f"更新内置 embedding 供应商 {settings.BUILTIN_EMBEDDING_PROVIDER_NAME} (id={provider.id})"
+                )
+            else:
+                logger.info(
+                    f"内置 embedding 供应商 {settings.BUILTIN_EMBEDDING_PROVIDER_NAME} 无变化，跳过更新"
+                )
+        else:
+            provider = models.EmbeddingProvider(
+                is_builtin=True,
+                visible_to_all=True,
+                user_id=None,
+                **fields,
+            )
+            session.add(provider)
+            logger.info(f"新建内置 embedding 供应商 {settings.BUILTIN_EMBEDDING_PROVIDER_NAME}")
+
+        session.commit()
+        session.refresh(provider)
+        return provider
+
+
 def init_all():
     """初始化超级管理员并 seed 内置供应商。"""
     init_superuser()
     seed_builtin_provider()
+    seed_builtin_embedding_provider()
 
 
 def backfill_user_default_models() -> tuple[int, int]:
@@ -188,7 +277,7 @@ def backfill_user_default_models() -> tuple[int, int]:
             session.add(models.UserDefaultModel(**init_kwargs))
             created += 1
 
-        # 2) 已有行逐槽位处理：补空位 + 刷新内置槽位的模型名
+        # 2) 已有行逐槽位处理：补空位 + 刷新内置槽位的模型名，同时补齐内置 embedding。
         #    模板的 provider_id / model_name 与 user_id 无关，循环外查一次即可。
         slots_filled = 0
         existing = session.exec(select(models.UserDefaultModel)).all()
@@ -197,24 +286,28 @@ def backfill_user_default_models() -> tuple[int, int]:
             if existing
             else {}
         )
-        # 内置不存在时模板里没有 *_provider_id 字段，无可补齐/刷新
-        if existing and "planner_provider_id" in template:
-            builtin_id = template["planner_provider_id"]
+        if existing:
+            builtin_id = template.get("planner_provider_id")
             for config in existing:
-                for prefix in slot_prefixes:
-                    pid = getattr(config, f"{prefix}_provider_id")
-                    # 空槽位 → 补齐；指向内置 → 刷新模型名；非内置 → 保持不变
-                    if pid is not None and pid != builtin_id:
-                        continue
-                    new_pid = template[f"{prefix}_provider_id"]
-                    new_model = template[f"{prefix}_model_name"]
-                    if (
-                        pid == new_pid
-                        and getattr(config, f"{prefix}_model_name") == new_model
-                    ):
-                        continue
-                    setattr(config, f"{prefix}_provider_id", new_pid)
-                    setattr(config, f"{prefix}_model_name", new_model)
+                if builtin_id:
+                    for prefix in slot_prefixes:
+                        pid = getattr(config, f"{prefix}_provider_id")
+                        # 空槽位 → 补齐；指向内置 → 刷新模型名；非内置 → 保持不变
+                        if pid is not None and pid != builtin_id:
+                            continue
+                        new_pid = template[f"{prefix}_provider_id"]
+                        new_model = template[f"{prefix}_model_name"]
+                        if (
+                            pid == new_pid
+                            and getattr(config, f"{prefix}_model_name") == new_model
+                        ):
+                            continue
+                        setattr(config, f"{prefix}_provider_id", new_pid)
+                        setattr(config, f"{prefix}_model_name", new_model)
+                        slots_filled += 1
+                if template.get("embedding_provider_id") and config.embedding_provider_id is None:
+                    config.embedding_enabled = True
+                    config.embedding_provider_id = template["embedding_provider_id"]
                     slots_filled += 1
                 session.add(config)
 
