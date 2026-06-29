@@ -4,6 +4,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from llm4ad.coder.base import BaseCoder
@@ -11,6 +12,7 @@ from llm4ad.config import EvolutionConfig
 from llm4ad.evaluator import EvaluationDispatcher
 from llm4ad.infra.state import EvolutionState, StateTracker
 from llm4ad.orchestrator.embedding_client import EmbeddingClient
+from llm4ad.orchestrator.embedding_utils import save_algorithm_embeddings
 from llm4ad.planner.base import Algorithm, BasePlanner
 from llm4ad.utils.registry import Registrable
 
@@ -271,6 +273,51 @@ class BaseOrchestrator(Registrable, ABC, registry_name="orchestrator"):
 
         return False, ""
 
+    def _schedule_embedding_save(self, algorithm: Algorithm) -> asyncio.Task | None:
+        """Schedule evaluation trace embedding generation for an evaluated algorithm."""
+        if not self.embedding_client:
+            logger.debug(
+                "Embedding client is not configured; skip evaluation trace embedding for algorithm {}",
+                getattr(algorithm, "id", "<unknown>"),
+            )
+            return None
+
+        embedding_dir = getattr(self.state_tracker, "embedding_dir", None)
+        if not embedding_dir:
+            logger.warning(
+                "Embedding client is configured but embedding_dir is missing; skip algorithm {}",
+                getattr(algorithm, "id", "<unknown>"),
+            )
+            return None
+
+        logger.info(
+            "Scheduling evaluation trace embedding for algorithm {}, island {}, generation {}",
+            getattr(algorithm, "id", "<unknown>"),
+            getattr(algorithm, "island_id", None),
+            getattr(algorithm, "generation", None),
+        )
+        task = asyncio.create_task(
+            save_algorithm_embeddings(self.embedding_client, algorithm, embedding_dir)
+        )
+        self._embedding_tasks.add(task)
+
+        def _log_embedding_task_result(done: asyncio.Task) -> None:
+            self._embedding_tasks.discard(done)
+            algorithm_id = getattr(algorithm, "id", "<unknown>")
+            if done.cancelled():
+                logger.warning("Evaluation trace embedding task was cancelled for algorithm {}", algorithm_id)
+                return
+            exc = done.exception()
+            if exc:
+                logger.warning(
+                    "Evaluation trace embedding task failed for algorithm {}: {}",
+                    algorithm_id,
+                    exc,
+                )
+
+        task.add_done_callback(_log_embedding_task_result)
+        return task
+
     async def _finish_embedding_tasks(self):
         if len(self._embedding_tasks) > 0:
-            await asyncio.gather(*self._embedding_tasks)
+            await asyncio.gather(*self._embedding_tasks, return_exceptions=True)

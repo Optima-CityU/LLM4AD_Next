@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from llm4ad.coder.base import BaseCoder
 from llm4ad.config.schema import AppConfig, CustomEvaluatorConfig
 from llm4ad.evaluator import BaseEvaluator, EvaluationDispatcher
@@ -375,8 +377,7 @@ class LLM4AD:
         if hasattr(self.config.evolution, "background") and self.config.background:
             self.config.evolution.background = self.config.background
 
-        if self.config.embedding and self.config.embedding.type:
-            self._embedding_client = EmbeddingClient(self.config.embedding)
+        self._initialize_embedding_client()
 
         self._orchestrator = BaseOrchestrator.create(
             self.config.evolution.type,
@@ -390,6 +391,29 @@ class LLM4AD:
             background=self.config.background,
             embedding_client=self._embedding_client
         )
+
+    def _initialize_embedding_client(self) -> None:
+        """Initialize the optional embedding client and log the effective routing."""
+        if not self.config.embedding or not self.config.embedding.type:
+            logger.info("Embedding client not configured; evaluation trace embeddings are disabled")
+            self._embedding_client = None
+            return
+
+        text_model = None
+        code_model = None
+        if self.config.embedding.text_config:
+            text_model = self.config.embedding.text_config.model
+        if self.config.embedding.code_config:
+            code_model = self.config.embedding.code_config.model
+
+        logger.info(
+            "Initializing embedding client: type={}, model={}, text_model={}, code_model={}",
+            self.config.embedding.type,
+            self.config.embedding.model or "",
+            text_model or "",
+            code_model or "",
+        )
+        self._embedding_client = EmbeddingClient(self.config.embedding)
 
     def _setup_workspace(self) -> None:
         """Create the workspace directory structure according to configuration."""

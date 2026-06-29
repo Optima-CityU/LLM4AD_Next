@@ -27,7 +27,6 @@ from llm4ad.orchestrator.base import (
     format_duration_ms,
 )
 from llm4ad.orchestrator.embedding_client import EmbeddingClient
-from llm4ad.orchestrator.embedding_utils import save_algorithm_embeddings
 from llm4ad.planner.base import Algorithm, BasePlanner
 
 # Optional psutil for resource tracking
@@ -347,11 +346,7 @@ class IslandGAOrchestrator(BaseOrchestrator):
             if self.state_tracker.generated_dir:
                 algorithm.write(self.state_tracker.generated_dir, stage="evaluation", island_id=island_id,
                                 generation=generation)
-                if self.embedding_client:
-                    task = asyncio.create_task(
-                        save_algorithm_embeddings(self.embedding_client, algorithm, self.state_tracker.embedding_dir))
-                    self._embedding_tasks.add(task)
-                    task.add_done_callback(self._embedding_tasks.discard)
+                self._schedule_embedding_save(algorithm)
 
             # Log evaluation result
             if algorithm.is_evaluated():

@@ -194,6 +194,17 @@ def _resolve_providers(
     embedding_config = _build_embedding_config(db, defaults, access_token)
     if embedding_config:
         input_args["embedding"] = embedding_config
+        text_config = embedding_config.get("text_config") or {}
+        code_config = embedding_config.get("code_config") or {}
+        logger.info(
+            "Task embedding config resolved: type={}, model={}, text_model={}, code_model={}",
+            embedding_config.get("type"),
+            embedding_config.get("model") or "",
+            text_config.get("model") or "",
+            code_config.get("model") or "",
+        )
+    else:
+        logger.info("Task embedding config not resolved; evaluation trace embeddings are disabled")
 
     # 启用凭据代理：把下发到容器的真实 LLM 凭据替换为一次性代理 token + 代理 base_url。
     # embedding 固定直连本地 gateway，不走 backend llmproxy，避免任务容器回连 backend。
