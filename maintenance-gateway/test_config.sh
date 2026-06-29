@@ -30,8 +30,14 @@ assert_not_contains nginx.conf '/flag/MAINTENANCE' \
   'nginx must not depend on the manual maintenance flag'
 assert_contains nginx.conf 'proxy_intercept_errors[[:space:]]+on;' \
   'nginx must intercept upstream error pages'
-assert_contains nginx.conf 'error_page[[:space:]]+500[[:space:]]+502[[:space:]]+503[[:space:]]+504[[:space:]]+@maintenance;' \
-  'nginx must map upstream 5xx responses to the maintenance page'
+assert_contains nginx.conf 'error_page[[:space:]]+500[[:space:]]+502[[:space:]]+503[[:space:]]+504[[:space:]]+=[[:space:]]+@maintenance;' \
+  'nginx must let browser maintenance pages return the static file status'
+assert_contains nginx.conf 'if \(\$request_method !~ \^\(GET\|HEAD\)\$\)' \
+  'non-GET/HEAD requests must still return 503 during maintenance'
+assert_contains maintenance.html 'headers\.get\("x-maintenance"\)' \
+  'maintenance page polling must check the X-Maintenance header'
+assert_not_contains maintenance.html 'res\.status && res\.status < 500' \
+  'maintenance page polling must not treat 200 + X-Maintenance as recovered'
 
 assert_contains compose.yml '^[[:space:]]+monitor:' \
   'compose must define a monitor sidecar'

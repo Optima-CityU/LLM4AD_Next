@@ -229,8 +229,9 @@
       </div>
     </main>
 
-    <!-- 智能自动重连：维护期间 nginx 对所有路径返回 503，因此周期性探活当前页，
-         一旦响应不再是 5xx（服务真正恢复，避开部署中途的 502/503）即整页重载，
+    <!-- 智能自动重连：维护期间 nginx 对页面路径返回 200 + X-Maintenance，
+         对接口路径返回 503 + X-Maintenance。周期性探活当前页，一旦响应不再带
+         X-Maintenance（服务真正恢复）即整页重载，
          无需用户手动刷新。探测失败（网络/容器重启中）静默重试。 -->
     <script>
       (function () {
@@ -246,8 +247,8 @@
               cache: "no-store",
               redirect: "manual",
             });
-            // < 500 表示已由真实应用响应（含 200/3xx/404），维护结束。
-            if (res.status && res.status < 500) {
+            // 维护页可能返回 200；只有不带 X-Maintenance 才代表真实应用已恢复。
+            if (!res.headers.get("x-maintenance")) {
               window.location.reload();
               return;
             }
