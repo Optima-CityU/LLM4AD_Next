@@ -6,7 +6,6 @@ from app.services.container_service import validate_task_container_host_path
 
 
 def test_task_container_host_path_rejects_relative_path(monkeypatch):
-    monkeypatch.setattr(settings, "TASK_CONTAINER_ENABLE", True)
     monkeypatch.setattr(settings, "HOST_PROJECT_HOME", "./app-data")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -19,14 +18,6 @@ def test_task_container_host_path_rejects_relative_path(monkeypatch):
 
 @pytest.mark.parametrize("host_project_home", ["/srv/llm4ad/app-data", r"D:\data\project_home"])
 def test_task_container_host_path_accepts_absolute_paths(monkeypatch, host_project_home):
-    monkeypatch.setattr(settings, "TASK_CONTAINER_ENABLE", True)
     monkeypatch.setattr(settings, "HOST_PROJECT_HOME", host_project_home)
-
-    validate_task_container_host_path()
-
-
-def test_task_container_host_path_skips_when_container_mode_disabled(monkeypatch):
-    monkeypatch.setattr(settings, "TASK_CONTAINER_ENABLE", False)
-    monkeypatch.setattr(settings, "HOST_PROJECT_HOME", "./app-data")
 
     validate_task_container_host_path()
