@@ -1038,6 +1038,497 @@ export const EmbeddingProviderResponseSchema = {
     description: 'Embedding 供应商响应，凭据不返回明文。'
 } as const;
 
+export const EmbeddingProviderTestByIdRequestSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        type: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/EmbeddingProviderType'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        api_key: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Api Key'
+        },
+        auth_token: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Auth Token'
+        },
+        base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Base Url'
+        },
+        mode: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/EmbeddingMode'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model'
+        },
+        dim: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Dim'
+        },
+        timeout: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Timeout'
+        },
+        embedding_func_max_async: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Func Max Async'
+        },
+        text_type: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/EmbeddingProviderType'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        text_base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Text Base Url'
+        },
+        text_api_key: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Text Api Key'
+        },
+        text_auth_token: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Text Auth Token'
+        },
+        text_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Text Model'
+        },
+        text_task: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Text Task'
+        },
+        code_type: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/EmbeddingProviderType'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        code_base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code Base Url'
+        },
+        code_api_key: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code Api Key'
+        },
+        code_auth_token: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code Auth Token'
+        },
+        code_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code Model'
+        },
+        code_task: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code Task'
+        },
+        task_type: {
+            type: 'string',
+            enum: ['text', 'code'],
+            title: 'Task Type'
+        },
+        sample: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sample'
+        }
+    },
+    type: 'object',
+    required: ['task_type'],
+    title: 'EmbeddingProviderTestByIdRequest',
+    description: '已存储 embedding 供应商连通性测试请求。'
+} as const;
+
+export const EmbeddingProviderTestRequestSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name',
+            default: 'embedding-test'
+        },
+        type: {
+            '$ref': '#/components/schemas/EmbeddingProviderType',
+            description: 'Embedding 供应商类型',
+            default: 'jina'
+        },
+        api_key: {
+            type: 'string',
+            title: 'Api Key',
+            description: 'API 密钥（加密存储）',
+            default: ''
+        },
+        auth_token: {
+            type: 'string',
+            title: 'Auth Token',
+            description: '认证令牌（加密存储）',
+            default: ''
+        },
+        base_url: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Base Url',
+            description: 'Embedding API 基础 URL'
+        },
+        mode: {
+            '$ref': '#/components/schemas/EmbeddingMode',
+            description: 'text/code 共用或分流',
+            default: 'shared'
+        },
+        model: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Model',
+            description: '共用 embedding 模型名称',
+            default: ''
+        },
+        dim: {
+            type: 'integer',
+            exclusiveMinimum: 0,
+            title: 'Dim',
+            description: 'Embedding 向量维度',
+            default: 3072
+        },
+        timeout: {
+            type: 'number',
+            exclusiveMinimum: 0,
+            title: 'Timeout',
+            description: '请求超时时间（秒）',
+            default: 60
+        },
+        embedding_func_max_async: {
+            type: 'integer',
+            minimum: 1,
+            title: 'Embedding Func Max Async',
+            description: '最大并发 embedding 请求数',
+            default: 2
+        },
+        text_type: {
+            '$ref': '#/components/schemas/EmbeddingProviderType',
+            description: '文本 embedding 供应商类型',
+            default: 'openai_compatible'
+        },
+        text_base_url: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Text Base Url',
+            description: '文本 embedding API 基础 URL'
+        },
+        text_api_key: {
+            type: 'string',
+            title: 'Text Api Key',
+            description: '文本 embedding API 密钥',
+            default: ''
+        },
+        text_auth_token: {
+            type: 'string',
+            title: 'Text Auth Token',
+            description: '文本 embedding 认证令牌',
+            default: ''
+        },
+        text_model: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Text Model',
+            description: '文本 embedding 模型名称',
+            default: ''
+        },
+        text_task: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Text Task',
+            description: '文本 embedding 任务模式',
+            default: 'text-matching'
+        },
+        code_type: {
+            '$ref': '#/components/schemas/EmbeddingProviderType',
+            description: '代码 embedding 供应商类型',
+            default: 'openai_compatible'
+        },
+        code_base_url: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Code Base Url',
+            description: '代码 embedding API 基础 URL'
+        },
+        code_api_key: {
+            type: 'string',
+            title: 'Code Api Key',
+            description: '代码 embedding API 密钥',
+            default: ''
+        },
+        code_auth_token: {
+            type: 'string',
+            title: 'Code Auth Token',
+            description: '代码 embedding 认证令牌',
+            default: ''
+        },
+        code_model: {
+            type: 'string',
+            maxLength: 255,
+            title: 'Code Model',
+            description: '代码 embedding 模型名称',
+            default: ''
+        },
+        code_task: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Code Task',
+            description: '代码 embedding 任务模式',
+            default: 'code.passage'
+        },
+        task_type: {
+            type: 'string',
+            enum: ['text', 'code'],
+            title: 'Task Type'
+        },
+        sample: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sample'
+        }
+    },
+    type: 'object',
+    required: ['task_type'],
+    title: 'EmbeddingProviderTestRequest',
+    description: 'Embedding 供应商连通性测试请求。'
+} as const;
+
+export const EmbeddingProviderTestResponseSchema = {
+    properties: {
+        success: {
+            type: 'boolean',
+            title: 'Success'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        task_type: {
+            type: 'string',
+            enum: ['text', 'code'],
+            title: 'Task Type'
+        },
+        dimension: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Dimension'
+        },
+        sample: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'number'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sample'
+        }
+    },
+    type: 'object',
+    required: ['success', 'message', 'task_type'],
+    title: 'EmbeddingProviderTestResponse',
+    description: 'Embedding 供应商连通性测试响应。'
+} as const;
+
 export const EmbeddingProviderTypeSchema = {
     type: 'string',
     enum: ['openai', 'jina', 'openai_compatible', 'mock', 'local'],

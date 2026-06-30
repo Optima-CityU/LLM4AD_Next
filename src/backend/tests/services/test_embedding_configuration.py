@@ -17,6 +17,7 @@ from app import models
 from app.core.config import settings
 from app.core.db import engine
 from app.models import EmbeddingMode, EmbeddingProviderType, ProviderType
+from app.schemas import embedding_provider as embedding_provider_schemas
 from app.schemas.result_render import ResultRenderGenerateRequest, ResultRenderType
 from app.services import embedding_provider_service, user_default_model_service
 from app.services.task_service.execution import _resolve_providers
@@ -155,6 +156,111 @@ def test_jina_embedding_provider_persists_model_and_task_modes(db: Session):
     assert provider.model == "jina-embeddings-v4-custom"
     assert provider.text_task == "retrieval.query"
     assert provider.code_task == "code.passage"
+
+
+@pytest.mark.asyncio
+async def test_embedding_provider_connectivity_tests_selected_task(monkeypatch):
+    calls: list[tuple[str, EmbeddingConfig]] = []
+
+    class FakeEmbeddingClient:
+        def __init__(self, config: EmbeddingConfig) -> None:
+            self.config = config
+
+        async def run_single(self, text: str, task_type: str | None = None) -> list[float]:
+            calls.append((task_type or "text", self.config))
+            return [0.1, 0.2, 0.3]
+
+        async def shutdown(self) -> None:
+            return None
+
+    monkeypatch.setattr(embedding_provider_service, "EmbeddingClient", FakeEmbeddingClient)
+
+    response = await embedding_provider_service.test_embedding_provider_connectivity(
+        embedding_provider_schemas.EmbeddingProviderTestRequest(
+            task_type="code",
+            name="split",
+            type=EmbeddingProviderType.LOCAL,
+            mode=EmbeddingMode.SPLIT,
+            dim=3,
+            timeout=5,
+            embedding_func_max_async=1,
+            text_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+            text_base_url="https://text.example/v1",
+            text_api_key="text-key",
+            text_model="text-model",
+            text_task="text-matching",
+            code_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+            code_base_url="https://code.example/v1",
+            code_api_key="code-key",
+            code_model="code-model",
+            code_task="code.passage",
+        )
+    )
+
+    assert response.success is True
+    assert response.dimension == 3
+    assert calls[0][0] == "code"
+    config = calls[0][1]
+    assert config.type == "local"
+    assert config.text_config is not None
+    assert config.text_config.model == "text-model"
+    assert config.code_config is not None
+    assert config.code_config.model == "code-model"
+
+
+@pytest.mark.asyncio
+async def test_stored_embedding_provider_connectivity_uses_existing_secrets_with_overrides(
+    db: Session,
+    monkeypatch,
+):
+    user = create_random_user(db)
+    provider = _embedding_provider(
+        db,
+        user.id,
+        type=EmbeddingProviderType.LOCAL,
+        mode=EmbeddingMode.SPLIT,
+        text_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        text_base_url="https://stored-text.example/v1",
+        text_api_key="stored-text-key",
+        text_model="stored-text-model",
+        code_type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        code_base_url="https://stored-code.example/v1",
+        code_api_key="stored-code-key",
+        code_model="stored-code-model",
+    )
+    configs: list[EmbeddingConfig] = []
+
+    class FakeEmbeddingClient:
+        def __init__(self, config: EmbeddingConfig) -> None:
+            configs.append(config)
+
+        async def run_single(self, text: str, task_type: str | None = None) -> list[float]:
+            assert task_type == "text"
+            return [0.1, 0.2]
+
+        async def shutdown(self) -> None:
+            return None
+
+    monkeypatch.setattr(embedding_provider_service, "EmbeddingClient", FakeEmbeddingClient)
+
+    response = await embedding_provider_service.test_stored_embedding_provider_connectivity(
+        db,
+        provider.id,
+        user,
+        embedding_provider_schemas.EmbeddingProviderTestByIdRequest(
+            task_type="text",
+            text_model="override-text-model",
+            text_api_key="sk-***",
+            code_api_key="override-code-key",
+        ),
+    )
+
+    assert response.success is True
+    assert configs[0].text_config is not None
+    assert configs[0].text_config.api_key == "stored-text-key"
+    assert configs[0].text_config.model == "override-text-model"
+    assert configs[0].code_config is not None
+    assert configs[0].code_config.api_key == "override-code-key"
 
 
 def test_resolve_providers_omits_embedding_when_disabled(db: Session):

@@ -2,11 +2,15 @@
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any, Literal
 
 from fastapi import HTTPException
+from llm4ad.config.app import EmbeddingConfig, TaskSpecificConfig
+from llm4ad.orchestrator.embedding_client import EmbeddingClient
 from sqlmodel import Session, func, select
 
 from app import models
+from app.schemas import embedding_provider as schemas
 from app.schemas.provider import _MASKED_SECRET
 
 JINA_DEFAULT_BASE_URL = "https://api.jinaai.cn/v1"
@@ -14,7 +18,11 @@ JINA_DEFAULT_MODEL = "jina-embeddings-v4"
 JINA_DEFAULT_DIM = 2048
 
 
-def _normalize_provider_data(data: dict) -> dict:
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _normalize_provider_data(data: dict[str, Any]) -> dict[str, Any]:
     """Apply provider defaults and validate mode-specific fields."""
     provider_type = data.get("type", models.EmbeddingProviderType.JINA)
     mode = data.get("mode", models.EmbeddingMode.SHARED)
@@ -87,6 +95,134 @@ def _normalize_provider_data(data: dict) -> dict:
     return data
 
 
+def _embedding_config_from_provider_data(data: dict[str, Any]) -> EmbeddingConfig:
+    data = _normalize_provider_data(data.copy())
+    provider_type = data.get("type", models.EmbeddingProviderType.JINA)
+    mode = data.get("mode", models.EmbeddingMode.SHARED)
+
+    if mode == models.EmbeddingMode.SPLIT or provider_type == models.EmbeddingProviderType.LOCAL:
+        text_type = data.get("text_type") or (
+            models.EmbeddingProviderType.OPENAI_COMPATIBLE
+            if provider_type == models.EmbeddingProviderType.LOCAL
+            else provider_type
+        )
+        code_type = data.get("code_type") or (
+            models.EmbeddingProviderType.OPENAI_COMPATIBLE
+            if provider_type == models.EmbeddingProviderType.LOCAL
+            else provider_type
+        )
+        return EmbeddingConfig(
+            type="local",
+            dim=data.get("dim") or JINA_DEFAULT_DIM,
+            timeout=data.get("timeout") or 60.0,
+            embedding_func_max_async=data.get("embedding_func_max_async") or 2,
+            text_config=TaskSpecificConfig(
+                type=_enum_value(text_type),
+                api_key=data.get("text_api_key") or "",
+                auth_token=data.get("text_auth_token") or "",
+                base_url=data.get("text_base_url") or "",
+                model=data.get("text_model") or data.get("model") or "",
+                timeout=data.get("timeout") or 60.0,
+                task=data.get("text_task") or None,
+            ),
+            code_config=TaskSpecificConfig(
+                type=_enum_value(code_type),
+                api_key=data.get("code_api_key") or "",
+                auth_token=data.get("code_auth_token") or "",
+                base_url=data.get("code_base_url") or "",
+                model=data.get("code_model") or data.get("model") or "",
+                timeout=data.get("timeout") or 60.0,
+                task=data.get("code_task") or None,
+            ),
+        )
+
+    return EmbeddingConfig(
+        type=_enum_value(provider_type),
+        api_key=data.get("api_key") or "",
+        auth_token=data.get("auth_token") or "",
+        base_url=data.get("base_url") or None,
+        model=data.get("model") or "",
+        text_task=data.get("text_task") or None,
+        code_task=data.get("code_task") or None,
+        dim=data.get("dim") or JINA_DEFAULT_DIM,
+        timeout=data.get("timeout") or 60.0,
+        embedding_func_max_async=data.get("embedding_func_max_async") or 2,
+    )
+
+
+async def _run_embedding_connectivity_test(
+    config: EmbeddingConfig,
+    task_type: Literal["text", "code"],
+    sample: str | None,
+) -> schemas.EmbeddingProviderTestResponse:
+    client = EmbeddingClient(config)
+    try:
+        text = sample or (
+            "LLM4AD embedding connectivity test"
+            if task_type == "text"
+            else "def llm4ad_embedding_connectivity_test(x):\n    return x"
+        )
+        vector = await client.run_single(text, task_type=task_type)
+        dimension = len(vector)
+        is_zero_vector = dimension > 0 and all(value == 0 for value in vector)
+        if dimension == 0 or is_zero_vector:
+            return schemas.EmbeddingProviderTestResponse(
+                success=False,
+                message="Embedding 测试未返回有效向量，请检查模型名称、API 地址或凭据",
+                task_type=task_type,
+                dimension=dimension,
+                sample=vector[:5],
+            )
+        return schemas.EmbeddingProviderTestResponse(
+            success=True,
+            message=f"{task_type} embedding 测试成功，返回 {dimension} 维向量",
+            task_type=task_type,
+            dimension=dimension,
+            sample=vector[:5],
+        )
+    except Exception as exc:
+        return schemas.EmbeddingProviderTestResponse(
+            success=False,
+            message=f"Embedding 测试失败：{exc}",
+            task_type=task_type,
+        )
+    finally:
+        await client.shutdown()
+
+
+async def test_embedding_provider_connectivity(
+    request: schemas.EmbeddingProviderTestRequest,
+) -> schemas.EmbeddingProviderTestResponse:
+    data = request.model_dump(exclude={"task_type", "sample"})
+    config = _embedding_config_from_provider_data(data)
+    return await _run_embedding_connectivity_test(config, request.task_type, request.sample)
+
+
+async def test_stored_embedding_provider_connectivity(
+    db: Session,
+    provider_id: uuid.UUID,
+    current_user: models.User,
+    request: schemas.EmbeddingProviderTestByIdRequest,
+) -> schemas.EmbeddingProviderTestResponse:
+    provider = get_embedding_provider_with_auth(db, provider_id, current_user)
+    update_data: dict[str, Any] = request.model_dump(exclude_unset=True, exclude={"task_type", "sample"})
+    for secret_field in (
+        "api_key",
+        "auth_token",
+        "text_api_key",
+        "text_auth_token",
+        "code_api_key",
+        "code_auth_token",
+    ):
+        if update_data.get(secret_field) == _MASKED_SECRET:
+            update_data.pop(secret_field)
+
+    data = provider.model_dump()
+    data.update(update_data)
+    config = _embedding_config_from_provider_data(data)
+    return await _run_embedding_connectivity_test(config, request.task_type, request.sample)
+
+
 def get_embedding_provider_with_auth(
     db: Session,
     provider_id: uuid.UUID,
@@ -131,7 +267,7 @@ def update_embedding_provider(
     db: Session,
     provider_id: uuid.UUID,
     current_user: models.User,
-    update_data: dict,
+    update_data: dict[str, Any],
 ) -> models.EmbeddingProvider:
     provider = get_embedding_provider_with_auth(db, provider_id, current_user)
 

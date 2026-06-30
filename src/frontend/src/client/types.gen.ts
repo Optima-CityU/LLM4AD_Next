@@ -450,6 +450,142 @@ export type EmbeddingProviderResponse = {
 };
 
 /**
+ * 已存储 embedding 供应商连通性测试请求。
+ */
+export type EmbeddingProviderTestByIdRequest = {
+    name?: (string | null);
+    type?: (EmbeddingProviderType | null);
+    api_key?: (string | null);
+    auth_token?: (string | null);
+    base_url?: (string | null);
+    mode?: (EmbeddingMode | null);
+    model?: (string | null);
+    dim?: (number | null);
+    timeout?: (number | null);
+    embedding_func_max_async?: (number | null);
+    text_type?: (EmbeddingProviderType | null);
+    text_base_url?: (string | null);
+    text_api_key?: (string | null);
+    text_auth_token?: (string | null);
+    text_model?: (string | null);
+    text_task?: (string | null);
+    code_type?: (EmbeddingProviderType | null);
+    code_base_url?: (string | null);
+    code_api_key?: (string | null);
+    code_auth_token?: (string | null);
+    code_model?: (string | null);
+    code_task?: (string | null);
+    task_type: 'text' | 'code';
+    sample?: (string | null);
+};
+
+export type task_type = 'text' | 'code';
+
+/**
+ * Embedding 供应商连通性测试请求。
+ */
+export type EmbeddingProviderTestRequest = {
+    name?: string;
+    /**
+     * Embedding 供应商类型
+     */
+    type?: EmbeddingProviderType;
+    /**
+     * API 密钥（加密存储）
+     */
+    api_key?: string;
+    /**
+     * 认证令牌（加密存储）
+     */
+    auth_token?: string;
+    /**
+     * Embedding API 基础 URL
+     */
+    base_url?: (string | null);
+    /**
+     * text/code 共用或分流
+     */
+    mode?: EmbeddingMode;
+    /**
+     * 共用 embedding 模型名称
+     */
+    model?: string;
+    /**
+     * Embedding 向量维度
+     */
+    dim?: number;
+    /**
+     * 请求超时时间（秒）
+     */
+    timeout?: number;
+    /**
+     * 最大并发 embedding 请求数
+     */
+    embedding_func_max_async?: number;
+    /**
+     * 文本 embedding 供应商类型
+     */
+    text_type?: EmbeddingProviderType;
+    /**
+     * 文本 embedding API 基础 URL
+     */
+    text_base_url?: (string | null);
+    /**
+     * 文本 embedding API 密钥
+     */
+    text_api_key?: string;
+    /**
+     * 文本 embedding 认证令牌
+     */
+    text_auth_token?: string;
+    /**
+     * 文本 embedding 模型名称
+     */
+    text_model?: string;
+    /**
+     * 文本 embedding 任务模式
+     */
+    text_task?: string;
+    /**
+     * 代码 embedding 供应商类型
+     */
+    code_type?: EmbeddingProviderType;
+    /**
+     * 代码 embedding API 基础 URL
+     */
+    code_base_url?: (string | null);
+    /**
+     * 代码 embedding API 密钥
+     */
+    code_api_key?: string;
+    /**
+     * 代码 embedding 认证令牌
+     */
+    code_auth_token?: string;
+    /**
+     * 代码 embedding 模型名称
+     */
+    code_model?: string;
+    /**
+     * 代码 embedding 任务模式
+     */
+    code_task?: string;
+    task_type: 'text' | 'code';
+    sample?: (string | null);
+};
+
+/**
+ * Embedding 供应商连通性测试响应。
+ */
+export type EmbeddingProviderTestResponse = {
+    success: boolean;
+    message: string;
+    task_type: 'text' | 'code';
+    dimension?: (number | null);
+    sample?: (Array<(number)> | null);
+};
+
+/**
  * Embedding 供应商类型枚举。
  */
 export type EmbeddingProviderType = 'openai' | 'jina' | 'openai_compatible' | 'mock' | 'local';
@@ -2184,6 +2320,12 @@ export type Llm4AdChatTuneStreamTurnData = {
 
 export type Llm4AdChatTuneStreamTurnResponse = (unknown);
 
+export type Llm4AdEmbeddingProvidersTestEmbeddingProviderData = {
+    requestBody: EmbeddingProviderTestRequest;
+};
+
+export type Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse = (EmbeddingProviderTestResponse);
+
 export type Llm4AdEmbeddingProvidersCreateEmbeddingProviderData = {
     requestBody: EmbeddingProviderCreate;
 };
@@ -2215,6 +2357,13 @@ export type Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData = {
 };
 
 export type Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse = (Message);
+
+export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData = {
+    providerId: string;
+    requestBody: EmbeddingProviderTestByIdRequest;
+};
+
+export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse = (EmbeddingProviderTestResponse);
 
 export type Llm4AdLlmproxyProxyLlmData = {
     path: string;

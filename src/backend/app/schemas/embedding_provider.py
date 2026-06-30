@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
@@ -43,6 +44,31 @@ class EmbeddingProviderUpdate(BaseModel):
     code_task: str | None = None
 
 
+class EmbeddingProviderTestRequest(EmbeddingProviderBase):
+    """Embedding 供应商连通性测试请求。"""
+
+    task_type: Literal["text", "code"]
+    name: str = "embedding-test"
+    sample: str | None = None
+
+
+class EmbeddingProviderTestByIdRequest(EmbeddingProviderUpdate):
+    """已存储 embedding 供应商连通性测试请求。"""
+
+    task_type: Literal["text", "code"]
+    sample: str | None = None
+
+
+class EmbeddingProviderTestResponse(BaseModel):
+    """Embedding 供应商连通性测试响应。"""
+
+    success: bool
+    message: str
+    task_type: Literal["text", "code"]
+    dimension: int | None = None
+    sample: list[float] | None = None
+
+
 class EmbeddingProviderResponse(BaseModel):
     """Embedding 供应商响应，凭据不返回明文。"""
 
@@ -76,7 +102,7 @@ class EmbeddingProviderResponse(BaseModel):
     code_task: str
 
     @model_serializer(mode="wrap")
-    def _mask_secrets(self, handler):
+    def _mask_secrets(self, handler: Any) -> dict[str, Any]:
         data = handler(self)
         for field in ("api_key", "auth_token", "text_api_key", "text_auth_token", "code_api_key", "code_auth_token"):
             data[field] = _MASKED_SECRET if data.get(field) else ""
