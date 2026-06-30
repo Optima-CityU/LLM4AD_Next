@@ -79,6 +79,28 @@ class AutoExtractionConfig(BaseModel):
     - Bad algorithms: capture what to avoid
     """
 
+    type: str = Field(
+        default="llm_card_extractor",
+        description="Memory extractor implementation registered name",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="提取器类型",
+            label_en="Extractor Type",
+            desc_zh="记忆自动提取器的注册名称",
+            desc_en="Registered memory extractor implementation name",
+        ),
+    )
+    module: str | None = Field(
+        default=None,
+        description="Optional Python module to import before creating the extractor",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="提取器模块",
+            label_en="Extractor Module",
+            desc_zh="创建提取器前导入的可选 Python 模块",
+            desc_en="Optional Python module imported before creating the extractor",
+        ),
+    )
     enabled: bool = Field(
         default=True, description="Enable auto-extraction after evaluation",
         json_schema_extra=ui(
@@ -172,6 +194,27 @@ class AutoExtractionConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory system configuration."""
 
+    type: str = Field(
+        default="local_yaml",
+        description="Memory implementation registered name",
+        json_schema_extra=ui(
+            label_zh="Memory 类型",
+            label_en="Memory Type",
+            desc_zh="记忆模块注册名称：local_yaml 或 mindmemos_cloud；自定义实现可填写注册名",
+            desc_en="Registered memory implementation: local_yaml or mindmemos_cloud; custom backends can use their registered name",
+        ),
+    )
+    module: str | None = Field(
+        default=None,
+        description="Optional Python module to import before creating memory",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="Memory 模块",
+            label_en="Memory Module",
+            desc_zh="创建记忆模块前导入的可选 Python 模块",
+            desc_en="Optional Python module imported before creating memory",
+        ),
+    )
     max_entries: int = Field(
         default=10000, ge=1, description="Maximum entries",
         json_schema_extra=ui(
@@ -193,6 +236,141 @@ class MemoryConfig(BaseModel):
             label_zh="衰减因子", label_en="Decay Factor",
             desc_zh="记忆随时间衰减的因子，值越小衰减越快（0.0-1.0）",
             desc_en="Temporal decay factor; lower values decay faster (0.0-1.0)",
+        ),
+    )
+
+    # MindMemOS backend settings
+    mindmemos_base_url: str = Field(
+        default="",
+        description="MindMemOS API base URL",
+        json_schema_extra=ui(
+            label_zh="MindMemOS 服务地址",
+            label_en="MindMemOS Base URL",
+            desc_zh="容器内默认使用 http://mindmemos-api:8000",
+            desc_en="Use http://mindmemos-api:8000 from Docker containers",
+        ),
+    )
+    mindmemos_api_key: str = Field(
+        default="",
+        description="MindMemOS API key",
+        json_schema_extra=ui(
+            label_zh="MindMemOS API Key",
+            label_en="MindMemOS API Key",
+            desc_zh="MindMemOS api_keys.yaml 中配置的 bearer key",
+            desc_en="Bearer key configured in MindMemOS api_keys.yaml",
+        ),
+    )
+    mindmemos_user_id: str = Field(
+        default="",
+        description="MindMemOS user scope",
+        json_schema_extra=ui(
+            label_zh="用户级记忆范围",
+            label_en="User Scope",
+            desc_zh="用于隔离不同用户或租户的记忆",
+            desc_en="Memory isolation key for users or tenants",
+        ),
+    )
+    mindmemos_app_id: str = Field(
+        default="llm4ad",
+        description="MindMemOS app scope",
+        json_schema_extra=ui(
+            label_zh="应用范围",
+            label_en="App Scope",
+            desc_zh="默认 llm4ad",
+            desc_en="Defaults to llm4ad",
+        ),
+    )
+    mindmemos_agent_id: str = Field(
+        default="planner",
+        description="MindMemOS agent scope",
+        json_schema_extra=ui(
+            label_zh="Agent 范围",
+            label_en="Agent Scope",
+            desc_zh="默认 planner",
+            desc_en="Defaults to planner",
+        ),
+    )
+    mindmemos_session_id: str = Field(
+        default="",
+        description="MindMemOS session/task scope",
+        json_schema_extra=ui(
+            label_zh="任务级记忆范围",
+            label_en="Session Scope",
+            desc_zh="建议使用当前 task_id 或 run_id",
+            desc_en="Use the current task_id or run_id",
+        ),
+    )
+    mindmemos_project_id: str = Field(
+        default="",
+        description="Project memory scope stored as metadata filter",
+        json_schema_extra=ui(
+            label_zh="项目级记忆范围",
+            label_en="Project Scope",
+            desc_zh="用于项目级长期记忆过滤",
+            desc_en="Used as project-level long-term memory filter",
+        ),
+    )
+    mindmemos_search_strategy: str = Field(
+        default="fast",
+        description="MindMemOS search strategy: fast or agentic",
+        json_schema_extra=ui(
+            label_zh="检索策略",
+            label_en="Search Strategy",
+            desc_zh="fast 或 agentic",
+            desc_en="fast or agentic",
+        ),
+    )
+    mindmemos_rerank: bool = Field(
+        default=False,
+        description="Enable MindMemOS rerank for search",
+        json_schema_extra=ui(
+            label_zh="启用重排",
+            label_en="Enable Rerank",
+            desc_zh="是否启用 MindMemOS 检索结果重排",
+            desc_en="Whether to rerank MindMemOS search results",
+        ),
+    )
+    mindmemos_score_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Optional MindMemOS search score threshold",
+        json_schema_extra=ui(
+            label_zh="检索分数阈值",
+            label_en="Score Threshold",
+            desc_zh="可选，过滤低相关记忆",
+            desc_en="Optional threshold for filtering weak memories",
+        ),
+    )
+    mindmemos_fail_open: bool = Field(
+        default=True,
+        description="Do not interrupt evolution when MindMemOS runtime calls fail",
+        json_schema_extra=ui(
+            label_zh="失败时不中断任务",
+            label_en="Fail Open",
+            desc_zh="MindMemOS 运行中不可用时返回空记忆并记录告警",
+            desc_en="Return empty memory context and log warnings when MindMemOS is unavailable",
+        ),
+    )
+    mindmemos_sync_static_cards: bool = Field(
+        default=False,
+        description="Sync static cards to MindMemOS on load",
+        json_schema_extra=ui(
+            label_zh="同步静态卡片",
+            label_en="Sync Static Cards",
+            desc_zh="默认关闭，避免重复污染远端记忆",
+            desc_en="Disabled by default to avoid duplicating remote memories",
+        ),
+    )
+    mindmemos_allow_remote_clear: bool = Field(
+        default=False,
+        description="Allow clear() to delete remote memories",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="允许远端清理",
+            label_en="Allow Remote Clear",
+            desc_zh="危险选项，默认关闭",
+            desc_en="Dangerous option, disabled by default",
         ),
     )
 

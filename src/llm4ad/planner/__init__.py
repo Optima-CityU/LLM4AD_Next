@@ -11,9 +11,14 @@ from llm4ad.planner.base import (
 )
 from llm4ad.planner.llm_evolution import LLMEvolutionPlanner
 from llm4ad.planner.memory import (
+    BaseMemory,
+    BaseMemoryExtractor,
     Memory,
     MemoryEntry,
+    MemoryExtractor,
     MemoryType,
+    create_memory,
+    create_memory_extractor,
 )
 from llm4ad.planner.meoh_evolution import MEoHEvolutionPlanner
 from llm4ad.planner.selector import BaseSelector, SamplerSelector
@@ -25,8 +30,13 @@ __all__ = [
     "LLMEvolutionPlanner",
     "MEoHEvolutionPlanner",
     "Memory",
+    "BaseMemory",
+    "BaseMemoryExtractor",
     "MemoryEntry",
+    "MemoryExtractor",
     "MemoryType",
+    "create_memory",
+    "create_memory_extractor",
     "BaseSelector",
     "SamplerSelector",
 ]

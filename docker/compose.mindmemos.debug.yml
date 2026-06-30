@@ -1,0 +1,32 @@
+services:
+  mindmemos-qdrant:
+    ports:
+      - "${MINDMEMOS_QDRANT_HTTP_PORT:-16333}:6333"
+      - "${MINDMEMOS_QDRANT_GRPC_PORT:-16334}:6334"
+
+  mindmemos-neo4j:
+    ports:
+      - "${MINDMEMOS_NEO4J_HTTP_PORT:-17474}:7474"
+      - "${MINDMEMOS_NEO4J_BOLT_PORT:-17687}:7687"
+
+  mindmemos-kafka:
+    ports:
+      - "${MINDMEMOS_KAFKA_PORT:-19092}:9092"
+
+  mindmemos-clickhouse:
+    ports:
+      - "${MINDMEMOS_CLICKHOUSE_HTTP_PORT:-18123}:8123"
+      - "${MINDMEMOS_CLICKHOUSE_NATIVE_PORT:-19000}:9000"
+
+  mindmemos-otel-collector:
+    ports:
+      - "${MINDMEMOS_OTEL_GRPC_PORT:-14317}:4317"
+      - "${MINDMEMOS_OTEL_HTTP_PORT:-14318}:4318"
+
+  mindmemos-grafana:
+    ports:
+      - "${MINDMEMOS_GRAFANA_PORT:-13000}:3000"
+
+  mindmemos-api:
+    ports:
+      - "${MINDMEMOS_API_PORT:-18000}:8000"

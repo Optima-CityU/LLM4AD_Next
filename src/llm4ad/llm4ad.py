@@ -210,7 +210,7 @@ class LLM4AD:
         planner_provider = self._providers[planner_provider_name]
 
         # Initialize planner
-        from llm4ad.planner.memory import Memory
+        from llm4ad.planner.memory import create_memory, create_memory_extractor
 
         # Get coder provider
         coder_provider_name = self.config.coder.provider
@@ -324,7 +324,7 @@ class LLM4AD:
             subdirs=self.config.workspace.subdirs,
         )
 
-        memory = Memory(self.config.memory.model_dump())
+        memory = create_memory(self.config.memory)
 
         # Set up memory persistence directory
         if self._state_tracker.memory_dir:
@@ -337,9 +337,7 @@ class LLM4AD:
 
         # Create memory extractor for auto-extraction during evolution
         if self.config.memory.auto_extraction.enabled:
-            from llm4ad.planner.memory import MemoryExtractor
-
-            memory.extractor = MemoryExtractor(
+            memory.extractor = create_memory_extractor(
                 provider=planner_provider,
                 config=self.config.memory.auto_extraction,
             )

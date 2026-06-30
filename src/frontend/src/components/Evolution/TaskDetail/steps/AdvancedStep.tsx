@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
+import axios from "axios"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -65,6 +67,8 @@ export default function AdvancedStep({
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
+        <MemoryConnectionTest value={value} />
+
         {/* Basic (primitive) params */}
         {basicEntries.length > 0 && (
           <div className="space-y-4">
@@ -112,6 +116,55 @@ export default function AdvancedStep({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function MemoryConnectionTest({ value }: { value: Record<string, unknown> }) {
+  const [isTesting, setIsTesting] = useState(false)
+  const memory = value.memory as Record<string, unknown> | undefined
+  if (!memory || memory.type !== "mindmemos_cloud") {
+    return null
+  }
+
+  const handleTest = async () => {
+    setIsTesting(true)
+    try {
+      const token = localStorage.getItem("access_token") || ""
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/memory/test`,
+        memory,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      )
+      if (response.data?.ok) {
+        toast.success(response.data.message || "MindMemOS 连接检测通过")
+      } else {
+        toast.error(response.data?.message || "MindMemOS 连接检测失败")
+      }
+    } catch (error) {
+      const message =
+        axios.isAxiosError(error) && error.response?.data?.detail
+          ? String(error.response.data.detail)
+          : "MindMemOS 连接检测失败"
+      toast.error(message)
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">MindMemOS</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {String(memory.mindmemos_base_url || "http://mindmemos-api:8000")}
+        </p>
+      </div>
+      <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={isTesting}>
+        {isTesting ? "检测中..." : "检测连接"}
+      </Button>
     </div>
   )
 }

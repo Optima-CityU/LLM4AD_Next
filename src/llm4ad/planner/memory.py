@@ -8,9 +8,13 @@ Provides persistent, card-based memory that supports:
 """
 
 import hashlib
+import importlib
+import importlib.util
 import re
+import sys
 import time
 import uuid
+from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -19,6 +23,8 @@ from typing import Any, Literal
 import yaml
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
+from llm4ad.utils.registry import Registrable
 
 
 class MemoryType(Enum):
@@ -175,7 +181,103 @@ class MemoryCard(BaseModel):
         return filepath
 
 
-class MemoryExtractor:
+class BaseMemoryExtractor(ABC, Registrable):
+    """Abstract interface for memory card extraction modules."""
+
+    def __init__(self, provider: Any, config: Any):
+        """Initialize extractor.
+
+        Args:
+            provider: LLM provider or extraction backend dependency.
+            config: Extractor configuration object.
+        """
+        self.provider = provider
+        self.config = config
+
+    @abstractmethod
+    def reset_generation(self) -> None:
+        """Reset any per-generation extractor state."""
+        ...
+
+    @abstractmethod
+    async def extract_from_good(
+        self,
+        algorithm: Any,
+        population: list[Any],
+        generation: int,
+        background: str = "",
+    ) -> MemoryCard | None:
+        """Extract a memory card from a well-performing algorithm."""
+        ...
+
+    @abstractmethod
+    async def extract_from_bad(
+        self,
+        algorithm: Any,
+        population: list[Any],
+        generation: int,
+        background: str = "",
+    ) -> MemoryCard | None:
+        """Extract a memory card from a poorly-performing algorithm."""
+        ...
+
+    @abstractmethod
+    async def extract_from_failure(
+        self,
+        algorithm: Any,
+        error: str,
+        generation: int,
+        background: str = "",
+    ) -> MemoryCard | None:
+        """Extract a memory card from an evaluation failure."""
+        ...
+
+
+class BaseMemory(ABC, Registrable):
+    """Abstract interface for pluggable memory modules."""
+
+    def __init__(self, config: dict[str, Any]):
+        """Initialize memory module.
+
+        Args:
+            config: Memory configuration dictionary.
+        """
+        self.config = config
+        self.extractor: BaseMemoryExtractor | None = None
+
+    @abstractmethod
+    def set_memory_dir(self, memory_dir: Path) -> None:
+        """Set the persistence directory for memory data."""
+        ...
+
+    @abstractmethod
+    def load_static_cards(self, inline_cards: list[Any]) -> None:
+        """Load static memory cards from configuration."""
+        ...
+
+    @abstractmethod
+    async def add_card(self, card: MemoryCard, persist: bool | None = None) -> None:
+        """Add a memory card to the module."""
+        ...
+
+    @abstractmethod
+    def get_prompt_context(self, query: str = "", max_cards: int | None = None) -> str:
+        """Build a prompt-ready memory context string."""
+        ...
+
+    @abstractmethod
+    def get_stats(self) -> dict[str, Any]:
+        """Return memory statistics."""
+        ...
+
+    @abstractmethod
+    def clear(self) -> None:
+        """Clear all runtime memory state."""
+        ...
+
+
+@BaseMemoryExtractor.register("llm_card_extractor")
+class MemoryExtractor(BaseMemoryExtractor):
     """LLM-based extraction of memory cards from evaluated algorithms.
 
     Extracts two types of insights:
@@ -190,8 +292,7 @@ class MemoryExtractor:
             provider: LLM provider for extraction calls.
             config: AutoExtractionConfig instance.
         """
-        self.provider = provider
-        self.config = config
+        super().__init__(provider, config)
         self._best_score: float = float("-inf")
         self._cards_this_gen: int = 0
 
@@ -518,7 +619,8 @@ class MemoryExtractor:
         self._cards_this_gen = 0
 
 
-class Memory:
+@BaseMemory.register("local_yaml")
+class Memory(BaseMemory):
     """Experience memory system for storing and retrieving insights.
 
     The memory system serves as the "long-term memory" of the evolution process,
@@ -540,7 +642,7 @@ class Memory:
         Args:
             config: Memory configuration dict.
         """
-        self.config = config
+        super().__init__(config)
         self.entries: dict[str, MemoryEntry] = {}  # id -> entry
         self._type_index: dict[MemoryType, set[str]] = {t: set() for t in MemoryType}
         self._generation_index: dict[int, set[str]] = {}
@@ -550,9 +652,6 @@ class Memory:
         self.memory_dir: Path | None = None
         self.max_prompt_cards: int = config.get("max_prompt_cards", 5)
         self.persist_enabled: bool = config.get("persist", True)
-
-        # Extractor (set externally after initialization)
-        self.extractor: MemoryExtractor | None = None
 
     def set_memory_dir(self, memory_dir: Path) -> None:
         """Set the persistence directory and load any existing cards.
@@ -1006,3 +1105,70 @@ class Memory:
         for card in other._cards:
             if card.id not in {c.id for c in self._cards}:
                 self._cards.append(card)
+
+
+def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    """Read a config key from either dict-like or attribute-based config."""
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
+def import_memory_module(module: str | None) -> None:
+    """Import an optional user module so it can register memory components.
+
+    Args:
+        module: Dotted module name or path to a Python file.
+
+    Raises:
+        ImportError: If the module cannot be imported.
+        ValueError: If a file module cannot be loaded.
+    """
+    if not module:
+        return
+
+    module_path = Path(module).expanduser()
+    if module.endswith(".py") or module_path.exists():
+        resolved_path = module_path.resolve()
+        module_name = f"llm4ad_user_memory_{resolved_path.stem}_{uuid.uuid4().hex[:8]}"
+        spec = importlib.util.spec_from_file_location(module_name, resolved_path)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"Unable to load memory module from '{module}'")
+        loaded_module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = loaded_module
+        spec.loader.exec_module(loaded_module)
+        return
+
+    importlib.import_module(module)
+
+
+def create_memory(config: Any) -> BaseMemory:
+    """Create a registered memory implementation from config.
+
+    Args:
+        config: MemoryConfig instance or plain dictionary.
+
+    Returns:
+        Registered memory implementation.
+    """
+    import_memory_module(_config_get(config, "module"))
+    memory_type = _config_get(config, "type", "local_yaml")
+    if memory_type == "mindmemos_cloud":
+        import_memory_module("llm4ad.planner.mindmemos_memory")
+    config_dict = config if isinstance(config, dict) else config.model_dump()
+    return BaseMemory.create(memory_type, config=config_dict)
+
+
+def create_memory_extractor(provider: Any, config: Any) -> BaseMemoryExtractor:
+    """Create a registered memory extractor implementation from config.
+
+    Args:
+        provider: Provider passed to the extractor.
+        config: AutoExtractionConfig instance or plain dictionary.
+
+    Returns:
+        Registered memory extractor implementation.
+    """
+    import_memory_module(_config_get(config, "module"))
+    extractor_type = _config_get(config, "type", "llm_card_extractor")
+    return BaseMemoryExtractor.create(extractor_type, provider=provider, config=config)

@@ -1,0 +1,76 @@
+telemetry:
+  enabled: false
+  telemetry_endpoint: http://mindmemos-otel-collector:4318
+  telemetry_timeout: 30
+  service_name: mindmemos
+  span_type: batch
+  logs_enabled: false
+  trace_sampling_ratio: 1.0
+  max_queue_size: 10240
+  max_export_batch_size: 256
+  log_level: INFO
+  metric_export_interval_millis: 5000
+
+auth:
+  mode: api_key
+  api_key_file: api_keys.yaml
+  gateway_jwt_secret: demo-jwt-secret-key
+  gateway_jwt_issuer: demo-jwt-gateway
+  gateway_jwt_audience: demo-jwt-audience
+
+# Fill these routers with real endpoints before running real add/search.
+# Empty routers let the local API start for wiring and health checks.
+chat_model_router:
+  routing_strategy: simple-shuffle
+  endpoints: []
+
+embed_model_router:
+  routing_strategy: simple-shuffle
+  endpoints: []
+
+rerank_model_router:
+  routing_strategy: simple-shuffle
+  endpoints: []
+
+database:
+  qdrant:
+    url: http://mindmemos-qdrant:6333
+    grpc_port: 6334
+    prefer_grpc: true
+    vector_size: 1024
+    auto_create: true
+
+  neo4j:
+    uri: bolt://mindmemos-neo4j:7687
+    username: neo4j
+    password: mindmemos_dev_password
+    database: neo4j
+    auto_create_schema: true
+
+  default_consistency: fast
+
+kafka:
+  enabled: true
+  bootstrap_servers: mindmemos-kafka:29092
+
+pipelines:
+  get: default_get
+  delete: default_delete
+  update: default_update
+  feedback: default_feedback
+
+algo_config:
+  common:
+    prompt_language: EN
+  add:
+    schema:
+      entity_modeling_path: config/presets/entity_modeling.json
+    vanilla:
+      enable_entities: false
+  search:
+    vanilla:
+      use_reranker: false
+      graph_enabled: false
+      shared_entity_graph_enabled: false
+    rerank:
+      enabled: false
