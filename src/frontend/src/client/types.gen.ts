@@ -325,6 +325,164 @@ export type ChatTuneUploadFileResponse = {
 export type ContactDisplay = 'none' | 'landing' | 'direct';
 
 /**
+ * Embedding text/code 配置模式。
+ */
+export type EmbeddingMode = 'shared' | 'split';
+
+/**
+ * Embedding 供应商创建请求。
+ */
+export type EmbeddingProviderCreate = {
+    name: string;
+    type?: EmbeddingProviderType;
+    /**
+     * API 密钥（加密存储）
+     */
+    api_key?: string;
+    /**
+     * 认证令牌（加密存储）
+     */
+    auth_token?: string;
+    /**
+     * Embedding API 基础 URL
+     */
+    base_url?: (string | null);
+    /**
+     * text/code 共用或分流
+     */
+    mode?: EmbeddingMode;
+    /**
+     * 共用 embedding 模型名称
+     */
+    model?: string;
+    /**
+     * Embedding 向量维度
+     */
+    dim?: number;
+    /**
+     * 请求超时时间（秒）
+     */
+    timeout?: number;
+    /**
+     * 最大并发 embedding 请求数
+     */
+    embedding_func_max_async?: number;
+    /**
+     * 文本 embedding 供应商类型
+     */
+    text_type?: EmbeddingProviderType;
+    /**
+     * 文本 embedding API 基础 URL
+     */
+    text_base_url?: (string | null);
+    /**
+     * 文本 embedding API 密钥
+     */
+    text_api_key?: string;
+    /**
+     * 文本 embedding 认证令牌
+     */
+    text_auth_token?: string;
+    /**
+     * 文本 embedding 模型名称
+     */
+    text_model?: string;
+    /**
+     * 文本 embedding 任务模式
+     */
+    text_task?: string;
+    /**
+     * 代码 embedding 供应商类型
+     */
+    code_type?: EmbeddingProviderType;
+    /**
+     * 代码 embedding API 基础 URL
+     */
+    code_base_url?: (string | null);
+    /**
+     * 代码 embedding API 密钥
+     */
+    code_api_key?: string;
+    /**
+     * 代码 embedding 认证令牌
+     */
+    code_auth_token?: string;
+    /**
+     * 代码 embedding 模型名称
+     */
+    code_model?: string;
+    /**
+     * 代码 embedding 任务模式
+     */
+    code_task?: string;
+};
+
+/**
+ * Embedding 供应商响应，凭据不返回明文。
+ */
+export type EmbeddingProviderResponse = {
+    id: string;
+    created_time: string;
+    updated_time: string;
+    user_id: string;
+    name: string;
+    type: EmbeddingProviderType;
+    api_key: string;
+    auth_token: string;
+    base_url: (string | null);
+    mode: EmbeddingMode;
+    model: string;
+    dim: number;
+    timeout: number;
+    embedding_func_max_async: number;
+    text_type: EmbeddingProviderType;
+    text_base_url: (string | null);
+    text_api_key: string;
+    text_auth_token: string;
+    text_model: string;
+    text_task: string;
+    code_type: EmbeddingProviderType;
+    code_base_url: (string | null);
+    code_api_key: string;
+    code_auth_token: string;
+    code_model: string;
+    code_task: string;
+};
+
+/**
+ * Embedding 供应商类型枚举。
+ */
+export type EmbeddingProviderType = 'openai' | 'jina' | 'openai_compatible' | 'mock' | 'local';
+
+/**
+ * Embedding 供应商更新请求（所有字段均可选）。
+ */
+export type EmbeddingProviderUpdate = {
+    name?: (string | null);
+    type?: (EmbeddingProviderType | null);
+    api_key?: (string | null);
+    auth_token?: (string | null);
+    base_url?: (string | null);
+    mode?: (EmbeddingMode | null);
+    model?: (string | null);
+    dim?: (number | null);
+    timeout?: (number | null);
+    embedding_func_max_async?: (number | null);
+    text_type?: (EmbeddingProviderType | null);
+    text_base_url?: (string | null);
+    text_api_key?: (string | null);
+    text_auth_token?: (string | null);
+    text_model?: (string | null);
+    text_task?: (string | null);
+    code_type?: (EmbeddingProviderType | null);
+    code_base_url?: (string | null);
+    code_api_key?: (string | null);
+    code_auth_token?: (string | null);
+    code_model?: (string | null);
+    code_task?: (string | null);
+};
+
+/**
  * 单个示例模板下的配置文件。
  */
 export type ExampleTemplateConfigItem = {
@@ -910,6 +1068,16 @@ export type NewPassword = {
 };
 
 /**
+ * Embedding 供应商分页响应。
+ */
+export type PaginatedEmbeddingProviderResponse = {
+    items: Array<EmbeddingProviderResponse>;
+    total: number;
+    skip: number;
+    limit: number;
+};
+
+/**
  * 活码分页列表响应模型。
  */
 export type PaginatedLiveCode = {
@@ -1024,9 +1192,6 @@ export type ProviderCreate = {
      * 使用的模型名称，支持多个，使用;分割
      */
     model?: string;
-    /**
-     * Embedding 模型名称，支持多个，使用;分割
-     */
     /**
      * 采样温度
      */
@@ -2019,6 +2184,74 @@ export type Llm4AdChatTuneStreamTurnData = {
 
 export type Llm4AdChatTuneStreamTurnResponse = (unknown);
 
+export type Llm4AdEmbeddingProvidersCreateEmbeddingProviderData = {
+    requestBody: EmbeddingProviderCreate;
+};
+
+export type Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse = (EmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersListEmbeddingProvidersData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse = (PaginatedEmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersGetEmbeddingProviderData = {
+    providerId: string;
+};
+
+export type Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse = (EmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData = {
+    providerId: string;
+    requestBody: EmbeddingProviderUpdate;
+};
+
+export type Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse = (EmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData = {
+    providerId: string;
+};
+
+export type Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse = (Message);
+
+export type Llm4AdLlmproxyProxyLlmData = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlmResponse = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm1Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm1Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm2Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm2Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm3Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm3Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm4Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm4Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm5Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm5Response = (unknown);
+
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
@@ -2265,6 +2498,12 @@ export type Llm4AdTasksGetConfigSchemaData = {
 };
 
 export type Llm4AdTasksGetConfigSchemaResponse = (AppConfigSchemaResponse);
+
+export type Llm4AdTasksDownloadTaskWorkspaceData = {
+    taskId: string;
+};
+
+export type Llm4AdTasksDownloadTaskWorkspaceResponse = (unknown);
 
 export type Llm4AdTasksUploadTaskDataData = {
     formData: tasks_upload_task_data;
