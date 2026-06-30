@@ -8,7 +8,7 @@ import { z } from "zod"
 import {
   Llm4AdEmbeddingProvidersService,
   type EmbeddingProviderCreate,
-} from "@/client/embeddingProviders"
+} from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,

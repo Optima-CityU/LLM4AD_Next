@@ -2,10 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback } from "react"
 
 import {
+  Llm4AdEmbeddingProvidersService,
   Llm4AdProvidersService,
   Llm4AdUserDefaultModelsService,
 } from "@/client"
-import { Llm4AdEmbeddingProvidersService } from "@/client/embeddingProviders"
 
 export const providersQueryKey = ["providers"] as const
 export const embeddingProvidersQueryKey = ["embedding-providers"] as const
