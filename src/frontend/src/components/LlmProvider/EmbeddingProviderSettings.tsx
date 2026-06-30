@@ -1,13 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { GitBranch, Plus, Trash2 } from "lucide-react"
-import { useForm } from "react-hook-form"
+import { FlaskConical, GitBranch, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react"
+import { useMemo, useState } from "react"
+import { type Control, type Resolver, useForm } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
 
 import {
   Llm4AdEmbeddingProvidersService,
   type EmbeddingProviderCreate,
+  type EmbeddingProviderResponse,
+  type EmbeddingProviderTestByIdRequest,
+  type EmbeddingProviderTestRequest,
+  type EmbeddingProviderUpdate,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,6 +34,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -45,83 +51,120 @@ import {
 import { handleError } from "@/utils"
 
 const JINA_DEFAULT_MODEL = "jina-embeddings-v4"
+type TaskType = "text" | "code"
+type SecretField =
+  | "api_key"
+  | "auth_token"
+  | "text_api_key"
+  | "text_auth_token"
+  | "code_api_key"
+  | "code_auth_token"
 
-const formSchema = z
-  .object({
-    name: z.string().min(1).max(255),
-    type: z.enum(["jina", "openai", "openai_compatible", "local", "mock"]),
-    api_key: z.string().optional(),
-    auth_token: z.string().optional(),
-    base_url: z.string().max(512).optional().or(z.literal("")),
-    mode: z.enum(["shared", "split"]),
-    model: z.string().max(255).optional(),
-    dim: z.coerce.number().int().min(1),
-    timeout: z.coerce.number().min(1),
-    embedding_func_max_async: z.coerce.number().int().min(1),
-    text_type: z.enum(["openai", "jina", "openai_compatible", "local", "mock"]).optional(),
-    text_base_url: z.string().max(512).optional().or(z.literal("")),
-    text_api_key: z.string().optional(),
-    text_auth_token: z.string().optional(),
-    text_model: z.string().max(255).optional(),
-    text_task: z.string().max(64).optional(),
-    code_type: z.enum(["openai", "jina", "openai_compatible", "local", "mock"]).optional(),
-    code_base_url: z.string().max(512).optional().or(z.literal("")),
-    code_api_key: z.string().optional(),
-    code_auth_token: z.string().optional(),
-    code_model: z.string().max(255).optional(),
-    code_task: z.string().max(64).optional(),
-  })
-  .superRefine((data, ctx) => {
-    const addModelIssue = (path: "model" | "text_model" | "code_model") => {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: [path],
-        message: "Use one embedding model per field.",
-      })
-    }
+interface ExistingSecretState {
+  shared: boolean
+  text: boolean
+  code: boolean
+}
 
-    if (data.model?.includes(";")) addModelIssue("model")
-    if (data.text_model?.includes(";")) addModelIssue("text_model")
-    if (data.code_model?.includes(";")) addModelIssue("code_model")
+function createFormSchema(
+  t: (key: string) => string,
+  existingSecrets: ExistingSecretState,
+) {
+  const providerType = z.enum(["jina", "openai", "openai_compatible", "local", "mock"])
+  const optionalString = z.string().max(512).optional().or(z.literal(""))
+  const optionalModel = z.string().max(255).optional().or(z.literal(""))
+  const optionalTask = z.string().max(64).optional().or(z.literal(""))
 
-    if (data.type === "mock") return
-    if (data.type !== "jina") {
-      if (!data.text_model?.trim()) addModelIssue("text_model")
-      if (!data.code_model?.trim()) addModelIssue("code_model")
-      if (!data.text_api_key?.trim() && !data.text_auth_token?.trim()) {
+  return z
+    .object({
+      name: z.string().trim().min(1, t("validation.providerNameRequired")).max(255),
+      type: providerType,
+      api_key: z.string().optional(),
+      auth_token: z.string().optional(),
+      base_url: optionalString,
+      mode: z.enum(["shared", "split"]),
+      model: optionalModel,
+      dim: z.coerce.number().int().min(1, t("validation.embedding.positiveInteger")),
+      timeout: z.coerce.number().min(1, t("validation.embedding.positiveNumber")),
+      embedding_func_max_async: z.coerce
+        .number()
+        .int()
+        .min(1, t("validation.embedding.positiveInteger")),
+      text_type: providerType.optional(),
+      text_base_url: optionalString,
+      text_api_key: z.string().optional(),
+      text_auth_token: z.string().optional(),
+      text_model: optionalModel,
+      text_task: optionalTask,
+      code_type: providerType.optional(),
+      code_base_url: optionalString,
+      code_api_key: z.string().optional(),
+      code_auth_token: z.string().optional(),
+      code_model: optionalModel,
+      code_task: optionalTask,
+    })
+    .superRefine((data, ctx) => {
+      const addIssue = (path: keyof FormData, message: string) => {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["text_api_key"],
-          message: "Text embedding requires an API key.",
+          path: [path],
+          message,
         })
       }
-      if (!data.code_api_key?.trim() && !data.code_auth_token?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["code_api_key"],
-          message: "Code embedding requires an API key.",
-        })
+      const requireText = (path: keyof FormData, message: string) => {
+        const value = data[path]
+        if (typeof value !== "string" || !value.trim()) addIssue(path, message)
       }
-      if (data.type !== "openai" && !data.text_base_url?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["text_base_url"],
-          message: "Text embedding requires a base URL.",
-        })
+      const rejectModelList = (path: keyof FormData) => {
+        const value = data[path]
+        if (typeof value === "string" && value.includes(";")) {
+          addIssue(path, t("validation.embedding.singleModel"))
+        }
       }
-      if (data.type !== "openai" && !data.code_base_url?.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["code_base_url"],
-          message: "Code embedding requires a base URL.",
-        })
-      }
-      return
-    }
-    if (!data.model?.trim()) addModelIssue("model")
-  })
 
-type FormData = z.infer<typeof formSchema>
+      rejectModelList("model")
+      rejectModelList("text_model")
+      rejectModelList("code_model")
+
+      if (data.type === "mock") return
+
+      if (data.type === "jina") {
+        requireText("base_url", t("validation.embedding.baseUrlRequired"))
+        requireText("model", t("validation.embedding.modelRequired"))
+        requireText("text_task", t("validation.embedding.textTaskRequired"))
+        requireText("code_task", t("validation.embedding.codeTaskRequired"))
+        if (
+          !existingSecrets.shared &&
+          !data.api_key?.trim() &&
+          !data.auth_token?.trim()
+        ) {
+          addIssue("api_key", t("validation.embedding.secretRequired"))
+        }
+        return
+      }
+
+      requireText("text_model", t("validation.embedding.textModelRequired"))
+      requireText("code_model", t("validation.embedding.codeModelRequired"))
+      requireText("text_base_url", t("validation.embedding.textBaseUrlRequired"))
+      requireText("code_base_url", t("validation.embedding.codeBaseUrlRequired"))
+      if (
+        !existingSecrets.text &&
+        !data.text_api_key?.trim() &&
+        !data.text_auth_token?.trim()
+      ) {
+        addIssue("text_api_key", t("validation.embedding.textSecretRequired"))
+      }
+      if (
+        !existingSecrets.code &&
+        !data.code_api_key?.trim() &&
+        !data.code_auth_token?.trim()
+      ) {
+        addIssue("code_api_key", t("validation.embedding.codeSecretRequired"))
+      }
+    })
+}
+
+type FormData = z.infer<ReturnType<typeof createFormSchema>>
 
 const defaultValues: FormData = {
   name: "Jina Embedding",
@@ -134,13 +177,13 @@ const defaultValues: FormData = {
   dim: 2048,
   timeout: 60,
   embedding_func_max_async: 2,
-  text_type: "openai_compatible",
+  text_type: "jina",
   text_base_url: "",
   text_api_key: "",
   text_auth_token: "",
   text_model: "",
   text_task: "text-matching",
-  code_type: "openai_compatible",
+  code_type: "jina",
   code_base_url: "",
   code_api_key: "",
   code_auth_token: "",
@@ -156,31 +199,161 @@ const providerTypes = [
   { value: "mock", label: "Mock" },
 ] as const
 
+function providerToFormData(provider: EmbeddingProviderResponse): FormData {
+  return {
+    name: provider.name,
+    type: provider.type,
+    api_key: "",
+    auth_token: "",
+    base_url: provider.base_url ?? "",
+    mode: provider.mode,
+    model: provider.model || (provider.type === "jina" ? JINA_DEFAULT_MODEL : ""),
+    dim: provider.dim,
+    timeout: provider.timeout,
+    embedding_func_max_async: provider.embedding_func_max_async,
+    text_type: provider.text_type,
+    text_base_url: provider.text_base_url ?? "",
+    text_api_key: "",
+    text_auth_token: "",
+    text_model: provider.text_model,
+    text_task: provider.text_task,
+    code_type: provider.code_type,
+    code_base_url: provider.code_base_url ?? "",
+    code_api_key: "",
+    code_auth_token: "",
+    code_model: provider.code_model,
+    code_task: provider.code_task,
+  }
+}
+
+function normalizePayload(data: FormData): EmbeddingProviderCreate {
+  const payload: EmbeddingProviderCreate = { ...data }
+  if (data.type === "jina") {
+    payload.mode = "shared"
+    payload.text_type = "jina"
+    payload.code_type = "jina"
+    payload.text_base_url = ""
+    payload.text_api_key = ""
+    payload.text_auth_token = ""
+    payload.text_model = ""
+    payload.code_base_url = ""
+    payload.code_api_key = ""
+    payload.code_auth_token = ""
+    payload.code_model = ""
+  }
+  if (data.type === "mock") {
+    payload.api_key = ""
+    payload.auth_token = ""
+    payload.base_url = ""
+    payload.mode = "shared"
+    payload.model = "mock"
+    payload.text_type = "mock"
+    payload.code_type = "mock"
+  }
+  if (data.type !== "jina" && data.type !== "mock") {
+    const taskProviderType = data.type === "local" ? "openai_compatible" : data.type
+    payload.mode = "split"
+    payload.model = ""
+    payload.api_key = ""
+    payload.auth_token = ""
+    payload.base_url = ""
+    payload.text_type = taskProviderType
+    payload.code_type = taskProviderType
+  }
+  return payload
+}
+
+function stripEmptySecretsForUpdate(
+  payload: EmbeddingProviderUpdate,
+  clearedSecrets: Set<SecretField>,
+) {
+  for (const field of [
+    "api_key",
+    "auth_token",
+    "text_api_key",
+    "text_auth_token",
+    "code_api_key",
+    "code_auth_token",
+  ] as const) {
+    if (clearedSecrets.has(field)) {
+      payload[field] = ""
+    } else if (!payload[field]) {
+      delete payload[field]
+    }
+  }
+}
+
+function secretWasConfigured(provider: EmbeddingProviderResponse | null, field: SecretField) {
+  return Boolean(provider?.[field])
+}
+
 export default function EmbeddingProviderSettings() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { data, isLoading } = useEmbeddingProviders()
   const providers = data?.items ?? []
+  const [editingProvider, setEditingProvider] = useState<EmbeddingProviderResponse | null>(null)
+  const [clearedSecrets, setClearedSecrets] = useState<Set<SecretField>>(new Set())
+  const [testingKey, setTestingKey] = useState<string | null>(null)
+  const existingSecrets = useMemo(
+    () => ({
+      shared: Boolean(
+        (editingProvider?.api_key && !clearedSecrets.has("api_key")) ||
+          (editingProvider?.auth_token && !clearedSecrets.has("auth_token")),
+      ),
+      text: Boolean(
+        (editingProvider?.text_api_key && !clearedSecrets.has("text_api_key")) ||
+          (editingProvider?.text_auth_token && !clearedSecrets.has("text_auth_token")),
+      ),
+      code: Boolean(
+        (editingProvider?.code_api_key && !clearedSecrets.has("code_api_key")) ||
+          (editingProvider?.code_auth_token && !clearedSecrets.has("code_auth_token")),
+      ),
+    }),
+    [editingProvider, clearedSecrets],
+  )
 
-  const form = useForm({
-    resolver: zodResolver(formSchema),
-    mode: "onBlur" as const,
+  const formSchema = useMemo(() => createFormSchema(t, existingSecrets), [t, existingSecrets])
+  const form = useForm<FormData, unknown, FormData>({
+    resolver: zodResolver(formSchema) as unknown as Resolver<FormData>,
+    mode: "onBlur",
+    criteriaMode: "all",
     defaultValues,
   })
+
   const type = form.watch("type")
   const isJina = type === "jina"
   const isMock = type === "mock"
   const usesSeparateTaskConfigs = !isJina && !isMock
+  const isEditing = Boolean(editingProvider)
 
   const createMutation = useMutation({
     mutationFn: (requestBody: EmbeddingProviderCreate) =>
-      Llm4AdEmbeddingProvidersService.createEmbeddingProvider({
+      Llm4AdEmbeddingProvidersService.createEmbeddingProvider({ requestBody }),
+    onSuccess: () => {
+      showSuccessToast(t("llmProvider.embedding.createSuccess"))
+      resetForm()
+      queryClient.invalidateQueries({ queryKey: embeddingProvidersQueryKey })
+    },
+    onError: handleError.bind(showErrorToast),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      providerId,
+      requestBody,
+    }: {
+      providerId: string
+      requestBody: EmbeddingProviderUpdate
+    }) =>
+      Llm4AdEmbeddingProvidersService.updateEmbeddingProvider({
+        providerId,
         requestBody,
       }),
     onSuccess: () => {
-      showSuccessToast(t("llmProvider.embedding.createSuccess"))
-      form.reset(defaultValues)
+      showSuccessToast(t("llmProvider.embedding.updateSuccess"))
+      resetForm()
       queryClient.invalidateQueries({ queryKey: embeddingProvidersQueryKey })
     },
     onError: handleError.bind(showErrorToast),
@@ -196,52 +369,119 @@ export default function EmbeddingProviderSettings() {
     onError: handleError.bind(showErrorToast),
   })
 
+  const testMutation = useMutation({
+    mutationFn: async ({
+      taskType,
+      formData,
+    }: {
+      taskType: TaskType
+      formData?: FormData
+    }) => {
+      const normalized = normalizePayload(formData ?? form.getValues())
+      if (editingProvider) {
+        const requestBody: EmbeddingProviderTestByIdRequest = {
+          ...(normalized as EmbeddingProviderUpdate),
+          task_type: taskType,
+        }
+        stripEmptySecretsForUpdate(requestBody, clearedSecrets)
+        return Llm4AdEmbeddingProvidersService.testStoredEmbeddingProvider({
+          providerId: editingProvider.id,
+          requestBody,
+        })
+      }
+      const requestBody: EmbeddingProviderTestRequest = {
+        ...normalized,
+        task_type: taskType,
+      }
+      return Llm4AdEmbeddingProvidersService.testEmbeddingProvider({ requestBody })
+    },
+    onSuccess: (result) => {
+      if (result.success) {
+        showSuccessToast(result.message || t("llmProvider.embedding.testSuccess"))
+      } else {
+        showErrorToast(result.message || t("llmProvider.embedding.testFailed"))
+      }
+    },
+    onError: handleError.bind(showErrorToast),
+    onSettled: () => setTestingKey(null),
+  })
+
+  function resetForm() {
+    setEditingProvider(null)
+    setClearedSecrets(new Set())
+    form.reset(defaultValues)
+  }
+
+  function editProvider(provider: EmbeddingProviderResponse) {
+    setEditingProvider(provider)
+    setClearedSecrets(new Set())
+    form.reset(providerToFormData(provider))
+  }
+
+  function setProviderType(value: FormData["type"]) {
+    form.setValue("type", value)
+    if (value === "jina") {
+      form.setValue("mode", "shared")
+      form.setValue("dim", 2048)
+      form.setValue("model", JINA_DEFAULT_MODEL)
+      form.setValue("text_type", "jina")
+      form.setValue("code_type", "jina")
+      form.setValue("text_task", "text-matching")
+      form.setValue("code_task", "code.passage")
+    } else if (value === "mock") {
+      form.setValue("mode", "shared")
+      form.setValue("model", "mock")
+      form.setValue("text_type", "mock")
+      form.setValue("code_type", "mock")
+    } else {
+      form.setValue("mode", "split")
+      const taskProviderType = value === "local" ? "openai_compatible" : value
+      form.setValue("text_type", taskProviderType)
+      form.setValue("code_type", taskProviderType)
+    }
+  }
+
+  function toggleClearSecret(field: SecretField) {
+    setClearedSecrets((current) => {
+      const next = new Set(current)
+      if (next.has(field)) next.delete(field)
+      else next.add(field)
+      return next
+    })
+  }
+
   const onSubmit = form.handleSubmit((data) => {
-    const payload: EmbeddingProviderCreate = { ...data }
-    if (isJina) {
-      payload.mode = "shared"
-      payload.text_type = "jina"
-      payload.code_type = "jina"
-      payload.text_base_url = ""
-      payload.text_api_key = ""
-      payload.text_auth_token = ""
-      payload.text_model = ""
-      payload.code_base_url = ""
-      payload.code_api_key = ""
-      payload.code_auth_token = ""
-      payload.code_model = ""
-    }
-    if (isMock) {
-      payload.api_key = ""
-      payload.auth_token = ""
-      payload.base_url = ""
-      payload.mode = "shared"
-      payload.model = "mock"
-    }
-    if (usesSeparateTaskConfigs) {
-      const taskProviderType = (data.type === "local" ? "openai_compatible" : data.type) as
-        | "openai"
-        | "openai_compatible"
-      payload.mode = "split"
-      payload.model = ""
-      payload.api_key = ""
-      payload.auth_token = ""
-      payload.base_url = ""
-      payload.text_type = taskProviderType
-      payload.code_type = taskProviderType
+    const payload = normalizePayload(data)
+    if (editingProvider) {
+      const updatePayload = { ...payload } as EmbeddingProviderUpdate
+      stripEmptySecretsForUpdate(updatePayload, clearedSecrets)
+      updateMutation.mutate({
+        providerId: editingProvider.id,
+        requestBody: updatePayload,
+      })
+      return
     }
     createMutation.mutate(payload)
   })
+
+  async function testCurrentForm(taskType: TaskType) {
+    const valid = await form.trigger()
+    if (!valid) return
+    setTestingKey(`form-${taskType}`)
+    testMutation.mutate({ taskType, formData: form.getValues() })
+  }
+
+  const saving = createMutation.isPending || updateMutation.isPending
 
   return (
     <Dialog>
       <DialogTrigger asChild>
         <Button variant="outline">
-          <GitBranch className="mr-2 size-4" />
+          <GitBranch />
           {t("llmProvider.embedding.title")}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("llmProvider.embedding.title")}</DialogTitle>
           <DialogDescription>
@@ -249,8 +489,8 @@ export default function EmbeddingProviderSettings() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
-          <div className="space-y-2">
+        <div className="flex max-h-[calc(90vh-8rem)] flex-col gap-5 overflow-hidden">
+          <div className="flex flex-col gap-2">
             {isLoading ? (
               <>
                 <Skeleton className="h-10 w-full" />
@@ -261,198 +501,77 @@ export default function EmbeddingProviderSettings() {
                 {t("llmProvider.embedding.empty")}
               </p>
             ) : (
-              providers.map((provider) => (
-                <div
-                  key={provider.id}
-                  className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
-                      {provider.name}
+              <ScrollArea className="max-h-56 pr-3">
+                <div className="flex flex-col gap-2">
+                  {providers.map((provider) => (
+                    <div
+                      key={provider.id}
+                      className="flex flex-col gap-3 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">
+                          {provider.name}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {provider.type} · {provider.mode} ·{" "}
+                          {provider.mode === "split"
+                            ? `${provider.text_model} / ${provider.code_model}`
+                            : provider.model || JINA_DEFAULT_MODEL}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => editProvider(provider)}
+                        >
+                          <Pencil />
+                          <span className="sr-only">{t("common.edit")}</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => deleteMutation.mutate(provider.id)}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 />
+                          <span className="sr-only">{t("common.delete")}</span>
+                        </Button>
+                      </div>
                     </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {provider.type} · {provider.mode} ·{" "}
-                      {provider.mode === "split"
-                        ? `${provider.text_model} / ${provider.code_model}`
-                        : provider.model || JINA_DEFAULT_MODEL}
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => deleteMutation.mutate(provider.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="size-4" />
-                    <span className="sr-only">{t("common.delete")}</span>
-                  </Button>
+                  ))}
                 </div>
-              ))
+              </ScrollArea>
             )}
           </div>
 
           <Form {...form}>
-            <form onSubmit={onSubmit} className="space-y-4" autoComplete="off">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("llmProvider.providerName")}</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="type"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("llmProvider.providerType")}</FormLabel>
-                      <Select
-                        value={field.value}
-                        onValueChange={(value) => {
-                          field.onChange(value)
-                          if (value === "jina") {
-                            form.setValue("mode", "shared")
-                            form.setValue("dim", 2048)
-                            form.setValue("model", JINA_DEFAULT_MODEL)
-                            form.setValue("text_type", "jina")
-                            form.setValue("code_type", "jina")
-                            form.setValue("text_task", "text-matching")
-                            form.setValue("code_task", "code.passage")
-                          } else if (value !== "mock") {
-                            form.setValue("mode", "split")
-                            const taskProviderType =
-                              value === "local" ? "openai_compatible" : value
-                            form.setValue("text_type", taskProviderType as FormData["text_type"])
-                            form.setValue("code_type", taskProviderType as FormData["code_type"])
-                          }
-                        }}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {providerTypes.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              {!isMock && isJina && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <FormField
-                    control={form.control}
-                    name="api_key"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>API Key</FormLabel>
-                        <FormControl>
-                          <PasswordInput
-                            autoComplete="new-password"
-                            placeholder="sk-..."
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="base_url"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Base URL</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder="https://api.jinaai.cn/v1"
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              )}
-
-              {!isMock && isJina && (
-                <FormField
-                  control={form.control}
-                  name="model"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t("llmProvider.modelName")}</FormLabel>
-                      <FormControl>
-                        <Input placeholder={JINA_DEFAULT_MODEL} {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              {isJina && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <FormField
-                    control={form.control}
-                    name="text_task"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t("llmProvider.embedding.textTask")}</FormLabel>
-                        <FormControl>
-                          <Input placeholder="text-matching" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="code_task"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t("llmProvider.embedding.codeTask")}</FormLabel>
-                        <FormControl>
-                          <Input placeholder="code.passage" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              )}
-
-              {usesSeparateTaskConfigs && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="space-y-4 rounded-md border p-3">
-                    <div className="text-sm font-medium">
-                      {t("llmProvider.embedding.textConfig")}
+            <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4" autoComplete="off">
+              <ScrollArea className="min-h-0 flex-1 pr-3">
+                <div className="flex flex-col gap-4">
+                  {isEditing && (
+                    <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                      <span className="truncate">
+                        {t("llmProvider.embedding.editing")}: {editingProvider?.name}
+                      </span>
+                      <Button type="button" variant="ghost" size="sm" onClick={resetForm}>
+                        <X />
+                        {t("common.cancel")}
+                      </Button>
                     </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <FormField
                       control={form.control}
-                      name="text_base_url"
+                      name="name"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Base URL</FormLabel>
+                          <FormLabel>{t("llmProvider.providerName")}</FormLabel>
                           <FormControl>
-                            <Input placeholder="http://localhost:8000/v1" {...field} />
+                            <Input {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -460,56 +579,155 @@ export default function EmbeddingProviderSettings() {
                     />
                     <FormField
                       control={form.control}
-                      name="text_api_key"
+                      name="type"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>API Key</FormLabel>
-                          <FormControl>
-                            <PasswordInput autoComplete="new-password" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="text_model"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t("llmProvider.embedding.textModel")}</FormLabel>
-                          <FormControl>
-                            <Input placeholder="bge-text" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="text_task"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t("llmProvider.embedding.textTask")}</FormLabel>
-                          <FormControl>
-                            <Input placeholder="text-matching" {...field} />
-                          </FormControl>
+                          <FormLabel>{t("llmProvider.providerType")}</FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={(value) => setProviderType(value as FormData["type"])}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {providerTypes.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                   </div>
-                  <div className="space-y-4 rounded-md border p-3">
-                    <div className="text-sm font-medium">
-                      {t("llmProvider.embedding.codeConfig")}
+
+                  {!isMock && isJina && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <SecretFieldInput
+                        control={form.control}
+                        name="api_key"
+                        label="API Key"
+                        provider={editingProvider}
+                        clearedSecrets={clearedSecrets}
+                        onToggleClear={toggleClearSecret}
+                        t={t}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="base_url"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Base URL</FormLabel>
+                            <FormControl>
+                              <Input placeholder="https://api.jinaai.cn/v1" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
                     </div>
+                  )}
+
+                  {!isMock && isJina && (
                     <FormField
                       control={form.control}
-                      name="code_base_url"
+                      name="model"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Base URL</FormLabel>
+                          <FormLabel>{t("llmProvider.modelName")}</FormLabel>
                           <FormControl>
-                            <Input placeholder="http://localhost:8001/v1" {...field} />
+                            <Input placeholder={JINA_DEFAULT_MODEL} {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {isJina && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <FormField
+                        control={form.control}
+                        name="text_task"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t("llmProvider.embedding.textTask")}</FormLabel>
+                            <FormControl>
+                              <Input placeholder="text-matching" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="code_task"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t("llmProvider.embedding.codeTask")}</FormLabel>
+                            <FormControl>
+                              <Input placeholder="code.passage" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  )}
+
+                  {usesSeparateTaskConfigs && (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <TaskConfigFields
+                        control={form.control}
+                        title={t("llmProvider.embedding.textConfig")}
+                        baseUrlName="text_base_url"
+                        apiKeyName="text_api_key"
+                        modelName="text_model"
+                        taskName="text_task"
+                        modelLabel={t("llmProvider.embedding.textModel")}
+                        taskLabel={t("llmProvider.embedding.textTask")}
+                        modelPlaceholder="bge-text"
+                        baseUrlPlaceholder="http://localhost:8000/v1"
+                        taskPlaceholder="text-matching"
+                        provider={editingProvider}
+                        clearedSecrets={clearedSecrets}
+                        onToggleClear={toggleClearSecret}
+                        t={t}
+                      />
+                      <TaskConfigFields
+                        control={form.control}
+                        title={t("llmProvider.embedding.codeConfig")}
+                        baseUrlName="code_base_url"
+                        apiKeyName="code_api_key"
+                        modelName="code_model"
+                        taskName="code_task"
+                        modelLabel={t("llmProvider.embedding.codeModel")}
+                        taskLabel={t("llmProvider.embedding.codeTask")}
+                        modelPlaceholder="bge-code"
+                        baseUrlPlaceholder="http://localhost:8001/v1"
+                        taskPlaceholder="code.passage"
+                        provider={editingProvider}
+                        clearedSecrets={clearedSecrets}
+                        onToggleClear={toggleClearSecret}
+                        t={t}
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <FormField
+                      control={form.control}
+                      name="dim"
+                      render={({ field: { value, ...field } }) => (
+                        <FormItem>
+                          <FormLabel>{t("llmProvider.embedding.dim")}</FormLabel>
+                          <FormControl>
+                            <Input type="number" value={(value as number) ?? ""} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -517,12 +735,12 @@ export default function EmbeddingProviderSettings() {
                     />
                     <FormField
                       control={form.control}
-                      name="code_api_key"
-                      render={({ field }) => (
+                      name="timeout"
+                      render={({ field: { value, ...field } }) => (
                         <FormItem>
-                          <FormLabel>API Key</FormLabel>
+                          <FormLabel>{t("llmProvider.timeout")}</FormLabel>
                           <FormControl>
-                            <PasswordInput autoComplete="new-password" {...field} />
+                            <Input type="number" value={(value as number) ?? ""} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -530,25 +748,12 @@ export default function EmbeddingProviderSettings() {
                     />
                     <FormField
                       control={form.control}
-                      name="code_model"
-                      render={({ field }) => (
+                      name="embedding_func_max_async"
+                      render={({ field: { value, ...field } }) => (
                         <FormItem>
-                          <FormLabel>{t("llmProvider.embedding.codeModel")}</FormLabel>
+                          <FormLabel>{t("llmProvider.embedding.concurrency")}</FormLabel>
                           <FormControl>
-                            <Input placeholder="bge-code" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="code_task"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t("llmProvider.embedding.codeTask")}</FormLabel>
-                          <FormControl>
-                            <Input placeholder="code.passage" {...field} />
+                            <Input type="number" value={(value as number) ?? ""} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -556,75 +761,199 @@ export default function EmbeddingProviderSettings() {
                     />
                   </div>
                 </div>
-              )}
+              </ScrollArea>
 
-              <div className="grid grid-cols-3 gap-4">
-                <FormField
-                  control={form.control}
-                  name="dim"
-                  render={({ field: { value, ...field } }) => (
-                    <FormItem>
-                      <FormLabel>{t("llmProvider.embedding.dim")}</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          value={(value as number) ?? ""}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+              <div className="flex flex-col-reverse gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <LoadingButton
+                    type="button"
+                    variant="outline"
+                    loading={testingKey === "form-text"}
+                    onClick={() => testCurrentForm("text")}
+                  >
+                    <FlaskConical />
+                    {t("llmProvider.embedding.testText")}
+                  </LoadingButton>
+                  <LoadingButton
+                    type="button"
+                    variant="outline"
+                    loading={testingKey === "form-code"}
+                    onClick={() => testCurrentForm("code")}
+                  >
+                    <FlaskConical />
+                    {t("llmProvider.embedding.testCode")}
+                  </LoadingButton>
+                </div>
+                <div className="flex justify-end gap-2">
+                  {isEditing && (
+                    <Button type="button" variant="outline" onClick={resetForm}>
+                      <RotateCcw />
+                      {t("common.cancel")}
+                    </Button>
                   )}
-                />
-                <FormField
-                  control={form.control}
-                  name="timeout"
-                  render={({ field: { value, ...field } }) => (
-                    <FormItem>
-                      <FormLabel>{t("llmProvider.timeout")}</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          value={(value as number) ?? ""}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="embedding_func_max_async"
-                  render={({ field: { value, ...field } }) => (
-                    <FormItem>
-                      <FormLabel>{t("llmProvider.embedding.concurrency")}</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          value={(value as number) ?? ""}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="flex justify-end">
-                <LoadingButton
-                  type="submit"
-                  loading={createMutation.isPending}
-                >
-                  <Plus className="mr-2 size-4" />
-                  {t("llmProvider.embedding.add")}
-                </LoadingButton>
+                  <LoadingButton type="submit" loading={saving}>
+                    {isEditing ? <Pencil /> : <Plus />}
+                    {isEditing
+                      ? t("llmProvider.embedding.saveEdit")
+                      : t("llmProvider.embedding.add")}
+                  </LoadingButton>
+                </div>
               </div>
             </form>
           </Form>
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+interface SecretFieldInputProps {
+  control: Control<FormData, unknown, FormData>
+  name: SecretField
+  label: string
+  provider: EmbeddingProviderResponse | null
+  clearedSecrets: Set<SecretField>
+  onToggleClear: (field: SecretField) => void
+  t: (key: string) => string
+}
+
+function SecretFieldInput({
+  control,
+  name,
+  label,
+  provider,
+  clearedSecrets,
+  onToggleClear,
+  t,
+}: SecretFieldInputProps) {
+  const configured = secretWasConfigured(provider, name)
+  const willClear = clearedSecrets.has(name)
+
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <div className="flex items-center justify-between gap-2">
+            <FormLabel>{label}</FormLabel>
+            {configured && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onToggleClear(name)}
+              >
+                {willClear ? t("llmProvider.undoClearSecret") : t("llmProvider.clearSecret")}
+              </Button>
+            )}
+          </div>
+          <FormControl>
+            <PasswordInput
+              autoComplete="new-password"
+              placeholder={configured ? t("llmProvider.secretUnchangedPlaceholder") : "sk-..."}
+              disabled={willClear}
+              {...field}
+            />
+          </FormControl>
+          {willClear && (
+            <p className="text-xs text-destructive">
+              {t("llmProvider.secretWillBeCleared")}
+            </p>
+          )}
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+}
+
+interface TaskConfigFieldsProps {
+  control: Control<FormData, unknown, FormData>
+  title: string
+  baseUrlName: "text_base_url" | "code_base_url"
+  apiKeyName: "text_api_key" | "code_api_key"
+  modelName: "text_model" | "code_model"
+  taskName: "text_task" | "code_task"
+  modelLabel: string
+  taskLabel: string
+  modelPlaceholder: string
+  baseUrlPlaceholder: string
+  taskPlaceholder: string
+  provider: EmbeddingProviderResponse | null
+  clearedSecrets: Set<SecretField>
+  onToggleClear: (field: SecretField) => void
+  t: (key: string) => string
+}
+
+function TaskConfigFields({
+  control,
+  title,
+  baseUrlName,
+  apiKeyName,
+  modelName,
+  taskName,
+  modelLabel,
+  taskLabel,
+  modelPlaceholder,
+  baseUrlPlaceholder,
+  taskPlaceholder,
+  provider,
+  clearedSecrets,
+  onToggleClear,
+  t,
+}: TaskConfigFieldsProps) {
+  return (
+    <div className="flex flex-col gap-4 rounded-md border p-3">
+      <div className="text-sm font-medium">{title}</div>
+      <FormField
+        control={control}
+        name={baseUrlName}
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Base URL</FormLabel>
+            <FormControl>
+              <Input placeholder={baseUrlPlaceholder} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <SecretFieldInput
+        control={control}
+        name={apiKeyName}
+        label="API Key"
+        provider={provider}
+        clearedSecrets={clearedSecrets}
+        onToggleClear={onToggleClear}
+        t={t}
+      />
+      <FormField
+        control={control}
+        name={modelName}
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{modelLabel}</FormLabel>
+            <FormControl>
+              <Input placeholder={modelPlaceholder} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name={taskName}
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{taskLabel}</FormLabel>
+            <FormControl>
+              <Input placeholder={taskPlaceholder} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
   )
 }

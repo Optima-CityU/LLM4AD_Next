@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdLlmproxyProxyLlmData, Llm4AdLlmproxyProxyLlmResponse, Llm4AdLlmproxyProxyLlm1Data, Llm4AdLlmproxyProxyLlm1Response, Llm4AdLlmproxyProxyLlm2Data, Llm4AdLlmproxyProxyLlm2Response, Llm4AdLlmproxyProxyLlm3Data, Llm4AdLlmproxyProxyLlm3Response, Llm4AdLlmproxyProxyLlm4Data, Llm4AdLlmproxyProxyLlm4Response, Llm4AdLlmproxyProxyLlm5Data, Llm4AdLlmproxyProxyLlm5Response, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdLlmproxyProxyLlmData, Llm4AdLlmproxyProxyLlmResponse, Llm4AdLlmproxyProxyLlm1Data, Llm4AdLlmproxyProxyLlm1Response, Llm4AdLlmproxyProxyLlm2Data, Llm4AdLlmproxyProxyLlm2Response, Llm4AdLlmproxyProxyLlm3Data, Llm4AdLlmproxyProxyLlm3Response, Llm4AdLlmproxyProxyLlm4Data, Llm4AdLlmproxyProxyLlm4Response, Llm4AdLlmproxyProxyLlm5Data, Llm4AdLlmproxyProxyLlm5Response, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
 
 export class FeedbackService {
     /**
@@ -799,6 +799,25 @@ export class Llm4AdChatTuneService {
 
 export class Llm4AdEmbeddingProvidersService {
     /**
+     * 测试 embedding 供应商配置连通性
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns EmbeddingProviderTestResponse Successful Response
+     * @throws ApiError
+     */
+    public static testEmbeddingProvider(data: Llm4AdEmbeddingProvidersTestEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/embedding-providers/test',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
      * 创建 embedding 供应商配置
      * @param data The data for the request.
      * @param data.requestBody
@@ -901,6 +920,29 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
+
+    /**
+     * 测试已存储 embedding 供应商配置连通性
+     * @param data The data for the request.
+     * @param data.providerId
+     * @param data.requestBody
+     * @returns EmbeddingProviderTestResponse Successful Response
+     * @throws ApiError
+     */
+    public static testStoredEmbeddingProvider(data: Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/embedding-providers/{provider_id}/test',
+            path: {
+                provider_id: data.providerId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
 }
 
 export class Llm4AdLlmproxyService {
@@ -949,7 +991,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm1(data: Llm4AdLlmproxyProxyLlm1Data): CancelablePromise<Llm4AdLlmproxyProxyLlm1Response> {
         return __request(OpenAPI, {
-            method: 'PATCH',
+            method: 'GET',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
@@ -977,7 +1019,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm2(data: Llm4AdLlmproxyProxyLlm2Data): CancelablePromise<Llm4AdLlmproxyProxyLlm2Response> {
         return __request(OpenAPI, {
-            method: 'DELETE',
+            method: 'POST',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
@@ -1005,7 +1047,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm3(data: Llm4AdLlmproxyProxyLlm3Data): CancelablePromise<Llm4AdLlmproxyProxyLlm3Response> {
         return __request(OpenAPI, {
-            method: 'POST',
+            method: 'DELETE',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
@@ -1061,7 +1103,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm5(data: Llm4AdLlmproxyProxyLlm5Data): CancelablePromise<Llm4AdLlmproxyProxyLlm5Response> {
         return __request(OpenAPI, {
-            method: 'GET',
+            method: 'PATCH',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
