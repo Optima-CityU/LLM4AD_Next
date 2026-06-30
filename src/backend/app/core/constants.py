@@ -59,6 +59,9 @@ TASK_CONTAINER_DATA_DIR = "/task/data"
 """AppConfig JSON 文件名（由宿主写入，容器内由 AppConfig.from_json 读取）。"""
 APP_CONFIG_FILENAME = ".app_config.json"
 
+"""容器写入、宿主侧 tail 的 NDJSON 事件流文件名。"""
+EVENTS_FILENAME = ".events.jsonl"
+
 # ---- 调参（chat-tune）隔离容器 ----
 
 """调参隔离容器名称前缀（容器名同时作为 docker 网络内的 DNS 主机名）。"""

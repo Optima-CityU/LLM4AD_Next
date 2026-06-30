@@ -55,10 +55,9 @@ def test_code_server_mount_paths_join_host_project_home_without_trailing_slash(m
     assert "/srv/llm4ad/app-datacode_user-123/" not in client.containers.volumes
 
 
-def test_code_server_rejects_relative_host_project_home_when_task_containers_disabled(monkeypatch):
+def test_code_server_rejects_relative_host_project_home(monkeypatch):
     client = _FakeDockerClient()
     monkeypatch.setattr(code_server_service, "get_docker_client", lambda: client)
-    monkeypatch.setattr(settings, "TASK_CONTAINER_ENABLE", False)
     monkeypatch.setattr(settings, "HOST_PROJECT_HOME", "./app-data")
 
     with pytest.raises(HTTPException) as exc_info:

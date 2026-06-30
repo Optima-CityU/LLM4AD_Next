@@ -379,10 +379,9 @@ def run_task(
     if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
         raise HTTPException(status_code=409, detail="任务正在运行中，请勿重复提交")
 
-    if settings.TASK_CONTAINER_ENABLE:
-        from app.services.container_service import validate_task_container_host_path
+    from app.services.container_service import validate_task_container_host_path
 
-        validate_task_container_host_path()
+    validate_task_container_host_path()
 
     # 解析供应商列表及 evolution 中的供应商引用
     input_args = dict(task.input_args) if task.input_args else {}
@@ -486,20 +485,16 @@ def _force_stop_celery_task(db: Session, task: models.Task, *, reason: str | Non
         )
 
     if task.celery_task_id:
-        if settings.TASK_CONTAINER_ENABLE:
-            from celery.contrib.abortable import AbortableAsyncResult
+        from celery.contrib.abortable import AbortableAsyncResult
 
-            AbortableAsyncResult(task.celery_task_id, app=celery_app).abort()
-        else:
-            celery_app.control.revoke(task.celery_task_id, terminate=True, signal="SIGTERM")
+        AbortableAsyncResult(task.celery_task_id, app=celery_app).abort()
 
-    if settings.TASK_CONTAINER_ENABLE:
-        try:
-            from app.services.container_service import kill_task_container
+    try:
+        from app.services.container_service import kill_task_container
 
-            kill_task_container(str(task.id))
-        except Exception as e:
-            logger.warning(f"强制停止任务容器失败: {e}")
+        kill_task_container(str(task.id))
+    except Exception as e:
+        logger.warning(f"强制停止任务容器失败: {e}")
 
     if task.celery_task_id:
         _finalize_task(task.celery_task_id, TaskStatus.FAILED)

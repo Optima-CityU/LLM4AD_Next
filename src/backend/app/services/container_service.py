@@ -1,14 +1,12 @@
-"""
-任务容器管理服务。
+"""任务/调参容器管理服务。
 
-封装 Docker 容器的创建、监控和清理，用于在隔离环境中执行 LLM4AD 演化任务。
-每个任务运行在独立的 Docker 容器中，通过 Redis 推送日志和指标。
+提供宿主路径校验、任务容器命名与终止/孤儿回收，以及调参（chat-tune）SSE 容器的
+生命周期管理。演化任务的容器运行已统一由 :mod:`app.services.container_runtime`
+承载，本模块不再负责其创建。
 """
 
-import json
 import os
 import shutil
-import time
 from pathlib import PureWindowsPath
 
 from docker.errors import ImageNotFound, NotFound
@@ -17,19 +15,16 @@ from loguru import logger
 
 from app.core.config import settings
 from app.core.constants import (
-    APP_CONFIG_FILENAME,
     CHAT_TUNE_CONTAINER_DATA_DIR,
     CHAT_TUNE_CONTAINER_NAME_PREFIX,
     DOCKER_NETWORK_NAME,
-    TASK_CONTAINER_DATA_DIR,
     TASK_CONTAINER_NAME_PREFIX,
 )
 from app.core.docker import get_docker_client
-from app.tasks import task_config_crypto
 
 
-def _container_name(task_id: str) -> str:
-    """生成容器名称，取 task_id 保持唯一。"""
+def container_name(task_id: str) -> str:
+    """生成任务容器名称，取 task_id 保持唯一。"""
     short_id = str(task_id).replace("-", "")
     return f"{TASK_CONTAINER_NAME_PREFIX}{short_id}"
 
@@ -55,13 +50,11 @@ def validate_host_project_home() -> None:
 
 
 def validate_task_container_host_path() -> None:
-    """Validate task container bind mounts when isolated task containers are enabled."""
-    if not settings.TASK_CONTAINER_ENABLE:
-        return
+    """Validate task container bind mounts for isolated task containers."""
     validate_host_project_home()
 
 
-def _resolve_host_path(docker_path: str) -> str:
+def resolve_host_path(docker_path: str) -> str:
     """将容器内路径（DOCKER_PROJECT_HOME 前缀）转换为宿主机路径（HOST_PROJECT_HOME 前缀）。
 
     例如:
@@ -78,163 +71,6 @@ def _resolve_host_path(docker_path: str) -> str:
     return docker_path
 
 
-def create_and_start_task_container(data: dict) -> str:
-    """创建并启动任务执行容器。
-
-    容器内**不会**注入任何敏感环境变量（无 Redis URL、无数据库凭据）。
-    任务配置通过挂载的 JSON 文件读取，输出全部写入 stdout/stderr，由
-    宿主机侧的 Celery worker 拉取 Docker 日志并转发到 Redis。
-
-    Args:
-        data: 完整的任务参数字典，包含 task_id、run_dir 与 run_args，
-            会被写入挂载目录下的配置文件。
-
-    Returns:
-        Docker 容器 ID。
-
-    Raises:
-        docker.errors.ImageNotFound: 任务运行镜像未构建。
-        docker.errors.APIError: Docker API 调用失败。
-    """
-    validate_task_container_host_path()
-
-    task_id = str(data["task_id"])
-    run_dir = data["run_dir"]
-    name = _container_name(task_id)
-
-    try:
-        old = get_docker_client().containers.get(name)
-        logger.warning(f"Found stale container {name}, removing")
-        old.remove(force=True)
-    except NotFound:
-        pass
-
-    host_run_dir = _resolve_host_path(run_dir)
-    os.makedirs(run_dir, exist_ok=True)
-
-    # Write AppConfig-compatible JSON with container-local paths
-    run_args_str = json.dumps(data["run_args"])
-    run_args_str = run_args_str.replace(run_dir.rstrip("/"), TASK_CONTAINER_DATA_DIR.rstrip("/"))
-    run_args = json.loads(run_args_str)
-    run_args["base_dir"] = TASK_CONTAINER_DATA_DIR
-    run_args["run_id"] = "run"
-
-    # 整体加密后落盘：解密密钥每任务一次性生成，经环境变量传入容器，容器在
-    # 运行用户代码前解密并立即从环境变量中删除（见 container_runner.main）。
-    # 加密整个配置而非逐字段，避免遗漏藏在 base_url 等字段中的凭据。
-    config_key = task_config_crypto.generate_key()
-    enc_token = task_config_crypto.encrypt_config(run_args, config_key)
-
-    app_config_path = os.path.join(run_dir, APP_CONFIG_FILENAME)
-    with open(app_config_path, "w", encoding="utf-8") as f:
-        f.write(enc_token)
-
-    try:
-        get_docker_client().images.get(settings.TASK_RUNNER_IMAGE)
-    except ImageNotFound:
-        raise ImageNotFound(
-            f"Task runner image {settings.TASK_RUNNER_IMAGE} not found. "
-            f"Build it first: docker build -f src/backend/Dockerfile.task -t {settings.TASK_RUNNER_IMAGE} ."
-        )
-
-    container = get_docker_client().containers.run(
-        settings.TASK_RUNNER_IMAGE,
-        name=name,
-        volumes={
-            host_run_dir.rstrip("/").rstrip("\\"): {
-                "bind": TASK_CONTAINER_DATA_DIR,
-                "mode": "rw",
-            },
-        },
-        detach=True,
-        mem_limit=settings.TASK_CONTAINER_MEMORY_LIMIT,
-        nano_cpus=int(settings.TASK_CONTAINER_CPU_LIMIT * 1e9),
-        security_opt=["no-new-privileges"],
-        network=DOCKER_NETWORK_NAME,
-        environment={
-            "PYTHONUNBUFFERED": "1",
-            "NO_COLOR": "1",
-            "LOGURU_COLORIZE": "false",
-            "LLM4AD_CONFIG_KEY": config_key,
-            "TASK_DEP_INSTALL_TIMEOUT": str(settings.TASK_DEP_INSTALL_TIMEOUT),
-            **({"UV_INDEX_URL": uv_index} if (uv_index := os.environ.get("UV_INDEX_URL")) else {}),
-        },
-    )
-
-    logger.info(f"Task container started: name={name}, id={container.id[:12]}")
-    return container.id
-
-
-def wait_for_container(
-    container_id: str,
-    check_cancelled=None,
-    poll_interval: int = 1,
-    timeout: int | None = None,
-) -> dict:
-    """轮询等待容器运行结束。
-
-    Args:
-        container_id: 容器 ID
-        check_cancelled: 可选回调，返回 True 时取消容器
-        poll_interval: 轮询间隔（秒）
-        timeout: 超时时间（秒）；为 None 时取 ``settings.TASK_TIME_LIMIT``
-
-    Returns:
-        {"exit_code": int, "timed_out": bool, "oom_killed": bool, "cancelled": bool}
-    """
-    if timeout is None:
-        timeout = settings.TASK_TIME_LIMIT
-    start_time = time.time()
-
-    while True:
-        try:
-            container = get_docker_client().containers.get(container_id)
-            container.reload()
-        except NotFound:
-            logger.warning(f"容器 {container_id[:12]} 已不存在")
-            return {"exit_code": -1, "timed_out": False, "oom_killed": False, "cancelled": False}
-
-        # 检查任务是否被取消
-        if check_cancelled and check_cancelled():
-            logger.info(f"任务被取消，正在停止容器 {container_id[:12]}")
-            container.stop(timeout=10)
-            return {"exit_code": -1, "timed_out": False, "oom_killed": False, "cancelled": True}
-
-        # 检查容器是否已退出
-        if container.status in ("exited", "dead"):
-            state = container.attrs.get("State", {})
-            exit_code = state.get("ExitCode", -1)
-            oom_killed = state.get("OOMKilled", False)
-            logger.info(f"容器 {container_id[:12]} 已退出: exit_code={exit_code}, oom_killed={oom_killed}")
-            return {
-                "exit_code": exit_code,
-                "timed_out": False,
-                "oom_killed": oom_killed,
-                "cancelled": False,
-            }
-
-        # 检查超时
-        elapsed = time.time() - start_time
-        if elapsed > timeout:
-            logger.warning(f"容器 {container_id[:12]} 执行超时 ({timeout}s)，正在终止")
-            container.kill()
-            return {"exit_code": -1, "timed_out": True, "oom_killed": False, "cancelled": False}
-
-        time.sleep(poll_interval)
-
-
-def cleanup_container(container_id: str) -> None:
-    """强制移除容器及其匿名卷。"""
-    try:
-        container = get_docker_client().containers.get(container_id)
-        container.remove(force=True, v=True)
-        logger.info(f"容器 {container_id[:12]} 已清理")
-    except NotFound:
-        pass
-    except Exception as e:
-        logger.error(f"清理容器 {container_id[:12]} 失败: {e}")
-
-
 def kill_task_container(task_id: str) -> None:
     """根据任务 ID 强制终止并移除对应的容器。
 
@@ -244,7 +80,7 @@ def kill_task_container(task_id: str) -> None:
     Args:
         task_id: 业务任务 ID。
     """
-    name = _container_name(task_id)
+    name = container_name(task_id)
     try:
         container = get_docker_client().containers.get(name)
         container.kill()
@@ -339,7 +175,7 @@ def prepare_chat_tune_workdir(
             input_data_path, local_path=docker_path, strip_first_level=False
         )
 
-    host_path = _resolve_host_path(docker_path)
+    host_path = resolve_host_path(docker_path)
     return docker_path, host_path
 
 
