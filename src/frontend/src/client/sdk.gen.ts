@@ -3,7 +3,116 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+import type { AdminAnalyticsGetAdminAnalyticsOverviewData, AdminAnalyticsGetAdminAnalyticsOverviewResponse, AdminAnalyticsGetAdminOperationsSummaryResponse, AdminAnalyticsGetAdminOperationsTasksResponse, AdminAnalyticsGetAdminOperationsFeedbackResponse, AdminAnalyticsGetAdminOperationsLitellmResponse, AdminAnalyticsGetAdminVisitorsPlausibleData, AdminAnalyticsGetAdminVisitorsPlausibleResponse, AdminAnalyticsGetAdminVisitorsGithubResponse, FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdLlmproxyProxyLlmData, Llm4AdLlmproxyProxyLlmResponse, Llm4AdLlmproxyProxyLlm1Data, Llm4AdLlmproxyProxyLlm1Response, Llm4AdLlmproxyProxyLlm2Data, Llm4AdLlmproxyProxyLlm2Response, Llm4AdLlmproxyProxyLlm3Data, Llm4AdLlmproxyProxyLlm3Response, Llm4AdLlmproxyProxyLlm4Data, Llm4AdLlmproxyProxyLlm4Response, Llm4AdLlmproxyProxyLlm5Data, Llm4AdLlmproxyProxyLlm5Response, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetBuiltinProviderQuotaResponse, Llm4AdProvidersGetLitellmUserQuotasResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+
+export class AdminAnalyticsService {
+    /**
+     * Get Admin Analytics Overview
+     * 返回管理员运营大屏聚合数据。
+     * @param data The data for the request.
+     * @param data.range
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminAnalyticsOverview(data: AdminAnalyticsGetAdminAnalyticsOverviewData = {}): CancelablePromise<AdminAnalyticsGetAdminAnalyticsOverviewResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/overview',
+            query: {
+                range: data.range
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Admin Operations Summary
+     * Return operations summary statistics.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminOperationsSummary(): CancelablePromise<AdminAnalyticsGetAdminOperationsSummaryResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/operations/summary'
+        });
+    }
+
+    /**
+     * Get Admin Operations Tasks
+     * Return operations task statistics.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminOperationsTasks(): CancelablePromise<AdminAnalyticsGetAdminOperationsTasksResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/operations/tasks'
+        });
+    }
+
+    /**
+     * Get Admin Operations Feedback
+     * Return operations feedback statistics.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminOperationsFeedback(): CancelablePromise<AdminAnalyticsGetAdminOperationsFeedbackResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/operations/feedback'
+        });
+    }
+
+    /**
+     * Get Admin Operations Litellm
+     * Return operations LiteLLM quota statistics.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminOperationsLitellm(): CancelablePromise<AdminAnalyticsGetAdminOperationsLitellmResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/operations/litellm'
+        });
+    }
+
+    /**
+     * Get Admin Visitors Plausible
+     * Return visitor Plausible statistics.
+     * @param data The data for the request.
+     * @param data.range
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminVisitorsPlausible(data: AdminAnalyticsGetAdminVisitorsPlausibleData = {}): CancelablePromise<AdminAnalyticsGetAdminVisitorsPlausibleResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/visitors/plausible',
+            query: {
+                range: data.range
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Admin Visitors Github
+     * Return visitor GitHub statistics.
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getAdminVisitorsGithub(): CancelablePromise<AdminAnalyticsGetAdminVisitorsGithubResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/analytics/visitors/github'
+        });
+    }
+}
 
 export class FeedbackService {
     /**
@@ -36,7 +145,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 查询反馈列表
      * 查询反馈列表。
@@ -79,7 +188,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 获取反馈统计信息（管理员）
      * 获取反馈统计信息。
@@ -104,7 +213,7 @@ export class FeedbackService {
             url: '/api/v1/feedback/statistics'
         });
     }
-    
+
     /**
      * 获取反馈详情
      * 获取单个反馈的详细信息。
@@ -139,7 +248,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 更新反馈（管理员）
      * 更新反馈信息。
@@ -178,7 +287,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 删除反馈（管理员）
      * 删除反馈。
@@ -234,7 +343,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 分页查询活码列表
      * 分页查询全部活码（全管理员共享）。
@@ -257,7 +366,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 获取活码详情
      * 获取活码详情，包含全部真实群码及其实时有效状态。
@@ -278,7 +387,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 更新活码
      * 更新活码名称、切换策略、落地页文案、启用状态等。
@@ -302,7 +411,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 删除活码
      * 删除活码及其全部真实群码（含对象存储清理）。
@@ -323,7 +432,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 批量上传真实群码
      * 为活码批量上传真实群码图片，统一设置有效期与扫码上限。
@@ -347,7 +456,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 更新真实群码
      * 更新真实群码的备注、过期时间、扫码上限、启用状态、排序。
@@ -373,7 +482,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 删除真实群码
      * 删除某张真实群码（含对象存储清理）。
@@ -396,7 +505,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 重置真实群码扫码计数
      * 将某张真实群码的扫码计数清零，便于满员后复用同一张群码。
@@ -437,7 +546,7 @@ export class LiveQrService {
             url: '/api/v1/live-qr/contact'
         });
     }
-    
+
     /**
      * 真实群码图片（公开）
      * 按 target_id 返回真实群码图片，免鉴权、内联、不计扫码数。
@@ -461,7 +570,7 @@ export class LiveQrService {
             }
         });
     }
-    
+
     /**
      * 活码落地页
      * 渲染活码落地页：展示当前有效群码与长按识别引导，永久不变。
@@ -482,7 +591,7 @@ export class LiveQrService {
             }
         });
     }
-    
+
     /**
      * 当前有效群码图片
      * 返回当前有效的真实群码图片，并累计扫码计数（同一客户端去重）。
@@ -510,7 +619,7 @@ export class LiveQrService {
             }
         });
     }
-    
+
     /**
      * 活码永久二维码 PNG（公开）
      * 返回活码的永久二维码 PNG（编码对外落地页 URL），免鉴权可直接用于 ``<img>``。
@@ -565,7 +674,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Reset chat tune history for a task
      * 清空任务的调参对话历史，会话保留并重置为初始配置。
@@ -586,7 +695,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Start a new chat tune turn for a task
      * 触发新一轮调参生成。
@@ -622,7 +731,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Stop the current chat tune turn
      * 停止指定轮次的生成。幂等：对已结束的轮次返回当前状态。
@@ -645,7 +754,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Retry a failed or stopped chat tune turn
      * 对失败或已停止的轮次原地重跑。
@@ -684,7 +793,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * 调参对话中上传文件到任务数据目录
      * 上传文件到 ``input_data_path`` 下的第一个子目录。
@@ -720,7 +829,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * 调参对话中上传目录到任务数据目录
      * 上传目录到 ``input_data_path`` 下的第一个子目录。
@@ -757,7 +866,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * SSE stream for a chat tune turn
      * SSE 端点：实时推送指定轮次的调参生成进度。
@@ -797,6 +906,282 @@ export class Llm4AdChatTuneService {
     }
 }
 
+export class Llm4AdEmbeddingProvidersService {
+    /**
+     * 创建 embedding 供应商配置
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns EmbeddingProviderResponse Successful Response
+     * @throws ApiError
+     */
+    public static createEmbeddingProvider(data: Llm4AdEmbeddingProvidersCreateEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/embedding-providers/',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 分页查询 embedding 供应商配置列表
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @returns PaginatedEmbeddingProviderResponse Successful Response
+     * @throws ApiError
+     */
+    public static listEmbeddingProviders(data: Llm4AdEmbeddingProvidersListEmbeddingProvidersData = {}): CancelablePromise<Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/embedding-providers/',
+            query: {
+                skip: data.skip,
+                limit: data.limit
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 获取单个 embedding 供应商配置详情
+     * @param data The data for the request.
+     * @param data.providerId
+     * @returns EmbeddingProviderResponse Successful Response
+     * @throws ApiError
+     */
+    public static getEmbeddingProvider(data: Llm4AdEmbeddingProvidersGetEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/embedding-providers/{provider_id}',
+            path: {
+                provider_id: data.providerId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 更新 embedding 供应商配置
+     * @param data The data for the request.
+     * @param data.providerId
+     * @param data.requestBody
+     * @returns EmbeddingProviderResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateEmbeddingProvider(data: Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/embedding-providers/{provider_id}',
+            path: {
+                provider_id: data.providerId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 删除 embedding 供应商配置
+     * @param data The data for the request.
+     * @param data.providerId
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteEmbeddingProvider(data: Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/embedding-providers/{provider_id}',
+            path: {
+                provider_id: data.providerId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class Llm4AdLlmproxyService {
+    /**
+     * Proxy Llm
+     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
+     *
+     * Args:
+     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
+     * request: 原始入站请求。
+     *
+     * Returns:
+     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * @param data The data for the request.
+     * @param data.path
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static proxyLlm(data: Llm4AdLlmproxyProxyLlmData): CancelablePromise<Llm4AdLlmproxyProxyLlmResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/llmproxy/{path}',
+            path: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Proxy Llm
+     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
+     *
+     * Args:
+     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
+     * request: 原始入站请求。
+     *
+     * Returns:
+     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * @param data The data for the request.
+     * @param data.path
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static proxyLlm1(data: Llm4AdLlmproxyProxyLlm1Data): CancelablePromise<Llm4AdLlmproxyProxyLlm1Response> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/llmproxy/{path}',
+            path: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Proxy Llm
+     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
+     *
+     * Args:
+     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
+     * request: 原始入站请求。
+     *
+     * Returns:
+     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * @param data The data for the request.
+     * @param data.path
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static proxyLlm2(data: Llm4AdLlmproxyProxyLlm2Data): CancelablePromise<Llm4AdLlmproxyProxyLlm2Response> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/llmproxy/{path}',
+            path: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Proxy Llm
+     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
+     *
+     * Args:
+     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
+     * request: 原始入站请求。
+     *
+     * Returns:
+     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * @param data The data for the request.
+     * @param data.path
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static proxyLlm3(data: Llm4AdLlmproxyProxyLlm3Data): CancelablePromise<Llm4AdLlmproxyProxyLlm3Response> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/llmproxy/{path}',
+            path: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Proxy Llm
+     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
+     *
+     * Args:
+     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
+     * request: 原始入站请求。
+     *
+     * Returns:
+     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * @param data The data for the request.
+     * @param data.path
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static proxyLlm4(data: Llm4AdLlmproxyProxyLlm4Data): CancelablePromise<Llm4AdLlmproxyProxyLlm4Response> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/llmproxy/{path}',
+            path: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Proxy Llm
+     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
+     *
+     * Args:
+     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
+     * request: 原始入站请求。
+     *
+     * Returns:
+     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * @param data The data for the request.
+     * @param data.path
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static proxyLlm5(data: Llm4AdLlmproxyProxyLlm5Data): CancelablePromise<Llm4AdLlmproxyProxyLlm5Response> {
+        return __request(OpenAPI, {
+            method: 'OPTIONS',
+            url: '/api/v1/llm4ad/llmproxy/{path}',
+            path: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
 export class Llm4AdProjectsService {
     /**
      * 创建新项目（属于当前用户）
@@ -825,7 +1210,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 分页查询项目列表
      * 分页查询当前用户的所有项目。
@@ -866,7 +1251,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 获取单个项目详情
      * 获取项目详情。
@@ -895,7 +1280,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 更新项目信息
      * 更新项目的名称或描述。
@@ -930,7 +1315,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 删除项目（同时删除其下的所有任务）
      * 删除项目及其关联的所有任务（级联删除）。
@@ -987,7 +1372,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 创建新供应商配置（属于当前用户）
      * 创建一个新的 LLM 供应商配置，自动关联到当前登录用户。
@@ -1015,7 +1400,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 分页查询供应商配置列表
      * 分页查询当前用户的所有供应商配置。
@@ -1047,7 +1432,33 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
+    /**
+     * 查询当前用户的内置供应商额度
+     * Get current user's built-in provider quota through the gateway.
+     * @returns BuiltinProviderQuotaResponse Successful Response
+     * @throws ApiError
+     */
+    public static getBuiltinProviderQuota(): CancelablePromise<Llm4AdProvidersGetBuiltinProviderQuotaResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/providers/builtin/quota'
+        });
+    }
+
+    /**
+     * 管理员查询 LiteLLM 已存在用户额度
+     * Query LiteLLM user quota rows through the gateway admin endpoint.
+     * @returns LiteLLMUserQuotaListResponse Successful Response
+     * @throws ApiError
+     */
+    public static getLitellmUserQuotas(): CancelablePromise<Llm4AdProvidersGetLitellmUserQuotasResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/providers/admin/litellm-user-quotas'
+        });
+    }
+
     /**
      * 获取单个供应商配置详情
      * 获取供应商配置详情。
@@ -1076,7 +1487,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 更新供应商配置
      * 更新供应商配置信息。
@@ -1111,7 +1522,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 删除供应商配置
      * 删除指定的供应商配置。
@@ -1140,7 +1551,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 测试已存储供应商的联通性（按 ID）
      * Test connectivity of a stored provider using its persisted credentials.
@@ -1199,7 +1610,7 @@ export class Llm4AdReportsService {
             url: '/api/v1/llm4ad/tasks/reports/report-templates'
         });
     }
-    
+
     /**
      * Trigger evolution insight report generation
      * 触发指定任务的报告后台生成。
@@ -1235,7 +1646,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Get a specific report
      * 从数据库读取指定类型的报告内容。
@@ -1267,7 +1678,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Stop report generation
      * 停止指定类型报告的生成过程。
@@ -1301,7 +1712,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * SSE stream for report generation progress
      * SSE 端点：实时推送报告生成进度。
@@ -1343,7 +1754,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Trigger evolve-block advise generation
      * 触发进化块分析建议的后台生成。
@@ -1380,7 +1791,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Get cached block advise result
      * 获取缓存的进化块分析建议结果。
@@ -1409,7 +1820,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Trigger evolve-block recommend generation
      * 触发进化块推荐的后台生成。
@@ -1446,7 +1857,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Get cached block recommend result
      * 获取缓存的进化块推荐结果。
@@ -1490,7 +1901,7 @@ export class Llm4AdTasksService {
             url: '/api/v1/llm4ad/tasks/templates'
         });
     }
-    
+
     /**
      * 获取项目下的任务列表
      * 分页查询指定项目下的所有任务。
@@ -1515,7 +1926,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务详情
      * 获取单个任务的详细信息，包含存储用量。
@@ -1536,7 +1947,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 修改任务参数
      * 修改任务的名称、描述或运行参数。
@@ -1560,7 +1971,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务
      * 删除任务及其关联的存储数据。任务运行中（pending/running）时不允许操作，需先停止任务。
@@ -1581,7 +1992,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 创建任务（自动生成默认参数）
      * 创建新任务。若未提供 input_args，将自动填充 AppConfig 默认值。
@@ -1601,7 +2012,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 修改任务标签
      * 修改任务的标签。
@@ -1625,7 +2036,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 设置根任务当前选中的子任务版本
      * 设置根任务的活跃子版本。传 child_id=null 可清除选中（读取时默认回退为指向自身）。
@@ -1649,7 +2060,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务树
      * 根据根任务 ID 获取任务树，包含根任务及其所有子任务的常用信息。
@@ -1670,7 +2081,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 复制任务
      * 复制指定任务，名称加后缀，数据存在则复制一份，状态重置为未初始化。
@@ -1694,7 +2105,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 运行任务（提交到Celery）
      * 运行指定任务，提交到 Celery 异步执行。
@@ -1715,7 +2126,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 停止任务
      * 停止正在运行或等待中的任务，撤销 Celery 任务并将状态置为失败。
@@ -1736,7 +2147,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务在Celery中的执行结果
      * 查询任务的 Celery 执行结果，并将状态同步回数据库。
@@ -1757,7 +2168,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务基本统计信息
      * 获取任务的基本统计信息：解的个数、解的平均分、解的最高分。
@@ -1778,7 +2189,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 生成任务结果渲染数据
      * 生成指定任务的结果渲染数据。
@@ -1805,7 +2216,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取参数配置的schema
      * 获取参数配置的schema。
@@ -1826,7 +2237,28 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
+    /**
+     * 下载任务 IDE 工作区
+     * Download the authorized task IDE workspace as a ZIP archive.
+     * @param data The data for the request.
+     * @param data.taskId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static downloadTaskWorkspace(data: Llm4AdTasksDownloadTaskWorkspaceData): CancelablePromise<Llm4AdTasksDownloadTaskWorkspaceResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/tasks/{task_id}/workspace/download',
+            path: {
+                task_id: data.taskId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
     /**
      * 批量上传任务输入数据文件
      * 批量上传任务的输入数据文件到 S3 存储。
@@ -1850,7 +2282,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务输入数据的目录树
      * 获取任务 input_data_path 对应存储中的文件目录树。
@@ -1871,7 +2303,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 在任务输入数据中创建新文件
      * 在任务输入数据目录中创建一个带 hello-world 示例的 Python 文件。
@@ -1895,7 +2327,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务输入数据中的文件内容
      * 获取任务输入数据目录中指定文件的文本内容。
@@ -1920,7 +2352,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 修改任务输入数据中的文件内容
      * 修改任务输入数据目录中指定文件的内容。内容以 UTF-8 写入；是否允许编辑由前端控制。
@@ -1944,7 +2376,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务输入数据中的文件
      * 删除任务输入数据目录中的指定文件。
@@ -1969,7 +2401,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 重命名任务输入数据中的文件
      * 重命名任务输入数据目录中的指定文件。
@@ -1993,7 +2425,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 在任务输入数据中创建子文件夹（占位文件方式）
      * 在已有目录下新建空文件夹，通过写入占位文件标记目录存在。不支持创建顶级文件夹。
@@ -2017,7 +2449,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务输入数据中的文件夹（递归）
      * 递归删除指定文件夹及其所有内容。
@@ -2042,7 +2474,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 重命名任务输入数据中的文件夹
      * 重命名任务输入数据目录中的指定文件夹（递归 copy + delete）。
@@ -2066,7 +2498,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务日志（游标分页，倒序查询）
      * 获取任务日志，游标分页倒序查询。首次加载最新一页，后续向前翻页。
@@ -2099,7 +2531,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * SSE 实时日志流
      * SSE 端点，实时推送任务日志和状态更新。
@@ -2127,7 +2559,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * code认证
      * 验证 code-server 请求的 cookie token，返回用户信息用于 iframe 代理。
@@ -2162,7 +2594,7 @@ export class Llm4AdUserDefaultModelsService {
             url: '/api/v1/llm4ad/user-default-models/'
         });
     }
-    
+
     /**
      * 更新当前用户的默认模型配置
      * 更新当前用户的默认模型配置。
@@ -2227,7 +2659,7 @@ export class LoginService {
             }
         });
     }
-    
+
     /**
      * 刷新token
      * 使用刷新令牌获取新的访问令牌和刷新令牌。
@@ -2260,7 +2692,7 @@ export class LoginService {
             }
         });
     }
-    
+
     /**
      * 找回密码申请
      * 发起密码找回流程，向用户邮箱发送重置链接。
@@ -2293,7 +2725,7 @@ export class LoginService {
             }
         });
     }
-    
+
     /**
      * 重置密码
      * 使用重置令牌设置新密码。
@@ -2354,7 +2786,7 @@ export class PermissionService {
             }
         });
     }
-    
+
     /**
      * Get
      * 根据主键获取单个权限（仅超级管理员）。
@@ -2382,7 +2814,7 @@ export class PermissionService {
             }
         });
     }
-    
+
     /**
      * Permissions
      * 获取所有权限列表（仅超级管理员）。
@@ -2430,7 +2862,7 @@ export class PrivacyPolicyService {
             }
         });
     }
-    
+
     /**
      * Accept Privacy Policy Authenticated
      * 已登录用户同意隐私协议。
@@ -2455,7 +2887,7 @@ export class PrivacyPolicyService {
             url: '/api/v1/privacy-policy/accept'
         });
     }
-    
+
     /**
      * Accept Privacy Policy Before Login
      * 登录前同意隐私协议。
@@ -2487,7 +2919,7 @@ export class PrivacyPolicyService {
             }
         });
     }
-    
+
     /**
      * Check Privacy Policy Status
      * 检查当前用户的隐私协议同意状态。
@@ -2541,7 +2973,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Create User
      * 管理员创建新用户，创建成功后发送欢迎邮件。
@@ -2574,7 +3006,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Read User Me
      * 获取当前登录用户信息。
@@ -2587,7 +3019,7 @@ export class UsersService {
             url: '/api/v1/users/me'
         });
     }
-    
+
     /**
      * Delete User Me
      * 删除当前登录用户账号（超级管理员不可自删）。
@@ -2610,7 +3042,7 @@ export class UsersService {
             url: '/api/v1/users/me'
         });
     }
-    
+
     /**
      * Update User Me
      * 更新当前登录用户的个人信息。
@@ -2643,7 +3075,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Update Password Me
      * 修改当前登录用户的密码。
@@ -2676,7 +3108,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Register User
      * 用户自助注册，注册后发送邮箱验证码。
@@ -2709,7 +3141,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Verify Email
      * 校验邮箱验证码，验证通过后标记用户邮箱已验证。
@@ -2739,7 +3171,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Resend Verify Code
      * 重新发送邮箱验证码。
@@ -2771,7 +3203,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Read User By Id
      * 根据 ID 获取用户信息。
@@ -2805,7 +3237,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Update User
      * 管理员更新指定用户信息。
@@ -2842,7 +3274,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Delete User
      * 管理员删除指定用户（不可删除自己）。
@@ -2907,7 +3339,7 @@ export class UtilsService {
             }
         });
     }
-    
+
     /**
      * Health Check
      * 健康检查端点。
@@ -2978,7 +3410,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_s3'
         });
     }
-    
+
     /**
      * 测试当前用户依赖
      * 测试 require_user 依赖注入是否正常工作。
@@ -2991,7 +3423,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_current_user_dp'
         });
     }
-    
+
     /**
      * 测试当前用户
      * 测试获取当前登录用户信息。
@@ -3004,7 +3436,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_current_user'
         });
     }
-    
+
     /**
      * 测试需要超管权限依赖
      * 测试 require_superuser 依赖注入是否正常工作。
@@ -3017,7 +3449,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_superuser_dp'
         });
     }
-    
+
     /**
      * 测试需要超管权限
      * 测试获取超级管理员用户信息。
@@ -3030,7 +3462,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_superuser'
         });
     }
-    
+
     /**
      * 测试需要特定权限依赖（超管除外）
      * 测试 require_permission 依赖注入（需 item:read 权限）。
@@ -3043,7 +3475,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_require_permission_dp'
         });
     }
-    
+
     /**
      * 测试获取任务信息
      * 测试查询 Celery 任务状态（注意：Celery 永远能返回结果，需自行维护任务表）。

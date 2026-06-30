@@ -105,6 +105,20 @@ export type Body_login_login_access_token = {
     client_secret?: (string | null);
 };
 
+/**
+ * 内置供应商额度信息响应。
+ */
+export type BuiltinProviderQuotaResponse = {
+    available?: boolean;
+    provider_id?: (string | null);
+    provider_name?: (string | null);
+    spend?: (number | null);
+    budget?: (number | null);
+    remaining?: (number | null);
+    currency?: string;
+    message?: string;
+};
+
 export type chat_tune_chat_tune_upload_data = {
     /**
      * 上传的文件列表（filename 可含 / 以表达子目录结构）
@@ -323,6 +337,174 @@ export type ChatTuneUploadFileResponse = {
  * 决定该活码是否、以及如何出现在前端「联系我们」面板。
  */
 export type ContactDisplay = 'none' | 'landing' | 'direct';
+
+/**
+ * Embedding text/code 配置模式。
+ */
+export type EmbeddingMode = 'shared' | 'split';
+
+/**
+ * Embedding 供应商创建请求。
+ */
+export type EmbeddingProviderCreate = {
+    name: string;
+    type?: EmbeddingProviderType;
+    /**
+     * API 密钥（加密存储）
+     */
+    api_key?: string;
+    /**
+     * 认证令牌（加密存储）
+     */
+    auth_token?: string;
+    /**
+     * Embedding API 基础 URL
+     */
+    base_url?: (string | null);
+    /**
+     * text/code 共用或分流
+     */
+    mode?: EmbeddingMode;
+    /**
+     * 共用 embedding 模型名称
+     */
+    model?: string;
+    /**
+     * Embedding 向量维度
+     */
+    dim?: number;
+    /**
+     * 请求超时时间（秒）
+     */
+    timeout?: number;
+    /**
+     * 最大并发 embedding 请求数
+     */
+    embedding_func_max_async?: number;
+    /**
+     * 文本 embedding 供应商类型
+     */
+    text_type?: EmbeddingProviderType;
+    /**
+     * 文本 embedding API 基础 URL
+     */
+    text_base_url?: (string | null);
+    /**
+     * 文本 embedding API 密钥
+     */
+    text_api_key?: string;
+    /**
+     * 文本 embedding 认证令牌
+     */
+    text_auth_token?: string;
+    /**
+     * 文本 embedding 模型名称
+     */
+    text_model?: string;
+    /**
+     * 文本 embedding 任务模式
+     */
+    text_task?: string;
+    /**
+     * 代码 embedding 供应商类型
+     */
+    code_type?: EmbeddingProviderType;
+    /**
+     * 代码 embedding API 基础 URL
+     */
+    code_base_url?: (string | null);
+    /**
+     * 代码 embedding API 密钥
+     */
+    code_api_key?: string;
+    /**
+     * 代码 embedding 认证令牌
+     */
+    code_auth_token?: string;
+    /**
+     * 代码 embedding 模型名称
+     */
+    code_model?: string;
+    /**
+     * 代码 embedding 任务模式
+     */
+    code_task?: string;
+    /**
+     * 系统内置 embedding 供应商，仅 init_db 可修改
+     */
+    is_builtin?: boolean;
+    /**
+     * 对所有用户可见可用
+     */
+    visible_to_all?: boolean;
+};
+
+/**
+ * Embedding 供应商响应，凭据不返回明文。
+ */
+export type EmbeddingProviderResponse = {
+    id: string;
+    created_time: string;
+    updated_time: string;
+    user_id: (string | null);
+    name: string;
+    type: EmbeddingProviderType;
+    api_key: string;
+    auth_token: string;
+    base_url: (string | null);
+    mode: EmbeddingMode;
+    model: string;
+    dim: number;
+    timeout: number;
+    embedding_func_max_async: number;
+    text_type: EmbeddingProviderType;
+    text_base_url: (string | null);
+    text_api_key: string;
+    text_auth_token: string;
+    text_model: string;
+    text_task: string;
+    code_type: EmbeddingProviderType;
+    code_base_url: (string | null);
+    code_api_key: string;
+    code_auth_token: string;
+    code_model: string;
+    code_task: string;
+    is_builtin: boolean;
+    visible_to_all: boolean;
+};
+
+/**
+ * Embedding 供应商类型枚举。
+ */
+export type EmbeddingProviderType = 'openai' | 'jina' | 'openai_compatible' | 'mock' | 'local';
+
+/**
+ * Embedding 供应商更新请求（所有字段均可选）。
+ */
+export type EmbeddingProviderUpdate = {
+    name?: (string | null);
+    type?: (EmbeddingProviderType | null);
+    api_key?: (string | null);
+    auth_token?: (string | null);
+    base_url?: (string | null);
+    mode?: (EmbeddingMode | null);
+    model?: (string | null);
+    dim?: (number | null);
+    timeout?: (number | null);
+    embedding_func_max_async?: (number | null);
+    text_type?: (EmbeddingProviderType | null);
+    text_base_url?: (string | null);
+    text_api_key?: (string | null);
+    text_auth_token?: (string | null);
+    text_model?: (string | null);
+    text_task?: (string | null);
+    code_type?: (EmbeddingProviderType | null);
+    code_base_url?: (string | null);
+    code_api_key?: (string | null);
+    code_auth_token?: (string | null);
+    code_model?: (string | null);
+    code_task?: (string | null);
+};
 
 /**
  * 单个示例模板下的配置文件。
@@ -731,6 +913,32 @@ export type HTTPValidationError = {
 };
 
 /**
+ * LiteLLM 用户额度列表项。
+ */
+export type LiteLLMUserQuotaItem = {
+    user_id?: (string | null);
+    user_email?: (string | null);
+    full_name?: (string | null);
+    user_alias?: (string | null);
+    spend?: (number | null);
+    budget?: (number | null);
+    remaining?: (number | null);
+    teams?: Array<(string)>;
+    created_at?: (string | null);
+    updated_at?: (string | null);
+};
+
+/**
+ * LiteLLM 用户额度列表响应。
+ */
+export type LiteLLMUserQuotaListResponse = {
+    available?: boolean;
+    items?: Array<LiteLLMUserQuotaItem>;
+    total?: number;
+    message?: string;
+};
+
+/**
  * 『联系我们』活码公开信息（免鉴权）。
  *
  * 仅暴露展示所需的最小字段，供前端拉取并渲染二维码与引导文案。
@@ -910,6 +1118,16 @@ export type NewPassword = {
 };
 
 /**
+ * Embedding 供应商分页响应。
+ */
+export type PaginatedEmbeddingProviderResponse = {
+    items: Array<EmbeddingProviderResponse>;
+    total: number;
+    skip: number;
+    limit: number;
+};
+
+/**
  * 活码分页列表响应模型。
  */
 export type PaginatedLiveCode = {
@@ -1024,9 +1242,6 @@ export type ProviderCreate = {
      * 使用的模型名称，支持多个，使用;分割
      */
     model?: string;
-    /**
-     * Embedding 模型名称，支持多个，使用;分割
-     */
     /**
      * 采样温度
      */
@@ -1793,6 +2008,42 @@ export type VerifyEmailRequest = {
     code: string;
 };
 
+export type AdminAnalyticsGetAdminAnalyticsOverviewData = {
+    range?: string;
+};
+
+export type AdminAnalyticsGetAdminAnalyticsOverviewResponse = ({
+    [key: string]: unknown;
+});
+
+export type AdminAnalyticsGetAdminOperationsSummaryResponse = ({
+    [key: string]: unknown;
+});
+
+export type AdminAnalyticsGetAdminOperationsTasksResponse = ({
+    [key: string]: unknown;
+});
+
+export type AdminAnalyticsGetAdminOperationsFeedbackResponse = ({
+    [key: string]: unknown;
+});
+
+export type AdminAnalyticsGetAdminOperationsLitellmResponse = ({
+    [key: string]: unknown;
+});
+
+export type AdminAnalyticsGetAdminVisitorsPlausibleData = {
+    range?: string;
+};
+
+export type AdminAnalyticsGetAdminVisitorsPlausibleResponse = ({
+    [key: string]: unknown;
+});
+
+export type AdminAnalyticsGetAdminVisitorsGithubResponse = ({
+    [key: string]: unknown;
+});
+
 export type FeedbackCreateFeedbackData = {
     requestBody: FeedbackCreate;
 };
@@ -2019,6 +2270,74 @@ export type Llm4AdChatTuneStreamTurnData = {
 
 export type Llm4AdChatTuneStreamTurnResponse = (unknown);
 
+export type Llm4AdEmbeddingProvidersCreateEmbeddingProviderData = {
+    requestBody: EmbeddingProviderCreate;
+};
+
+export type Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse = (EmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersListEmbeddingProvidersData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse = (PaginatedEmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersGetEmbeddingProviderData = {
+    providerId: string;
+};
+
+export type Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse = (EmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData = {
+    providerId: string;
+    requestBody: EmbeddingProviderUpdate;
+};
+
+export type Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse = (EmbeddingProviderResponse);
+
+export type Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData = {
+    providerId: string;
+};
+
+export type Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse = (Message);
+
+export type Llm4AdLlmproxyProxyLlmData = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlmResponse = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm1Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm1Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm2Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm2Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm3Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm3Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm4Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm4Response = (unknown);
+
+export type Llm4AdLlmproxyProxyLlm5Data = {
+    path: string;
+};
+
+export type Llm4AdLlmproxyProxyLlm5Response = (unknown);
+
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
@@ -2081,6 +2400,10 @@ export type Llm4AdProvidersListProvidersData = {
 };
 
 export type Llm4AdProvidersListProvidersResponse = (PaginatedProviderResponse);
+
+export type Llm4AdProvidersGetBuiltinProviderQuotaResponse = (BuiltinProviderQuotaResponse);
+
+export type Llm4AdProvidersGetLitellmUserQuotasResponse = (LiteLLMUserQuotaListResponse);
 
 export type Llm4AdProvidersGetProviderData = {
     providerId: string;
@@ -2265,6 +2588,12 @@ export type Llm4AdTasksGetConfigSchemaData = {
 };
 
 export type Llm4AdTasksGetConfigSchemaResponse = (AppConfigSchemaResponse);
+
+export type Llm4AdTasksDownloadTaskWorkspaceData = {
+    taskId: string;
+};
+
+export type Llm4AdTasksDownloadTaskWorkspaceResponse = (unknown);
 
 export type Llm4AdTasksUploadTaskDataData = {
     formData: tasks_upload_task_data;

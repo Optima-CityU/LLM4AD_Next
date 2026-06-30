@@ -3,11 +3,11 @@ import axios from "axios"
 import { useCallback } from "react"
 
 import {
+  Llm4AdEmbeddingProvidersService,
   Llm4AdProvidersService,
   Llm4AdUserDefaultModelsService,
   OpenAPI,
 } from "@/client"
-import { Llm4AdEmbeddingProvidersService } from "@/client/embeddingProviders"
 
 export const providersQueryKey = ["providers"] as const
 export const embeddingProvidersQueryKey = ["embedding-providers"] as const
