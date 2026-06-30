@@ -316,6 +316,19 @@ export interface UseTaskLogsListResult {
   loadMore: () => void
 }
 
+/**
+ * Log types fetched for the evolution logs panel, joined as a comma-separated
+ * `log_type` query param. The backend splits on commas and matches any of them.
+ */
+const EVOLUTION_LOG_TYPES = [
+  "print",
+  "status",
+  "final_state",
+  "system",
+  "log",
+  "error",
+].join(",")
+
 export function useTaskLogsList(opts: {
   taskId: string | null | undefined
   searchQuery: string
@@ -327,13 +340,18 @@ export function useTaskLogsList(opts: {
   const isDemo = isDemoTaskId(taskId)
 
   const query = useInfiniteQuery({
-    queryKey: taskKeys.logsList(taskId ?? "", "log", searchQuery, levelArr),
+    queryKey: taskKeys.logsList(
+      taskId ?? "",
+      EVOLUTION_LOG_TYPES,
+      searchQuery,
+      levelArr,
+    ),
     queryFn: ({ pageParam }) =>
       Llm4AdTasksService.getTaskLogs({
         taskId: taskId!,
         cursor: pageParam || undefined,
         q: searchQuery || undefined,
-        logType: "log",
+        logType: EVOLUTION_LOG_TYPES,
         level: levelArr.length > 0 ? levelArr : undefined,
         limit: 1000,
       }),

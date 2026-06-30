@@ -372,15 +372,16 @@ def get_task_logs(
     task_id: uuid.UUID,
     cursor: str | None = Query(None, description="分页游标，首次请求不传，后续传上一次返回的 next_cursor"),
     limit: int = Query(100, ge=0, le=10000, description="每页条数，0 表示不分页返回全部"),
-    log_type: str | None = Query(None, description="按日志类型过滤"),
+    log_type: str | None = Query(None, description="按日志类型过滤，多个用英文逗号分隔"),
     level: list[str] | None = Query(None, description="按日志级别过滤，支持多选"),
     q: str | None = Query(None, description="全文搜索日志内容"),
 ):
     """获取任务日志，游标分页倒序查询。首次加载最新一页，后续向前翻页。"""
+    log_types = [t.strip() for t in log_type.split(",") if t.strip()] if log_type else None
     return task_service.get_task_logs(
         db, task_id, current_user,
         cursor=cursor, limit=limit,
-        log_type=log_type, level=level, message_query=q,
+        log_type=log_types, level=level, message_query=q,
     )
 
 
