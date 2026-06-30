@@ -113,7 +113,7 @@ export class AdminAnalyticsService {
         });
     }
 }
-
+import type { Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse } from './types.gen';
 export class FeedbackService {
     /**
      * 提交意见反馈
@@ -908,6 +908,25 @@ export class Llm4AdChatTuneService {
 
 export class Llm4AdEmbeddingProvidersService {
     /**
+     * 测试 embedding 供应商配置连通性
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns EmbeddingProviderTestResponse Successful Response
+     * @throws ApiError
+     */
+    public static testEmbeddingProvider(data: Llm4AdEmbeddingProvidersTestEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/embedding-providers/test',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
      * 创建 embedding 供应商配置
      * @param data The data for the request.
      * @param data.requestBody
@@ -1010,6 +1029,29 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
+
+    /**
+     * 测试已存储 embedding 供应商配置连通性
+     * @param data The data for the request.
+     * @param data.providerId
+     * @param data.requestBody
+     * @returns EmbeddingProviderTestResponse Successful Response
+     * @throws ApiError
+     */
+    public static testStoredEmbeddingProvider(data: Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData): CancelablePromise<Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/embedding-providers/{provider_id}/test',
+            path: {
+                provider_id: data.providerId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
 }
 
 export class Llm4AdLlmproxyService {
@@ -1058,7 +1100,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm1(data: Llm4AdLlmproxyProxyLlm1Data): CancelablePromise<Llm4AdLlmproxyProxyLlm1Response> {
         return __request(OpenAPI, {
-            method: 'PATCH',
+            method: 'GET',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
@@ -1086,7 +1128,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm2(data: Llm4AdLlmproxyProxyLlm2Data): CancelablePromise<Llm4AdLlmproxyProxyLlm2Response> {
         return __request(OpenAPI, {
-            method: 'DELETE',
+            method: 'POST',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
@@ -1114,7 +1156,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm3(data: Llm4AdLlmproxyProxyLlm3Data): CancelablePromise<Llm4AdLlmproxyProxyLlm3Response> {
         return __request(OpenAPI, {
-            method: 'GET',
+            method: 'DELETE',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path
@@ -1170,7 +1212,7 @@ export class Llm4AdLlmproxyService {
      */
     public static proxyLlm5(data: Llm4AdLlmproxyProxyLlm5Data): CancelablePromise<Llm4AdLlmproxyProxyLlm5Response> {
         return __request(OpenAPI, {
-            method: 'OPTIONS',
+            method: 'PATCH',
             url: '/api/v1/llm4ad/llmproxy/{path}',
             path: {
                 path: data.path

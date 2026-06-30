@@ -253,7 +253,6 @@ class Settings(BaseSettings):
     TASK_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 任务运行镜像名称
     TASK_CONTAINER_MEMORY_LIMIT: str = "4g"  # 容器内存限制
     TASK_CONTAINER_CPU_LIMIT: float = 2.0                  # 容器 CPU 核心数限制
-    TASK_CONTAINER_ENABLE: bool = True                    # 是否启用容器隔离（feature flag）
 
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）

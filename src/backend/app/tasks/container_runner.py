@@ -1,11 +1,11 @@
 """容器化任务执行入口。
 
-在 Docker 容器内执行 LLM4AD 演化任务。无需命令行参数：宿主机将
-任务运行目录挂载到 ``DATA_DIR``，并在启动容器前写入 AppConfig JSON
-文件，容器读取该配置后即可运行。
+在 Docker 容器内执行 LLM4AD 演化任务。无需命令行参数：宿主机将任务运行目录挂载
+到 ``DATA_DIR``，并在启动容器前写入加密的 AppConfig 文件，容器解密后即可运行。
 
-所有输出统一写入 stdout/stderr —— 宿主机上的 Celery worker 实时拉取
-Docker 日志并转发到 Redis。本模块**不依赖** Redis 与数据库。
+结构化日志与产物写入挂载盘的 NDJSON 事件文件（``EVENTS_FILENAME``），由宿主侧
+tail；stdout/stderr 仅承载依赖安装、用户 print 与未捕获 traceback 等非结构化输出。
+本模块**不依赖** Redis 与数据库。
 """
 
 import asyncio
@@ -13,7 +13,9 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import traceback
+from datetime import UTC, datetime
 from pathlib import Path
 
 # 与 container_runner.py 同目录，容器内以脚本方式启动时 sys.path[0] 即本目录
@@ -25,6 +27,109 @@ from loguru import logger
 DATA_DIR = "/task/data"
 CONFIG_FILENAME = ".app_config.json"
 FINAL_STATE_FILENAME = ".final_state.json"
+EVENTS_FILENAME = ".events.jsonl"  # 须与 app.core.constants.EVENTS_FILENAME 一致
+GENERATED_DIR = os.path.join(DATA_DIR, "llm4ad", "run", "generated")
+_GENERATED_SCAN_INTERVAL = 2.0  # 扫描 generated 目录的间隔（秒）
+
+
+class EventsSink:
+    """写 NDJSON 事件文件的 loguru sink。
+
+    实例可调用，直接传给 ``logger.add``；``emit`` 用于手动追加其他事件
+    （generated/final_state）。可用作上下文管理器自动关闭文件句柄。
+    """
+
+    def __init__(self, events_path: str):
+        self._fp = open(events_path, "a", encoding="utf-8")  # noqa: SIM115 - 由 close 释放
+        self._lock = threading.Lock()
+
+    def emit(self, event: dict) -> None:
+        """线程安全地追加一条事件。"""
+        line = json.dumps(event, ensure_ascii=False, default=str) + "\n"
+        with self._lock:
+            try:
+                self._fp.write(line)
+                self._fp.flush()
+            except Exception:
+                pass
+
+    def __call__(self, message) -> None:
+        """loguru sink：把日志记录转为 log 事件。"""
+        record = message.record
+        self.emit({
+            "type": "log",
+            "timestamp": record["time"].isoformat(),
+            "level": record["level"].name,
+            "message": record["message"],
+            "module": record["name"],
+            "function": record["function"],
+            "line": record["line"],
+        })
+
+    def close(self) -> None:
+        with self._lock:
+            try:
+                self._fp.close()
+            except Exception:
+                pass
+
+    def __enter__(self) -> "EventsSink":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
+def _scan_generated(generated_dir: str, emit, seen: dict[str, float]) -> None:
+    """扫描 generated 目录，对新增/更新的 JSON 解文件追加 generated 事件。"""
+    if not os.path.isdir(generated_dir):
+        return
+    for name in sorted(os.listdir(generated_dir)):
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(generated_dir, name)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if seen.get(name) == mtime:
+            continue
+        seen[name] = mtime
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = json.load(f)
+        except Exception:
+            continue
+        emit({
+            "type": "generated",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "file_name": name,
+            "data": content,
+        })
+
+
+def _start_generated_scanner(generated_dir: str, emit, interval: float = _GENERATED_SCAN_INTERVAL):
+    """启动后台线程定时扫描 generated 目录，返回停止函数。
+
+    停止函数会停掉线程并做一次最终扫描，确保捕获结束前最后写出的解。
+    """
+    seen: dict[str, float] = {}
+    stop_event = threading.Event()
+
+    def loop() -> None:
+        while not stop_event.is_set():
+            _scan_generated(generated_dir, emit, seen)
+            stop_event.wait(interval)
+
+    thread = threading.Thread(target=loop, name="generated-scan", daemon=True)
+    thread.start()
+
+    def stop() -> None:
+        stop_event.set()
+        thread.join(timeout=5)
+        _scan_generated(generated_dir, emit, seen)
+
+    return stop
 
 
 def _install_dependencies(data_dir: str) -> None:
@@ -72,12 +177,10 @@ def _install_dependencies(data_dir: str) -> None:
 def main() -> None:
     """容器入口：读取配置、安装依赖、运行 LLM4AD 演化任务。
 
-    宿主机将任务运行目录挂载至 ``DATA_DIR``，并写入 AppConfig 兼容的
-    JSON 配置文件（``CONFIG_FILENAME``），其中所有路径均已转换为容器内
-    路径、敏感字段（api_key/auth_token）以对称加密存储。解密密钥经
-    ``LLM4AD_CONFIG_KEY`` 环境变量传入，本函数在运行用户代码前完成解密
-    并立即从环境变量中删除。任务运行结束后会将最终 state 序列化到
-    ``FINAL_STATE_FILENAME``。
+    宿主机将运行目录挂载至 ``DATA_DIR`` 并写入加密配置（``CONFIG_FILENAME``，路径
+    已转为容器内路径、敏感字段对称加密）。解密密钥经 ``LLM4AD_CONFIG_KEY`` 环境
+    变量传入，运行用户代码前完成解密并立即从环境变量删除。运行结束后将最终 state
+    写入 ``FINAL_STATE_FILENAME`` 并追加一条 final_state 事件。
     """
     try:
         # 最早处取出并删除解密密钥：必须早于 _install_dependencies（会 spawn
@@ -115,6 +218,11 @@ def main() -> None:
         )
 
         data = merge_with_global_settings(load_global_settings(), data)
+        # 关闭 LLM4AD 控制台 handler：日志改走 events.jsonl，stdout/stderr 仅承载
+        # 非结构化输出（依赖安装、用户 print、未捕获 traceback），避免重复采集。
+        logging_cfg = data.get("logging") or {}
+        logging_cfg["console"] = False
+        data["logging"] = logging_cfg
         config = AppConfig.from_dict(data)
 
         # 切换工作目录到挂载的数据目录：配置以内存 AppConfig 对象传入，
@@ -127,18 +235,31 @@ def main() -> None:
         llm4ad = LLM4AD(config)
         llm4ad.print_run_summary()
 
-        result = asyncio.run(llm4ad.run(resume_from_checkpoint=None))
-        logger.info(result.state.value)
+        # LLM4AD 初始化会 logger.remove() 重建 handler，故事件 sink 在其后安装。
+        with EventsSink(os.path.join(DATA_DIR, EVENTS_FILENAME)) as events:
+            sink_id = logger.add(events, level="INFO")
+            # 定时扫描 generated 目录推送新解（不依赖具体日志文案）。
+            stop_scanner = _start_generated_scanner(GENERATED_DIR, events.emit)
+            try:
+                result = asyncio.run(llm4ad.run(resume_from_checkpoint=None))
+                logger.info(result.state.value)
 
-        try:
-            final_state = llm4ad.export_state()
-            state_path = os.path.join(DATA_DIR, FINAL_STATE_FILENAME)
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(final_state, f, ensure_ascii=False, default=str)
-        except Exception:
-            pass
+                try:
+                    final_state = llm4ad.export_state()
+                    state_path = os.path.join(DATA_DIR, FINAL_STATE_FILENAME)
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump(final_state, f, ensure_ascii=False, default=str)
+                    events.emit({"type": "final_state", "data": final_state})
+                except Exception:
+                    pass
 
-        logger.info("Task completed successfully")
+                logger.info("Task completed successfully")
+            finally:
+                stop_scanner()  # 停止扫描并做最终扫描，捕获最后写出的解
+                try:
+                    logger.remove(sink_id)  # 须早于 __exit__ 关文件，避免向已关闭句柄写
+                except ValueError:
+                    pass
 
     except Exception as exc:
         logger.error(f"Task failed: {exc}")

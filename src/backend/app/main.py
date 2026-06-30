@@ -44,15 +44,14 @@ async def lifespan(_app: FastAPI):
     except Exception:
         logger.exception("启动时重置 chat tune 幽灵轮次失败")
 
-    if settings.TASK_CONTAINER_ENABLE:
-        try:
-            from app.services.container_service import (
-                cleanup_orphaned_chat_tune_containers,
-            )
+    try:
+        from app.services.container_service import (
+            cleanup_orphaned_chat_tune_containers,
+        )
 
-            cleanup_orphaned_chat_tune_containers()
-        except Exception:
-            logger.exception("启动时清理孤儿调参容器失败")
+        cleanup_orphaned_chat_tune_containers()
+    except Exception:
+        logger.exception("启动时清理孤儿调参容器失败")
 
     cleanup_task = asyncio.create_task(run_idle_cleanup_loop())
     try:

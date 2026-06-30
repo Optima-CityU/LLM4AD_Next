@@ -30,7 +30,7 @@ def get_task_logs(
     current_user: models.User,
     cursor: str | None = None,
     limit: int = 100,
-    log_type: str | None = None,
+    log_type: list[str] | None = None,
     level: list[str] | None = None,
     message_query: str | None = None,
 ) -> schemas.TaskLogsResponse:
@@ -46,7 +46,7 @@ def get_task_logs(
         current_user: 当前认证用户。
         cursor: 分页游标（base64 编码）。
         limit: 每页条数。
-        log_type: 按日志类型过滤。
+        log_type: 按日志类型过滤，支持多选。
         level: 按日志级别过滤，支持多选。
         message_query: 在消息字段中进行全文检索。
 
@@ -100,7 +100,7 @@ def _encode_cursor(timestamp: datetime, log_id: uuid.UUID) -> str:
 def _get_all_task_logs_from_db(
     db: Session,
     task: models.Task,
-    log_type: str | None,
+    log_type: list[str] | None,
     level: list[str] | None,
     message_query: str | None,
 ) -> schemas.TaskLogsResponse:
@@ -111,7 +111,7 @@ def _get_all_task_logs_from_db(
     query = select(TaskLog).where(TaskLog.task_id == task.id)
 
     if log_type:
-        query = query.where(TaskLog.type == log_type)
+        query = query.where(TaskLog.type.in_(log_type))
     if level:
         query = query.where(TaskLog.level.in_(level))
     if message_query:
@@ -135,7 +135,7 @@ def _get_all_task_logs_from_db(
 
 def _filter_redis_entries(
     entries: list[dict],
-    log_type: str | None,
+    log_type: list[str] | None,
     level: list[str] | None,
     message_query: str | None,
 ) -> list[dict]:
@@ -145,10 +145,11 @@ def _filter_redis_entries(
     if not log_type and not level and not message_query:
         return entries
 
+    type_set = set(log_type) if log_type else None
     level_set = set(level) if level else None
     result = []
     for entry in entries:
-        if log_type and entry.get("type") != log_type:
+        if type_set is not None and entry.get("type") not in type_set:
             continue
         if level_set is not None and entry.get("level") not in level_set:
             continue
@@ -162,7 +163,7 @@ def _filter_redis_entries(
 
 def _get_all_task_logs_from_redis(
     task: models.Task,
-    log_type: str | None = None,
+    log_type: list[str] | None = None,
     level: list[str] | None = None,
     message_query: str | None = None,
 ) -> schemas.TaskLogsResponse:
@@ -189,7 +190,7 @@ def _get_task_logs_from_db(
     task: models.Task,
     cursor: str | None,
     limit: int,
-    log_type: str | None,
+    log_type: list[str] | None,
     level: list[str] | None,
     message_query: str | None,
 ) -> schemas.TaskLogsResponse:
@@ -202,7 +203,7 @@ def _get_task_logs_from_db(
     query = select(TaskLog).where(TaskLog.task_id == task.id)
 
     if log_type:
-        query = query.where(TaskLog.type == log_type)
+        query = query.where(TaskLog.type.in_(log_type))
     if level:
         query = query.where(TaskLog.level.in_(level))
     if message_query:
@@ -243,7 +244,7 @@ def _get_task_logs_from_redis(
     task: models.Task,
     cursor: str | None,
     limit: int,
-    log_type: str | None = None,
+    log_type: list[str] | None = None,
     level: list[str] | None = None,
     message_query: str | None = None,
 ) -> schemas.TaskLogsResponse:
