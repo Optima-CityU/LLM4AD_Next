@@ -414,6 +414,7 @@ export default function EmbeddingProviderSettings() {
   }
 
   function editProvider(provider: EmbeddingProviderResponse) {
+    if (provider.is_builtin) return
     setEditingProvider(provider)
     setClearedSecrets(new Set())
     form.reset(providerToFormData(provider))
@@ -531,6 +532,7 @@ export default function EmbeddingProviderSettings() {
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => editProvider(provider)}
+                          disabled={provider.is_builtin}
                         >
                           <Pencil />
                           <span className="sr-only">{t("common.edit")}</span>
