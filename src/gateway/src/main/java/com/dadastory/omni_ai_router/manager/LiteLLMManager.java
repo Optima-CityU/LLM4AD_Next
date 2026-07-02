@@ -137,6 +137,84 @@ public class LiteLLMManager {
     }
 
     /**
+     * Returns LiteLLM user metadata, creating the user and assigning the configured
+     * team when the user does not exist yet.
+     *
+     * @param user authenticated backend user
+     * @param teamId LiteLLM team id to assign when creating the user
+     * @return LiteLLM user info result
+     */
+    public Mono<Result<?>> getOrCreateUserInfo(AuthUser user, String teamId) {
+        if (user == null || !StringUtils.hasText(user.getId())) {
+            return Mono.just(Result.failure(400, "User id is required."));
+        }
+        if (!StringUtils.hasText(teamId)) {
+            return Mono.just(Result.failure(400, "Team id is required."));
+        }
+
+        String userId = user.getId();
+        return getUserInfo(userId)
+                .flatMap(userInfoResult -> {
+                    if (isSuccessResult(userInfoResult)) {
+                        return Mono.just(userInfoResult);
+                    }
+                    log.info("LiteLLM user does not exist or is unavailable. Creating before quota/reward flow. user={}, team={}, result={}",
+                            userId, teamId, userInfoResult);
+                    return createUserAndAssignTeam(user, teamId)
+                            .flatMap(createResult -> {
+                                if (isSuccessResult(createResult) || isAlreadyExistsResult(createResult)) {
+                                    return getUserInfo(userId);
+                                }
+                                return Mono.just(createResult);
+                            });
+                });
+    }
+
+    /**
+     * Adds a budget amount to the LiteLLM user's max budget.
+     *
+     * @param userId LiteLLM user id
+     * @param amount positive amount to add
+     * @return LiteLLM update result
+     */
+    public Mono<Result<?>> addBudgetToUser(String userId, double amount) {
+        if (!StringUtils.hasText(userId)) {
+            return Mono.just(Result.failure(400, "User id is required."));
+        }
+        if (!Double.isFinite(amount) || amount <= 0) {
+            return Mono.just(Result.failure(400, "Reward amount must be positive."));
+        }
+
+        return getUserInfo(userId)
+                .flatMap(result -> {
+                    if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
+                        String message = result == null ? "Unknown LiteLLM user info error." : result.getMessage();
+                        return Mono.just(Result.failure(502, "Cannot read current user budget: " + message));
+                    }
+                    Double currentBudget = findFirstNumber(jsonNode, List.of("max_budget", "budget", "user_budget"));
+                    if (currentBudget == null) {
+                        return Mono.just(Result.failure(502, "Current user budget is unavailable."));
+                    }
+                    double newBudget = currentBudget + amount;
+                    Map<String, Object> requestBody = new LinkedHashMap<>();
+                    requestBody.put("user_id", userId);
+                    requestBody.put("max_budget", newBudget);
+                    return litellmWebClient.post()
+                            .uri("/user/update")
+                            .bodyValue(requestBody)
+                            .exchangeToMono(this::handleResponse)
+                            .doOnSubscribe(subscription -> log.debug(
+                                    "Calling LiteLLM update user budget. user={}, amount={}, newBudget={}",
+                                    userId, amount, newBudget
+                            ));
+                })
+                .onErrorResume(e -> {
+                    log.warn("LiteLLM update user budget request failed. user={}, amount={}", userId, amount, e);
+                    return Mono.just(Result.failure(500, "Update User Budget failed: " + e.getMessage()));
+                });
+    }
+
+    /**
      * Queries LiteLLM team metadata.
      *
      * @param team_id LiteLLM team id
@@ -211,6 +289,25 @@ public class LiteLLMManager {
      */
     public Mono<LiteLLMUserQuota> getUserQuota(String userId) {
         return getUserInfo(userId)
+                .flatMap(result -> {
+                    if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
+                        String message = result == null ? "Unknown LiteLLM user info error." : result.getMessage();
+                        return Mono.error(new IllegalStateException(message));
+                    }
+                    return Mono.just(parseUserQuota(jsonNode));
+                });
+    }
+
+    /**
+     * Queries the user's LiteLLM quota, creating the LiteLLM user first when
+     * needed so newly registered users can see their initial default budget.
+     *
+     * @param user authenticated backend user
+     * @param teamId LiteLLM team id
+     * @return normalized quota row
+     */
+    public Mono<LiteLLMUserQuota> getOrCreateUserQuota(AuthUser user, String teamId) {
+        return getOrCreateUserInfo(user, teamId)
                 .flatMap(result -> {
                     if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode jsonNode)) {
                         String message = result == null ? "Unknown LiteLLM user info error." : result.getMessage();
@@ -752,6 +849,15 @@ public class LiteLLMManager {
 
     private boolean isSuccessResult(Result<?> result) {
         return result != null && result.getCode() >= 200 && result.getCode() < 300;
+    }
+
+    private boolean isAlreadyExistsResult(Result<?> result) {
+        if (result == null) {
+            return false;
+        }
+        String message = result.getMessage();
+        return result.getCode() == 409
+                || (StringUtils.hasText(message) && message.toLowerCase().contains("already"));
     }
 
     private Double extractRemainingBudget(Result<?> userInfoResult) {

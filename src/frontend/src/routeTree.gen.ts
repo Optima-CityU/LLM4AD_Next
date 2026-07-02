@@ -13,6 +13,7 @@ import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
+import { Route as OidcCallbackRouteImport } from './routes/oidc.callback'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as Layout_evolutionRouteImport } from './routes/_layout_evolution'
 import { Route as Layout_demoRouteImport } from './routes/_layout_demo'
@@ -50,6 +51,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
 const RecoverPasswordRoute = RecoverPasswordRouteImport.update({
   id: '/recover-password',
   path: '/recover-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OidcCallbackRoute = OidcCallbackRouteImport.update({
+  id: '/oidc/callback',
+  path: '/oidc/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -144,6 +150,7 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/oidc/callback': typeof OidcCallbackRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
@@ -165,6 +172,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/oidc/callback': typeof OidcCallbackRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
@@ -190,6 +198,7 @@ export interface FileRoutesById {
   '/_layout_demo': typeof Layout_demoRouteWithChildren
   '/_layout_evolution': typeof Layout_evolutionRouteWithChildren
   '/login': typeof LoginRoute
+  '/oidc/callback': typeof OidcCallbackRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
@@ -213,6 +222,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/oidc/callback'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
@@ -234,6 +244,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/login'
+    | '/oidc/callback'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
@@ -258,6 +269,7 @@ export interface FileRouteTypes {
     | '/_layout_demo'
     | '/_layout_evolution'
     | '/login'
+    | '/oidc/callback'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
@@ -283,6 +295,7 @@ export interface RootRouteChildren {
   Layout_demoRoute: typeof Layout_demoRouteWithChildren
   Layout_evolutionRoute: typeof Layout_evolutionRouteWithChildren
   LoginRoute: typeof LoginRoute
+  OidcCallbackRoute: typeof OidcCallbackRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
@@ -324,6 +337,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oidc/callback': {
+      id: '/oidc/callback'
+      path: '/oidc/callback'
+      fullPath: '/oidc/callback'
+      preLoaderRoute: typeof OidcCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_layout_evolution': {
@@ -508,6 +528,7 @@ const rootRouteChildren: RootRouteChildren = {
   Layout_demoRoute: Layout_demoRouteWithChildren,
   Layout_evolutionRoute: Layout_evolutionRouteWithChildren,
   LoginRoute: LoginRoute,
+  OidcCallbackRoute: OidcCallbackRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,

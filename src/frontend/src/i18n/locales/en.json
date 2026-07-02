@@ -73,8 +73,17 @@
     "passwordPlaceholder": "Enter your password",
     "forgotPassword": "Forgot password?",
     "loginButton": "Login",
+    "githubLoginButton": "Continue with GitHub",
     "noAccount": "Don't have an account?",
     "signupLink": "Sign up"
+  },
+  "starReward": {
+    "title": "Extra reward",
+    "description": "Star {{repo}} on GitHub, then sign in again to automatically receive ${{amount}} in LiteLLM credit.",
+    "later": "Later",
+    "openGithub": "Star on GitHub",
+    "grantedToast": "${{amount}} LiteLLM reward granted",
+    "apiKeyRefreshed": "LiteLLM API key cache was refreshed and quota is up to date."
   },
   "signup": {
     "pageTitle": "Sign Up - LLM4AD_Next",

@@ -2,6 +2,7 @@ package com.dadastory.omni_ai_router.controller;
 
 import com.dadastory.omni_ai_router.dto.LiteLLMUserQuota;
 import com.dadastory.omni_ai_router.dto.Result;
+import com.dadastory.omni_ai_router.manager.APIKeyManager;
 import com.dadastory.omni_ai_router.manager.AuthUserManager;
 import com.dadastory.omni_ai_router.manager.LiteLLMManager;
 import lombok.RequiredArgsConstructor;
@@ -12,11 +13,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -34,6 +40,7 @@ public class LiteLLMAdminController {
 
     private final AuthUserManager authUserManager;
     private final LiteLLMManager liteLLMManager;
+    private final APIKeyManager apiKeyManager;
 
     @Value("${TEAM_ID:}")
     private String teamId;
@@ -131,9 +138,13 @@ public class LiteLLMAdminController {
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Result.<LiteLLMUserQuota>failure(401, "Missing bearer token.")));
         }
+        if (!StringUtils.hasText(teamId)) {
+            return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Result.<LiteLLMUserQuota>failure(502, "LiteLLM team id is not configured.")));
+        }
 
         return authUserManager.getCurrentUser(token)
-                .flatMap(user -> liteLLMManager.getUserQuota(user.getId())
+                .flatMap(user -> liteLLMManager.getOrCreateUserQuota(user, teamId)
                         .map(quota -> ResponseEntity.ok(Result.<LiteLLMUserQuota>success(quota))))
                 .onErrorResume(AuthUserManager.UnauthorizedUserException.class, error ->
                         Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -146,6 +157,131 @@ public class LiteLLMAdminController {
                                     "Failed to query current LiteLLM user quota: " + error.getMessage()
                             )));
                 });
+    }
+
+    /**
+     * Adds a reward amount to the authenticated user's LiteLLM budget.
+     *
+     * @param authorization backend access-token authorization header
+     * @param request reward request body
+     * @return LiteLLM update result wrapped in common result envelope
+     */
+    @PostMapping("/users/me/reward")
+    public Mono<ResponseEntity<Result<Map<String, Object>>>> grantCurrentUserReward(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
+            @RequestBody RewardRequest request
+    ) {
+        String token = extractBearerToken(authorization);
+        if (!StringUtils.hasText(token)) {
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Result.<Map<String, Object>>failure(401, "Missing bearer token.")));
+        }
+        if (request == null || request.amount() == null || !Double.isFinite(request.amount()) || request.amount() <= 0) {
+            return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Result.<Map<String, Object>>failure(400, "Reward amount must be positive.")));
+        }
+        if (!StringUtils.hasText(teamId)) {
+            return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Result.<Map<String, Object>>failure(502, "LiteLLM team id is not configured.")));
+        }
+
+        return authUserManager.getCurrentUser(token)
+                .flatMap(user -> liteLLMManager.getOrCreateUserInfo(user, teamId)
+                        .flatMap(userInfoResult -> {
+                            if (!userInfoResult.isSuccess()) {
+                                return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                                        .body(Result.<Map<String, Object>>failure(
+                                                userInfoResult.getCode(),
+                                                "Failed to initialize LiteLLM user before reward: "
+                                                        + userInfoResult.getMessage()
+                                        )));
+                            }
+                            return liteLLMManager.addBudgetToUser(user.getId(), request.amount())
+                                    .flatMap(result -> {
+                                        if (!result.isSuccess()) {
+                                            return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                                                    .body(Result.<Map<String, Object>>failure(
+                                                            result.getCode(),
+                                                            result.getMessage()
+                                                    )));
+                                        }
+                                        return refreshCurrentUserApiKeyCache(user.getId(), result);
+                                    });
+                        }))
+                .onErrorResume(AuthUserManager.UnauthorizedUserException.class, error ->
+                        Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                .body(Result.<Map<String, Object>>failure(401, "Access token is invalid."))))
+                .onErrorResume(error -> {
+                    log.warn("Failed to grant current LiteLLM user reward.", error);
+                    return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                            .body(Result.<Map<String, Object>>failure(
+                                    502,
+                                    "Failed to grant current LiteLLM user reward: " + error.getMessage()
+                            )));
+                });
+    }
+
+    public record RewardRequest(Double amount) {
+    }
+
+    private Mono<ResponseEntity<Result<Map<String, Object>>>> refreshCurrentUserApiKeyCache(
+            String userId,
+            Result<?> rewardResult
+    ) {
+        return liteLLMManager.getUserInfo(userId)
+                .flatMap(userInfoResult -> liteLLMManager.regenerateApiKeyWithinUserBudget(
+                        userInfoResult,
+                        userId,
+                        teamId
+                ))
+                .flatMap(keyResult -> {
+                    if (!keyResult.isSuccess()) {
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                                .body(Result.<Map<String, Object>>failure(
+                                        keyResult.getCode(),
+                                        "Reward granted, but failed to refresh LiteLLM API key cache: "
+                                                + keyResult.getMessage()
+                                )));
+                    }
+                    String apiKey = extractApiKey(keyResult.getData());
+                    if (!StringUtils.hasText(apiKey)) {
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                                .body(Result.<Map<String, Object>>failure(
+                                        502,
+                                        "Reward granted, but LiteLLM did not return a refreshed API key."
+                                )));
+                    }
+                    return apiKeyManager.saveApiKey(teamId, userId, apiKey)
+                            .map(saved -> ResponseEntity.ok(Result.success(rewardResponseData(rewardResult, saved))));
+                });
+    }
+
+    private Map<String, Object> rewardResponseData(Result<?> rewardResult, boolean apiKeyCacheRefreshed) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("reward", rewardResult.getData());
+        data.put("api_key_cache_refreshed", apiKeyCacheRefreshed);
+        return data;
+    }
+
+    private String extractApiKey(Object rawData) {
+        if (rawData instanceof JsonNode jsonNode) {
+            String key = jsonNode.path("key").asString(null);
+            if (StringUtils.hasText(key)) {
+                return key;
+            }
+            return jsonNode.path("api_key").asString(null);
+        }
+        if (rawData instanceof Map<?, ?> map) {
+            Object key = map.get("key");
+            if (key instanceof String value && StringUtils.hasText(value)) {
+                return value;
+            }
+            Object apiKey = map.get("api_key");
+            if (apiKey instanceof String value && StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private String extractBearerToken(String authorization) {

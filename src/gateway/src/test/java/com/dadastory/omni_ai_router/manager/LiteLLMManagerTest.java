@@ -1,5 +1,6 @@
 package com.dadastory.omni_ai_router.manager;
 
+import com.dadastory.omni_ai_router.entity.AuthUser;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -440,6 +441,115 @@ class LiteLLMManagerTest {
         assertThat(requests).hasSize(1);
         assertThat(requests.get(0).path()).isEqualTo("/user/info");
         assertThat(requests.get(0).query()).isEqualTo("user_id=user-1");
+    }
+
+    @Test
+    void getOrCreateUserQuotaCreatesMissingUserBeforeReadingQuota() {
+        List<CapturedRequest> requests = new ArrayList<>();
+        ExchangeFunction exchangeFunction = request -> {
+            requests.add(CapturedRequest.from(request));
+            String path = request.url().getPath();
+            if (request.method() == HttpMethod.GET && path.equals("/user/info")) {
+                long infoCalls = requests.stream()
+                        .filter(item -> item.method() == HttpMethod.GET && item.path().equals("/user/info"))
+                        .count();
+                if (infoCalls == 1) {
+                    return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND)
+                            .header("Content-Type", "application/json")
+                            .body("{\"error\":{\"message\":\"User user-1 not found\",\"code\":404}}")
+                            .build());
+                }
+                return Mono.just(jsonResponse("""
+                        {
+                          "user_id": "user-1",
+                          "user_email": "user@example.com",
+                          "user_alias": "User One",
+                          "spend": 0,
+                          "max_budget": 10,
+                          "teams": ["team-1"]
+                        }
+                        """));
+            }
+            if (request.method() == HttpMethod.POST && path.equals("/user/new")) {
+                return Mono.just(jsonResponse("""
+                        {"user_id": "user-1", "teams": ["team-1"]}
+                        """));
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).build());
+        };
+
+        AuthUser user = new AuthUser();
+        user.setId("user-1");
+        user.setEmail("user@example.com");
+        user.setFullName("User One");
+        user.setActive(true);
+        user.setEmailVerified(true);
+
+        LiteLLMManager manager = newManager(exchangeFunction);
+
+        StepVerifier.create(manager.getOrCreateUserQuota(user, "team-1"))
+                .assertNext(quota -> {
+                    assertThat(quota.getUserId()).isEqualTo("user-1");
+                    assertThat(quota.getUserEmail()).isEqualTo("user@example.com");
+                    assertThat(quota.getUserAlias()).isEqualTo("User One");
+                    assertThat(quota.getBudget()).isEqualTo(10.0);
+                    assertThat(quota.getSpend()).isEqualTo(0.0);
+                    assertThat(quota.getRemaining()).isEqualTo(10.0);
+                })
+                .verifyComplete();
+
+        assertThat(requests).hasSize(3);
+        assertThat(requests.get(0).method()).isEqualTo(HttpMethod.GET);
+        assertThat(requests.get(0).path()).isEqualTo("/user/info");
+        assertThat(requests.get(1).method()).isEqualTo(HttpMethod.POST);
+        assertThat(requests.get(1).path()).isEqualTo("/user/new");
+        assertThat(requests.get(1).body())
+                .contains("\"user_id\":\"user-1\"")
+                .contains("\"teams\":[\"team-1\"]");
+        assertThat(requests.get(2).method()).isEqualTo(HttpMethod.GET);
+        assertThat(requests.get(2).path()).isEqualTo("/user/info");
+    }
+
+    @Test
+    void addBudgetToUserReadsCurrentBudgetAndUpdatesMaxBudget() {
+        List<CapturedRequest> requests = new ArrayList<>();
+        ExchangeFunction exchangeFunction = request -> {
+            requests.add(CapturedRequest.from(request));
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/info")) {
+                return Mono.just(jsonResponse("""
+                        {
+                          "user_id": "user-1",
+                          "spend": 2,
+                          "max_budget": 10
+                        }
+                        """));
+            }
+            if (request.method() == HttpMethod.POST && request.url().getPath().equals("/user/update")) {
+                return Mono.just(jsonResponse("""
+                        {
+                          "user_id": "user-1",
+                          "max_budget": 20
+                        }
+                        """));
+            }
+            return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).build());
+        };
+
+        LiteLLMManager manager = newManager(exchangeFunction);
+
+        StepVerifier.create(manager.addBudgetToUser("user-1", 10.0))
+                .expectNextMatches(result -> result.getCode() == 200)
+                .verifyComplete();
+
+        assertThat(requests).hasSize(2);
+        assertThat(requests.get(0).method()).isEqualTo(HttpMethod.GET);
+        assertThat(requests.get(0).path()).isEqualTo("/user/info");
+        assertThat(requests.get(0).query()).isEqualTo("user_id=user-1");
+        assertThat(requests.get(1).method()).isEqualTo(HttpMethod.POST);
+        assertThat(requests.get(1).path()).isEqualTo("/user/update");
+        assertThat(requests.get(1).body())
+                .contains("\"user_id\":\"user-1\"")
+                .contains("\"max_budget\":20.0");
     }
 
     private static ClientResponse jsonResponse(String body) {

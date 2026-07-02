@@ -73,8 +73,17 @@
     "passwordPlaceholder": "请输入密码",
     "forgotPassword": "忘记密码?",
     "loginButton": "登录",
+    "githubLoginButton": "使用 GitHub 登录",
     "noAccount": "还没有账号?",
     "signupLink": "注册"
+  },
+  "starReward": {
+    "title": "额外奖励",
+    "description": "给 {{repo}} 点 Star 后，下次登录即可自动获得 ${{amount}} LiteLLM 额度奖励。",
+    "later": "稍后",
+    "openGithub": "去 GitHub Star",
+    "grantedToast": "${{amount}} LiteLLM 奖励已发放",
+    "apiKeyRefreshed": "LiteLLM API Key 缓存已刷新，额度已同步更新。"
   },
   "signup": {
     "pageTitle": "注册 - LLM4AD_Next",

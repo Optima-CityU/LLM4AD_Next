@@ -13,6 +13,14 @@ from sqlmodel import SQLModel  # noqa: F401
 # 基础模型
 from app.models.base import Message, NewPassword, TimeMixin, Token  # noqa: F401
 
+# 第三方认证与奖励模型
+from app.models.auth import (  # noqa: F401
+    StarRewardStatus,
+    StarRewardStatusPublic,
+    UserOidcAccount,
+    UserStarReward,
+)
+
 # Chat 调参模型
 from app.models.chat_tune import (  # noqa: F401
     ChatTuneActiveStage,

@@ -8,6 +8,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
+import { Github } from "lucide-react"
 
 import type { Body_login_login_access_token as AccessToken } from "@/client"
 import { PrivacyPolicyService } from "@/client"
@@ -21,6 +22,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
@@ -90,6 +92,12 @@ function Login() {
   const onSubmit = (data: FormData) => {
     if (loginMutation.isPending) return
     loginMutation.mutate(data)
+  }
+
+  const handleGithubLogin = () => {
+    const apiBase = import.meta.env.VITE_API_URL || ""
+    const redirect = encodeURIComponent(redirectTo || "/projects")
+    window.location.href = `${apiBase}/api/v1/oidc/github/authorize?redirect=${redirect}`
   }
 
   const handleAcceptPrivacyPolicy = async () => {
@@ -188,6 +196,16 @@ function Login() {
             >
               {t("login.loginButton")}
             </LoadingButton>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={handleGithubLogin}
+            >
+              <Github data-icon="inline-start" />
+              {t("login.githubLoginButton")}
+            </Button>
           </div>
 
           <div className="text-center text-sm text-muted-foreground">

@@ -233,6 +233,12 @@ class Settings(BaseSettings):
     ADMIN_ANALYTICS_CACHE_TTL_SECONDS: int = 300
     GITHUB_REPOSITORY: str = "Optima-CityU/LLM4AD_Next"
     GITHUB_TOKEN: str = ""
+    STAR_REWARD_AMOUNT_USD: float = 10.0
+    OIDC_GITHUB_ENABLED: bool = False
+    OIDC_GITHUB_CLIENT_ID: str = ""
+    OIDC_GITHUB_CLIENT_SECRET: str = ""
+    OIDC_GITHUB_REDIRECT_URI: str = ""
+    GITHUB_HTTP_TIMEOUT_SECONDS: float = 120.0
     PLAUSIBLE_API_BASE_URL: str = ""
     PLAUSIBLE_SITE_ID: str = ""
     PLAUSIBLE_API_KEY: str = ""

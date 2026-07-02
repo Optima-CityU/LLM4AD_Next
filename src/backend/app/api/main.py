@@ -14,8 +14,10 @@ from app.api.base_routes import (
     live_codes,
     live_qr,
     login,
+    oidc,
     permission,
     privacy_policy,
+    star_reward,
     testing,
     users,
     utils,
@@ -33,8 +35,10 @@ api_router = APIRouter()
 
 # ---- 基础路由 ----
 api_router.include_router(login.router)
+api_router.include_router(oidc.router)
 api_router.include_router(users.router)
 api_router.include_router(utils.router)
+api_router.include_router(star_reward.router)
 api_router.include_router(admin_analytics.router)
 api_router.include_router(code_server.router)
 api_router.include_router(testing.router)

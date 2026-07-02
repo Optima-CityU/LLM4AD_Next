@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next"
 
 import { Footer } from "@/components/Common/Footer"
 import LanguageToggle from "@/components/Common/LanguageToggle"
+import { StarRewardDialog } from "@/components/Common/StarRewardDialog"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { resetAllTours } from "@/components/Onboarding/tourStorage"
 import AppSidebar from "@/components/Sidebar/AppSidebar"
@@ -183,6 +184,7 @@ function Layout() {
         </main>
         <Footer />
       </SidebarInset>
+      <StarRewardDialog enabled={Boolean(user)} />
     </SidebarProvider>
   )
 }
