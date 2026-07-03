@@ -57,6 +57,13 @@ class ChatTuneTurnStartRequest(BaseModel):
         default="zh",
         description="本轮对话使用的语言（zh/en），驱动 LLM 回答语言",
     )
+    beta: bool = Field(
+        default=False,
+        description=(
+            "是否走 AI 构建 (Beta)：用 AgentScope 单 agent 构建。仅当后端 "
+            "ENABLE_AI_AGENT_BUILD 开启时生效，否则忽略并回退到默认分发。"
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_inputs(self) -> "ChatTuneTurnStartRequest":

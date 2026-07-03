@@ -239,6 +239,12 @@ class Settings(BaseSettings):
     CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0   # 等待容器 SSE 服务就绪的超时（秒）
     CHAT_TUNE_CONTAINER_NETWORK: bool = True           # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
 
+    # ---- AI 构建 (beta)：AgentScope 单 agent 构建 ----
+    # 开启后前端显示 "AI 构建 (Beta)" 入口，beta 轮次走 AgentScope agent
+    # （混合：BuildOrchestrator 生成 + agent 用 run_python 验证/重试），
+    # 与现有 AI 构建并存。关闭时 beta 入口隐藏、beta 请求回退到旧 AI 构建。
+    ENABLE_AI_AGENT_BUILD: bool = False
+
     # ---- Celery 任务超时 ----
     # 单一来源：Celery 配置与 LLM 代理 token TTL 均由此派生，避免多处魔法数字漂移。
     TASK_TIME_LIMIT: int = 7 * 24 * 3600        # 任务硬超时（秒），默认 7 天

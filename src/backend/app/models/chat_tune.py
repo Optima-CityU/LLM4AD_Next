@@ -53,6 +53,7 @@ class ChatTuneGenerationKind(StrEnum):
 
     CHAT_TUNE = "chat_tune"
     AI_BUILD = "ai_build"
+    AI_AGENT = "ai_agent"
     REVIEW = "review"
 
 

@@ -65,6 +65,18 @@ class ReviewRequest(BaseModel):
     gathering_context: dict[str, Any] | None = None
 
 
+class AgentBuildRequest(BaseModel):
+    """``POST /agent`` 请求体（AI 构建 beta）。"""
+
+    provider_config: dict[str, Any]
+    gathering_context: dict[str, Any] | None = None
+    user_content: str = ""
+    allow_build: bool = False
+    agent_state: dict[str, Any] | None = None
+    proposed: dict[str, Any] | None = None
+    max_iters: int = 40
+
+
 def _resolve_within_sandbox(base: Path, path: str) -> Path | None:
     """Resolve a user-supplied path against the sandbox root.
 
@@ -579,6 +591,42 @@ async def review(req: ReviewRequest) -> StreamingResponse:
     """执行一轮 review 对话并以 SSE 流返回事件。"""
     return StreamingResponse(
         _review_event_stream(req),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---- AI build (beta): AgentScope single-agent route ----
+# Defined here (rather than imported from app.tasks.agent_build_runner) so the
+# task-runner image — which only copies chat_tune_runner.py from app/tasks and
+# relies on the core llm4ad.agent package — has the /agent route without needing
+# the backend-only wrapper module. Also avoids a chat_tune_runner <-> wrapper
+# import cycle.
+
+
+async def _agent_event_stream(req: AgentBuildRequest) -> AsyncIterator[str]:
+    """Run the core agent build for this request and encode events as SSE frames."""
+    from llm4ad.agent.runner import AgentBuildConfig, run_agent_build
+
+    config = AgentBuildConfig(
+        provider_config=req.provider_config,
+        base_dir=DATA_DIR,
+        user_content=req.user_content,
+        gathering_context=req.gathering_context,
+        allow_build=req.allow_build,
+        prior_state=req.agent_state,
+        proposed=req.proposed,
+        max_iters=req.max_iters,
+    )
+    async for event in run_agent_build(config):
+        yield _sse(event)
+
+
+@app.post("/agent")
+async def agent_build(req: AgentBuildRequest) -> StreamingResponse:
+    """执行 AI 构建 (beta) 的 AgentScope agent 并以 SSE 流返回事件。"""
+    return StreamingResponse(
+        _agent_event_stream(req),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
