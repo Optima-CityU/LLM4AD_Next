@@ -13,6 +13,11 @@ networks:
     name: ${CHAT_TUNE_CONTAINER_NETWORK_NAME}
     internal: true
 
+x-build-ulimits: &build-ulimits
+  nofile:
+    soft: 65535
+    hard: 65535
+
 x-shared-env: &shared-env
   # PostgreSQL
   POSTGRES_SERVER: ${POSTGRES_SERVER:-db}
@@ -46,6 +51,7 @@ x-backend-common: &backend-common
     dockerfile: src/backend/Dockerfile
     args:
       UV_INDEX_URL: ${UV_INDEX_URL:-}
+    ulimits: *build-ulimits
   env_file:
     - .env
   environment:
@@ -208,6 +214,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+      ulimits: *build-ulimits
     restart: "no"
     entrypoint: [ "true" ]
 
@@ -241,6 +248,7 @@ services:
         - VITE_PLAUSIBLE_LOGGING=${VITE_PLAUSIBLE_LOGGING:-true}
         - VITE_PLAUSIBLE_BIND_TO_WINDOW=${VITE_PLAUSIBLE_BIND_TO_WINDOW:-true}
         - NODE_ENV=production
+      ulimits: *build-ulimits
     volumes:
       - ../src/frontend/extra-cloud-conf:/etc/nginx/extra-conf.d
     ports:
@@ -302,6 +310,7 @@ services:
       context: ../src/gateway
       network: host
       dockerfile: Dockerfile
+      ulimits: *build-ulimits
     image: gateway:latest
     depends_on:
       backend:

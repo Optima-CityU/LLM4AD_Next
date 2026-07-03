@@ -49,7 +49,10 @@ export function StarRewardDialog({ enabled }: StarRewardDialogProps) {
           })
           if (cancelled) return
 
-          if (!notifiedGrantedRepos.current.has(nextStatus.repo)) {
+          if (
+            nextStatus.reward_granted_now &&
+            !notifiedGrantedRepos.current.has(nextStatus.repo)
+          ) {
             notifiedGrantedRepos.current.add(nextStatus.repo)
             toast.success(
               t("starReward.grantedToast", {
