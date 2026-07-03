@@ -5,13 +5,21 @@
 """
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from pydantic.networks import EmailStr
 
 from app.api.deps import get_current_active_superuser
+from app.core.config import settings
 from app.models import Message
 from app.utils.email import generate_test_email, send_email
 
 router = APIRouter(prefix="/utils", tags=["utils"])
+
+
+class FeatureFlags(BaseModel):
+    """Public feature flags the frontend uses to show/hide optional UI."""
+
+    enable_ai_agent_build: bool
 
 
 @router.post(
@@ -49,3 +57,16 @@ async def health_check() -> bool:
         bool: 始终为 ``True``。
     """
     return True
+
+
+@router.get("/features/")
+async def feature_flags() -> FeatureFlags:
+    """返回前端可见的特性开关。
+
+    前端据此决定是否展示可选 UI（如 "AI 构建 (Beta)" 入口）。无需鉴权——
+    仅暴露布尔开关，不含任何敏感信息。
+
+    Returns:
+        FeatureFlags: 当前生效的特性开关集合。
+    """
+    return FeatureFlags(enable_ai_agent_build=settings.ENABLE_AI_AGENT_BUILD)

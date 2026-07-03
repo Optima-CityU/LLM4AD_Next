@@ -63,7 +63,7 @@ import type {
   ProviderResponse,
   TaskResponse,
 } from "@/client"
-import { Llm4AdChatTuneService, Llm4AdTasksService } from "@/client"
+import { Llm4AdChatTuneService, Llm4AdTasksService, UtilsService } from "@/client"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { useTheme } from "@/components/theme-provider"
 import {
@@ -256,6 +256,16 @@ export default function ChatTuneView({
   const [targetStage, setTargetStage] = useState<ChatTuneActiveStage | null>(
     null,
   )
+  const [betaBuild, setBetaBuild] = useState(false)
+
+  // Feature flags (e.g. whether the AI build Beta entry is enabled). Cached
+  // long — flags only change on backend redeploy.
+  const { data: featureFlags } = useQuery({
+    queryKey: ["featureFlags"],
+    queryFn: () => UtilsService.featureFlags(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const betaEnabled = featureFlags?.enable_ai_agent_build ?? false
 
   const selectedProvider = providerList.find((p) => p.id === providerId)
   const availableModels = useMemo(
@@ -624,6 +634,7 @@ export default function ChatTuneView({
             model_name: modelName || undefined,
             target_stage: targetStage,
             language: i18n.language?.startsWith("zh") ? "zh" : "en",
+            beta: betaBuild || undefined,
           },
         })
         // The backend has accepted the turn; if the user has since switched
@@ -682,6 +693,7 @@ export default function ChatTuneView({
       providerId,
       modelName,
       targetStage,
+      betaBuild,
       connectToStream,
       refetchSession,
       i18n.language,
@@ -1236,6 +1248,22 @@ export default function ChatTuneView({
                       disabled={isGenerating}
                       t={t}
                     />
+                    {betaEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setBetaBuild((v) => !v)}
+                        disabled={isGenerating}
+                        title={t("evolution.chatTune.betaBuild.desc")}
+                        className={`h-6 px-2 flex items-center gap-1 rounded-md border text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                          betaBuild
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-transparent text-muted-foreground/60 hover:text-foreground hover:bg-muted"
+                        }`}
+                      >
+                        <Sparkles className="size-3" />
+                        <span>{t("evolution.chatTune.betaBuild.label")}</span>
+                      </button>
+                    )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <button
@@ -1757,9 +1785,9 @@ export function CardRenderer({
             {t(`evolution.chatTune.stages.${card.stage}`)}
           </p>
         </div>
-        <p className="text-sm font-medium text-foreground leading-snug">
-          {card.prompt}
-        </p>
+        <div className="text-sm text-foreground">
+          <ChatMarkdown content={card.prompt} />
+        </div>
         {card.hint && !locked && (
           <p className="text-xs text-muted-foreground leading-relaxed">
             {card.hint}

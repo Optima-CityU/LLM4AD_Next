@@ -1126,6 +1126,10 @@
         "review": "审阅",
         "reviewDesc": "对已构建结果进行审阅或修改"
       },
+      "betaBuild": {
+        "label": "Agent 构建 (Beta)",
+        "desc": "用 AI Agent 自主构建并自检任务包（测试功能）"
+      },
       "stages": {
         "scenario": "场景",
         "data": "数据准备",
@@ -1134,7 +1138,9 @@
         "evolution": "进化算法",
         "coder": "代码生成",
         "advanced": "高级配置",
-        "confirm": "确认提交"
+        "confirm": "确认提交",
+        "run_needs_gathering": "需求收集",
+        "confirm_build": "确认构建"
       }
     }
   },

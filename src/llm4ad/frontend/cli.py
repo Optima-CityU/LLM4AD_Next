@@ -1187,6 +1187,230 @@ def evolve_clean(
         raise typer.Exit(code=1)
 
 
+@app.command("chatv2")
+def chat_agent_build(
+    provider_name: str | None = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="Provider name defined in global settings (~/.llm4ad/settings.yaml). "
+        "Uses the first provider if not specified.",
+    ),
+    output: str = typer.Option(
+        "./",
+        "--output",
+        "-o",
+        help="Output directory where the built LLM4AD task package will be written.",
+    ),
+    prompt: str | None = typer.Option(
+        None,
+        "--prompt",
+        help="Problem description passed directly to the agent. "
+        "If omitted, the agent will ask you interactively.",
+    ),
+    max_iters: int = typer.Option(
+        40,
+        "--max-iters",
+        help="Maximum agent ReAct loop iterations.",
+    ),
+):
+    """Build an LLM4AD task package using an AI agent (beta).
+
+    Launches a single AgentScope ReAct agent that gathers your requirements,
+    generates a complete task package (evaluator, algorithm, config, test scripts)
+    via the proven build engine, and self-verifies the result by running the
+    generated scripts.
+
+    The agent reads and runs files inside the output directory; it cannot access
+    anything outside it. The generated code runs with your local user privileges —
+    intended for local developer use.
+
+    Requires the ``agent`` extra (Python >=3.11)::
+
+        pip install 'llm4ad[agent]'
+        # or: uv sync --extra agent
+
+    Configure a provider in ~/.llm4ad/settings.yaml, for example::
+
+        providers:
+          - name: deepseek
+            type: anthropic
+            base_url: https://api.deepseek.com/anthropic
+            auth_token: sk-...
+            model: deepseek-v4-pro
+    """
+    import asyncio
+    import contextlib
+    import sys
+    from pathlib import Path
+
+    # Reconfigure stdout/stderr to UTF-8 so streamed agent output (which may contain
+    # non-ASCII / emoji) does not crash on a legacy Windows cp1252 console.
+    for _stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(_stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+    # ---- Dependency check (friendly error before any import hang) ----
+    try:
+        import agentscope  # noqa: F401
+    except ImportError:
+        console.print(
+            "[bold red]Error:[/bold red] The [bold]agent[/bold] extra is not installed.\n"
+            "Install it with:\n\n"
+            "    [bold]pip install 'llm4ad[agent]'[/bold]\n\n"
+            "Note: Python >=3.11 is required for the agent extra.\n"
+            f"You are running Python {sys.version_info.major}.{sys.version_info.minor}."
+        )
+        raise typer.Exit(code=1) from None
+
+    from llm4ad.config.settings import load_global_settings
+    from llm4ad.infra.provider.base import BaseProvider
+
+    # ---- Provider resolution (same pattern as `chat`) ----
+    global_data = load_global_settings()
+    global_providers = global_data.get("providers", [])
+
+    if not global_providers:
+        console.print(
+            "[bold red]Error:[/bold red] No providers found in global settings.\n"
+            "Please configure a provider in [bold]~/.llm4ad/settings.yaml[/bold].\n"
+            "Example:\n"
+            "  providers:\n"
+            '    - name: "deepseek"\n'
+            '      type: "anthropic"\n'
+            '      base_url: "https://api.deepseek.com/anthropic"\n'
+            '      auth_token: "${DEEPSEEK_API_KEY}"\n'
+            '      model: "deepseek-v4-pro"'
+        )
+        raise typer.Exit(code=1)
+
+    providers_by_name = {p.get("name", "default"): p for p in global_providers}
+
+    if provider_name is None:
+        provider_cfg = global_providers[0]
+        provider_name = provider_cfg.get("name", "default")
+        console.print(f"[dim]Using provider: {provider_name}[/dim]")
+    else:
+        if provider_name not in providers_by_name:
+            console.print(
+                f"[bold red]Error:[/bold red] Provider '{provider_name}' not found.\n"
+                f"Available: {', '.join(providers_by_name.keys())}"
+            )
+            raise typer.Exit(code=1)
+        provider_cfg = providers_by_name[provider_name]
+
+    # Validate base_dir
+    base_dir = str(Path(output).resolve())
+    Path(base_dir).mkdir(parents=True, exist_ok=True)
+
+    # ---- Collect problem description ----
+    user_content = prompt or ""
+    if not user_content.strip():
+        console.print(
+            "[bold]AI Build (Beta)[/bold] — describe your optimization problem\n"
+            "(or press Ctrl-C to cancel)"
+        )
+        user_content = typer.prompt("Problem description")
+
+    # ---- Security notice ----
+    console.print(
+        f"\n[yellow]! The agent will run generated Python code inside "
+        f"[bold]{base_dir}[/bold] with your local privileges.[/yellow]\n"
+    )
+
+    # Need a BaseProvider for the build engine; agentscope model is built inside core.
+    BaseProvider.discover("llm4ad.infra.provider")
+
+    # ---- Run agent loop (multi-turn: gather -> confirm -> build) ----
+    from llm4ad.agent.runner import AgentBuildConfig, run_agent_build
+
+    console.print("[bold green]Starting agent...[/bold green]\n")
+
+    async def _run_turn(
+        turn_input: str,
+        *,
+        allow_build: bool,
+        prior_state: dict | None,
+        proposed: dict | None,
+    ) -> dict:
+        """Run one agent turn; return {state, proposed, built, project_name}."""
+        cfg = AgentBuildConfig(
+            provider_config=provider_cfg,
+            base_dir=base_dir,
+            user_content=turn_input,
+            allow_build=allow_build,
+            prior_state=prior_state,
+            proposed=proposed,
+            max_iters=max_iters,
+            surface="cli",
+        )
+        result: dict = {"state": prior_state, "proposed": None, "built": False, "project_name": ""}
+        async for event in run_agent_build(cfg):
+            etype = event.get("type")
+            if etype == "chunk":
+                # Straight to stdout (UTF-8 reconfigured above), bypassing rich's
+                # legacy-Windows console path which can crash on emoji.
+                sys.stdout.write(event.get("content", ""))
+                sys.stdout.flush()
+            elif etype == "payload":
+                result["proposed"] = event.get("proposed")
+            elif etype == "build_result":
+                bp = event.get("blueprint_data", {})
+                result["built"] = bool(bp.get("built"))
+                result["project_name"] = bp.get("project_name", "")
+            elif etype == "agent_state":
+                result["state"] = event.get("state")
+            elif etype == "error":
+                console.print(f"\n[bold red]Error:[/bold red] {event.get('error', '')}")
+        return result
+
+    async def _run() -> bool:
+        """Gather step-by-step, confirm, then build."""
+        prior_state: dict | None = None
+        turn_input = user_content
+        # Gather loop: keep talking until the agent proposes a plan the user accepts.
+        for _ in range(50):
+            r = await _run_turn(
+                turn_input, allow_build=False, prior_state=prior_state, proposed=None
+            )
+            prior_state = r["state"]
+            proposed = r["proposed"]
+            if proposed is None:
+                # Agent asked a question; get the user's answer and continue.
+                console.print()
+                turn_input = typer.prompt("You")
+                continue
+            # Agent proposed a build plan -> confirm.
+            console.print()
+            if typer.confirm("确认按此方案开始构建? (Confirm build?)", default=True):
+                br = await _run_turn(
+                    "", allow_build=True, prior_state=prior_state, proposed=proposed
+                )
+                if br["built"]:
+                    console.print(
+                        f"\n\n[bold green]Build complete![/bold green] "
+                        f"Project: [bold]{br['project_name'] or '?'}[/bold]\n"
+                        f"Output: {base_dir}"
+                    )
+                    return True
+                console.print("\n[yellow]Build finished but no package was produced.[/yellow]")
+                return False
+            # User declined -> keep adjusting.
+            console.print()
+            turn_input = typer.prompt("You (keep adjusting)")
+        console.print("\n[yellow]Reached max gather turns without building.[/yellow]")
+        return False
+
+    try:
+        ok = asyncio.run(_run())
+        raise typer.Exit(code=0 if ok else 1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(code=1) from None
+
+
 def main():
     """Main entrypoint for the CLI."""
     app()
