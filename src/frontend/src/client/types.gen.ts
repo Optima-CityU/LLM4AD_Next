@@ -421,36 +421,8 @@ export type EmbeddingProviderCreate = {
     code_task?: string;
 };
 
-/**
- * Embedding 供应商响应，凭据不返回明文。
- */
 export type EmbeddingProviderResponse = {
-    id: string;
-    created_time: string;
-    updated_time: string;
-    user_id: string;
-    name: string;
-    type: EmbeddingProviderType;
-    api_key: string;
-    auth_token: string;
-    base_url: (string | null);
-    mode: EmbeddingMode;
-    model: string;
-    dim: number;
-    timeout: number;
-    embedding_func_max_async: number;
-    text_type: EmbeddingProviderType;
-    text_base_url: (string | null);
-    text_api_key: string;
-    text_auth_token: string;
-    text_model: string;
-    text_task: string;
-    code_type: EmbeddingProviderType;
-    code_base_url: (string | null);
-    code_api_key: string;
-    code_auth_token: string;
-    code_model: string;
-    code_task: string;
+    [key: string]: unknown;
 };
 
 /**
@@ -662,6 +634,13 @@ export type ExampleTemplateListResponse = {
      * 可用的示例模板列表
      */
     templates?: Array<ExampleTemplateItem>;
+};
+
+/**
+ * Public feature flags the frontend uses to show/hide optional UI.
+ */
+export type FeatureFlags = {
+    enable_ai_agent_build: boolean;
 };
 
 /**
@@ -2750,7 +2729,7 @@ export type Llm4AdTasksGetTaskLogsData = {
      */
     limit?: number;
     /**
-     * 按日志类型过滤
+     * 按日志类型过滤，多个用英文逗号分隔
      */
     logType?: (string | null);
     /**
@@ -2907,10 +2886,6 @@ export type UtilsTestEmailData = {
 export type UtilsTestEmailResponse = (Message);
 
 export type UtilsHealthCheckResponse = (boolean);
-
-export type FeatureFlags = {
-    enable_ai_agent_build: boolean;
-};
 
 export type UtilsFeatureFlagsResponse = (FeatureFlags);
 

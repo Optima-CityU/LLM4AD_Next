@@ -638,6 +638,12 @@ export const ChatTuneTurnStartRequestSchema = {
             title: 'Language',
             description: '本轮对话使用的语言（zh/en），驱动 LLM 回答语言',
             default: 'zh'
+        },
+        beta: {
+            type: 'boolean',
+            title: 'Beta',
+            description: '是否走 AI 构建 (Beta)：用 AgentScope 单 agent 构建。仅当后端 ENABLE_AI_AGENT_BUILD 开启时生效，否则忽略并回退到默认分发。',
+            default: false
         }
     },
     type: 'object',
@@ -905,137 +911,8 @@ export const EmbeddingProviderCreateSchema = {
 } as const;
 
 export const EmbeddingProviderResponseSchema = {
-    properties: {
-        id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Id'
-        },
-        created_time: {
-            type: 'string',
-            format: 'date-time',
-            title: 'Created Time'
-        },
-        updated_time: {
-            type: 'string',
-            format: 'date-time',
-            title: 'Updated Time'
-        },
-        user_id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'User Id'
-        },
-        name: {
-            type: 'string',
-            title: 'Name'
-        },
-        type: {
-            '$ref': '#/components/schemas/EmbeddingProviderType'
-        },
-        api_key: {
-            type: 'string',
-            title: 'Api Key'
-        },
-        auth_token: {
-            type: 'string',
-            title: 'Auth Token'
-        },
-        base_url: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Base Url'
-        },
-        mode: {
-            '$ref': '#/components/schemas/EmbeddingMode'
-        },
-        model: {
-            type: 'string',
-            title: 'Model'
-        },
-        dim: {
-            type: 'integer',
-            title: 'Dim'
-        },
-        timeout: {
-            type: 'number',
-            title: 'Timeout'
-        },
-        embedding_func_max_async: {
-            type: 'integer',
-            title: 'Embedding Func Max Async'
-        },
-        text_type: {
-            '$ref': '#/components/schemas/EmbeddingProviderType'
-        },
-        text_base_url: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Text Base Url'
-        },
-        text_api_key: {
-            type: 'string',
-            title: 'Text Api Key'
-        },
-        text_auth_token: {
-            type: 'string',
-            title: 'Text Auth Token'
-        },
-        text_model: {
-            type: 'string',
-            title: 'Text Model'
-        },
-        text_task: {
-            type: 'string',
-            title: 'Text Task'
-        },
-        code_type: {
-            '$ref': '#/components/schemas/EmbeddingProviderType'
-        },
-        code_base_url: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Code Base Url'
-        },
-        code_api_key: {
-            type: 'string',
-            title: 'Code Api Key'
-        },
-        code_auth_token: {
-            type: 'string',
-            title: 'Code Auth Token'
-        },
-        code_model: {
-            type: 'string',
-            title: 'Code Model'
-        },
-        code_task: {
-            type: 'string',
-            title: 'Code Task'
-        }
-    },
-    type: 'object',
-    required: ['id', 'created_time', 'updated_time', 'user_id', 'name', 'type', 'api_key', 'auth_token', 'base_url', 'mode', 'model', 'dim', 'timeout', 'embedding_func_max_async', 'text_type', 'text_base_url', 'text_api_key', 'text_auth_token', 'text_model', 'text_task', 'code_type', 'code_base_url', 'code_api_key', 'code_auth_token', 'code_model', 'code_task'],
-    title: 'EmbeddingProviderResponse',
-    description: 'Embedding 供应商响应，凭据不返回明文。'
+    additionalProperties: true,
+    type: 'object'
 } as const;
 
 export const EmbeddingProviderTestByIdRequestSchema = {
@@ -1856,6 +1733,19 @@ export const ExampleTemplateListResponseSchema = {
     type: 'object',
     title: 'ExampleTemplateListResponse',
     description: '示例模板列表响应。'
+} as const;
+
+export const FeatureFlagsSchema = {
+    properties: {
+        enable_ai_agent_build: {
+            type: 'boolean',
+            title: 'Enable Ai Agent Build'
+        }
+    },
+    type: 'object',
+    required: ['enable_ai_agent_build'],
+    title: 'FeatureFlags',
+    description: 'Public feature flags the frontend uses to show/hide optional UI.'
 } as const;
 
 export const FeedbackAdminSchema = {
