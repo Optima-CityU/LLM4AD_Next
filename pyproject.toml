@@ -96,6 +96,14 @@ docs = [
     "mkdocs-minify-plugin>=0.8.0",
     "mkdocstrings[python]>=0.24.0",
 ]
+# AI build (beta) agent. agentscope requires Python >=3.11, while llm4ad core
+# targets >=3.10; the env marker makes this extra empty on 3.10 (so the universal
+# lockfile still resolves) and pulls agentscope only on 3.11+. Imports are lazy so
+# the rest of llm4ad works on 3.10 without it. Used by `llm4ad chatv2` and the
+# backend /agent path.
+agent = [
+    "agentscope>=2.0,<3.0; python_version >= '3.11'",
+]
 all = [
     "llm4ad[infra,providers,eval,dev,docs,tsp,lunarlander,dyca,meoh]"
 ]
