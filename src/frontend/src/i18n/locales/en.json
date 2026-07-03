@@ -1125,6 +1125,10 @@
         "review": "Review",
         "reviewDesc": "Review or revise the built artifacts"
       },
+      "betaBuild": {
+        "label": "Agent Build (Beta)",
+        "desc": "Have an AI agent autonomously build and self-verify the task package (experimental)"
+      },
       "stages": {
         "scenario": "Scenario",
         "data": "Data",
@@ -1133,7 +1137,9 @@
         "evolution": "Algorithm",
         "coder": "Code Generation",
         "advanced": "Advanced",
-        "confirm": "Confirm & Submit"
+        "confirm": "Confirm & Submit",
+        "run_needs_gathering": "Requirements",
+        "confirm_build": "Confirm Build"
       }
     }
   },

@@ -272,6 +272,10 @@ export type ChatTuneTurnStartRequest = {
      * 本轮对话使用的语言（zh/en），驱动 LLM 回答语言
      */
     language?: 'zh' | 'en';
+    /**
+     * 是否走 AI 构建 (Beta)：用 AgentScope 单 agent 构建。仅当后端 ENABLE_AI_AGENT_BUILD 开启时生效，否则忽略并回退到默认分发。
+     */
+    beta?: boolean;
 };
 
 /**
@@ -2903,6 +2907,12 @@ export type UtilsTestEmailData = {
 export type UtilsTestEmailResponse = (Message);
 
 export type UtilsHealthCheckResponse = (boolean);
+
+export type FeatureFlags = {
+    enable_ai_agent_build: boolean;
+};
+
+export type UtilsFeatureFlagsResponse = (FeatureFlags);
 
 export type UtilsCodeServerGetCodeTokenData = {
     /**
