@@ -37,8 +37,8 @@ class (OpenAI / OpenAI-compatible such as DeepSeek or Qwen / Anthropic). The sam
 ``provider_config`` also drives the engine's own LLM calls via the llm4ad
 ``BaseProvider``.
 
-agentscope is imported lazily inside functions so this module imports cleanly under
-Python 3.10 (agentscope requires >=3.11); install the ``agent`` extra to use it.
+agentscope is a base dependency (the project requires Python >=3.12). It is still
+imported lazily inside functions to keep this module's top-level import cheap.
 
 Event protocol (dicts): ``chunk`` / ``build_result`` / ``done`` / ``error``.
 """

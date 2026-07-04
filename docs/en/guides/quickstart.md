@@ -9,7 +9,7 @@ Both paths end with the same `llm4ad run` command.
 
 ## Prerequisites
 
-- ✅ Python 3.10 or higher
+- ✅ Python 3.12 or higher
 - ✅ LLM4AD installed (see [Installation](installation.md))
 - ✅ An API key for OpenAI, Anthropic, or any OpenAI-compatible endpoint
 

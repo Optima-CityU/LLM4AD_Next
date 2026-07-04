@@ -4,7 +4,7 @@
 
 ## 系统要求
 
-- **Python**: 推荐 3.12（已在 `.python-version` 中固定）。支持 `>=3.10`，但 `chatv2` AI 构建智能体需要 `>=3.11`。
+- **Python**：3.12 或更高版本（必需；已在 `.python-version` 中固定）。
 - **操作系统**: Linux、macOS 或 Windows
 - **包管理器**: [uv](https://github.com/astral-sh/uv)（推荐）或 pip
 
@@ -205,7 +205,7 @@ mypy src/
 
 ### Python 版本问题
 
-**错误**: `需要 Python 3.10 或更高版本`
+**错误**: `需要 Python 3.12 或更高版本`
 
 **解决方案**:
 ```bash
@@ -214,8 +214,8 @@ python --version
 
 # 如有需要，安装较新版本
 # 使用 pyenv（推荐）
-pyenv install 3.11
-pyenv global 3.11
+pyenv install 3.12
+pyenv global 3.12
 ```
 
 ### uv 安装问题

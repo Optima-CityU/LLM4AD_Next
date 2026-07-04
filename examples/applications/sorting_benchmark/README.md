@@ -15,7 +15,7 @@ This example includes:
 
 - C++ compiler with C++17 support (g++ or clang)
 - CMake (for building the C++ executable)
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed
 - OpenAI API key (or other LLM provider)
 

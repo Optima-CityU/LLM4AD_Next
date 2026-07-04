@@ -49,7 +49,7 @@ All commands should be run from the repository root.
 
 ### CI/CD
 - GitHub Actions workflow runs on PRs and pushes to main: `.github/workflows/ci.yml`
-- CI runs tests on Python 3.10, 3.11, 3.12 across Ubuntu and macOS
+- CI runs tests on Python 3.12 across Ubuntu, macOS, and Windows
 - CI includes: ruff linting, mypy type checking, unit tests with coverage reporting
 
 ### Git Conventions
@@ -106,4 +106,4 @@ LLM4AD is a modular platform for large language model based algorithm design, wi
 
 ## Requirements
 
-1. Run `uv run --python 3.10 ruff check src/` every time when finish coding jobs, and fix the errors it reports
+1. Run `uv run --python 3.12 ruff check src/` every time when finish coding jobs, and fix the errors it reports

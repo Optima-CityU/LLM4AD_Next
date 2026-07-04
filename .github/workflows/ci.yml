@@ -18,8 +18,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-15-intel, windows-latest]
         #os: [ubuntu-latest, macos-latest]
-        # Recommended interpreter. agentscope (chatv2) is a base dep on >=3.11, so it
-        # is installed here and the agent module is type-checked by the mypy step.
+        # Sole supported interpreter (the project requires Python >=3.12). agentscope
+        # (chatv2) is a base dependency, so it is installed here and the agent module
+        # is type-checked by the mypy step.
         python-version: ["3.12"]
 
     steps:

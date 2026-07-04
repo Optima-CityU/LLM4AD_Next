@@ -1225,10 +1225,8 @@ def chat_agent_build(
     anything outside it. The generated code runs with your local user privileges —
     intended for local developer use.
 
-    Requires the ``agent`` extra (Python >=3.11)::
-
-        pip install 'llm4ad[agent]'
-        # or: uv sync --extra agent
+    Requires Python >=3.12. agentscope is a base dependency, so a plain ``uv sync``
+    (or ``pip install llm4ad``) installs everything needed — no extra step.
 
     Configure a provider in ~/.llm4ad/settings.yaml, for example::
 
@@ -1257,10 +1255,10 @@ def chat_agent_build(
         import agentscope  # noqa: F401
     except ImportError:
         console.print(
-            "[bold red]Error:[/bold red] The [bold]agent[/bold] extra is not installed.\n"
-            "Install it with:\n\n"
-            "    [bold]pip install 'llm4ad[agent]'[/bold]\n\n"
-            "Note: Python >=3.11 is required for the agent extra.\n"
+            "[bold red]Error:[/bold red] [bold]agentscope[/bold] is not installed.\n"
+            "Reinstall dependencies with:\n\n"
+            "    [bold]uv sync[/bold]   (or: pip install llm4ad)\n\n"
+            "Note: this project requires Python >=3.12.\n"
             f"You are running Python {sys.version_info.major}.{sys.version_info.minor}."
         )
         raise typer.Exit(code=1) from None

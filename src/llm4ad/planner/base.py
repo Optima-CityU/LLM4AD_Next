@@ -1125,7 +1125,7 @@ class BasePlanner(ABC, Registrable):
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(), timeout=timeout
                 )
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 proc.kill()
                 await proc.communicate()
                 raise RuntimeError(

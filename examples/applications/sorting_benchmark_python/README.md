@@ -29,7 +29,7 @@ sorting_benchmark_python/
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed
 - LLM API key configured
 

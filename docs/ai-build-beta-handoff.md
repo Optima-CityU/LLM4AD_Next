@@ -73,8 +73,8 @@ nginx），通过 `docker/` 下的 compose 编排。其中"AI 构建"功能对�
   Docker 容器（硬依赖 `docker>=7.1.0`），我们已在容器里跑，装它=容器套容器。
 - 已通过 `uv lock` 加入 `src/backend/pyproject.toml`，解析为 `agentscope==2.0.3`，
   无版本冲突（含 OpenTelemetry 1.43 等传递依赖）。
-- 要求 Python ≥3.11。backend 是 3.12，满足；**故 agentscope 放 backend 依赖，不进
-  根 `llm4ad`**（根项目受 3.10 约束，CLAUDE.md 要求 `ruff` 用 3.10 跑）。
+- 要求 Python ≥3.11。backend 是 3.12，满足；**agentscope 作为基础依赖**
+  （根 `llm4ad` 现要求 Python 3.12，CLAUDE.md 要求 `ruff` 用 3.12 跑）。
 - 真实 API（v2.0.3，与网上部分 v1 教程不同）：
   - `from agentscope.agent import Agent, ReActConfig`（v2 把 ReActAgent 合并进统一 `Agent`）。
   - `Agent(name, system_prompt, model, toolkit=None, react_config=None, ...)`。
@@ -184,7 +184,7 @@ nginx），通过 `docker/` 下的 compose 编排。其中"AI 构建"功能对�
 
 ## 4. 已完成的改动（逐文件）
 
-> 全部在 `src/backend/`。所有文件已通过 `uv run --python 3.10 --with ruff ruff check`（All checks passed）。
+> 全部在 `src/backend/`。所有文件已通过 `uv run --python 3.12 --with ruff ruff check`（All checks passed）。
 
 ### 4.1 `src/backend/pyproject.toml`（改）
 - dependencies 末尾新增 `"agentscope>=2.0,<3.0"`，附注释说明只用核心包、绝不用
@@ -346,8 +346,8 @@ task_id 也签发任务级 token。我最初在 `_run_agent_build` 的 `finally`
   连不上 deb.debian.org，整批构建 CANCELED。本会话当时用不带 `--build` 的 `up -d` 复用
   既有镜像绕过。**但本次加了 agentscope 依赖，必须重建**——届时需配 `APT_MIRROR`
   （如 `mirrors.aliyun.com`）或确保容器联网，否则 task-runner 镜像重建会失败。
-- ruff 在本仓库要用 `uv run --python 3.10 --with ruff ruff check src/...`
-  （ruff 不是默认依赖，要 `--with ruff`；CLAUDE.md 要求用 3.10 跑）。
+- ruff 在本仓库要用 `uv run --python 3.12 --with ruff ruff check src/...`
+  （ruff 不是默认依赖，要 `--with ruff`；CLAUDE.md 要求用 3.12 跑）。
 
 ---
 

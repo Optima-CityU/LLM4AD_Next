@@ -9,7 +9,7 @@
 | 工具 | 配置 | 强制内容 |
 |---|---|---|
 | **Ruff** | `pyproject.toml` 中 `[tool.ruff.lint]` | Lint：未使用 import、未定义名称、过时 API、常见 bug 模式 |
-| **Black** | `line-length = 100`、`target-version = py310/311/312` | 格式化（空白、换行、字符串引号） |
+| **Black** | `line-length = 100`、`target-version = py312` | 格式化（空白、换行、字符串引号） |
 | **isort** | Black 兼容 profile | import 顺序与分组 |
 | **mypy** | `pyproject.toml` 中 `[tool.mypy]` | 静态类型检查 |
 
@@ -29,7 +29,7 @@ CI 跑的是同一套，干净通过是合并的前置条件。
 - 给每个公开函数和方法都加类型注解（凡是从模块 `__init__.py` 可达的）。
 - 内部函数若调用点无法轻松推断类型，也加上。
 - 优先 `from __future__ import annotations`，让注解作为字符串（不增加运行时 import 成本）。
-- 自由使用 `Annotated[X, ...]`、`TypeAlias`、PEP 604（`X | None`）— 最低支持 Python 3.10。
+- 自由使用 `Annotated[X, ...]`、`TypeAlias`、PEP 604（`X | None`）— 项目要求 Python 3.12。
 
 ```python
 from __future__ import annotations

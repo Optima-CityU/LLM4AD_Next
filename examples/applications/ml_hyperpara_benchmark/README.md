@@ -27,7 +27,7 @@ ml_hyperpara_benchmark/
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed (recommended: use `uv`)
 - A reachable OpenAI-compatible LLM provider configured in `config.yaml`
 
