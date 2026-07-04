@@ -29,7 +29,7 @@ tsp_benchmark_python_mock/
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed
 - No API key needed
 

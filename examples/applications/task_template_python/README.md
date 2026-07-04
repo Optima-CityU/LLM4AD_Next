@@ -211,7 +211,7 @@ if not algo_dir.exists():
    ```
 9. **Lint check:**
    ```bash
-   uv run --python 3.10 ruff check examples/applications/my_task_python/
+   uv run --python 3.12 ruff check examples/applications/my_task_python/
    ```
 
 ## Existing Task Reference

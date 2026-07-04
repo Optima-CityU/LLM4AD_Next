@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/pypi/v/llm4ad?color=blue" alt="PyPI Version">
   </a>
   <a href="https://pypi.org/project/llm4ad/">
-    <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python Versions">
+    <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python Versions">
   </a>
   <a href="https://github.com/Optima-CityU/LLM4AD_Next/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue" alt="License">
@@ -115,7 +115,7 @@ No setup, no API key needed — just open the link and start designing algorithm
 
 ### Option B: Local Installation
 
-Requires Python 3.10+ and [uv](https://github.com/astral-sh/uv) (recommended) or pip.
+Requires **Python 3.12+** (pinned in `.python-version`) and [uv](https://github.com/astral-sh/uv) (recommended) or pip. A plain `uv sync` sets up everything, including the `chatv2` AI build agent, out of the box.
 
 ```bash
 # Clone the repository

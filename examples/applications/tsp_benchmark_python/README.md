@@ -33,7 +33,7 @@ tsp_benchmark_python/
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed
 - LLM API key configured
 - **Install TSP dependencies**: `uv sync --extra tsp` (numpy is required)

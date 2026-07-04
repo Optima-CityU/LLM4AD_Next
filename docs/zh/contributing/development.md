@@ -4,7 +4,7 @@
 
 ## 前置依赖
 
-- **Python 3.10、3.11 或 3.12**（CI 矩阵；最低 3.10）
+- **Python 3.12**（必需；CI 运行 3.12）
 - **uv** — 快速的 Python 包管理器。按 [官方指引](https://docs.astral.sh/uv/) 安装。
 - **git** ≥ 2.5（版本控制层依赖 `git worktree`）
 - 跑 Web UI 还需：**bun** ≥ 1.0（前端）、**Docker**（容器化开发）
@@ -78,7 +78,7 @@ uv run pre-commit install            # 一次性
 uv run pre-commit run --all-files    # 临时全量过一遍
 ```
 
-`CLAUDE.md` 中的硬要求是：每次代码改动后都跑一次 `uv run --python 3.10 ruff check src/`，把它报的问题修掉。
+`CLAUDE.md` 中的硬要求是：每次代码改动后都跑一次 `uv run --python 3.12 ruff check src/`，把它报的问题修掉。
 
 ## 用真实 provider 跑 CLI
 

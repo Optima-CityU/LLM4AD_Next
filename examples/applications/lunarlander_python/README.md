@@ -77,7 +77,7 @@ The evolved policies are evaluated on multiple random seeds:
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed
 - LLM API key configured
 - **Install dependencies**: `uv sync --extra all` (includes gymnasium)

@@ -37,8 +37,8 @@ class (OpenAI / OpenAI-compatible such as DeepSeek or Qwen / Anthropic). The sam
 ``provider_config`` also drives the engine's own LLM calls via the llm4ad
 ``BaseProvider``.
 
-agentscope is imported lazily inside functions so this module imports cleanly under
-Python 3.10 (agentscope requires >=3.11); install the ``agent`` extra to use it.
+agentscope is a base dependency (the project requires Python >=3.12). It is still
+imported lazily inside functions to keep this module's top-level import cheap.
 
 Event protocol (dicts): ``chunk`` / ``build_result`` / ``done`` / ``error``.
 """
@@ -48,16 +48,21 @@ from __future__ import annotations
 import contextlib
 import subprocess
 import traceback
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from pydantic import SecretStr
 
 _MAX_ERROR_LEN = 2000
 _MAX_TOOL_OUTPUT = 20000
 _RUN_PYTHON_TIMEOUT = 600
 _DEFAULT_MAX_ITERS = 40
 _MAX_REPAIR_ATTEMPTS = 10
+# How many times the BUILD phase re-prompts the agent to fix a structural defect
+# (seed EVOLVE file not inside version_control.local_path) before giving up.
+_MAX_STRUCTURE_REPAIRS = 2
 
 
 @dataclass
@@ -132,7 +137,7 @@ def build_model(provider_config: dict[str, Any]) -> Any:
         if auth_token:
             client_kwargs["auth_token"] = auth_token
         return AnthropicChatModel(
-            credential=AnthropicCredential(api_key=api_key, base_url=base_url),
+            credential=AnthropicCredential(api_key=SecretStr(api_key), base_url=base_url),
             model=model_name,
             stream=True,
             client_kwargs=client_kwargs or None,
@@ -142,7 +147,7 @@ def build_model(provider_config: dict[str, Any]) -> Any:
     from agentscope.model import OpenAIChatModel
 
     return OpenAIChatModel(
-        credential=OpenAICredential(api_key=api_key, base_url=base_url),
+        credential=OpenAICredential(api_key=SecretStr(api_key), base_url=base_url),
         model=model_name,
         stream=True,
     )
@@ -337,6 +342,24 @@ def make_tools(
     from llm4ad.consultant.needs import NeedsProfile
 
     base = Path(base_dir).resolve()
+
+    def _tool(func: Callable[..., Any], **kwargs: Any) -> FunctionTool:
+        """Wrap a workspace tool function as an agentscope ``FunctionTool``.
+
+        agentscope types ``FunctionTool``'s ``func`` parameter narrowly (callables
+        returning ``ToolChunk``), but its adapter converts arbitrary return values —
+        including the ``str`` these tools return — into a ``ToolChunk`` at runtime
+        (see ``FunctionTool._convert_func_result_to_chunk``). The cast pins that one
+        external-typing boundary so the tool functions themselves stay fully typed.
+
+        Args:
+            func: The workspace tool callable (returns ``str``).
+            **kwargs: Extra ``FunctionTool`` options (e.g. ``is_read_only``).
+
+        Returns:
+            The constructed ``FunctionTool``.
+        """
+        return FunctionTool(cast(Any, func), **kwargs)
 
     def read_file(path: str) -> str:
         """Read a UTF-8 text file from the workspace (for inspecting user code).
@@ -743,21 +766,21 @@ def make_tools(
     if not allow_build:
         # GATHER phase: inspection + ask + propose only. No build tools => hard gate.
         return [
-            FunctionTool(read_file, is_read_only=True),
-            FunctionTool(list_dir, is_read_only=True),
-            FunctionTool(ask_choice),
-            FunctionTool(propose_plan),
+            _tool(read_file, is_read_only=True),
+            _tool(list_dir, is_read_only=True),
+            _tool(ask_choice),
+            _tool(propose_plan),
         ]
 
     # BUILD phase (post-confirmation): full build + verify + edit toolset.
     return [
-        FunctionTool(read_file, is_read_only=True),
-        FunctionTool(list_dir, is_read_only=True),
-        FunctionTool(run_python),
-        FunctionTool(build_task),
-        FunctionTool(rebuild_evaluator),
-        FunctionTool(write_file),
-        FunctionTool(edit_file),
+        _tool(read_file, is_read_only=True),
+        _tool(list_dir, is_read_only=True),
+        _tool(run_python),
+        _tool(build_task),
+        _tool(rebuild_evaluator),
+        _tool(write_file),
+        _tool(edit_file),
     ]
 
 
@@ -925,6 +948,96 @@ def _choice_card(pending: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_package_structure(base_dir: str, project_name: str) -> str | None:
+    """Check the produced package can actually be evolved; return a defect or None.
+
+    The evolution engine evolves code between ``EVOLVE_START`` / ``EVOLVE_END``
+    markers found by scanning ``version_control.local_path`` (resolved relative to
+    the directory holding ``config.yaml``). If the seed algorithm file was written
+    somewhere else — the common failure when the agent hand-writes files instead of
+    calling ``build_task`` — that directory has no evolvable block, and a real run
+    dies mid-evolution with a cryptic ``InitSampler requires ... at least one
+    evolvable block`` error. Catching it here, before reporting success, lets the
+    agent fix placement while it still has the file tools.
+
+    Args:
+        base_dir: Workspace root the package was written under.
+        project_name: Produced project dir name (may be "" for a hand-write build;
+            detected from the workspace in that case).
+
+    Returns:
+        A human-readable defect description if the package cannot be evolved, or
+        ``None`` if it looks correct (or could not be checked — fail open, never
+        block a build over a validator hiccup).
+    """
+    import yaml
+
+    from llm4ad.infra.repo_analyzer.evolve_detector import EvolveDetector
+
+    try:
+        base = Path(base_dir).resolve()
+        project = project_name or _detect_project_dir(base_dir)
+        if not project:
+            return None  # No project dir detected; nothing we can assert.
+        project_dir = base / project
+        config_path = project_dir / "config.yaml"
+        if not config_path.is_file():
+            return None  # No config to reason about; leave it to other checks.
+
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        vc = cfg.get("version_control") or {}
+        local_path = vc.get("local_path") or "."
+        analyzer_cfg = cfg.get("repo_analyzer") or {}
+
+        # local_path is relative to the directory containing config.yaml.
+        repo_dir = (project_dir / local_path).resolve()
+        if not repo_dir.is_dir():
+            return (
+                f"The config's version_control.local_path is '{local_path}', but "
+                f"'{project}/{local_path}' does not exist. The seed algorithm file "
+                f"(with EVOLVE_START/EVOLVE_END markers) must live inside that "
+                f"directory so the engine can evolve it."
+            )
+
+        detector = EvolveDetector({
+            "include": analyzer_cfg.get("include", ["*.py"]),
+            "exclude": analyzer_cfg.get("exclude", [".git/**", "__pycache__/**", "*.pyc"]),
+        })
+        analyzed = detector.analyze(repo_dir)
+        if len(analyzed.evolvable_blocks) == 0:
+            return (
+                f"No EVOLVE_START/EVOLVE_END block was found under the configured "
+                f"version_control.local_path ('{local_path}' -> '{project}/{local_path}'). "
+                f"The seed algorithm file with the markers must be written INSIDE that "
+                f"directory (the engine scans only local_path). It is likely written "
+                f"elsewhere in the package (e.g. the project root) instead."
+            )
+    except Exception:  # noqa: BLE001 - a validator must never break a build report.
+        return None
+    return None
+
+
+def _structure_repair_message(defect: str) -> str:
+    """Build the corrective instruction re-fed to the agent for a structural defect.
+
+    Args:
+        defect: The defect description from :func:`_validate_package_structure`.
+
+    Returns:
+        A user-role message telling the agent exactly what to fix and how to verify.
+    """
+    return (
+        "The package is not runnable yet — a structural problem will make the "
+        f"evolution run fail:\n\n{defect}\n\n"
+        "Fix it now: read config.yaml to confirm version_control.local_path, then "
+        "make sure the algorithm file with the EVOLVE_START/EVOLVE_END markers is "
+        "written INSIDE that directory (move/write it there with write_file if "
+        "needed), keeping the file name consistent with what the evaluator loads. "
+        "Then verify with list_dir on that directory and re-run test_evaluator.py. "
+        "Do not report completion until an EVOLVE block exists under local_path."
+    )
+
+
 async def run_agent_build(config: AgentBuildConfig) -> AsyncIterator[dict[str, Any]]:
     """Drive the AgentScope build agent for one turn, yielding SSE-shaped events.
 
@@ -1022,33 +1135,48 @@ async def run_agent_build(config: AgentBuildConfig) -> AsyncIterator[dict[str, A
         # AgentState is consistent for the next turn.
         turn_ending_tools = {"ask_choice", "propose_plan"}
         tool_names: dict[str, str] = {}  # tool_call_id -> tool name
-        stop_after_turn = False
 
-        _stream = agent.reply_stream(inputs)
-        async for event in _stream:
-            if isinstance(event, TextBlockDeltaEvent):
-                if event.delta:
-                    yield {"type": "chunk", "content": event.delta}
-            elif isinstance(event, ToolCallStartEvent):
-                tool_names[event.tool_call_id] = event.tool_call_name
-                yield {"type": "chunk", "content": f"\n\n🔧 `{event.tool_call_name}` ...\n"}
-            elif isinstance(event, ToolResultEndEvent):
-                yield {"type": "chunk", "content": "✓\n"}
-                if (
-                    not config.allow_build
-                    and tool_names.get(event.tool_call_id) in turn_ending_tools
-                ):
-                    # The gather-phase question/proposal is recorded; end the turn.
-                    stop_after_turn = True
-                    break
+        async def _pump(msg: Any) -> AsyncIterator[dict[str, Any]]:
+            """Drive one ``reply_stream`` on the shared agent, yielding chunk events.
 
-        if stop_after_turn:
-            # Close the reply generator cleanly after the intentional early break
-            # (the tool call + result are already persisted to context).
-            aclose = getattr(_stream, "aclose", None)
-            if aclose is not None:
-                with contextlib.suppress(Exception):
-                    await aclose()
+            Runs the agent's ReAct loop for ``msg`` and forwards text/tool activity
+            as ``chunk`` events. In the GATHER phase it breaks after a turn-ending
+            tool (``ask_choice`` / ``propose_plan``) so the turn ends and we wait for
+            the user — safe because the tool call + result are persisted to context
+            before the break. Usable more than once (same agent, memory intact), so
+            the BUILD phase can re-drive it to repair a structural defect.
+
+            Args:
+                msg: The user-role message to reply to.
+
+            Yields:
+                ``chunk`` event dicts.
+            """
+            _stream = agent.reply_stream(msg)
+            try:
+                async for event in _stream:
+                    if isinstance(event, TextBlockDeltaEvent):
+                        if event.delta:
+                            yield {"type": "chunk", "content": event.delta}
+                    elif isinstance(event, ToolCallStartEvent):
+                        tool_names[event.tool_call_id] = event.tool_call_name
+                        yield {"type": "chunk", "content": f"\n\n🔧 `{event.tool_call_name}` ...\n"}
+                    elif isinstance(event, ToolResultEndEvent):
+                        yield {"type": "chunk", "content": "✓\n"}
+                        if (
+                            not config.allow_build
+                            and tool_names.get(event.tool_call_id) in turn_ending_tools
+                        ):
+                            break
+            finally:
+                # Close the reply generator cleanly (harmless if already exhausted).
+                aclose = getattr(_stream, "aclose", None)
+                if aclose is not None:
+                    with contextlib.suppress(Exception):
+                        await aclose()
+
+        async for ev in _pump(inputs):
+            yield ev
 
         # GATHER phase: emit an interactive card. A pending question (ask_choice)
         # takes priority over a proposal; the two are mutually exclusive because
@@ -1062,8 +1190,22 @@ async def run_agent_build(config: AgentBuildConfig) -> AsyncIterator[dict[str, A
                 "proposed": state.proposed,
             }
 
-        # BUILD phase: report what was produced (or edited, for a follow-up).
+        # BUILD phase: before reporting success, verify the package is actually
+        # evolvable — the seed EVOLVE file must sit inside version_control.local_path.
+        # If not (the common hand-write mistake), re-drive the agent to fix placement
+        # rather than shipping a package that dies mid-run with a cryptic InitSampler
+        # error. Only check when a build/edit actually happened this turn.
         if config.allow_build:
+            if _blueprint_data(state, config.base_dir).get("built"):
+                for _ in range(_MAX_STRUCTURE_REPAIRS):
+                    defect = _validate_package_structure(config.base_dir, state.project_name)
+                    if defect is None:
+                        break
+                    yield {"type": "chunk", "content": f"\n\n⚠️ {defect}\n"}
+                    async for ev in _pump(
+                        UserMsg(name="user", content=_structure_repair_message(defect))
+                    ):
+                        yield ev
             yield {"type": "build_result", "blueprint_data": _blueprint_data(state, config.base_dir)}
 
         # Persist conversation memory for the next turn (not forwarded to the user).

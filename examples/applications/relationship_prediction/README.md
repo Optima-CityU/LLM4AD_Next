@@ -13,7 +13,7 @@ This example uses LLM4AD to evolve **relationship crisis outcome predictions**. 
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - LLM4AD installed (`uv sync` or `pip install -e .`)
 - An OpenAI-compatible API key (e.g., DeepSeek, OpenAI)
 

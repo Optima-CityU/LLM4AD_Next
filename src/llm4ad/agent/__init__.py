@@ -1,10 +1,9 @@
 """AgentScope-based AI build (beta): a single ReAct agent for LLM4AD task packages.
 
 The agent builds and self-verifies an LLM4AD task package. Shared by the backend
-(HTTP/SSE endpoint) and the ``llm4ad chatv2`` CLI. agentscope is an optional
-dependency (the ``agent`` extra; requires Python >=3.11) and is imported lazily
-inside :mod:`llm4ad.agent.runner`, so importing this package does not require
-agentscope to be installed.
+(HTTP/SSE endpoint) and the ``llm4ad chatv2`` CLI. agentscope is a base dependency
+(the project requires Python >=3.12) and is imported lazily inside
+:mod:`llm4ad.agent.runner` to keep imports cheap.
 """
 
 from __future__ import annotations

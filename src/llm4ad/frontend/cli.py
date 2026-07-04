@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.table import Table
 
 from llm4ad import LLM4AD, __version__
@@ -1225,10 +1226,8 @@ def chat_agent_build(
     anything outside it. The generated code runs with your local user privileges —
     intended for local developer use.
 
-    Requires the ``agent`` extra (Python >=3.11)::
-
-        pip install 'llm4ad[agent]'
-        # or: uv sync --extra agent
+    Requires Python >=3.12. agentscope is a base dependency, so a plain ``uv sync``
+    (or ``pip install llm4ad``) installs everything needed — no extra step.
 
     Configure a provider in ~/.llm4ad/settings.yaml, for example::
 
@@ -1257,10 +1256,10 @@ def chat_agent_build(
         import agentscope  # noqa: F401
     except ImportError:
         console.print(
-            "[bold red]Error:[/bold red] The [bold]agent[/bold] extra is not installed.\n"
-            "Install it with:\n\n"
-            "    [bold]pip install 'llm4ad[agent]'[/bold]\n\n"
-            "Note: Python >=3.11 is required for the agent extra.\n"
+            "[bold red]Error:[/bold red] [bold]agentscope[/bold] is not installed.\n"
+            "Reinstall dependencies with:\n\n"
+            "    [bold]uv sync[/bold]   (or: pip install llm4ad)\n\n"
+            "Note: this project requires Python >=3.12.\n"
             f"You are running Python {sys.version_info.major}.{sys.version_info.minor}."
         )
         raise typer.Exit(code=1) from None
@@ -1335,7 +1334,7 @@ def chat_agent_build(
         prior_state: dict | None,
         proposed: dict | None,
     ) -> dict:
-        """Run one agent turn; return {state, proposed, built, project_name}."""
+        """Run one agent turn; return {state, proposed, card, built, project_name}."""
         cfg = AgentBuildConfig(
             provider_config=provider_cfg,
             base_dir=base_dir,
@@ -1346,7 +1345,13 @@ def chat_agent_build(
             max_iters=max_iters,
             surface="cli",
         )
-        result: dict = {"state": prior_state, "proposed": None, "built": False, "project_name": ""}
+        result: dict = {
+            "state": prior_state,
+            "proposed": None,
+            "card": None,
+            "built": False,
+            "project_name": "",
+        }
         async for event in run_agent_build(cfg):
             etype = event.get("type")
             if etype == "chunk":
@@ -1355,7 +1360,10 @@ def chat_agent_build(
                 sys.stdout.write(event.get("content", ""))
                 sys.stdout.flush()
             elif etype == "payload":
+                # `proposed` marks a build-plan confirm card; `data` carries the
+                # interactive choice card (ask_choice) or the confirm card body.
                 result["proposed"] = event.get("proposed")
+                result["card"] = event.get("data")
             elif etype == "build_result":
                 bp = event.get("blueprint_data", {})
                 result["built"] = bool(bp.get("built"))
@@ -1365,6 +1373,87 @@ def chat_agent_build(
             elif etype == "error":
                 console.print(f"\n[bold red]Error:[/bold red] {event.get('error', '')}")
         return result
+
+    async def _select_from_card(card: dict) -> str:
+        """Render a gather-phase choice card as an interactive selector.
+
+        Mirrors the web UI (and ``llm4ad chat``): the agent's ``ask_choice`` tool
+        emits a card with preset options; here we show them as an InquirerPy menu
+        so the user can arrow-select instead of typing. Options tagged for a file /
+        directory pick, or the "enter your own" custom option, drop to a text
+        prompt. Falls back to a plain prompt if InquirerPy or the terminal is
+        unavailable.
+
+        Args:
+            card: The choice card dict ({prompt, options:[{value,label,
+                description, is_custom?, ask_for_path?, ask_for_dir?}, ...]}).
+
+        Returns:
+            The chosen option value (optionally augmented with a picked path), or
+            the user's free-text input.
+        """
+        options = card.get("options") or []
+        question = (card.get("prompt") or "").strip()
+
+        # No preset options -> behave like the old plain-text path.
+        if not options:
+            if question:
+                console.print(Markdown(question))
+            console.print()
+            return typer.prompt("You")
+
+        try:
+            from InquirerPy import inquirer
+            from InquirerPy.base.control import Choice
+        except ImportError:
+            # InquirerPy missing: show the question + options as text, then prompt.
+            if question:
+                console.print(Markdown(question))
+            for i, opt in enumerate(options, 1):
+                label = opt.get("label", opt.get("value", ""))
+                desc = opt.get("description", "")
+                console.print(f"  [bold]{i}.[/bold] {label}" + (f" — {desc}" if desc else ""))
+            console.print()
+            return typer.prompt("You")
+
+        if question:
+            console.print()
+            console.print(Markdown(question))
+
+        iq_choices = []
+        for i, opt in enumerate(options):
+            label = opt.get("label", opt.get("value", ""))
+            desc = opt.get("description", "")
+            name = f"{label} — {desc}" if desc else label
+            iq_choices.append(Choice(value=i, name=name))
+
+        try:
+            selected = await inquirer.select(  # type: ignore[func-returns-value]
+                message="",
+                choices=iq_choices,
+                pointer=">",
+                qmark="",
+                amark="",
+                instruction="(arrow keys to move, Enter to select)",
+            ).execute_async()
+        except OSError:
+            # Non-interactive terminal: fall back to a plain prompt.
+            console.print()
+            return typer.prompt("You")
+
+        opt = options[int(selected)]
+        # Custom / free-text option -> let the user type their own answer.
+        if opt.get("is_custom"):
+            console.print()
+            return typer.prompt("You")
+        # File / directory pick options -> ask for the path, keep the option's
+        # meaning so the agent knows why the path was provided.
+        if opt.get("ask_for_dir") or opt.get("ask_for_path"):
+            what = "目录路径 / directory path" if opt.get("ask_for_dir") else "文件路径 / file path"
+            path = typer.prompt(what)
+            label = opt.get("label", opt.get("value", ""))
+            return f"{label}: {path}" if label and not label.startswith("__") else path
+        return opt.get("value", opt.get("label", ""))
 
     async def _run() -> bool:
         """Gather step-by-step, confirm, then build."""
@@ -1378,11 +1467,19 @@ def chat_agent_build(
             prior_state = r["state"]
             proposed = r["proposed"]
             if proposed is None:
-                # Agent asked a question; get the user's answer and continue.
-                console.print()
-                turn_input = typer.prompt("You")
+                # Agent asked a question. If it offered preset options (ask_choice),
+                # render them as an interactive selector; otherwise plain prompt.
+                card = r["card"]
+                if card and card.get("options"):
+                    turn_input = await _select_from_card(card)
+                else:
+                    console.print()
+                    turn_input = typer.prompt("You")
                 continue
-            # Agent proposed a build plan -> confirm.
+            # Agent proposed a build plan -> show the plan card, then confirm.
+            if r["card"] and (r["card"].get("prompt") or "").strip():
+                console.print()
+                console.print(Markdown(r["card"]["prompt"]))
             console.print()
             if typer.confirm("确认按此方案开始构建? (Confirm build?)", default=True):
                 br = await _run_turn(

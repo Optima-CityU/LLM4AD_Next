@@ -4,7 +4,7 @@ This guide covers installing LLM4AD on your system.
 
 ## System Requirements
 
-- **Python**: 3.10, 3.11, or 3.12
+- **Python**: 3.12 or higher (required; pinned in `.python-version`).
 - **Operating System**: Linux, macOS, or Windows
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
@@ -205,7 +205,7 @@ mypy src/
 
 ### Python Version Issues
 
-**Error**: `Python version 3.10 or higher required`
+**Error**: `Python version 3.12 or higher required`
 
 **Solution**:
 ```bash
@@ -214,8 +214,8 @@ python --version
 
 # Install a newer version if needed
 # Using pyenv (recommended)
-pyenv install 3.11
-pyenv global 3.11
+pyenv install 3.12
+pyenv global 3.12
 ```
 
 ### uv Installation Issues

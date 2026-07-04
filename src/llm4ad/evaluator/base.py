@@ -252,7 +252,7 @@ class ExecutableEvaluator(BaseEvaluator):
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     proc.communicate(), timeout=timeout
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 await proc.communicate()
                 return EvaluationResult(

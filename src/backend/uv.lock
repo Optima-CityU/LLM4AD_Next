@@ -2191,6 +2191,7 @@ name = "llm4ad"
 version = "0.1.0"
 source = { editable = "../../" }
 dependencies = [
+    { name = "agentscope" },
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "claude-agent-sdk" },
@@ -2251,6 +2252,8 @@ all = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentscope", marker = "python_full_version >= '3.11'", specifier = ">=2.0,<3.0" },
+    { name = "agentscope", marker = "python_full_version >= '3.11' and extra == 'agent'", specifier = ">=2.0,<3.0" },
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "anthropic", marker = "extra == 'providers'", specifier = ">=0.19.0" },
@@ -2306,7 +2309,7 @@ requires-dist = [
     { name = "umap-learn", marker = "extra == 'eval'", specifier = ">=0.5.12" },
     { name = "xgboost", specifier = ">=3.2.0" },
 ]
-provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "dev", "docs", "all"]
+provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "dev", "docs", "agent", "all"]
 
 [[package]]
 name = "llvmlite"
