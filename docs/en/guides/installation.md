@@ -4,7 +4,7 @@ This guide covers installing LLM4AD on your system.
 
 ## System Requirements
 
-- **Python**: 3.10, 3.11, or 3.12
+- **Python**: 3.12 recommended (pinned in `.python-version`). Supported: `>=3.10`, but the `chatv2` AI build agent requires `>=3.11`.
 - **Operating System**: Linux, macOS, or Windows
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) (recommended) or pip
 

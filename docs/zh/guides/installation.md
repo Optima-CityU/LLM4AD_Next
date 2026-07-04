@@ -4,7 +4,7 @@
 
 ## 系统要求
 
-- **Python**: 3.10、3.11 或 3.12
+- **Python**: 推荐 3.12（已在 `.python-version` 中固定）。支持 `>=3.10`，但 `chatv2` AI 构建智能体需要 `>=3.11`。
 - **操作系统**: Linux、macOS 或 Windows
 - **包管理器**: [uv](https://github.com/astral-sh/uv)（推荐）或 pip
 

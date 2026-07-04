@@ -48,10 +48,12 @@ from __future__ import annotations
 import contextlib
 import subprocess
 import traceback
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from pydantic import SecretStr
 
 _MAX_ERROR_LEN = 2000
 _MAX_TOOL_OUTPUT = 20000
@@ -132,7 +134,7 @@ def build_model(provider_config: dict[str, Any]) -> Any:
         if auth_token:
             client_kwargs["auth_token"] = auth_token
         return AnthropicChatModel(
-            credential=AnthropicCredential(api_key=api_key, base_url=base_url),
+            credential=AnthropicCredential(api_key=SecretStr(api_key), base_url=base_url),
             model=model_name,
             stream=True,
             client_kwargs=client_kwargs or None,
@@ -142,7 +144,7 @@ def build_model(provider_config: dict[str, Any]) -> Any:
     from agentscope.model import OpenAIChatModel
 
     return OpenAIChatModel(
-        credential=OpenAICredential(api_key=api_key, base_url=base_url),
+        credential=OpenAICredential(api_key=SecretStr(api_key), base_url=base_url),
         model=model_name,
         stream=True,
     )
@@ -337,6 +339,24 @@ def make_tools(
     from llm4ad.consultant.needs import NeedsProfile
 
     base = Path(base_dir).resolve()
+
+    def _tool(func: Callable[..., Any], **kwargs: Any) -> FunctionTool:
+        """Wrap a workspace tool function as an agentscope ``FunctionTool``.
+
+        agentscope types ``FunctionTool``'s ``func`` parameter narrowly (callables
+        returning ``ToolChunk``), but its adapter converts arbitrary return values —
+        including the ``str`` these tools return — into a ``ToolChunk`` at runtime
+        (see ``FunctionTool._convert_func_result_to_chunk``). The cast pins that one
+        external-typing boundary so the tool functions themselves stay fully typed.
+
+        Args:
+            func: The workspace tool callable (returns ``str``).
+            **kwargs: Extra ``FunctionTool`` options (e.g. ``is_read_only``).
+
+        Returns:
+            The constructed ``FunctionTool``.
+        """
+        return FunctionTool(cast(Any, func), **kwargs)
 
     def read_file(path: str) -> str:
         """Read a UTF-8 text file from the workspace (for inspecting user code).
@@ -743,21 +763,21 @@ def make_tools(
     if not allow_build:
         # GATHER phase: inspection + ask + propose only. No build tools => hard gate.
         return [
-            FunctionTool(read_file, is_read_only=True),
-            FunctionTool(list_dir, is_read_only=True),
-            FunctionTool(ask_choice),
-            FunctionTool(propose_plan),
+            _tool(read_file, is_read_only=True),
+            _tool(list_dir, is_read_only=True),
+            _tool(ask_choice),
+            _tool(propose_plan),
         ]
 
     # BUILD phase (post-confirmation): full build + verify + edit toolset.
     return [
-        FunctionTool(read_file, is_read_only=True),
-        FunctionTool(list_dir, is_read_only=True),
-        FunctionTool(run_python),
-        FunctionTool(build_task),
-        FunctionTool(rebuild_evaluator),
-        FunctionTool(write_file),
-        FunctionTool(edit_file),
+        _tool(read_file, is_read_only=True),
+        _tool(list_dir, is_read_only=True),
+        _tool(run_python),
+        _tool(build_task),
+        _tool(rebuild_evaluator),
+        _tool(write_file),
+        _tool(edit_file),
     ]
 
 

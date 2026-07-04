@@ -115,7 +115,7 @@ No setup, no API key needed — just open the link and start designing algorithm
 
 ### Option B: Local Installation
 
-Requires Python 3.10+ and [uv](https://github.com/astral-sh/uv) (recommended) or pip.
+Requires [uv](https://github.com/astral-sh/uv) (recommended) or pip. **Python 3.12 is recommended** (pinned in `.python-version`); the package still supports `>=3.10`, but the `chatv2` AI build agent needs `>=3.11`. On the recommended 3.12 environment, a plain `uv sync` enables `chatv2` out of the box.
 
 ```bash
 # Clone the repository

@@ -1963,6 +1963,7 @@ name = "llm4ad"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agentscope", marker = "python_full_version >= '3.11'" },
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "claude-agent-sdk" },
@@ -2085,6 +2086,7 @@ tsp = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agentscope", marker = "python_full_version >= '3.11'", specifier = ">=2.0,<3.0" },
     { name = "agentscope", marker = "python_full_version >= '3.11' and extra == 'agent'", specifier = ">=2.0,<3.0" },
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "aiohttp", specifier = ">=3.9.0" },
