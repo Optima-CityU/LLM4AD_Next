@@ -245,10 +245,19 @@ rebuild_evaluator for evaluator logic), then re-verify with run_python and brief
 report what changed. Never tell the user to edit files themselves; you have the \
 tools to do it.
 
+STRUCTURAL REQUIREMENT (critical): the seed algorithm file with the \
+EVOLVE_START / EVOLVE_END markers MUST live inside the directory named by \
+config.yaml's version_control.local_path — the engine scans only that directory \
+for evolvable blocks. If the file sits anywhere else (e.g. the project root), the \
+run fails mid-evolution. Prefer build_task, which wires this correctly; if you \
+write files by hand, put the algorithm file under local_path and keep its name \
+consistent with what the evaluator loads.
+
 COMPLETION CRITERIA (for a build): done only when build_task succeeded AND \
-test_evaluator.py loads the evaluator AND debug_run.py runs without raising. Then \
-briefly summarize what was built and the verification result. If a tool reports a \
-path-access error, you tried to leave the workspace — stay within it.
+test_evaluator.py loads the evaluator AND debug_run.py runs without raising AND an \
+EVOLVE block exists under version_control.local_path. Then briefly summarize what \
+was built and the verification result. If a tool reports a path-access error, you \
+tried to leave the workspace — stay within it.
 
 {_closing_for_surface(surface)}
 
