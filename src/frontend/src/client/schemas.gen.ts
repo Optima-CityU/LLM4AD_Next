@@ -911,137 +911,8 @@ export const EmbeddingProviderCreateSchema = {
 } as const;
 
 export const EmbeddingProviderResponseSchema = {
-    properties: {
-        id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'Id'
-        },
-        created_time: {
-            type: 'string',
-            format: 'date-time',
-            title: 'Created Time'
-        },
-        updated_time: {
-            type: 'string',
-            format: 'date-time',
-            title: 'Updated Time'
-        },
-        user_id: {
-            type: 'string',
-            format: 'uuid',
-            title: 'User Id'
-        },
-        name: {
-            type: 'string',
-            title: 'Name'
-        },
-        type: {
-            '$ref': '#/components/schemas/EmbeddingProviderType'
-        },
-        api_key: {
-            type: 'string',
-            title: 'Api Key'
-        },
-        auth_token: {
-            type: 'string',
-            title: 'Auth Token'
-        },
-        base_url: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Base Url'
-        },
-        mode: {
-            '$ref': '#/components/schemas/EmbeddingMode'
-        },
-        model: {
-            type: 'string',
-            title: 'Model'
-        },
-        dim: {
-            type: 'integer',
-            title: 'Dim'
-        },
-        timeout: {
-            type: 'number',
-            title: 'Timeout'
-        },
-        embedding_func_max_async: {
-            type: 'integer',
-            title: 'Embedding Func Max Async'
-        },
-        text_type: {
-            '$ref': '#/components/schemas/EmbeddingProviderType'
-        },
-        text_base_url: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Text Base Url'
-        },
-        text_api_key: {
-            type: 'string',
-            title: 'Text Api Key'
-        },
-        text_auth_token: {
-            type: 'string',
-            title: 'Text Auth Token'
-        },
-        text_model: {
-            type: 'string',
-            title: 'Text Model'
-        },
-        text_task: {
-            type: 'string',
-            title: 'Text Task'
-        },
-        code_type: {
-            '$ref': '#/components/schemas/EmbeddingProviderType'
-        },
-        code_base_url: {
-            anyOf: [
-                {
-                    type: 'string'
-                },
-                {
-                    type: 'null'
-                }
-            ],
-            title: 'Code Base Url'
-        },
-        code_api_key: {
-            type: 'string',
-            title: 'Code Api Key'
-        },
-        code_auth_token: {
-            type: 'string',
-            title: 'Code Auth Token'
-        },
-        code_model: {
-            type: 'string',
-            title: 'Code Model'
-        },
-        code_task: {
-            type: 'string',
-            title: 'Code Task'
-        }
-    },
-    type: 'object',
-    required: ['id', 'created_time', 'updated_time', 'user_id', 'name', 'type', 'api_key', 'auth_token', 'base_url', 'mode', 'model', 'dim', 'timeout', 'embedding_func_max_async', 'text_type', 'text_base_url', 'text_api_key', 'text_auth_token', 'text_model', 'text_task', 'code_type', 'code_base_url', 'code_api_key', 'code_auth_token', 'code_model', 'code_task'],
-    title: 'EmbeddingProviderResponse',
-    description: 'Embedding 供应商响应，凭据不返回明文。'
+    additionalProperties: true,
+    type: 'object'
 } as const;
 
 export const EmbeddingProviderTestByIdRequestSchema = {
@@ -3261,6 +3132,111 @@ export const NewPasswordSchema = {
     required: ['token', 'new_password'],
     title: 'NewPassword',
     description: '密码重置请求模型，包含重置令牌和新密码。'
+} as const;
+
+export const NewsItemSchema = {
+    properties: {
+        title: {
+            type: 'string',
+            title: 'Title',
+            description: '资讯标题'
+        },
+        url: {
+            type: 'string',
+            title: 'Url',
+            description: '微信公众号文章 URL'
+        },
+        summary: {
+            type: 'string',
+            title: 'Summary',
+            description: '首段摘要（去除 HTML 后的纯文本）',
+            default: ''
+        },
+        cover_image: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cover Image',
+            description: '封面图 URL；无则为 null'
+        },
+        published_at: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Published At',
+            description: '发布日期原始字符串'
+        },
+        tag: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Tag',
+            description: '标签，例如『探索』'
+        },
+        source: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source',
+            description: '来源公众号名称'
+        }
+    },
+    type: 'object',
+    required: ['title', 'url'],
+    title: 'NewsItem',
+    description: '单条资讯（对应 wiki 中一个 `## [标题](链接)` 块）。'
+} as const;
+
+export const NewsListSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/NewsItem'
+            },
+            type: 'array',
+            title: 'Items',
+            description: '资讯条目列表'
+        },
+        updated_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Updated At',
+            description: '缓存的最近一次成功更新时间（UTC）'
+        }
+    },
+    type: 'object',
+    title: 'NewsList',
+    description: `资讯列表响应。
+
+\`updated_at\` 反映后端最近一次成功从 wiki 拉取的时间；wiki 拉取失败但缓存
+仍有内容时，该字段保持上次成功时的时间，便于前端判断新鲜度。`
 } as const;
 
 export const PaginatedEmbeddingProviderResponseSchema = {

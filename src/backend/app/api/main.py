@@ -13,6 +13,7 @@ from app.api.base_routes import (
     live_codes,
     live_qr,
     login,
+    news,
     permission,
     privacy_policy,
     testing,
@@ -41,6 +42,7 @@ api_router.include_router(privacy_policy.router)
 api_router.include_router(feedback.router)
 api_router.include_router(live_codes.router)
 api_router.include_router(live_qr.router)
+api_router.include_router(news.router)
 
 # ---- LLM4AD 业务路由 ----
 api_router.include_router(llm4ad_projects.router, prefix="/llm4ad")

@@ -1150,6 +1150,7 @@
       "features": "Features",
       "domains": "Domains",
       "achievements": "Research Achievements",
+      "news": "News",
       "login": "Login",
       "signup": "Sign Up"
     },
@@ -1234,6 +1235,12 @@
         "linkLabel": "View Paper Collection",
         "link": "https://github.com/FeiLiu36/LLM4AlgorithmDesign"
       }
+    },
+    "news": {
+      "title": "Latest News",
+      "subtitle": "Updates, research notes, and tutorials from our WeChat Official Account, refreshed regularly.",
+      "readMore": "Read full article",
+      "viewMore": "View all news"
     },
     "footer": {
       "copyright": "LLM4AD_Next - Algorithm Design with Large Language Models",
