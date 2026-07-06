@@ -275,5 +275,18 @@ class Settings(BaseSettings):
     CODE_SERVER_IDLE_TIMEOUT_SECONDS: int = 24 * 60 * 60  # 容器空闲超过该时长则停止
     CODE_SERVER_CLEANUP_INTERVAL_SECONDS: int = 10 * 60  # 后台清理任务执行间隔
 
+    # ---- 首页资讯（GitHub Wiki 拉取） ----
+    # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。
+    NEWS_WIKI_URL_ZH: str = (
+        "https://raw.githubusercontent.com/wiki/Optima-CityU/LLM4AD_Next/"
+        "News%E2%80%90and%E2%80%90Articles%E2%80%90Index_zh.md"
+    )
+    NEWS_WIKI_URL_EN: str = (
+        "https://raw.githubusercontent.com/wiki/Optima-CityU/LLM4AD_Next/"
+        "News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en.md"
+    )
+    NEWS_REFRESH_INTERVAL_SECONDS: int = 30 * 60  # 后台刷新间隔，默认 30 分钟
+    NEWS_HTTP_TIMEOUT: float = 15.0  # 拉取 wiki 的 HTTP 超时（秒）
+
 
 settings = Settings()  # type: ignore

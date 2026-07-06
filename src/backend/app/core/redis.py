@@ -363,3 +363,51 @@ def pop_idle_code_users(threshold_ts: float) -> list[str]:
     members, _ = pipe.execute()
     return list(members)
 
+
+# ---- 首页资讯缓存 ----
+# wiki 是唯一真源，后台定时拉取并整体覆盖缓存；GET /news?lang=<..> 直接读该缓存。
+# 无 TTL：若拉取长时间失败，宁可返回旧内容也不返回空，由 updated_at 让前端判断新鲜度。
+# 按语种分 key —— 未配置对应语种 URL 时，key 不会被创建，读也返回 None。
+
+NEWS_CACHE_PREFIX = "news:"
+
+
+def _news_cache_key(lang: str) -> str:
+    """构造某语种资讯缓存的 Redis key。"""
+    return f"{NEWS_CACHE_PREFIX}{lang}"
+
+
+def set_cached_news(lang: str, payload: dict) -> None:
+    """整体覆盖某语种资讯缓存。
+
+    Args:
+        lang: 语种代码，如 "zh"、"en"。
+        payload: 已可 JSON 序列化的字典，通常来自 ``NewsList.model_dump(mode="json")``。
+    """
+    try:
+        r = get_sync_redis()
+        r.set(_news_cache_key(lang), json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to write news cache to Redis, lang=%s", lang, exc_info=True
+        )
+
+
+def get_cached_news(lang: str) -> dict | None:
+    """读取某语种资讯缓存。缓存不存在或反序列化失败均返回 None。"""
+    try:
+        r = get_sync_redis()
+        raw = r.get(_news_cache_key(lang))
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to read news cache from Redis, lang=%s", lang, exc_info=True
+        )
+        return None
+

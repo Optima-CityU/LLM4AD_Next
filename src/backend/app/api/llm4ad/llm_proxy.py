@@ -87,6 +87,7 @@ def _build_auth_headers(provider_type: str, api_key: str, auth_token: str) -> di
 @router.api_route(
     "/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    include_in_schema=False,
 )
 async def proxy_llm(path: str, request: Request) -> Response:
     """透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。

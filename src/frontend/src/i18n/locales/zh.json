@@ -1151,6 +1151,7 @@
       "features": "核心特性",
       "domains": "应用领域",
       "achievements": "研究成果",
+      "news": "最新资讯",
       "login": "登录",
       "signup": "注册"
     },
@@ -1235,6 +1236,12 @@
         "linkLabel": "查看论文合集",
         "link": "https://github.com/FeiLiu36/LLM4AlgorithmDesign"
       }
+    },
+    "news": {
+      "title": "最新资讯",
+      "subtitle": "来自官方微信公众号的产品动态、研究进展与上手教程，持续更新。",
+      "readMore": "阅读全文",
+      "viewMore": "查看更多"
     },
     "footer": {
       "copyright": "LLM4AD_Next - 基于大语言模型的算法设计工具",

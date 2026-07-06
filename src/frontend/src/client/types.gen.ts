@@ -421,36 +421,8 @@ export type EmbeddingProviderCreate = {
     code_task?: string;
 };
 
-/**
- * Embedding 供应商响应，凭据不返回明文。
- */
 export type EmbeddingProviderResponse = {
-    id: string;
-    created_time: string;
-    updated_time: string;
-    user_id: string;
-    name: string;
-    type: EmbeddingProviderType;
-    api_key: string;
-    auth_token: string;
-    base_url: (string | null);
-    mode: EmbeddingMode;
-    model: string;
-    dim: number;
-    timeout: number;
-    embedding_func_max_async: number;
-    text_type: EmbeddingProviderType;
-    text_base_url: (string | null);
-    text_api_key: string;
-    text_auth_token: string;
-    text_model: string;
-    text_task: string;
-    code_type: EmbeddingProviderType;
-    code_base_url: (string | null);
-    code_api_key: string;
-    code_auth_token: string;
-    code_model: string;
-    code_task: string;
+    [key: string]: unknown;
 };
 
 /**
@@ -1212,6 +1184,57 @@ export type Message = {
 export type NewPassword = {
     token: string;
     new_password: string;
+};
+
+/**
+ * 单条资讯（对应 wiki 中一个 `## [标题](链接)` 块）。
+ */
+export type NewsItem = {
+    /**
+     * 资讯标题
+     */
+    title: string;
+    /**
+     * 微信公众号文章 URL
+     */
+    url: string;
+    /**
+     * 首段摘要（去除 HTML 后的纯文本）
+     */
+    summary?: string;
+    /**
+     * 封面图 URL；无则为 null
+     */
+    cover_image?: (string | null);
+    /**
+     * 发布日期原始字符串
+     */
+    published_at?: (string | null);
+    /**
+     * 标签，例如『探索』
+     */
+    tag?: (string | null);
+    /**
+     * 来源公众号名称
+     */
+    source?: (string | null);
+};
+
+/**
+ * 资讯列表响应。
+ *
+ * `updated_at` 反映后端最近一次成功从 wiki 拉取的时间；wiki 拉取失败但缓存
+ * 仍有内容时，该字段保持上次成功时的时间，便于前端判断新鲜度。
+ */
+export type NewsList = {
+    /**
+     * 资讯条目列表
+     */
+    items?: Array<NewsItem>;
+    /**
+     * 缓存的最近一次成功更新时间（UTC）
+     */
+    updated_at?: (string | null);
 };
 
 /**
@@ -2376,42 +2399,6 @@ export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData = {
 
 export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse = (EmbeddingProviderTestResponse);
 
-export type Llm4AdLlmproxyProxyLlmData = {
-    path: string;
-};
-
-export type Llm4AdLlmproxyProxyLlmResponse = (unknown);
-
-export type Llm4AdLlmproxyProxyLlm1Data = {
-    path: string;
-};
-
-export type Llm4AdLlmproxyProxyLlm1Response = (unknown);
-
-export type Llm4AdLlmproxyProxyLlm2Data = {
-    path: string;
-};
-
-export type Llm4AdLlmproxyProxyLlm2Response = (unknown);
-
-export type Llm4AdLlmproxyProxyLlm3Data = {
-    path: string;
-};
-
-export type Llm4AdLlmproxyProxyLlm3Response = (unknown);
-
-export type Llm4AdLlmproxyProxyLlm4Data = {
-    path: string;
-};
-
-export type Llm4AdLlmproxyProxyLlm4Response = (unknown);
-
-export type Llm4AdLlmproxyProxyLlm5Data = {
-    path: string;
-};
-
-export type Llm4AdLlmproxyProxyLlm5Response = (unknown);
-
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
@@ -2808,6 +2795,15 @@ export type LoginResetPasswordData = {
 };
 
 export type LoginResetPasswordResponse = (Message);
+
+export type NewsListNewsData = {
+    /**
+     * 语种：zh 或 en
+     */
+    lang?: 'zh' | 'en';
+};
+
+export type NewsListNewsResponse = (NewsList);
 
 export type PermissionCreateData = {
     requestBody: PermissionBase;

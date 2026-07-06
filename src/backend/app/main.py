@@ -17,6 +17,7 @@ from loguru import logger
 from app.api.main import api_router
 from app.core.config import settings
 from app.services.code_server_service import run_idle_cleanup_loop
+from app.services.news_service import run_news_refresh_loop
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
@@ -54,6 +55,9 @@ async def lifespan(_app: FastAPI):
         logger.exception("启动时清理孤儿调参容器失败")
 
     cleanup_task = asyncio.create_task(run_idle_cleanup_loop())
+
+    news_refresh_task = asyncio.create_task(run_news_refresh_loop())
+
     try:
         yield
     finally:
@@ -61,6 +65,11 @@ async def lifespan(_app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
         logger.info("code-server 空闲清理循环已停止")
+
+        news_refresh_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await news_refresh_task
+        logger.info("首页资讯刷新循环已停止")
 
 
 app = FastAPI(
