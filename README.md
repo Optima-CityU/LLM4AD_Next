@@ -236,4 +236,4 @@ Scan the QR code with WeChat to join the LLM4AD_Next community group.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Optima-CityU/LLM4AD_Next&type=Date)](https://www.star-history.com/#Optima-CityU/LLM4AD_Next&Date)
+[![Star History Chart](docs/assets/star-history.svg)](https://www.star-history.com/#Optima-CityU/LLM4AD_Next&Date)
