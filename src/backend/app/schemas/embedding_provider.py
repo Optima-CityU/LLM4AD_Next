@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
@@ -102,7 +102,7 @@ class EmbeddingProviderResponse(BaseModel):
     code_task: str
 
     @model_serializer(mode="wrap")
-    def _mask_secrets(self, handler: Any) -> dict[str, Any]:
+    def _mask_secrets(self, handler):
         data = handler(self)
         for field in ("api_key", "auth_token", "text_api_key", "text_auth_token", "code_api_key", "code_auth_token"):
             data[field] = _MASKED_SECRET if data.get(field) else ""

@@ -421,8 +421,36 @@ export type EmbeddingProviderCreate = {
     code_task?: string;
 };
 
+/**
+ * Embedding 供应商响应，凭据不返回明文。
+ */
 export type EmbeddingProviderResponse = {
-    [key: string]: unknown;
+    id: string;
+    created_time: string;
+    updated_time: string;
+    user_id: string;
+    name: string;
+    type: EmbeddingProviderType;
+    api_key: string;
+    auth_token: string;
+    base_url: (string | null);
+    mode: EmbeddingMode;
+    model: string;
+    dim: number;
+    timeout: number;
+    embedding_func_max_async: number;
+    text_type: EmbeddingProviderType;
+    text_base_url: (string | null);
+    text_api_key: string;
+    text_auth_token: string;
+    text_model: string;
+    text_task: string;
+    code_type: EmbeddingProviderType;
+    code_base_url: (string | null);
+    code_api_key: string;
+    code_auth_token: string;
+    code_model: string;
+    code_task: string;
 };
 
 /**
