@@ -126,11 +126,10 @@ Windows PowerShell：
 
 ```bash
 VERSION=latest
-CN_REGISTRY=registry.cn-hangzhou.aliyuncs.com/noah2012
 DOCKER_REGISTRY=docker.io/noah2012
 ```
 
-未显式传入 `TAG` 时使用 `VERSION`；未显式传入 `--mirrors` 或 `SWR_REGISTRY` 时使用 `DOCKER_REGISTRY`。`CN_REGISTRY` 作为国内镜像源地址，可通过 `--mirrors` 显式使用。
+未显式传入 `TAG` 时使用 `VERSION`；未显式传入 `--mirrors` 或 `SWR_REGISTRY` 时使用 `DOCKER_REGISTRY`。默认镜像仓库为 Docker Hub。
 
 - 启动指定版本（示例：`v1.0.0`）
 ```shell
@@ -146,7 +145,6 @@ TAG=v1.0.0 ./start.sh start
 
 - 使用指定镜像仓库或加速地址
 ```shell
-./start.sh start --mirrors registry.cn-hangzhou.aliyuncs.com/noah2012
 ./start.sh start --mirrors docker.io/noah2012
 ./start.sh start --mirrors docker.1ms.run/noah2012
 ```

@@ -1,0 +1,220 @@
+name: Release Versioned Images
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to publish, for example v1.0.0"
+        required: true
+        type: string
+      release_notes:
+        description: "Optional release notes to prepend before the generated changelog"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish versioned images and GitHub release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'noah2012' }}
+      BACKEND_IMAGE_NAME: ${{ vars.DOCKERHUB_BACKEND_IMAGE || 'backend' }}
+      FRONTEND_IMAGE_NAME: ${{ vars.DOCKERHUB_FRONTEND_IMAGE || 'frontend' }}
+      TASK_RUNNER_IMAGE_NAME: ${{ vars.DOCKERHUB_TASK_RUNNER_IMAGE || 'llm4ad-task-runner' }}
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          fetch-depth: 0
+
+      - name: Prepare release version
+        id: release
+        env:
+          INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${INPUT_VERSION}"
+          else
+            version="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must match vX.Y.Z, got: $version" >&2
+            exit 1
+          fi
+
+          git fetch --tags origin
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if git rev-parse -q --verify "refs/tags/${version}" >/dev/null; then
+              echo "Tag already exists: ${version}" >&2
+              exit 1
+            fi
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "version_no_v=${version#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Docker Hub configuration
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          test -n "${DOCKERHUB_NAMESPACE}" || {
+            echo "Set repository variable DOCKERHUB_NAMESPACE or use the default noah2012 namespace." >&2
+            exit 1
+          }
+          test -n "${DOCKERHUB_USERNAME}" || {
+            echo "Set repository secret DOCKERHUB_USERNAME." >&2
+            exit 1
+          }
+          test -n "${DOCKERHUB_TOKEN}" || {
+            echo "Set repository secret DOCKERHUB_TOKEN." >&2
+            exit 1
+          }
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract backend metadata
+        id: backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.BACKEND_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.release.outputs.version }}
+            type=raw,value=${{ steps.release.outputs.version_no_v }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./src/backend/Dockerfile
+          push: true
+          build-args: |
+            UV_INDEX_URL=${{ vars.UV_INDEX_URL }}
+          tags: ${{ steps.backend-meta.outputs.tags }}
+          labels: ${{ steps.backend-meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Extract task runner metadata
+        id: task-runner-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.TASK_RUNNER_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.release.outputs.version }}
+            type=raw,value=${{ steps.release.outputs.version_no_v }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push task runner image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./src/backend/Dockerfile.task
+          push: true
+          build-args: |
+            APT_MIRROR=${{ vars.APT_MIRROR }}
+            UV_INDEX_URL=${{ vars.UV_INDEX_URL }}
+          tags: ${{ steps.task-runner-meta.outputs.tags }}
+          labels: ${{ steps.task-runner-meta.outputs.labels }}
+          cache-from: type=gha,scope=task-runner
+          cache-to: type=gha,mode=max,scope=task-runner
+
+      - name: Extract frontend metadata
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.FRONTEND_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.release.outputs.version }}
+            type=raw,value=${{ steps.release.outputs.version_no_v }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./src/frontend/Dockerfile
+          push: true
+          build-args: |
+            VITE_API_URL=
+            VITE_CODE_SERVER_URL=${{ vars.VITE_CODE_SERVER_URL || '/code_ide' }}
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Push release tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}"
+          git push origin "refs/tags/${RELEASE_VERSION}"
+
+      - name: Create GitHub release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_NOTES_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || '' }}
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const version = process.env.RELEASE_VERSION;
+            const generated = await github.rest.repos.generateReleaseNotes({
+              owner,
+              repo,
+              tag_name: version,
+            });
+            const manualNotes = process.env.RELEASE_NOTES_INPUT.trim();
+            const body = manualNotes
+              ? `${manualNotes}\n\n${generated.data.body}`
+              : generated.data.body;
+
+            try {
+              await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: version,
+                name: `LLM4AD_Next ${version}`,
+                body,
+              });
+            } catch (error) {
+              if (error.status !== 422) {
+                throw error;
+              }
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: version,
+              });
+              await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: existing.data.id,
+                name: `LLM4AD_Next ${version}`,
+                body,
+              });
+            }

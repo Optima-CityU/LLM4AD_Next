@@ -1,3 +1,2 @@
 VERSION=latest
-CN_REGISTRY=registry.cn-hangzhou.aliyuncs.com/noah2012
 DOCKER_REGISTRY=docker.io/noah2012
