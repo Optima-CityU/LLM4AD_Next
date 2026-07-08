@@ -48,10 +48,20 @@ uv sync
 pip install -e ".[all]"
 ```
 
-### Method 2: Install from PyPI (Coming Soon)
+### Method 2: Install from PyPI
+
+Use this method when you want the published Python package and CLI without
+modifying the source tree.
 
 ```bash
 pip install llm4ad
+```
+
+Install optional dependency groups as needed:
+
+```bash
+pip install "llm4ad[providers,eval]"
+pip install "llm4ad[all]"
 ```
 
 ## Optional Dependencies
