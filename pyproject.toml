@@ -1,6 +1,6 @@
 [project]
 name = "llm4ad"
-version = "0.1.0"
+version = "1.12.0"
 description = "Interactive LLM-driven automated algorithm design with evolutionary optimization"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
