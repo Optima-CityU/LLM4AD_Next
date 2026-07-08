@@ -1,23 +1,36 @@
 [project]
 name = "llm4ad"
-version = "0.1.0"
-description = "LLM for Algorithm Design - A platform using LLMs with evolutionary algorithms"
+version = "1.12.0"
+description = "Interactive LLM-driven automated algorithm design with evolutionary optimization"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 authors = [
     {name = "LLM4AD Contributors"}
 ]
+maintainers = [
+    {name = "LLM4AD Contributors"}
+]
 requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Code Generators",
 ]
-keywords = ["llm", "algorithm", "evolution", "optimization", "ai"]
+keywords = [
+    "llm",
+    "algorithm-design",
+    "automated-algorithm-design",
+    "evolutionary-optimization",
+    "code-generation",
+    "ai",
+]
 
 dependencies = [
     "pydantic>=2.0.0",
@@ -116,6 +129,7 @@ Homepage = "https://github.com/Optima-CityU/LLM4AD_Next"
 Documentation = "https://llm4ad.readthedocs.io"
 Repository = "https://github.com/Optima-CityU/LLM4AD_Next"
 Issues = "https://github.com/Optima-CityU/LLM4AD_Next/issues"
+Changelog = "https://github.com/Optima-CityU/LLM4AD_Next/releases"
 
 [build-system]
 requires = ["hatchling"]
@@ -123,6 +137,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llm4ad"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/llm4ad",
+    "/README.md",
+    "/LICENSE",
+    "/docs",
+    "/examples",
+    "/pyproject.toml",
+]
 
 [tool.black]
 line-length = 100
@@ -253,4 +277,3 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
-

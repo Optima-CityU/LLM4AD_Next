@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version to publish, for example v1.0.0"
+        description: "Release version to publish, for example v1.12.0"
         required: true
         type: string
       release_notes:
@@ -20,17 +20,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
   cancel-in-progress: false
 
+env:
+  DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'noah2012' }}
+  BACKEND_IMAGE_NAME: ${{ vars.DOCKERHUB_BACKEND_IMAGE || 'backend' }}
+  FRONTEND_IMAGE_NAME: ${{ vars.DOCKERHUB_FRONTEND_IMAGE || 'frontend' }}
+  TASK_RUNNER_IMAGE_NAME: ${{ vars.DOCKERHUB_TASK_RUNNER_IMAGE || 'llm4ad-task-runner' }}
+
 jobs:
-  release:
-    name: Publish versioned images and GitHub release
+  prepare:
+    name: Validate release version
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-    env:
-      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'noah2012' }}
-      BACKEND_IMAGE_NAME: ${{ vars.DOCKERHUB_BACKEND_IMAGE || 'backend' }}
-      FRONTEND_IMAGE_NAME: ${{ vars.DOCKERHUB_FRONTEND_IMAGE || 'frontend' }}
-      TASK_RUNNER_IMAGE_NAME: ${{ vars.DOCKERHUB_TASK_RUNNER_IMAGE || 'llm4ad-task-runner' }}
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_no_v: ${{ steps.version.outputs.version_no_v }}
 
     steps:
       - name: Checkout release source
@@ -40,7 +44,7 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare release version
-        id: release
+        id: version
         env:
           INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
         run: |
@@ -65,6 +69,82 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "version_no_v=${version#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Python package version
+        env:
+          VERSION_NO_V: ${{ steps.version.outputs.version_no_v }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          import re
+          import sys
+          import tomllib
+          import urllib.error
+          import urllib.request
+
+          expected = os.environ["VERSION_NO_V"]
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          project_version = project["version"]
+          if project_version != expected:
+              raise SystemExit(
+                  f"pyproject.toml version {project_version!r} does not match release {expected!r}"
+              )
+
+          init_text = Path("src/llm4ad/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', init_text, re.MULTILINE)
+          if not match:
+              raise SystemExit("src/llm4ad/__init__.py does not define __version__")
+          package_version = match.group(1)
+          if package_version != expected:
+              raise SystemExit(
+                  f"src/llm4ad/__init__.py version {package_version!r} does not match release {expected!r}"
+              )
+
+          def normalize_version(value: str) -> tuple[object, ...]:
+              public = value.split("+", 1)[0].lower()
+              parts: list[object] = []
+              for part in re.split(r"[._-]", public):
+                  if not part:
+                      continue
+                  parts.append(int(part) if part.isdigit() else part)
+              while parts and parts[-1] == 0:
+                  parts.pop()
+              return tuple(parts)
+
+          url = "https://pypi.org/pypi/llm4ad/json"
+          try:
+              with urllib.request.urlopen(url, timeout=20) as response:
+                  data = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  data = {"releases": {}}
+              else:
+                  raise
+
+          expected_normalized = normalize_version(expected)
+          for published_version, files in data.get("releases", {}).items():
+              if files and normalize_version(published_version) == expected_normalized:
+                  raise SystemExit(
+                      f"PyPI version conflict: llm4ad {published_version!r} already exists"
+                  )
+
+          print(f"Validated Python package version {expected}; no PyPI version conflict found.")
+          PY
+
+  docker:
+    name: Publish versioned Docker images
+    runs-on: ubuntu-latest
+    needs: prepare
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
 
       - name: Validate Docker Hub configuration
         env:
@@ -99,8 +179,8 @@ jobs:
         with:
           images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.BACKEND_IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.release.outputs.version }}
-            type=raw,value=${{ steps.release.outputs.version_no_v }}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.version_no_v }}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push backend image
@@ -122,8 +202,8 @@ jobs:
         with:
           images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.TASK_RUNNER_IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.release.outputs.version }}
-            type=raw,value=${{ steps.release.outputs.version_no_v }}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.version_no_v }}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push task runner image
@@ -146,8 +226,8 @@ jobs:
         with:
           images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.FRONTEND_IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.release.outputs.version }}
-            type=raw,value=${{ steps.release.outputs.version_no_v }}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.version_no_v }}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push frontend image
@@ -164,10 +244,58 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+  pypi:
+    name: Publish Python package to PyPI
+    runs-on: ubuntu-latest
+    needs: [prepare, docker]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/llm4ad
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Check distributions
+        run: python -m twine check dist/*
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Publish Git tag and GitHub release
+    runs-on: ubuntu-latest
+    needs: [prepare, docker, pypi]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          fetch-depth: 0
+
       - name: Push release tag
         if: github.event_name == 'workflow_dispatch'
         env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -177,7 +305,7 @@ jobs:
       - name: Create GitHub release
         uses: actions/github-script@v7
         env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_NOTES_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || '' }}
         with:
           script: |
