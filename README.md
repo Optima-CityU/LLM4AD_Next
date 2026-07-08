@@ -22,6 +22,12 @@
 
 ---
 
+## 🔥 News
+
+- 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [http://8.163.71.37/](http://8.163.71.37/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
+- ✨ [2026.07][New Feature]: Introducing an **interactive problem-to-project workflow** that turns natural-language problem descriptions into runnable evolutionary algorithm search projects.
+- 🐳 [2026.07][New Feature]: Versioned **Docker Hub deployment images** are now aligned with GitHub Release tags for reproducible local deployment.
+
 ## 🚀 Why LLM4AD_Next?
 
 Traditionally, using Large Language Models for Automated Algorithm Design (LLM4AD) required a tedious, multi-step configuration pipeline. **LLM4AD_Next destroys this entry barrier.**
