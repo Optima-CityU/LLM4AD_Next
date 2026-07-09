@@ -293,16 +293,6 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
           fetch-depth: 0
 
-      - name: Push release tag
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}"
-          git push origin "refs/tags/${RELEASE_VERSION}"
-
       - name: Create GitHub release
         uses: actions/github-script@v7
         env:
@@ -312,10 +302,12 @@ jobs:
           script: |
             const {owner, repo} = context.repo;
             const version = process.env.RELEASE_VERSION;
+            const targetCommitish = context.sha;
             const generated = await github.rest.repos.generateReleaseNotes({
               owner,
               repo,
               tag_name: version,
+              target_commitish: targetCommitish,
             });
             const manualNotes = process.env.RELEASE_NOTES_INPUT.trim();
             const body = manualNotes
@@ -327,6 +319,7 @@ jobs:
                 owner,
                 repo,
                 tag_name: version,
+                target_commitish: targetCommitish,
                 name: `LLM4AD_Next ${version}`,
                 body,
               });
