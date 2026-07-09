@@ -12,11 +12,9 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 env:
   STAR_HISTORY_REPOSITORY: ${{ github.event.inputs.repository || vars.STAR_HISTORY_REPOSITORY || github.repository }}
-  STAR_HISTORY_PATH: docs/assets/star-history.svg
 
 jobs:
   update-star-history:
@@ -28,18 +26,13 @@ jobs:
         with:
           ref: main
 
-      - name: Generate star history SVG
-        run: python .github/scripts/generate_star_history_svg.py
-
-      - name: Create pull request
-        uses: peter-evans/create-pull-request@v6
+      - name: Update star history chart
+        uses: narayann7/star-history-action@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: chore/update-star-history
-          base: main
-          title: "docs: update star history chart"
-          commit-message: "docs: update star history chart"
-          body: "Automatically updates the static star history chart image."
-          add-paths: |
-            docs/assets/star-history.svg
-          delete-branch: true
+          repos: ${{ env.STAR_HISTORY_REPOSITORY }}
+          output-dir: docs/assets/star-history
+          readme: README.md
+          type: Date
+          themes: light,dark
+          commit: true
+          commit-message: "docs: update star history chart [skip ci]"
