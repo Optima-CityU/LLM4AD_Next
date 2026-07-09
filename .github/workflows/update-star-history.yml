@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   STAR_HISTORY_REPOSITORY: ${{ github.event.inputs.repository || vars.STAR_HISTORY_REPOSITORY || github.repository }}
@@ -34,5 +35,18 @@ jobs:
           readme: README.md
           type: Date
           themes: light,dark
-          commit: true
+          commit: false
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/update-star-history
+          base: main
+          title: "docs: update star history chart"
           commit-message: "docs: update star history chart [skip ci]"
+          body: "Automatically updates the static star history chart image."
+          add-paths: |
+            README.md
+            docs/assets/star-history
+          delete-branch: true
