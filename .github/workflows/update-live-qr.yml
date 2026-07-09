@@ -15,7 +15,7 @@ permissions:
   pull-requests: write
 
 env:
-  QR_URL: ${{ github.event.inputs.qr_url || vars.LIVE_QR_URL || 'http://8.163.71.37/api/v1/live-qr/Ksndoq1l' }}
+  QR_URL: ${{ github.event.inputs.qr_url || vars.LIVE_QR_URL || 'https://llm4ad-next.cn/api/v1/live-qr/Ksndoq1l' }}
   QR_PATH: docs/assets/live-qr.png
 
 jobs:

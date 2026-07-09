@@ -24,7 +24,7 @@
 
 ## 🔥 News
 
-- 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [http://8.163.71.37/](http://8.163.71.37/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
+- 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [https://llm4ad-next.cn/](https://llm4ad-next.cn/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
 - ✨ [2026.07][New Feature]: Introducing an **interactive problem-to-project workflow** that turns natural-language problem descriptions into runnable evolutionary algorithm search projects.
 - 🐳 [2026.07][New Feature]: Versioned **Docker Hub deployment images** are now aligned with GitHub Release tags for reproducible local deployment.
 
@@ -78,7 +78,7 @@ Our built-in AI-powered consultant will interview you, instantly understand your
   </tr>
   <tr>
     <td align="center" width="33%">
-      <a href="http://8.163.71.37/">
+      <a href="https://llm4ad-next.cn/">
         <img src="https://img.shields.io/badge/Launch%20Online%20Demo-Open%20Now-2ea44f?style=for-the-badge"
              alt="Launch Online Demo">
       </a>
@@ -115,7 +115,7 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 ### Option A: Online Demo (No Installation Required)
 
 Use the online demo from [Quick Start](#quick-start), or open it directly:
-[Launch Online Demo](http://8.163.71.37/).
+[Launch Online Demo](https://llm4ad-next.cn/).
 
 No setup, no API key needed — just open the link and start designing algorithms.
 
