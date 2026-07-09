@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/llm4ad/">
-    <img src="https://img.shields.io/pypi/v/llm4ad?color=blue" alt="PyPI Version">
+  <a href="https://pypi.org/project/llm4ad-next/">
+    <img src="https://img.shields.io/pypi/v/llm4ad-next?color=blue" alt="PyPI Version">
   </a>
-  <a href="https://pypi.org/project/llm4ad/">
+  <a href="https://pypi.org/project/llm4ad-next/">
     <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python Versions">
   </a>
   <a href="https://github.com/Optima-CityU/LLM4AD_Next/blob/main/LICENSE">

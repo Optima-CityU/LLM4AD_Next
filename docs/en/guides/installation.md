@@ -54,14 +54,14 @@ Use this method when you want the published Python package and CLI without
 modifying the source tree.
 
 ```bash
-pip install llm4ad
+pip install llm4ad-next
 ```
 
 Install optional dependency groups as needed:
 
 ```bash
-pip install "llm4ad[providers,eval]"
-pip install "llm4ad[all]"
+pip install "llm4ad-next[providers,eval]"
+pip install "llm4ad-next[all]"
 ```
 
 ## Optional Dependencies
