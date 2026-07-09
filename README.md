@@ -243,4 +243,8 @@ Scan the QR code with WeChat to join the LLM4AD_Next community group.
 ## Star History
 
 <!-- star-history:start -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history/star-history-dark-20260709012905.svg">
+  <img alt="Star history" src="docs/assets/star-history/star-history-light-20260709012905.svg">
+</picture>
 <!-- star-history:end -->
