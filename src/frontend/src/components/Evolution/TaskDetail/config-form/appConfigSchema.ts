@@ -97,10 +97,31 @@ export const coderConfigSchema = z.discriminatedUnion("type", [
 
 // --- Memory ---
 export const memoryConfigSchema = z.object({
+  type: z.string().default("local_yaml"),
+  module: z.string().nullable().optional(),
+  enabled: z.boolean().default(true),
   embedding_dim: z.coerce.number().int().min(1).default(768),
   max_entries: z.coerce.number().int().min(1).default(10000),
   similarity_threshold: z.coerce.number().min(0).max(1).default(0.8),
   decay_factor: z.coerce.number().min(0).max(1).default(0.99),
+  mindmemos_base_url: z.string().default(""),
+  mindmemos_api_key: z.string().default(""),
+  mindmemos_user_id: z.string().default(""),
+  mindmemos_app_id: z.string().default("llm4ad"),
+  mindmemos_agent_id: z.string().default("planner"),
+  mindmemos_session_id: z.string().default(""),
+  mindmemos_project_id: z.string().default(""),
+  mindmemos_search_strategy: z.string().default("fast"),
+  mindmemos_rerank: z.boolean().default(false),
+  mindmemos_score_threshold: z.coerce.number().min(0).max(1).nullable().optional(),
+  mindmemos_fail_open: z.boolean().default(true),
+  mindmemos_sync_static_cards: z.boolean().default(false),
+  include_user_memory: z.boolean().default(true),
+  include_project_memory: z.boolean().default(true),
+  include_task_memory: z.boolean().default(true),
+  user_memory_limit: z.coerce.number().int().min(0).default(5),
+  project_memory_limit: z.coerce.number().int().min(0).default(5),
+  task_memory_limit: z.coerce.number().int().min(0).default(5),
 })
 
 // --- Logging ---

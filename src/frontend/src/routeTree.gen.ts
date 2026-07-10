@@ -22,6 +22,7 @@ import { Route as Layout_evolutionEvolutionRouteImport } from './routes/_layout_
 import { Route as Layout_demoDemoRouteImport } from './routes/_layout_demo/demo'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
+import { Route as LayoutMemoryRouteImport } from './routes/_layout/memory'
 import { Route as LayoutLlm_roviderRouteImport } from './routes/_layout/llm_rovider'
 import { Route as LayoutLiveCodesRouteImport } from './routes/_layout/live-codes'
 import { Route as LayoutGuideRouteImport } from './routes/_layout/guide'
@@ -93,6 +94,11 @@ const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutMemoryRoute = LayoutMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutLlm_roviderRoute = LayoutLlm_roviderRouteImport.update({
   id: '/llm_rovider',
   path: '/llm_rovider',
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/guide': typeof LayoutGuideRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
+  '/memory': typeof LayoutMemoryRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/demo': typeof Layout_demoDemoRoute
@@ -162,6 +169,7 @@ export interface FileRoutesByTo {
   '/guide': typeof LayoutGuideRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
+  '/memory': typeof LayoutMemoryRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/demo': typeof Layout_demoDemoRoute
@@ -185,6 +193,7 @@ export interface FileRoutesById {
   '/_layout/guide': typeof LayoutGuideRoute
   '/_layout/live-codes': typeof LayoutLiveCodesRoute
   '/_layout/llm_rovider': typeof LayoutLlm_roviderRoute
+  '/_layout/memory': typeof LayoutMemoryRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout_demo/demo': typeof Layout_demoDemoRoute
@@ -206,6 +215,7 @@ export interface FileRouteTypes {
     | '/guide'
     | '/live-codes'
     | '/llm_rovider'
+    | '/memory'
     | '/projects'
     | '/settings'
     | '/demo'
@@ -225,6 +235,7 @@ export interface FileRouteTypes {
     | '/guide'
     | '/live-codes'
     | '/llm_rovider'
+    | '/memory'
     | '/projects'
     | '/settings'
     | '/demo'
@@ -247,6 +258,7 @@ export interface FileRouteTypes {
     | '/_layout/guide'
     | '/_layout/live-codes'
     | '/_layout/llm_rovider'
+    | '/_layout/memory'
     | '/_layout/projects'
     | '/_layout/settings'
     | '/_layout_demo/demo'
@@ -365,6 +377,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutLlm_roviderRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/memory': {
+      id: '/_layout/memory'
+      path: '/memory'
+      fullPath: '/memory'
+      preLoaderRoute: typeof LayoutMemoryRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/live-codes': {
       id: '/_layout/live-codes'
       path: '/live-codes'
@@ -418,6 +437,7 @@ interface LayoutRouteChildren {
   LayoutGuideRoute: typeof LayoutGuideRoute
   LayoutLiveCodesRoute: typeof LayoutLiveCodesRoute
   LayoutLlm_roviderRoute: typeof LayoutLlm_roviderRoute
+  LayoutMemoryRoute: typeof LayoutMemoryRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
 }
@@ -430,6 +450,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutGuideRoute: LayoutGuideRoute,
   LayoutLiveCodesRoute: LayoutLiveCodesRoute,
   LayoutLlm_roviderRoute: LayoutLlm_roviderRoute,
+  LayoutMemoryRoute: LayoutMemoryRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
 }

@@ -17,8 +17,9 @@ COPY third_party/MindMemOS/README.md ./README.md
 COPY third_party/MindMemOS/src ./src
 COPY third_party/MindMemOS/config ./config
 COPY third_party/MindMemOS/scripts ./scripts
+COPY docker/mindmemos/render_config.py ./render_config.py
 
 RUN --mount=type=cache,id=uv-mindmemos,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package mindmemos
 
-CMD ["python", "-m", "uvicorn", "mindmemos.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python /app/mindmemos/render_config.py && MINDMEMOS_CONFIG_PATH=${MINDMEMOS_RENDERED_CONFIG:-/tmp/mindmemos-dev.yaml} python -m uvicorn mindmemos.api.app:app --host 0.0.0.0 --port 8000"]

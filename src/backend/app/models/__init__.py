@@ -67,8 +67,10 @@ from app.models.llm4ad import (  # noqa: F401
     EmbeddingProviderType,
     LLMProvider,
     LLMProviderBase,
+    MemoryConfigBase,
     Project,
     ProjectBase,
+    ProjectMemoryConfig,
     ProviderType,
     Task,
     TaskBase,
@@ -76,6 +78,7 @@ from app.models.llm4ad import (  # noqa: F401
     TaskStatus,
     UserDefaultModel,
     UserDefaultModelBase,
+    UserMemoryConfig,
 )
 
 # RBAC 权限模型（定义关联表，需在 User 之前导入）

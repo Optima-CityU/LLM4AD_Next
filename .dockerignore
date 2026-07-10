@@ -1,0 +1,14 @@
+.git
+.ruff_cache
+.pytest_cache
+.mypy_cache
+.playwright-mcp
+**/__pycache__
+**/.ruff_cache
+**/.pytest_cache
+**/.mypy_cache
+**/node_modules
+**/dist
+docker/app-data
+docker/litellm-data
+docker/litellm-db

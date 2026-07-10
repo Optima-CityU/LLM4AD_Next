@@ -2,6 +2,7 @@ import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
 import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
+  Database,
   FolderKanban,
   MessageSquareText,
   QrCode,
@@ -85,6 +86,7 @@ export function AppSidebar() {
 
   const configItems: Item[] = [
     { icon: ServerCog, title: t("sidebar.llmProvider"), path: "/llm_rovider" },
+    { icon: Database, title: t("sidebar.memory"), path: "/memory" },
   ]
 
   const helpItems: Item[] = [

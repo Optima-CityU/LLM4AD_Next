@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "entity_types": [
+    {
+      "entity_type": "llm4ad_memory_card",
+      "entity_description": "Reusable LLM4AD algorithm memory cards extracted from user input, task execution, evolution results, failures, and project guidance.",
+      "entity_instruction": "Extract only information that is useful for future LLM4AD algorithm evolution. Each extracted memory entity must include exactly one substantive card property using one of: good_algorithm, error_reflection, domain_knowledge, general_insight. The tags property is optional user-facing metadata: generate it only when concise grouping labels can be inferred naturally from the same source message, and never skip an otherwise useful memory card because tags are uncertain. Do not create personal profile, conversation episode, organization, place, or other unrelated entities. Prefer concise but complete technical statements. If the input is temporary chat, credentials, or has no reusable value for algorithm evolution, do not extract a memory.",
+      "search_weight": 1.0,
+      "static_property": {
+        "name": "A short stable title for this memory card, preferably describing the algorithm, error, domain, or insight."
+      },
+      "dynamic_property": {
+        "good_algorithm": {
+          "type": "string",
+          "order": 1,
+          "desc": "Successful algorithm design, operator choice, parameter range, search strategy, initialization method, repair method, or empirical pattern that should be reused. The value is the LLM4AD MemoryCard.content for type=good_algorithm.",
+          "example": "For medium-size TSP instances, 2-opt local search improves nearest-neighbor seed tours reliably, but the neighborhood should be capped on larger instances."
+        },
+        "error_reflection": {
+          "type": "string",
+          "order": 1,
+          "desc": "Failure lesson, runtime error, invalid assumption, unstable parameter, implementation pitfall, or debugging reflection that should help avoid repeated mistakes. The value is the LLM4AD MemoryCard.content for type=error_reflection.",
+          "example": "A mutation rate above 0.2 caused the population to collapse quickly; start below 0.05 for similar evolutionary search tasks."
+        },
+        "domain_knowledge": {
+          "type": "string",
+          "order": 1,
+          "desc": "Task or domain facts, constraints, objective details, benchmark characteristics, data assumptions, or project-specific requirements. The value is the LLM4AD MemoryCard.content for type=domain_knowledge.",
+          "example": "In this project, solution stability and interpretability are more important than small gains from complex black-box heuristics."
+        },
+        "general_insight": {
+          "type": "string",
+          "order": 1,
+          "desc": "General reusable insight, preference, heuristic, comparison, or planning guidance that does not clearly fit the other three memory types. The value is the LLM4AD MemoryCard.content for type=general_insight.",
+          "example": "When a heuristic has many interacting parameters, first tune one parameter group at a time and keep ablation notes for later runs."
+        },
+        "tags": {
+          "type": "string",
+          "order": 1,
+          "desc": "Optional user-facing metadata for filtering, searching, and grouping memory cards. When the source message naturally supports it, generate a concise comma-separated list of 0-6 visible tags using stable technical, algorithm, domain, task, or lesson labels. Do not include dates, generic words, credentials, full sentences, or labels that are not grounded in the source message.",
+          "example": "TSP, 2-opt, local-search"
+        }
+      }
+    }
+  ]
+}

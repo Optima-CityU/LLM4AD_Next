@@ -52,74 +52,6 @@ services:
       timeout: 10s
       retries: 10
 
-  mindmemos-kafka-exporter:
-    image: danielqsj/kafka-exporter:v1.8.0
-    restart: always
-    depends_on:
-      mindmemos-kafka:
-        condition: service_healthy
-    command:
-      - "--kafka.server=mindmemos-kafka:29092"
-      - "--web.listen-address=:9308"
-
-  mindmemos-clickhouse:
-    image: clickhouse/clickhouse-server:24.8
-    restart: always
-    environment:
-      CLICKHOUSE_USER: "${MINDMEMOS_CLICKHOUSE_USER:-mindmemos}"
-      CLICKHOUSE_PASSWORD: "${MINDMEMOS_CLICKHOUSE_PASSWORD:-mindmemos_dev_password}"
-      CLICKHOUSE_DB: "${MINDMEMOS_CLICKHOUSE_DB:-otel}"
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-    volumes:
-      - ./app-data/mindmemos/clickhouse/data:/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-
-  mindmemos-otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.127.0
-    restart: always
-    depends_on:
-      mindmemos-clickhouse:
-        condition: service_healthy
-    command: ["--config=/etc/otel/config.yaml"]
-    environment:
-      OTEL_GRPC_ENDPOINT: "0.0.0.0:4317"
-      OTEL_HTTP_ENDPOINT: "0.0.0.0:4318"
-      KAFKA_EXPORTER_TARGET: "mindmemos-kafka-exporter:9308"
-      CLICKHOUSE_ENDPOINT: "tcp://mindmemos-clickhouse:9000?dial_timeout=10s"
-      CLICKHOUSE_DATABASE: "${MINDMEMOS_CLICKHOUSE_DB:-otel}"
-      CLICKHOUSE_USERNAME: "${MINDMEMOS_CLICKHOUSE_USER:-mindmemos}"
-      CLICKHOUSE_PASSWORD: "${MINDMEMOS_CLICKHOUSE_PASSWORD:-mindmemos_dev_password}"
-      CLICKHOUSE_TTL: "${MINDMEMOS_OTEL_TTL:-72h}"
-    volumes:
-      - ../third_party/MindMemOS/dockers/otel-collector-config.yaml:/etc/otel/config.yaml:ro
-
-  mindmemos-grafana:
-    image: grafana/grafana:11.4.0
-    restart: always
-    depends_on:
-      mindmemos-clickhouse:
-        condition: service_healthy
-    environment:
-      GF_SECURITY_ADMIN_USER: "${MINDMEMOS_GRAFANA_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${MINDMEMOS_GRAFANA_PASSWORD:-admin}"
-      GF_INSTALL_PLUGINS: "grafana-clickhouse-datasource,yesoreyeram-infinity-datasource"
-      MINDMEMOS_CLICKHOUSE_DB: "${MINDMEMOS_CLICKHOUSE_DB:-otel}"
-      MINDMEMOS_CLICKHOUSE_USER: "${MINDMEMOS_CLICKHOUSE_USER:-mindmemos}"
-      MINDMEMOS_CLICKHOUSE_PASSWORD: "${MINDMEMOS_CLICKHOUSE_PASSWORD:-mindmemos_dev_password}"
-      MINDMEMOS_GRAFANA_QDRANT_URL: "http://mindmemos-qdrant:6333"
-    volumes:
-      - ./app-data/mindmemos/grafana/data:/var/lib/grafana
-      - ../third_party/MindMemOS/dockers/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ../third_party/MindMemOS/dockers/grafana/dashboards:/var/lib/grafana/dashboards:ro
-
   mindmemos-api:
     build:
       context: ../
@@ -146,7 +78,12 @@ services:
       MINDMEMOS_NEO4J_USERNAME: "${MINDMEMOS_NEO4J_USERNAME:-neo4j}"
       MINDMEMOS_NEO4J_PASSWORD: "${MINDMEMOS_NEO4J_PASSWORD:-mindmemos_dev_password}"
       MINDMEMOS_KAFKA_BOOTSTRAP_SERVERS: mindmemos-kafka:29092
-      MINDMEMOS_TELEMETRY_ENDPOINT: http://mindmemos-otel-collector:4318
+      MINDMEMOS_AUTH_MODE: gateway_jwt
+      MINDMEMOS_GATEWAY_JWT_SECRET: "${LLM4AD_MINDMEMOS_JWT_SECRET:-demo-jwt-secret-key}"
+      MINDMEMOS_GATEWAY_JWT_ISSUER: "${LLM4AD_MINDMEMOS_JWT_ISSUER:-demo-jwt-gateway}"
+      MINDMEMOS_GATEWAY_JWT_AUDIENCE: "${LLM4AD_MINDMEMOS_JWT_AUDIENCE:-demo-jwt-audience}"
+      MINDMEMOS_PROVIDER_BINDING_ENABLED: "true"
+      MINDMEMOS_PROJECT_COLLECTION_NAMESPACE_ENABLED: "true"
     volumes:
       - ./mindmemos/config:/app/mindmemos/config/mindmemos:ro
     healthcheck:

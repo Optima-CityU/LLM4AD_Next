@@ -46,6 +46,16 @@ class MemoryCardConfig(BaseModel):
             multiline=True,
         ),
     )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this memory card can be injected into prompts",
+        json_schema_extra=ui(
+            label_zh="启用",
+            label_en="Enabled",
+            desc_zh="是否允许该记忆卡片注入后续提示词",
+            desc_en="Whether this memory card can be injected into future prompts",
+        ),
+    )
     tags: list[str] = Field(
         default_factory=list, description="Tags for filtering and retrieval",
         json_schema_extra=ui(
@@ -201,7 +211,10 @@ class MemoryConfig(BaseModel):
             label_zh="Memory 类型",
             label_en="Memory Type",
             desc_zh="记忆模块注册名称：local_yaml 或 mindmemos_cloud；自定义实现可填写注册名",
-            desc_en="Registered memory implementation: local_yaml or mindmemos_cloud; custom backends can use their registered name",
+            desc_en=(
+                "Registered memory implementation: local_yaml or mindmemos_cloud; "
+                "custom backends can use their registered name"
+            ),
         ),
     )
     module: str | None = Field(
@@ -236,6 +249,16 @@ class MemoryConfig(BaseModel):
             label_zh="衰减因子", label_en="Decay Factor",
             desc_zh="记忆随时间衰减的因子，值越小衰减越快（0.0-1.0）",
             desc_en="Temporal decay factor; lower values decay faster (0.0-1.0)",
+        ),
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether memory is enabled for this task",
+        json_schema_extra=ui(
+            label_zh="启用记忆",
+            label_en="Enable Memory",
+            desc_zh="是否在当前任务中启用记忆系统",
+            desc_en="Whether to enable memory for this task",
         ),
     )
 
@@ -371,6 +394,69 @@ class MemoryConfig(BaseModel):
             label_en="Allow Remote Clear",
             desc_zh="危险选项，默认关闭",
             desc_en="Dangerous option, disabled by default",
+        ),
+    )
+    include_project_memory: bool = Field(
+        default=True,
+        description="Include project-scoped memory when building prompt context",
+        json_schema_extra=ui(
+            label_zh="注入项目级记忆",
+            label_en="Include Project Memory",
+            desc_zh="是否在当前任务中注入项目级共享记忆",
+            desc_en="Whether to include project-scoped shared memory in this task",
+        ),
+    )
+    include_user_memory: bool = Field(
+        default=True,
+        description="Include user-scoped memory when building prompt context",
+        json_schema_extra=ui(
+            label_zh="注入用户级记忆",
+            label_en="Include User Memory",
+            desc_zh="是否在当前任务中注入用户级共享记忆",
+            desc_en="Whether to include user-scoped shared memory in this task",
+        ),
+    )
+    include_task_memory: bool = Field(
+        default=True,
+        description="Include task-scoped memory when building prompt context",
+        json_schema_extra=ui(
+            label_zh="注入任务级记忆",
+            label_en="Include Task Memory",
+            desc_zh="是否在当前任务中注入任务级记忆",
+            desc_en="Whether to include task-scoped memory in this task",
+        ),
+    )
+    project_memory_limit: int = Field(
+        default=5,
+        ge=0,
+        description="Maximum project-scoped memories to include",
+        json_schema_extra=ui(
+            label_zh="项目级记忆数量",
+            label_en="Project Memory Limit",
+            desc_zh="每次提示词中最多注入的项目级记忆数量",
+            desc_en="Maximum project-scoped memories injected into each prompt",
+        ),
+    )
+    user_memory_limit: int = Field(
+        default=5,
+        ge=0,
+        description="Maximum user-scoped memories to include",
+        json_schema_extra=ui(
+            label_zh="用户级记忆数量",
+            label_en="User Memory Limit",
+            desc_zh="每次提示词中最多注入的用户级记忆数量",
+            desc_en="Maximum user-scoped memories injected into each prompt",
+        ),
+    )
+    task_memory_limit: int = Field(
+        default=5,
+        ge=0,
+        description="Maximum task-scoped memories to include",
+        json_schema_extra=ui(
+            label_zh="任务级记忆数量",
+            label_en="Task Memory Limit",
+            desc_zh="每次提示词中最多注入的任务级记忆数量",
+            desc_en="Maximum task-scoped memories injected into each prompt",
         ),
     )
 

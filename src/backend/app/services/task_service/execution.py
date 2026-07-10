@@ -354,6 +354,54 @@ def _apply_credential_proxy(
         _swap(cfg)
 
 
+def _apply_mindmemos_runtime_config(
+    input_args: dict,
+    *,
+    current_user: models.User,
+    task_id: uuid.UUID | str,
+    project_id: uuid.UUID | str,
+) -> None:
+    """Inject system-level MindMemOS settings into task run arguments."""
+    if not settings.mindmemos_runtime_available:
+        return
+
+    memory = input_args.get("memory")
+    if not isinstance(memory, dict):
+        memory = {}
+        input_args["memory"] = memory
+    if memory.get("enabled") is False:
+        return
+    if memory.get("type") not in (None, "", "mindmemos_cloud"):
+        return
+
+    memory.update(
+        {
+            "type": "mindmemos_cloud",
+            "mindmemos_base_url": settings.LLM4AD_MINDMEMOS_BASE_URL.rstrip("/"),
+            "mindmemos_api_key": _mindmemos_task_token(current_user),
+            "mindmemos_user_id": str(current_user.id),
+            "mindmemos_app_id": settings.LLM4AD_MINDMEMOS_APP_ID,
+            "mindmemos_agent_id": "task",
+            "mindmemos_session_id": str(task_id),
+            "mindmemos_project_id": str(project_id),
+        }
+    )
+    memory.setdefault("mindmemos_fail_open", settings.LLM4AD_MINDMEMOS_FAIL_OPEN)
+    memory.setdefault("include_user_memory", True)
+    memory.setdefault("include_project_memory", True)
+    memory.setdefault("include_task_memory", True)
+
+
+def _mindmemos_task_token(current_user: models.User) -> str:
+    from app.services import memory_service
+
+    return memory_service._mindmemos_gateway_token(
+        current_user,
+        scopes=["memory:read", "memory:write"],
+        ttl_seconds=settings.TASK_TIME_LIMIT + 3600,
+    )
+
+
 def run_task(
     db: Session,
     task_id: uuid.UUID,
@@ -395,6 +443,12 @@ def run_task(
     input_args["project_name"] = "llm4ad"
     input_args["base_dir"] = "/task/data/"
     input_args["run_id"] = "run"
+    _apply_mindmemos_runtime_config(
+        input_args,
+        current_user=current_user,
+        task_id=task_id,
+        project_id=task.project_id,
+    )
     task_args = {
         "task_id": task_id,
         "project_id": task.project_id,

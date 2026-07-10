@@ -12,7 +12,7 @@ telemetry:
   metric_export_interval_millis: 5000
 
 auth:
-  mode: api_key
+  mode: gateway_jwt
   api_key_file: api_keys.yaml
   gateway_jwt_secret: demo-jwt-secret-key
   gateway_jwt_issuer: demo-jwt-gateway
@@ -38,6 +38,7 @@ database:
     grpc_port: 6334
     prefer_grpc: true
     vector_size: 1024
+    project_collection_namespace_enabled: true
     auto_create: true
 
   neo4j:
@@ -48,6 +49,9 @@ database:
     auto_create_schema: true
 
   default_consistency: fast
+
+provider_binding:
+  enabled: true
 
 kafka:
   enabled: true
@@ -64,7 +68,7 @@ algo_config:
     prompt_language: EN
   add:
     schema:
-      entity_modeling_path: config/presets/entity_modeling.json
+      entity_modeling_path: config/mindmemos/presets/llm4ad_memory_card.json
     vanilla:
       enable_entities: false
   search:

@@ -164,6 +164,7 @@
     "research": "研究",
     "globalConfig": "全局配置",
     "llmProvider": "模型供应商",
+    "memory": "记忆配置",
     "helpAndInfo": "帮助与信息",
     "userManual": "使用手册",
     "admin": "管理员",
@@ -310,6 +311,9 @@
       "modeSplit": "Text / Code 分流",
       "textConfig": "Text Embedding 配置",
       "codeConfig": "Code Embedding 配置",
+      "sharedTaskConfig": "Text / Code 共用配置",
+      "shareTaskConfig": "Text 和 Code 使用同一配置",
+      "shareTaskConfigHint": "勾选后 Code embedding 会复用左侧 Base URL、API Key、模型和任务模式，无需重复填写。",
       "textModel": "Text 模型",
       "codeModel": "Code 模型",
       "textTask": "Text 任务模式",
@@ -548,6 +552,7 @@
       "overview": "演化仿真",
       "render": "结果渲染",
       "insights": "结果洞察",
+      "memory": "任务记忆",
       "ide": "打开IDE"
     },
     "renderPlaceholder": "结果渲染 - 功能开发中...",
@@ -568,6 +573,41 @@
       "trajectory.title": "进化策略嵌入"
     },
     "insightsPlaceholder": "结果洞察 - 功能开发中...",
+    "memory": {
+      "title": "任务记忆",
+      "description": "管理当前任务在后续演化提示词中注入的经验",
+      "loadFailed": "加载任务记忆失败",
+      "saveFailed": "保存记忆卡片失败",
+      "deleteFailed": "删除记忆卡片失败",
+      "required": "标题和内容不能为空",
+      "saved": "记忆卡片已保存",
+      "deleted": "记忆卡片已删除",
+      "new": "新建",
+      "add": "添加",
+      "loading": "正在加载记忆...",
+      "empty": "暂无任务记忆",
+      "emptyHint": "可以添加可复用的教训、领域知识或算法经验，用于当前任务后续演化。",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "fields": {
+        "title": "标题",
+        "type": "类型",
+        "content": "内容",
+        "tags": "标签",
+        "enabled": "启用"
+      },
+      "placeholders": {
+        "title": "简短的记忆标题",
+        "content": "后续演化中需要复用什么经验？",
+        "tags": "用逗号分隔多个标签"
+      },
+      "types": {
+        "good_algorithm": "优秀算法经验",
+        "error_reflection": "错误反思",
+        "domain_knowledge": "领域知识",
+        "general_insight": "通用经验"
+      }
+    },
     "insights": {
       "tech_change": "整体总结",
       "node_comparison": "节点对比",
@@ -1485,10 +1525,31 @@
       "anthropicAuthToken": "Anthropic Auth Token"
     },
     "memory": {
+      "enabled": "使用记忆注入（关闭用于对比无记忆效果）",
+      "type": "后端类型（系统托管）",
+      "module": "自定义模块",
       "embeddingDimension": "嵌入维度",
       "maxEntries": "最大条目数",
       "similarityThreshold": "相似度阈值",
-      "decayFactor": "衰减因子"
+      "decayFactor": "衰减因子",
+      "mindmemosBaseUrl": "MindMemOS Base URL",
+      "mindmemosApiKey": "MindMemOS API Key",
+      "mindmemosUserId": "MindMemOS 用户 ID",
+      "mindmemosAppId": "MindMemOS 应用 ID",
+      "mindmemosAgentId": "MindMemOS Agent ID",
+      "mindmemosSessionId": "MindMemOS 会话 ID",
+      "mindmemosProjectId": "MindMemOS 项目 ID",
+      "mindmemosSearchStrategy": "MindMemOS 搜索策略",
+      "mindmemosRerank": "MindMemOS 重排",
+      "mindmemosScoreThreshold": "MindMemOS 分数阈值",
+      "mindmemosFailOpen": "MindMemOS 失败放行",
+      "mindmemosSyncStaticCards": "同步静态记忆",
+      "includeUserMemory": "注入用户级记忆",
+      "includeProjectMemory": "注入项目级记忆",
+      "includeTaskMemory": "注入任务级记忆",
+      "userMemoryLimit": "用户级注入条数",
+      "projectMemoryLimit": "项目级注入条数",
+      "taskMemoryLimit": "任务级注入条数"
     },
     "logging": {
       "level": "日志级别",

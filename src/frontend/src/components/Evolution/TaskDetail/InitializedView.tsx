@@ -1,17 +1,19 @@
 import {
   Activity,
   Code,
+  Database,
   Download,
   Eye,
   Lightbulb,
   Loader2,
   RefreshCw,
 } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { TaskResponse } from "@/client"
-import { UtilsCodeServerService } from "@/client"
+import { UtilsCodeServerService, UtilsService } from "@/client"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { useTheme } from "@/components/theme-provider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -28,6 +30,7 @@ import { authFetch } from "@/utils/auth"
 import InsightsSplitView from "./InsightsSplitView"
 import MultiPanelLayout from "./MultiPanelLayout"
 import RenderSplitView from "./RenderSplitView"
+import TaskMemoryPanel from "./TaskMemoryPanel"
 
 const REFRESH_COOLDOWN_MS = 3000
 
@@ -59,6 +62,12 @@ export default function InitializedView({ task }: InitializedViewProps) {
   const [isDownloadingWorkspace, setIsDownloadingWorkspace] = useState(false)
   const { activeTab, setActiveTab, selectedNodes } = useEvolution()
   const { resolvedTheme } = useTheme()
+  const { data: featureFlags } = useQuery({
+    queryKey: ["featureFlags"],
+    queryFn: () => UtilsService.featureFlags(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const mindmemosMemoryEnabled = featureFlags?.mindmemos_memory_enabled ?? false
 
   const loadCodeToken = useCallback(() => {
     setIdeState("loading")
@@ -91,6 +100,12 @@ export default function InitializedView({ task }: InitializedViewProps) {
       loadCodeToken()
     }
   }, [activeTab, ideState, loadCodeToken, task.id])
+
+  useEffect(() => {
+    if (!mindmemosMemoryEnabled && activeTab === "memory") {
+      setActiveTab("overview")
+    }
+  }, [activeTab, mindmemosMemoryEnabled, setActiveTab])
 
   const handleRefreshIDE = () => {
     if (isRefreshing) return
@@ -197,6 +212,15 @@ export default function InitializedView({ task }: InitializedViewProps) {
             <Lightbulb className="size-3.5" />
             {t("evolution.tabs.insights")}
           </TabsTrigger>
+          {mindmemosMemoryEnabled && (
+            <TabsTrigger
+              value="memory"
+              className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
+            >
+              <Database className="size-3.5" />
+              {t("evolution.tabs.memory")}
+            </TabsTrigger>
+          )}
           {!isDemoTaskId(task.id) && (
             <TooltipProvider delayDuration={200}>
               <Tooltip>
@@ -294,6 +318,16 @@ export default function InitializedView({ task }: InitializedViewProps) {
       >
         <InsightsSplitView task={task} />
       </TabsContent>
+
+      {mindmemosMemoryEnabled && (
+        <TabsContent
+          value="memory"
+          className="flex-1 min-h-0 data-[state=inactive]:hidden"
+          forceMount
+        >
+          <TaskMemoryPanel taskId={task.id} />
+        </TabsContent>
+      )}
 
       <TabsContent value="ide" className="flex-1 min-h-0">
         {isDemoTaskId(task.id) ? (

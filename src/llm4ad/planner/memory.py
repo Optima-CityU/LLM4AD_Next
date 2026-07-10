@@ -71,6 +71,7 @@ class MemoryCard(BaseModel):
     type: MemoryType
     title: str  # Short human-readable title
     content: str  # Main textual content
+    enabled: bool = True  # Whether this card can be injected into prompts
     source: Literal["static", "auto"] = "static"
 
     # Optional structured fields
@@ -96,6 +97,7 @@ class MemoryCard(BaseModel):
             metadata={
                 "title": self.title,
                 "source": self.source,
+                "enabled": self.enabled,
                 "tags": self.tags,
                 "algorithm_id": self.algorithm_id,
                 **self.metadata,
@@ -116,10 +118,11 @@ class MemoryCard(BaseModel):
         title = entry.metadata.get("title", entry.content[:60].strip())
         tags = entry.metadata.get("tags", [])
         algorithm_id = entry.metadata.get("algorithm_id")
+        enabled = entry.metadata.get("enabled", True)
         # Remove keys that are stored as top-level fields
         extra_metadata = {
             k: v for k, v in entry.metadata.items()
-            if k not in ("title", "source", "tags", "algorithm_id")
+            if k not in ("title", "source", "enabled", "tags", "algorithm_id")
         }
 
         return cls(
@@ -128,6 +131,7 @@ class MemoryCard(BaseModel):
             title=title,
             content=entry.content,
             source=source,
+            enabled=bool(enabled),
             score=entry.score,
             generation=entry.generation,
             algorithm_id=algorithm_id,
@@ -258,6 +262,26 @@ class BaseMemory(ABC, Registrable):
     @abstractmethod
     async def add_card(self, card: MemoryCard, persist: bool | None = None) -> None:
         """Add a memory card to the module."""
+        ...
+
+    @abstractmethod
+    def list_cards(self) -> list[MemoryCard]:
+        """Return memory cards managed by this module."""
+        ...
+
+    @abstractmethod
+    async def upsert_card(self, card: MemoryCard, persist: bool | None = None) -> MemoryCard:
+        """Create or update a memory card."""
+        ...
+
+    @abstractmethod
+    async def delete_card(self, card_id: str) -> None:
+        """Delete a memory card by id."""
+        ...
+
+    @abstractmethod
+    async def set_card_enabled(self, card_id: str, enabled: bool) -> MemoryCard:
+        """Enable or disable a memory card."""
         ...
 
     @abstractmethod
@@ -651,6 +675,8 @@ class Memory(BaseMemory):
         self._cards: list[MemoryCard] = []
         self.memory_dir: Path | None = None
         self.max_prompt_cards: int = config.get("max_prompt_cards", 5)
+        self.include_task_memory: bool = bool(config.get("include_task_memory", True))
+        self.task_memory_limit: int = int(config.get("task_memory_limit", self.max_prompt_cards))
         self.persist_enabled: bool = config.get("persist", True)
 
     def set_memory_dir(self, memory_dir: Path) -> None:
@@ -706,6 +732,7 @@ class Memory(BaseMemory):
                     title=card_config.title,
                     content=card_config.content,
                     source="static",
+                    enabled=getattr(card_config, "enabled", True),
                     tags=card_config.tags,
                     score=card_config.score,
                     metadata=card_config.metadata,
@@ -811,6 +838,18 @@ class Memory(BaseMemory):
             card: The memory card to add.
             persist: Whether to persist to disk. None uses self.persist_enabled.
         """
+        await self.upsert_card(card, persist=persist)
+
+    def list_cards(self) -> list[MemoryCard]:
+        """Return all memory cards in insertion order."""
+        return list(self._cards)
+
+    async def upsert_card(self, card: MemoryCard, persist: bool | None = None) -> MemoryCard:
+        """Create or replace a memory card and optionally persist it."""
+        existing_index = next((idx for idx, item in enumerate(self._cards) if item.id == card.id), None)
+        if existing_index is not None:
+            await self.delete_card(card.id)
+
         entry = card.to_entry()
         await self.add(entry)
         self._cards.append(card)
@@ -818,6 +857,30 @@ class Memory(BaseMemory):
         should_persist = persist if persist is not None else self.persist_enabled
         if should_persist:
             await self.persist_card(card)
+        return card
+
+    async def delete_card(self, card_id: str) -> None:
+        """Delete a memory card from runtime indexes and disk."""
+        entry = self.entries.pop(card_id, None)
+        if entry is not None:
+            self._type_index[entry.memory_type].discard(card_id)
+            if entry.generation in self._generation_index:
+                self._generation_index[entry.generation].discard(card_id)
+                if not self._generation_index[entry.generation]:
+                    del self._generation_index[entry.generation]
+
+        self._cards = [card for card in self._cards if card.id != card_id]
+        if self.memory_dir:
+            for yaml_file in self.memory_dir.glob(f"*_{card_id}.yaml"):
+                yaml_file.unlink(missing_ok=True)
+
+    async def set_card_enabled(self, card_id: str, enabled: bool) -> MemoryCard:
+        """Enable or disable a memory card."""
+        for card in self._cards:
+            if card.id == card_id:
+                updated = card.model_copy(update={"enabled": enabled})
+                return await self.upsert_card(updated)
+        raise KeyError(card_id)
 
     async def persist_card(self, card: MemoryCard) -> Path | None:
         """Save a MemoryCard to the memory directory as YAML.
@@ -941,7 +1004,11 @@ class Memory(BaseMemory):
         if not self._cards:
             return ""
 
+        if not self.include_task_memory:
+            return ""
+
         max_cards = max_cards if max_cards is not None else self.max_prompt_cards
+        max_cards = min(max_cards, self.task_memory_limit)
         if max_cards <= 0:
             return ""
 
@@ -951,6 +1018,8 @@ class Memory(BaseMemory):
         domain_cards: list[MemoryCard] = []
 
         for card in self._cards:
+            if not card.enabled:
+                continue
             if card.type == MemoryType.GOOD_ALGORITHM or card.type == MemoryType.GENERAL_INSIGHT:
                 good_cards.append(card)
             elif card.type == MemoryType.ERROR_REFLECTION:

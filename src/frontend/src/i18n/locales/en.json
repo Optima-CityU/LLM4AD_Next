@@ -164,6 +164,7 @@
     "research": "Research",
     "globalConfig": "Configuration",
     "llmProvider": "LLM Providers",
+    "memory": "Memory",
     "helpAndInfo": "Help & Info",
     "userManual": "User Manual",
     "admin": "Admin",
@@ -310,6 +311,9 @@
       "modeSplit": "Text / Code split",
       "textConfig": "Text Embedding Config",
       "codeConfig": "Code Embedding Config",
+      "sharedTaskConfig": "Shared Text / Code Config",
+      "shareTaskConfig": "Use the same config for Text and Code",
+      "shareTaskConfigHint": "When enabled, code embedding reuses the Base URL, API key, model, and task mode from the text config.",
       "textModel": "Text model",
       "codeModel": "Code model",
       "textTask": "Text task",
@@ -548,6 +552,7 @@
       "overview": "Simulation",
       "render": "Rendering",
       "insights": "Insights",
+      "memory": "Memory",
       "ide": "Open IDE"
     },
     "renderPlaceholder": "Rendering - Coming soon...",
@@ -568,6 +573,41 @@
       "trajectory.title": "Evolutionary Strategy Embedding"
     },
     "insightsPlaceholder": "Insights - Coming soon...",
+    "memory": {
+      "title": "Task Memory",
+      "description": "Manage task-scoped memories injected into later evolution prompts",
+      "loadFailed": "Failed to load task memory",
+      "saveFailed": "Failed to save memory card",
+      "deleteFailed": "Failed to delete memory card",
+      "required": "Title and content are required",
+      "saved": "Memory card saved",
+      "deleted": "Memory card deleted",
+      "new": "New",
+      "add": "Add",
+      "loading": "Loading memory...",
+      "empty": "No task memory yet",
+      "emptyHint": "Add reusable lessons, domain facts, or algorithm insights for this task.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "fields": {
+        "title": "Title",
+        "type": "Type",
+        "content": "Content",
+        "tags": "Tags",
+        "enabled": "Enabled"
+      },
+      "placeholders": {
+        "title": "Short memory title",
+        "content": "What should be reused in future evolution?",
+        "tags": "Comma separated tags"
+      },
+      "types": {
+        "good_algorithm": "Good Algorithm",
+        "error_reflection": "Error Reflection",
+        "domain_knowledge": "Domain Knowledge",
+        "general_insight": "General Insight"
+      }
+    },
     "insights": {
       "tech_change": "Overall Summary",
       "node_comparison": "Node Comparison",
@@ -1484,10 +1524,31 @@
       "anthropicAuthToken": "Anthropic Auth Token"
     },
     "memory": {
+      "enabled": "Use memory injection (turn off to compare without memory)",
+      "type": "Backend Type (system managed)",
+      "module": "Custom Module",
       "embeddingDimension": "Embedding Dimension",
       "maxEntries": "Max Entries",
       "similarityThreshold": "Similarity Threshold",
-      "decayFactor": "Decay Factor"
+      "decayFactor": "Decay Factor",
+      "mindmemosBaseUrl": "MindMemOS Base URL",
+      "mindmemosApiKey": "MindMemOS API Key",
+      "mindmemosUserId": "MindMemOS User ID",
+      "mindmemosAppId": "MindMemOS App ID",
+      "mindmemosAgentId": "MindMemOS Agent ID",
+      "mindmemosSessionId": "MindMemOS Session ID",
+      "mindmemosProjectId": "MindMemOS Project ID",
+      "mindmemosSearchStrategy": "MindMemOS Search Strategy",
+      "mindmemosRerank": "MindMemOS Rerank",
+      "mindmemosScoreThreshold": "MindMemOS Score Threshold",
+      "mindmemosFailOpen": "MindMemOS Fail Open",
+      "mindmemosSyncStaticCards": "Sync Static Cards",
+      "includeUserMemory": "Include User Memory",
+      "includeProjectMemory": "Include Project Memory",
+      "includeTaskMemory": "Include Task Memory",
+      "userMemoryLimit": "User Memory Injection Limit",
+      "projectMemoryLimit": "Project Memory Injection Limit",
+      "taskMemoryLimit": "Task Memory Injection Limit"
     },
     "logging": {
       "level": "Level",
