@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
+import sys
 import traceback
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
@@ -318,10 +319,12 @@ def make_tools(
     - GATHER phase (``allow_build=False``): only ``read_file``, ``list_dir`` and
       ``propose_build``. No build tools, so the agent cannot start building before
       the user confirms — a hard gate, not just a prompt instruction.
-    - BUILD phase (``allow_build=True``): adds ``run_python``, ``build_task`` and
-      ``rebuild_evaluator``. ``build_task`` runs the existing
-      :class:`BuildOrchestrator` (engine generates everything and runs its
-      deterministic validation gate).
+    - BUILD phase (``allow_build=True``): adds ``run_python``, ``build_task``,
+      ``rebuild_evaluator``, ``revalidate``, ``write_file`` and ``edit_file``.
+      ``build_task`` runs the existing :class:`BuildOrchestrator` (engine
+      generates everything and runs its deterministic validation gate); if the
+      gate fails, the partial package is still written so the agent can fix it in
+      place and re-check with ``revalidate``.
 
     Inspection and execution tools are fenced to ``base_dir``.
 
@@ -486,7 +489,7 @@ def make_tools(
             return f"Error: Access denied, path escapes workspace: {path}"
         if not resolved.is_file():
             return f"Error: File not found: {path}"
-        cmd = ["python", str(resolved), *args.split()] if args else ["python", str(resolved)]
+        cmd = [sys.executable, str(resolved), *args.split()] if args else [sys.executable, str(resolved)]
         try:
             proc = subprocess.run(  # noqa: S603 - fixed interpreter, sandboxed path
                 cmd,
@@ -560,7 +563,34 @@ def make_tools(
         try:
             blueprint = await orchestrator.build(needs)
         except BuildError as exc:
-            return f"Build failed at validation gate: {exc}"
+            # The engine exhausted its auto-repair budget. If it produced a
+            # partial package, persist it to the workspace and stash it on state
+            # so the agent can inspect and fix it in place (read_file / edit_file
+            # / write_file / rebuild_evaluator) and re-check with revalidate,
+            # instead of blindly re-running the whole engine.
+            if exc.blueprint is None:
+                return f"Build failed before any package was produced: {exc}"
+            write_task_directory(exc.blueprint, str(base))
+            state.blueprint = exc.blueprint
+            state.needs = needs
+            state.project_name = exc.blueprint.project_name
+            failed_files = sorted(
+                p.relative_to(base).as_posix()
+                for p in (base / exc.blueprint.project_name).rglob("*")
+                if p.is_file()
+            )
+            return (
+                f"Build did NOT pass the validation gate, but a partial package "
+                f"was written to the workspace so you can fix it in place.\n"
+                f"Project: {exc.blueprint.project_name}\n"
+                f"Validation error(s):\n{exc}\n\n"
+                f"Files on disk:\n" + "\n".join(f"  {f}" for f in failed_files) + "\n\n"
+                "To fix: read the offending file with read_file, apply a targeted "
+                "fix with edit_file/write_file (or rebuild_evaluator for evaluator "
+                "logic), then call revalidate to re-run the validation gate. "
+                "Repeat until revalidate reports the gate passed. Prefer fixing in "
+                "place over calling build_task again."
+            )
         write_task_directory(blueprint, str(base))
         state.blueprint = blueprint
         state.needs = needs
@@ -610,6 +640,64 @@ def make_tools(
         return (
             "Evaluator updated and rewritten to the workspace. "
             f"Re-verify with run_python on `{state.project_name}/test_evaluator.py`."
+        )
+
+    async def revalidate() -> str:
+        """Re-run the deterministic validation gate on the current on-disk package.
+
+        Use after fixing a package that failed the gate (via edit_file /
+        write_file / rebuild_evaluator): this reloads your on-disk edits onto the
+        current blueprint and runs the validation gate ONCE with no auto-repair,
+        so your hand edits are checked as-is (never overwritten). Requires a prior
+        build_task (successful or failed) that produced a package.
+
+        Returns:
+            A confirmation that the gate passed, or the remaining validation
+            error(s) to fix.
+        """
+        from llm4ad.builder.validator import TaskValidator
+
+        if state.blueprint is None:
+            return "Error: no current package. Call build_task first."
+        bp = state.blueprint
+        project_dir = base / bp.project_name
+
+        # Reload on-disk edits onto the blueprint (reverse of write_task_directory).
+        def _read(rel: str) -> str | None:
+            fp = project_dir / rel
+            if not fp.is_file():
+                return None
+            try:
+                return fp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return None
+
+        for rel, attr in (
+            ("config.yaml", "config_yaml"),
+            (bp.evaluator_file_name, "evaluator_code"),
+            (f"{bp.algorithm_dir_name}/{bp.algorithm_file_name}", "algorithm_code"),
+            ("debug_run.py", "debug_run_code"),
+            ("test_evaluator.py", "test_evaluator_code"),
+        ):
+            content = _read(rel)
+            if content is not None:
+                setattr(bp, attr, content)
+
+        provider = _build_llm_provider(provider_config)
+        validator = TaskValidator(provider)
+        bp = validator.check(bp)
+        state.blueprint = bp
+
+        if bp.is_valid():
+            return (
+                "Validation gate PASSED on the current on-disk package. "
+                f"Now verify at runtime: run `{bp.project_name}/test_evaluator.py` "
+                f"and `{bp.project_name}/debug_run.py` with run_python."
+            )
+        errors = "\n".join(f"  - {e}" for e in bp.validation_errors)
+        return (
+            f"Validation gate still FAILING:\n{errors}\n\n"
+            f"Fix the offending file and call revalidate again."
         )
 
     def propose_plan(
@@ -779,6 +867,7 @@ def make_tools(
         _tool(run_python),
         _tool(build_task),
         _tool(rebuild_evaluator),
+        _tool(revalidate),
         _tool(write_file),
         _tool(edit_file),
     ]
