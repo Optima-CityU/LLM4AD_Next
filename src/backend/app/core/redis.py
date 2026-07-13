@@ -331,6 +331,180 @@ def check_chat_tune_rate_limit(session_id: str | uuid.UUID) -> bool:
     return bool(acquired)
 
 
+# ---- Research (auto-research pipeline) ----
+
+RESEARCH_GEN_PREFIX = "research_gen:"
+RESEARCH_GEN_TTL = 3600
+RESEARCH_STREAM_PREFIX = "research_stream:"
+RESEARCH_STREAM_TTL = 7200  # 2 小时，比调参长；科研 pipeline 更慢
+RESEARCH_STREAM_MAXLEN = 20000
+# gate 唤醒：桥接 worker 订阅 pub/sub channel 等用户 reply（见 save_research_gate_reply）。
+RESEARCH_GATE_REPLY_PREFIX = "research_gate:"
+RESEARCH_GATE_REPLY_TTL = 86400  # 24h，覆盖用户离开后再回来的情况
+
+
+def research_gen_key(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> str:
+    """构造科研生成 ID 在 Redis 中的 key。"""
+    return f"{RESEARCH_GEN_PREFIX}{session_id}:{turn_id}"
+
+
+def research_stream_key(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> str:
+    """构造科研 SSE Stream 在 Redis 中的 key。"""
+    return f"{RESEARCH_STREAM_PREFIX}{session_id}:{turn_id}"
+
+
+def research_gate_reply_key(
+    session_id: str | uuid.UUID, message_id: str | uuid.UUID
+) -> str:
+    """构造 gate 唤醒（用户回填表单）的 Redis 键。
+
+    键内容是 JSON 字符串：``{"submission": {...}, "message_id": "..."}``；
+    key 存在 = 该 gate 已被用户回复过。
+    """
+    return f"{RESEARCH_GATE_REPLY_PREFIX}{session_id}:{message_id}"
+
+
+def research_gate_channel(session_id: str | uuid.UUID) -> str:
+    """pub/sub channel：用户 reply 到达时 PUBLISH 到此，桥接 worker 订阅。"""
+    return f"research_gate_channel:{session_id}"
+
+
+def set_research_generation_id(
+    session_id: str | uuid.UUID,
+    turn_id: str | uuid.UUID,
+    generation_id: str,
+) -> None:
+    """记录当前活跃生成 ID，用于识别并发触发时哪次输出有效。"""
+    r = get_sync_redis()
+    r.set(
+        research_gen_key(session_id, turn_id),
+        generation_id,
+        ex=RESEARCH_GEN_TTL,
+    )
+
+
+def clear_research_generation_id(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> None:
+    """清除当前生成 ID。"""
+    r = get_sync_redis()
+    r.delete(research_gen_key(session_id, turn_id))
+
+
+def push_research_event(
+    session_id: str | uuid.UUID,
+    turn_id: str | uuid.UUID,
+    entry: dict,
+) -> None:
+    """向科研 Stream 追加一条事件（XADD）。
+
+    近似 MAXLEN 限流，首次写入时设置 TTL。失败仅记录日志，避免影响主流程。
+    entry 至少要包含 ``type`` 字段供前端分派渲染。
+    """
+    try:
+        r = get_sync_redis()
+        key = research_stream_key(session_id, turn_id)
+        payload = json.dumps(entry, ensure_ascii=False, default=str)
+        r.xadd(
+            key,
+            {"data": payload},
+            maxlen=RESEARCH_STREAM_MAXLEN,
+            approximate=True,
+        )
+        if r.ttl(key) == -1:
+            r.expire(key, RESEARCH_STREAM_TTL)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Push research event to Redis failed, session_id=%s, turn_id=%s",
+            session_id,
+            turn_id,
+            exc_info=True,
+        )
+
+
+def delete_research_stream(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> None:
+    """删除指定科研轮次的 Stream key。"""
+    r = get_sync_redis()
+    r.delete(research_stream_key(session_id, turn_id))
+
+
+def save_research_gate_reply(
+    session_id: str | uuid.UUID,
+    message_id: str | uuid.UUID,
+    submission: dict,
+) -> None:
+    """记录一次 gate 回填并 PUBLISH 唤醒桥接 worker。
+
+    两个步骤：先把 submission 落到 Redis（key 存在 = 已回填），再 PUBLISH
+    到会话级 channel。桥接 worker 收到 PUBLISH 后按 message_id 拿走
+    submission 继续 subprocess。
+    """
+    r = get_sync_redis()
+    key = research_gate_reply_key(session_id, message_id)
+    r.set(
+        key,
+        json.dumps(
+            {
+                "message_id": str(message_id),
+                "submission": submission,
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        ex=RESEARCH_GATE_REPLY_TTL,
+    )
+    r.publish(
+        research_gate_channel(session_id),
+        json.dumps(
+            {"message_id": str(message_id)}, ensure_ascii=False
+        ),
+    )
+
+
+def read_research_gate_reply(
+    session_id: str | uuid.UUID, message_id: str | uuid.UUID
+) -> dict | None:
+    """读取一次 gate 回填载荷；未设置时返回 None。"""
+    r = get_sync_redis()
+    raw = r.get(research_gate_reply_key(session_id, message_id))
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def clear_research_gate_reply(
+    session_id: str | uuid.UUID, message_id: str | uuid.UUID
+) -> None:
+    """清除某条 gate 回填载荷。"""
+    r = get_sync_redis()
+    r.delete(research_gate_reply_key(session_id, message_id))
+
+
+# ---- Research rate limit ----
+
+RESEARCH_RATE_LIMIT_PREFIX = "research_rl:"
+RESEARCH_RATE_LIMIT_COOLDOWN = 3  # 秒
+
+
+def check_research_rate_limit(session_id: str | uuid.UUID) -> bool:
+    """科研触发速率限制：3s 内不允许同一会话再次 POST /turns。"""
+    r = get_sync_redis()
+    key = f"{RESEARCH_RATE_LIMIT_PREFIX}{session_id}"
+    acquired = r.set(key, "1", nx=True, ex=RESEARCH_RATE_LIMIT_COOLDOWN)
+    return bool(acquired)
+
+
 # ---- Email verification code ----
 
 VERIFY_CODE_PREFIX = "email_verify:"

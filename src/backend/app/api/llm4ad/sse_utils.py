@@ -17,10 +17,10 @@ from starlette.responses import StreamingResponse
 async def redis_sse_stream(
     redis_key: str,
     connected_data: dict[str, Any],
-    entry_handler: Callable[[dict], tuple[str, bool] | None],
+    entry_handler: Callable[[str, dict], tuple[str, bool] | None],
     *,
     last_id: str = "0-0",
-    max_idle: float = 300.0,
+    max_idle: float | None = 300.0,
     heartbeat_interval: float = 15.0,
     batch_size: int = 100,
     block_ms: int = 1000,
@@ -32,11 +32,14 @@ async def redis_sse_stream(
     Args:
         redis_key: 要读取的 Redis Stream 键。
         connected_data: 初始 ``connected`` 事件中携带的数据。
-        entry_handler: 对每条 Redis 条目的 *fields* 字典调用。
+        entry_handler: 对每条 Redis Stream 条目的 ID 和 *fields* 字典调用。
             返回 ``(sse_text, is_terminal)`` 表示产出，返回 ``None`` 表示跳过。
             当 *is_terminal* 为 True 时会额外产出 ``done`` 事件并关闭流。
         last_id: 起始 Redis Stream ID。
         max_idle: 无数据超时秒数，超出后产出 ``timeout`` 事件并关闭。
+            传 ``None`` 表示**永不因静默关流**（长任务场景，如演化/研究单阶段
+            可能静默几十分钟）；此时仅靠 ``heartbeat`` 保活，终止只由 ``is_terminal``
+            事件（done/error）驱动。
         heartbeat_interval: ``heartbeat`` 保活事件的发送间隔（秒）。
         batch_size: 每次 ``XREAD`` 调用的最大条目数。
         block_ms: ``XREAD`` 阻塞等待时间（毫秒）。
@@ -47,7 +50,10 @@ async def redis_sse_stream(
 
     redis_client = await get_async_redis()
 
-    yield f"event: connected\ndata: {json.dumps(connected_data, ensure_ascii=False)}\n\n"
+    yield (
+        "event: connected\n"
+        f"data: {json.dumps(connected_data, ensure_ascii=False)}\n\n"
+    )
 
     now = time.monotonic()
     last_data_time = now
@@ -55,7 +61,7 @@ async def redis_sse_stream(
     draining = False
 
     while True:
-        if time.monotonic() - last_data_time > max_idle:
+        if max_idle is not None and time.monotonic() - last_data_time > max_idle:
             yield f"event: timeout\ndata: {json.dumps({'reason': 'idle_timeout'})}\n\n"
             return
 
@@ -84,9 +90,9 @@ async def redis_sse_stream(
             last_heartbeat_time = now
             for _stream_key, entries in results:
                 fetched += len(entries)
-                for _entry_id, fields in entries:
-                    last_id = _entry_id
-                    result = entry_handler(fields)
+                for entry_id, fields in entries:
+                    last_id = entry_id
+                    result = entry_handler(str(entry_id), fields)
                     if result is None:
                         continue
                     sse_text, is_terminal = result

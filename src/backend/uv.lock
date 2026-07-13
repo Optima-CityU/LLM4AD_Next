@@ -309,6 +309,11 @@ dependencies = [
     { name = "tenacity" },
 ]
 
+[package.optional-dependencies]
+research = [
+    { name = "researchclaw" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "agentscope", specifier = ">=2.0,<3.0" },
@@ -333,10 +338,12 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.8.0,<3.0.0" },
     { name = "python-multipart", specifier = ">=0.0.7,<1.0.0" },
     { name = "qrcode", extras = ["pil"], specifier = ">=8.0" },
+    { name = "researchclaw", marker = "extra == 'research'", git = "https://github.com/y414987863/AutoResearchClawAD.git?branch=dev%2F0.5.0-llm4ad" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=1.40.6,<2.0.0" },
     { name = "sqlmodel", specifier = ">=0.0.21,<1.0.0" },
     { name = "tenacity", specifier = ">=8.2.3,<9.0.0" },
 ]
+provides-extras = ["research"]
 
 [[package]]
 name = "argon2-cffi"
@@ -379,6 +386,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/74/cd/15777dfde1c29d96de7f18edf4cc94c385646852e7c7b0320aa91ccca583/argon2_cffi_bindings-25.1.0-cp39-abi3-win32.whl", hash = "sha256:473bcb5f82924b1becbb637b63303ec8d10e84c8d241119419897a26116515d2", size = 27180, upload-time = "2025-07-30T10:01:57.759Z" },
     { url = "https://files.pythonhosted.org/packages/e2/c6/a759ece8f1829d1f162261226fbfd2c6832b3ff7657384045286d2afa384/argon2_cffi_bindings-25.1.0-cp39-abi3-win_amd64.whl", hash = "sha256:a98cd7d17e9f7ce244c0803cad3c23a7d379c301ba618a5fa76a67d116618b98", size = 31715, upload-time = "2025-07-30T10:01:58.56Z" },
     { url = "https://files.pythonhosted.org/packages/42/b9/f8d6fa329ab25128b7e98fd83a3cb34d9db5b059a9847eddb840a0af45dd/argon2_cffi_bindings-25.1.0-cp39-abi3-win_arm64.whl", hash = "sha256:b0fdbcf513833809c882823f98dc2f931cf659d9a1429616ac3adebb49f5db94", size = 27149, upload-time = "2025-07-30T10:01:59.329Z" },
+]
+
+[[package]]
+name = "arxiv"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fb/48/88c8e9c42712760ca9e74e52f6c4a388ee9e9939e341bfd8da295a9d1b17/arxiv-4.0.0.tar.gz", hash = "sha256:1d30a1dba5054e0df9b1d63f8e190b58e6a59d0c2f4ccec344ce1de5bafe546d", size = 198009, upload-time = "2026-05-17T23:42:30.952Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/af/50/4d01d219958b19b5aaca6ae74820b181baea438cd034d5b3c04b4cf4f75e/arxiv-4.0.0-py3-none-any.whl", hash = "sha256:fc7e65e74d0fba21df2c521df24119d015fcb839dd5c4feb683ee35548c932c4", size = 13014, upload-time = "2026-05-17T23:42:29.246Z" },
 ]
 
 [[package]]
@@ -2252,8 +2272,8 @@ all = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentscope", marker = "python_full_version >= '3.11'", specifier = ">=2.0,<3.0" },
-    { name = "agentscope", marker = "python_full_version >= '3.11' and extra == 'agent'", specifier = ">=2.0,<3.0" },
+    { name = "agentscope", specifier = ">=2.0,<3.0" },
+    { name = "agentscope", marker = "extra == 'agent'", specifier = ">=2.0,<3.0" },
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "anthropic", marker = "extra == 'providers'", specifier = ">=0.19.0" },
@@ -2262,12 +2282,14 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.1" },
     { name = "codebleu", marker = "extra == 'meoh'", specifier = ">=0.7.0" },
     { name = "gymnasium", extras = ["box2d"], marker = "extra == 'lunarlander'", specifier = ">=0.29.0" },
+    { name = "httpx", marker = "extra == 'mindmemos'", specifier = ">=0.27.0,<1" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
     { name = "llm4ad-next", extras = ["infra", "providers", "eval", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
     { name = "llvmlite", marker = "extra == 'eval'", specifier = "==0.44.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", marker = "extra == 'lunarlander'", specifier = ">=3.5.0" },
+    { name = "mindmemos-sdk", marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'mindmemos'", specifier = ">=0.1.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
     { name = "mkdocs-git-committers-plugin-2", marker = "extra == 'docs'", specifier = ">=2.5.0" },
     { name = "mkdocs-git-revision-date-localized-plugin", marker = "extra == 'docs'", specifier = ">=1.5.1" },
@@ -2295,6 +2317,7 @@ requires-dist = [
     { name = "pytest-custom-exit-code", specifier = ">=0.3.0" },
     { name = "pytest-custom-exit-code", marker = "extra == 'dev'", specifier = ">=0.3.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "pyyaml", marker = "extra == 'mindmemos'", specifier = ">=6.0,<7" },
     { name = "rich", specifier = ">=13.0.0,<14.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.2.0" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
@@ -2302,6 +2325,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'meoh'", specifier = ">=1.3.0" },
     { name = "scipy", marker = "extra == 'eval'", specifier = ">=1.10.0" },
     { name = "sympy", marker = "extra == 'eval'", specifier = ">=1.12.0" },
+    { name = "textual", marker = "extra == 'mindmemos'", specifier = ">=1.0.0,<2" },
     { name = "tiktoken", marker = "extra == 'providers'", specifier = ">=0.6.0" },
     { name = "tree-sitter-python", marker = "extra == 'meoh'", specifier = "==0.21.0" },
     { name = "typer", specifier = ">=0.24.1" },
@@ -2309,7 +2333,7 @@ requires-dist = [
     { name = "umap-learn", marker = "extra == 'eval'", specifier = ">=0.5.12" },
     { name = "xgboost", specifier = ">=3.2.0" },
 ]
-provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "dev", "docs", "agent", "all"]
+provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "mindmemos", "dev", "docs", "agent", "all"]
 
 [[package]]
 name = "llvmlite"
@@ -4350,6 +4374,17 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5f/a4/98b9c7c6428a668bf7e42ebb7c79d576a1c3c1e3ae2d47e674b468388871/requests-2.33.1.tar.gz", hash = "sha256:18817f8c57c6263968bc123d237e3b8b08ac046f5456bd1e307ee8f4250d3517", size = 134120, upload-time = "2026-03-30T16:09:15.531Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/8e/7540e8a2036f79a125c1d2ebadf69ed7901608859186c856fa0388ef4197/requests-2.33.1-py3-none-any.whl", hash = "sha256:4e6d1ef462f3626a1f0a0a9c42dd93c63bad33f9f1c1937509b8c5c8718ab56a", size = 64947, upload-time = "2026-03-30T16:09:13.83Z" },
+]
+
+[[package]]
+name = "researchclaw"
+version = "0.5.0"
+source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?branch=dev%2F0.5.0-llm4ad#18fd80eb9ffcb0c48d8f1db2d15df0d7181dec45" }
+dependencies = [
+    { name = "arxiv" },
+    { name = "numpy" },
+    { name = "pyyaml" },
+    { name = "rich" },
 ]
 
 [[package]]

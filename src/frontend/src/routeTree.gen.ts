@@ -16,10 +16,12 @@ import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as Layout_evolutionRouteImport } from './routes/_layout_evolution'
 import { Route as Layout_demoRouteImport } from './routes/_layout_demo'
+import { Route as Layout_autoresearchRouteImport } from './routes/_layout_autoresearch'
 import { Route as LayoutRouteImport } from './routes/_layout'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as Layout_evolutionEvolutionRouteImport } from './routes/_layout_evolution/evolution'
 import { Route as Layout_demoDemoRouteImport } from './routes/_layout_demo/demo'
+import { Route as Layout_autoresearchAutoresearchRouteImport } from './routes/_layout_autoresearch/autoresearch'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutMemoryRouteImport } from './routes/_layout/memory'
@@ -64,6 +66,10 @@ const Layout_demoRoute = Layout_demoRouteImport.update({
   id: '/_layout_demo',
   getParentRoute: () => rootRouteImport,
 } as any)
+const Layout_autoresearchRoute = Layout_autoresearchRouteImport.update({
+  id: '/_layout_autoresearch',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LayoutRoute = LayoutRouteImport.update({
   id: '/_layout',
   getParentRoute: () => rootRouteImport,
@@ -84,6 +90,12 @@ const Layout_demoDemoRoute = Layout_demoDemoRouteImport.update({
   path: '/demo',
   getParentRoute: () => Layout_demoRoute,
 } as any)
+const Layout_autoresearchAutoresearchRoute =
+  Layout_autoresearchAutoresearchRouteImport.update({
+    id: '/autoresearch',
+    path: '/autoresearch',
+    getParentRoute: () => Layout_autoresearchRoute,
+  } as any)
 const LayoutSettingsRoute = LayoutSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -152,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/memory': typeof LayoutMemoryRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/autoresearch': typeof Layout_autoresearchAutoresearchRoute
   '/demo': typeof Layout_demoDemoRoute
   '/evolution': typeof Layout_evolutionEvolutionRoute
 }
@@ -172,6 +185,7 @@ export interface FileRoutesByTo {
   '/memory': typeof LayoutMemoryRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/autoresearch': typeof Layout_autoresearchAutoresearchRoute
   '/demo': typeof Layout_demoDemoRoute
   '/evolution': typeof Layout_evolutionEvolutionRoute
 }
@@ -179,6 +193,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_layout': typeof LayoutRouteWithChildren
+  '/_layout_autoresearch': typeof Layout_autoresearchRouteWithChildren
   '/_layout_demo': typeof Layout_demoRouteWithChildren
   '/_layout_evolution': typeof Layout_evolutionRouteWithChildren
   '/login': typeof LoginRoute
@@ -196,6 +211,7 @@ export interface FileRoutesById {
   '/_layout/memory': typeof LayoutMemoryRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
+  '/_layout_autoresearch/autoresearch': typeof Layout_autoresearchAutoresearchRoute
   '/_layout_demo/demo': typeof Layout_demoDemoRoute
   '/_layout_evolution/evolution': typeof Layout_evolutionEvolutionRoute
 }
@@ -218,6 +234,7 @@ export interface FileRouteTypes {
     | '/memory'
     | '/projects'
     | '/settings'
+    | '/autoresearch'
     | '/demo'
     | '/evolution'
   fileRoutesByTo: FileRoutesByTo
@@ -238,12 +255,14 @@ export interface FileRouteTypes {
     | '/memory'
     | '/projects'
     | '/settings'
+    | '/autoresearch'
     | '/demo'
     | '/evolution'
   id:
     | '__root__'
     | '/'
     | '/_layout'
+    | '/_layout_autoresearch'
     | '/_layout_demo'
     | '/_layout_evolution'
     | '/login'
@@ -261,6 +280,7 @@ export interface FileRouteTypes {
     | '/_layout/memory'
     | '/_layout/projects'
     | '/_layout/settings'
+    | '/_layout_autoresearch/autoresearch'
     | '/_layout_demo/demo'
     | '/_layout_evolution/evolution'
   fileRoutesById: FileRoutesById
@@ -268,6 +288,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LayoutRoute: typeof LayoutRouteWithChildren
+  Layout_autoresearchRoute: typeof Layout_autoresearchRouteWithChildren
   Layout_demoRoute: typeof Layout_demoRouteWithChildren
   Layout_evolutionRoute: typeof Layout_evolutionRouteWithChildren
   LoginRoute: typeof LoginRoute
@@ -328,6 +349,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Layout_demoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_layout_autoresearch': {
+      id: '/_layout_autoresearch'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof Layout_autoresearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_layout': {
       id: '/_layout'
       path: ''
@@ -355,6 +383,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/demo'
       preLoaderRoute: typeof Layout_demoDemoRouteImport
       parentRoute: typeof Layout_demoRoute
+    }
+    '/_layout_autoresearch/autoresearch': {
+      id: '/_layout_autoresearch/autoresearch'
+      path: '/autoresearch'
+      fullPath: '/autoresearch'
+      preLoaderRoute: typeof Layout_autoresearchAutoresearchRouteImport
+      parentRoute: typeof Layout_autoresearchRoute
     }
     '/_layout/settings': {
       id: '/_layout/settings'
@@ -458,6 +493,17 @@ const LayoutRouteChildren: LayoutRouteChildren = {
 const LayoutRouteWithChildren =
   LayoutRoute._addFileChildren(LayoutRouteChildren)
 
+interface Layout_autoresearchRouteChildren {
+  Layout_autoresearchAutoresearchRoute: typeof Layout_autoresearchAutoresearchRoute
+}
+
+const Layout_autoresearchRouteChildren: Layout_autoresearchRouteChildren = {
+  Layout_autoresearchAutoresearchRoute: Layout_autoresearchAutoresearchRoute,
+}
+
+const Layout_autoresearchRouteWithChildren =
+  Layout_autoresearchRoute._addFileChildren(Layout_autoresearchRouteChildren)
+
 interface Layout_demoRouteChildren {
   Layout_demoDemoRoute: typeof Layout_demoDemoRoute
 }
@@ -484,6 +530,7 @@ const Layout_evolutionRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LayoutRoute: LayoutRouteWithChildren,
+  Layout_autoresearchRoute: Layout_autoresearchRouteWithChildren,
   Layout_demoRoute: Layout_demoRouteWithChildren,
   Layout_evolutionRoute: Layout_evolutionRouteWithChildren,
   LoginRoute: LoginRoute,

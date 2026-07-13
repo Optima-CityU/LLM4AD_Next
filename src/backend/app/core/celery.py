@@ -12,7 +12,7 @@ celery_app = Celery(
     "fastapi_celery",
     broker=settings.CELERY_BROKER,
     backend=settings.CELERY_BACKEND,
-    include=["app.tasks.evolution"],
+    include=["app.tasks.evolution", "app.tasks.research_runner"],
 )
 
 # Celery 运行时配置

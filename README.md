@@ -284,6 +284,10 @@ ruff check src/ tests/ --fix
 
 This project is licensed under the BSD 3-Clause License - see the [LICENSE](LICENSE) file for details.
 
+## Acknowledgements
+
+The AutoResearch module is based on / adapted from [AutoResearchClaw](https://github.com/aiming-lab/AutoResearchClaw) (MIT License). Its original copyright and license notice are retained in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
 ## Support
 
 - [Documentation](docs/en/index.md)

@@ -30,11 +30,16 @@ from app.models import Task, TaskStatus
 
 @signals.worker_init.connect
 def _on_worker_init(**kwargs):  # noqa: ARG001
-    """Celery worker 启动时清理上次崩溃可能遗留的任务容器。"""
-    try:
-        from app.services.container_service import cleanup_orphaned_containers
+    """Celery worker 启动时清理上次崩溃可能遗留的任务容器。
 
-        cleanup_orphaned_containers()
+    复用 :func:`container_runtime.cleanup_orphaned_containers`（与 research 同一套）：
+    演化容器经 ``ContainerJob`` 创建，天生带管理标签 + ``task_id`` 业务标签，故按
+    ``task_id`` 标签收窄即可只回收本类容器，不误伤研究/调参容器。
+    """
+    try:
+        from app.services.container_runtime import cleanup_orphaned_containers
+
+        cleanup_orphaned_containers(extra_filters={"label": "task_id"})
     except Exception as e:
         logger.error(f"清理孤儿容器失败: {e}")
 

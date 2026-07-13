@@ -25,6 +25,7 @@ import {
   Newspaper,
   Play,
   Sigma,
+  Sparkles,
   Trophy,
   Workflow,
   Wrench,
@@ -485,6 +486,16 @@ function HeroSection() {
             >
               {t("landing.hero.cta")}
               <ArrowRight className="ml-2 size-5" />
+            </Button>
+          </Link>
+          <Link to={logged ? "/autoresearch" : "/login"}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="min-w-44 px-8 py-6 text-base border-primary/40 text-primary hover:bg-primary/10 hover:-translate-y-0.5 transition-all"
+            >
+              <Sparkles className="mr-2 size-5" />
+              {t("landing.hero.autoresearch")}
             </Button>
           </Link>
           <Button

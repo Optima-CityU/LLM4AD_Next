@@ -298,10 +298,35 @@ def build_from_config_sync(
 
 
 def _resolve_description(description: str) -> str:
-    """Resolve description from file path if applicable."""
-    desc_path = Path(description)
-    if desc_path.exists() and desc_path.suffix in (".md", ".txt"):
-        return desc_path.read_text(encoding="utf-8")
+    """Resolve description from a file path, or return the text as-is.
+
+    When ``description`` is a free-form prompt (e.g. multi-line text, or a
+    string longer than the OS path limit), constructing a ``Path`` and probing
+    it can raise ``OSError``/``ValueError`` on some platforms rather than
+    reporting "not a file". Multi-line inputs short-circuit early, and any
+    filesystem error is treated as "not a file path".
+
+    Args:
+        description: Either a path to a ``.md``/``.txt`` file, or the raw
+            description text.
+
+    Returns:
+        The file contents when ``description`` points to an existing
+        ``.md``/``.txt`` file, otherwise ``description`` unchanged.
+    """
+    # Fast path: multi-line strings are descriptions, never file paths. This
+    # also avoids passing them to Path(), which can raise on some platforms.
+    if not description or "\n" in description or "\x00" in description:
+        return description
+
+    try:
+        desc_path = Path(description)
+        if desc_path.suffix in (".md", ".txt") and desc_path.is_file():
+            return desc_path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        # Path too long, invalid characters, or unreadable — treat the input
+        # as literal description text.
+        return description
     return description
 
 

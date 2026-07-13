@@ -135,10 +135,13 @@ def stop_report(
     )
 
 
-def _report_entry_handler(fields: dict) -> tuple[str, bool] | None:
+def _report_entry_handler(entry_id: str, fields: dict) -> tuple[str, bool] | None:
     """解析报告流条目为 SSE 帧。"""
     entry = json.loads(fields["data"])
-    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    sse_text = (
+        f"id: {entry_id}\n"
+        f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    )
     is_terminal = isinstance(entry, dict) and entry.get("type") in (
         "done",
         "error",

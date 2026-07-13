@@ -211,7 +211,9 @@ async def chat_tune_upload_data(
     )
 
 
-def _chat_tune_entry_handler(fields: dict) -> tuple[str, bool] | None:
+def _chat_tune_entry_handler(
+    entry_id: str, fields: dict
+) -> tuple[str, bool] | None:
     """解析调参 Stream 条目为 SSE 帧。
 
     将 done / error / cancelled 帧标记为终止事件。对脏数据宽松忽略，
@@ -223,7 +225,10 @@ def _chat_tune_entry_handler(fields: dict) -> tuple[str, bool] | None:
         return None
     if not isinstance(entry, dict):
         return None
-    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    sse_text = (
+        f"id: {entry_id}\n"
+        f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    )
     is_terminal = entry.get("type") in ("done", "error", "cancelled")
     return sse_text, is_terminal
 

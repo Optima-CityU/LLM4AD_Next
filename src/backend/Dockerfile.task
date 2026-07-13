@@ -1,6 +1,12 @@
 # ============================================================
 # LLM4AD 任务执行容器镜像
 # ============================================================
+# 一镜多入口：同一镜像按 ContainerJobSpec.command 覆盖 CMD 分别承载
+#   - 任务执行     app/tasks/container_runner.py（默认 CMD）
+#   - 调参执行     app/tasks/chat_tune_runner.py
+#   - 研究 pipeline app/tasks/research_container_runner.py（需 research extra）
+#   - 研究协作     app/tasks/research_collab_container_runner.py（需 research extra）
+# 故装 research extra（researchclaw，公开 git 依赖；git 由 bookworm 基础镜像自带）。
 
 # ---------- 基础镜像 ----------
 FROM python:3.12-bookworm
@@ -24,6 +30,20 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# ---------- 安装 TeX Live（仅 AutoResearch 论文阶段用）----------
+# ARC 的 compile_latex() 走 pdflatex → bibtex → pdflatex×2 三遍编译；缺 pdflatex
+# 时 ARC 降级为只导出 .tex（不报错、无 PDF）。约 +1GB 镜像体积，运行时内存不受影响。
+# 演化任务不用 LaTeX，但研究镜像复用本镜像（RESEARCH_RUNNER_IMAGE），故装在此处。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-bibtex-extra \
+    texlive-science \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
@@ -41,21 +61,20 @@ WORKDIR /app/backend/
 # 将虚拟环境加入 PATH
 ENV PATH="/app/backend/.venv/bin:$PATH"
 
-# ---------- 安装依赖（不含工作区包，利用 Docker 层缓存）----------
+# ---------- 安装依赖（含 research extra，不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=pyproject.toml,target=/pyproject.toml \
     --mount=type=bind,source=README.md,target=/README.md \
-    uv sync --no-install-workspace
+    uv sync --no-install-workspace --extra research
 
 # ---------- 复制应用代码 ----------
+# 仅 uv sync（editable 安装工作区）所需：pyproject + 包标记 + llm4ad 源。
+# 高频改动的入口脚本延后到 uv sync 之后再 COPY，避免改脚本触发工作区重装。
 COPY ./src/backend/pyproject.toml /app/backend/
 COPY ./src/backend/app/__init__.py        /app/backend/app/__init__.py
-COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
-COPY ./src/backend/app/tasks/chat_tune_runner.py             /app/backend/app/tasks/chat_tune_runner.py
-COPY ./src/backend/app/tasks/task_config_crypto.py           /app/backend/app/tasks/task_config_crypto.py
 
 # 复制 llm4ad 核心库及根项目配置
 COPY ./src/llm4ad             /src/llm4ad
@@ -63,10 +82,17 @@ COPY ./examples               /examples
 COPY ./pyproject.toml     /pyproject.toml
 COPY ./README.md          /README.md
 
-# ---------- 安装工作区包 ----------
+# ---------- 安装工作区包（含 research extra）----------
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
-    uv sync
+    uv sync --extra research
+
+# ---------- 复制容器入口脚本（editable 安装无需其内容，故放最后：改脚本只失效本层，不重跑 uv sync）----------
+COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
+COPY ./src/backend/app/tasks/chat_tune_runner.py             /app/backend/app/tasks/chat_tune_runner.py
+COPY ./src/backend/app/tasks/research_container_runner.py    /app/backend/app/tasks/research_container_runner.py
+COPY ./src/backend/app/tasks/research_collab_container_runner.py /app/backend/app/tasks/research_collab_container_runner.py
+COPY ./src/backend/app/tasks/task_config_crypto.py           /app/backend/app/tasks/task_config_crypto.py
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner

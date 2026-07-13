@@ -571,9 +571,14 @@ def _force_stop_celery_task(db: Session, task: models.Task, *, reason: str | Non
         AbortableAsyncResult(task.celery_task_id, app=celery_app).abort()
 
     try:
-        from app.services.container_service import kill_task_container
+        from app.services.container_service import (
+            container_name as task_container_name,
+        )
+        from app.services.container_service import (
+            kill_container_by_name,
+        )
 
-        kill_task_container(str(task.id))
+        kill_container_by_name(task_container_name(str(task.id)))
     except Exception as e:
         logger.warning(f"强制停止任务容器失败: {e}")
 

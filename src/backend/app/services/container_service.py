@@ -18,6 +18,8 @@ from app.core.constants import (
     CHAT_TUNE_CONTAINER_DATA_DIR,
     CHAT_TUNE_CONTAINER_NAME_PREFIX,
     DOCKER_NETWORK_NAME,
+    RESEARCH_COLLAB_CONTAINER_NAME_PREFIX,
+    RESEARCH_CONTAINER_NAME_PREFIX,
     TASK_CONTAINER_NAME_PREFIX,
 )
 from app.core.docker import get_docker_client
@@ -27,6 +29,18 @@ def container_name(task_id: str) -> str:
     """生成任务容器名称，取 task_id 保持唯一。"""
     short_id = str(task_id).replace("-", "")
     return f"{TASK_CONTAINER_NAME_PREFIX}{short_id}"
+
+
+def research_container_name(turn_id: str) -> str:
+    """生成研究运行容器名称，按 turn_id 隔离（每-turn 一容器）。"""
+    short_id = str(turn_id).replace("-", "")
+    return f"{RESEARCH_CONTAINER_NAME_PREFIX}{short_id}"
+
+
+def research_collab_container_name(turn_id: str) -> str:
+    """生成协作 agent 容器名称，按 collab turn_id 隔离（每条协作消息一容器）。"""
+    short_id = str(turn_id).replace("-", "")
+    return f"{RESEARCH_COLLAB_CONTAINER_NAME_PREFIX}{short_id}"
 
 
 def _is_absolute_host_path(path: str) -> bool:
@@ -61,49 +75,40 @@ def resolve_host_path(docker_path: str) -> str:
         /data/project_home/code_user-xxx/20240101/
         → D:\\data\\project_home\\code_user-xxx\\20240101\\  (Windows)
         → /data/project_home/code_user-xxx/20240101/  (Linux 生产环境)
+
+    分隔符归一化：调用方可能传入 ``pathlib.Path`` 字符串化后的路径。在 Windows
+    原生进程里，``str(Path("/data/project_home/x"))`` 会得到反斜杠形式
+    ``\\data\\project_home\\x``，与正斜杠的 ``DOCKER_PROJECT_HOME`` 前缀 startswith
+    比较失败，导致原样返回无盘符路径（Docker 报 "is not a valid Windows path"）。
+    故先把 ``docker_path`` 的反斜杠统一成正斜杠再比较；输出侧 host 前缀用户在
+    ``.env`` 里已按目标平台写好，直接拼接。
     """
     docker_prefix = settings.DOCKER_PROJECT_HOME.rstrip("/")
     host_prefix = settings.HOST_PROJECT_HOME.rstrip("/").rstrip("\\")
 
-    if docker_path.startswith(docker_prefix):
-        relative = docker_path[len(docker_prefix) :]
+    normalized = docker_path.replace("\\", "/")
+    if normalized.startswith(docker_prefix):
+        relative = normalized[len(docker_prefix) :]
         return host_prefix + relative
     return docker_path
 
 
-def kill_task_container(task_id: str) -> None:
-    """根据任务 ID 强制终止并移除对应的容器。
+def kill_container_by_name(name: str) -> None:
+    """按容器名 SIGKILL 并 remove；不存在则 no-op。失败仅记日志、不抛。
 
-    使用 ``SIGKILL`` 立即终止容器进程，跳过优雅期，适用于用户点击
-    "停止任务" 等需要快速响应的场景。
-
-    Args:
-        task_id: 业务任务 ID。
+    跳过优雅期立即终止，适用于用户点"停止"等需快速响应的场景。调用方自行用
+    :func:`container_name`（演化任务）/ :func:`research_container_name`（研究轮次）
+    等构造出容器名再传入。
     """
-    name = container_name(task_id)
     try:
         container = get_docker_client().containers.get(name)
         container.kill()
         container.remove(force=True, v=True)
-        logger.info(f"已强制终止并移除任务容器: {name}")
+        logger.info(f"已强制终止并移除容器: {name}")
     except NotFound:
-        logger.debug(f"任务容器 {name} 不存在，无需停止")
+        logger.debug(f"容器 {name} 不存在，无需停止")
     except Exception as e:
-        logger.error(f"强制终止任务容器 {name} 失败: {e}")
-
-
-def cleanup_orphaned_containers() -> None:
-    """清理所有孤儿任务容器（worker 重启时调用）。"""
-    try:
-        containers = get_docker_client().containers.list(
-            all=True,
-            filters={"name": TASK_CONTAINER_NAME_PREFIX},
-        )
-        for container in containers:
-            logger.warning(f"发现孤儿任务容器: {container.name}，正在清理")
-            container.remove(force=True, v=True)
-    except Exception as e:
-        logger.error(f"清理孤儿容器失败: {e}")
+        logger.error(f"强制终止容器 {name} 失败: {e}")
 
 
 # ---- 调参（chat-tune）隔离容器生命周期 ----
