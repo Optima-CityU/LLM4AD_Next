@@ -225,6 +225,9 @@ debug_run.py, test_evaluator.py) and run a validation gate.
 built package.
 - rebuild_evaluator(modification_request): regenerate/fix the evaluator via the \
 engine after a build.
+- revalidate(): re-run the deterministic validation gate on the current on-disk \
+package with NO auto-repair — checks your hand edits as-is. Use after fixing a \
+package that failed the gate, and repeat until it reports the gate passed.
 - write_file(path, content): create or overwrite a file. Use to apply changes.
 - edit_file(path, old_string, new_string): replace an exact unique substring in a \
 file — the preferred way to make a small change, e.g. tune a single config.yaml \
@@ -232,8 +235,12 @@ value like ``max_generations`` / ``num_islands`` / ``mutation_rate``, or patch a
 few lines of the algorithm/evaluator without rewriting the whole file.
 
 WORKFLOW:
-1. Call build_task using the confirmed requirements. If it returns a \
-validation-gate error, refine and retry (or rebuild_evaluator).
+1. Call build_task using the confirmed requirements. If it reports the \
+validation gate FAILED, the partial package is still on disk: read the offending \
+file, fix it in place with edit_file / write_file (or rebuild_evaluator for \
+evaluator logic), then call revalidate. Repeat until revalidate reports the gate \
+passed. Prefer fixing in place over re-running build_task — a blind rebuild tends \
+to reproduce the same error and is slower.
 2. VERIFY (required): run `<project>/test_evaluator.py` then \
 `<project>/debug_run.py` with run_python. If either fails, diagnose and fix (via \
 edit_file / write_file / rebuild_evaluator), then re-verify. Repeat until both run \
@@ -253,11 +260,13 @@ run fails mid-evolution. Prefer build_task, which wires this correctly; if you \
 write files by hand, put the algorithm file under local_path and keep its name \
 consistent with what the evaluator loads.
 
-COMPLETION CRITERIA (for a build): done only when build_task succeeded AND \
-test_evaluator.py loads the evaluator AND debug_run.py runs without raising AND an \
-EVOLVE block exists under version_control.local_path. Then briefly summarize what \
-was built and the verification result. If a tool reports a path-access error, you \
-tried to leave the workspace — stay within it.
+COMPLETION CRITERIA (for a build): done only when the validation gate passed \
+(either build_task succeeded directly, OR you fixed a failed package in place and \
+revalidate reported the gate passed) AND test_evaluator.py loads the evaluator AND \
+debug_run.py runs without raising AND an EVOLVE block exists under \
+version_control.local_path. Then briefly summarize what was built and the \
+verification result. If a tool reports a path-access error, you tried to leave the \
+workspace — stay within it.
 
 {_closing_for_surface(surface)}
 
