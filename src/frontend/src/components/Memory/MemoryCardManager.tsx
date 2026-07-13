@@ -380,7 +380,7 @@ export default function MemoryCardManager({
       const payload = (await response.json()) as MemoryCardPage
       const items = payload.items ?? []
       setCards(items)
-      setTotal(items.length)
+      setTotal(payload.total ?? items.length)
       setHasMore(items.length > 0 && payload.has_more)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载记忆失败")

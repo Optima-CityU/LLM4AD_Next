@@ -402,6 +402,22 @@ def test_task_memory_status_update_does_not_touch_content_or_require_model_bindi
     assert updated.content == "Existing MindMemOS content."
 
 
+def test_task_memory_delete_requires_card_in_current_scope(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    task = _create_task_for_user(db, user.id)
+    _enable_system_mindmemos(monkeypatch)
+    _store, calls = _fake_mindmemos(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc:
+        memory_service.delete_task_memory_card(db, task.id, user, "other-scope-card")
+
+    assert exc.value.status_code == 404
+    assert not [payload for path, payload in calls if path == "/v1/memory/delete"]
+
+
 def test_memory_card_response_splits_editable_and_readonly_fields():
     card = memory_service._remote_memory_to_card(  # noqa: SLF001
         {
@@ -883,6 +899,7 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
     )
 
     assert [card.id for card in page.items] == ["card-1", "card-2"]
+    assert page.total == 2
     assert page.items[0].tags == ["TSP", "2-opt"]
     assert page.items[1].tags == []
     assert [payload.get("filters") for _path, payload in calls] == [
@@ -894,6 +911,64 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
         },
         {"entity_id": {"in": ["entity-1", "entity-2"]}, "property_name": "tags"},
     ]
+
+
+def test_remote_list_cards_uses_remote_total_when_available(monkeypatch: pytest.MonkeyPatch):
+    user = models.User(id=uuid.uuid4(), email="page-total@example.com", hashed_password="x")
+
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        assert path == "/v1/memory/list"
+        if payload.get("filters", {}).get("property_name") == "tags":
+            return {
+                "code": "ok",
+                "data": {
+                    "memories": [],
+                    "page": 1,
+                    "page_size": 20,
+                    "total": 0,
+                    "has_more": False,
+                },
+            }
+        return {
+            "code": "ok",
+            "data": {
+                "memories": [
+                    {
+                        "id": "card-1",
+                        "memory": "Run 2-opt.",
+                        "property_name": "good_algorithm",
+                        "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                        "entity_id": "entity-1",
+                    },
+                    {
+                        "id": "card-2",
+                        "memory": "Use annealing.",
+                        "property_name": "domain_knowledge",
+                        "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                        "entity_id": "entity-2",
+                    },
+                ],
+                "page": 2,
+                "page_size": 2,
+                "total": 37,
+                "has_more": True,
+            },
+        }
+
+    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
+
+    page = memory_service._remote_list_cards(  # noqa: SLF001
+        user,
+        {"user_id": str(user.id), "app_id": "llm4ad", "agent_id": "global", "session_id": "global"},
+        page=2,
+        page_size=2,
+    )
+
+    assert len(page.items) == 2
+    assert page.page == 2
+    assert page.page_size == 2
+    assert page.total == 37
+    assert page.has_more is True
 
 
 def test_remote_list_cards_merges_entity_name_tags_metadata(monkeypatch: pytest.MonkeyPatch):

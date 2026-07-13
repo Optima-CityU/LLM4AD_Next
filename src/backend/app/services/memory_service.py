@@ -837,11 +837,20 @@ def _remote_list_cards(
                 card.model_copy(update={"tags": tag_cards_by_entity.get(_memory_entity_key(item), card.tags)})
                 for card, item in zip(cards, memories, strict=False)
             ]
+    remote_total = page_data.get("total")
+    total = len(cards)
+    if remote_total is not None:
+        try:
+            parsed_total = int(remote_total)
+        except (TypeError, ValueError):
+            parsed_total = len(cards)
+        if parsed_total > len(memories):
+            total = parsed_total
     return MemoryCardPageResponse(
         items=cards,
         page=int(page_data.get("page") or page),
         page_size=int(page_data.get("page_size") or page_size),
-        total=len(cards),
+        total=total,
         has_more=bool(page_data.get("has_more", False)) if cards else False,
     )
 
@@ -1382,7 +1391,9 @@ def upsert_memory_provider_binding(
     if not _provider_accessible(chat_provider, current_user):
         raise HTTPException(status_code=403, detail="No access to selected LLM provider")
     available_models = [model.strip() for model in chat_provider.model.split(";") if model.strip()]
-    if request.chat_model not in available_models:
+    if not request.chat_model.strip():
+        raise HTTPException(status_code=400, detail="Chat model is required")
+    if available_models and request.chat_model not in available_models:
         raise HTTPException(status_code=400, detail="Selected chat model does not belong to this provider")
 
     embedding_provider = db.get(models.EmbeddingProvider, request.embedding_provider_id)
@@ -1529,7 +1540,7 @@ def _provider_routers_need_refresh(current: dict[str, Any], expected: dict[str, 
         if len(current_endpoints) != len(expected_endpoints):
             return True
         for current_endpoint, expected_endpoint in zip(current_endpoints, expected_endpoints, strict=True):
-            for key in ("model", "api_base", "dimensions", "timeout", "num_retries"):
+            for key in ("model", "api_base", "api_key", "dimensions", "timeout", "num_retries"):
                 if current_endpoint.get(key) != expected_endpoint.get(key):
                     return True
     return False
@@ -1895,8 +1906,13 @@ def discard_memory_card_extraction(
     """Hard-delete generated cards when the user chooses not to keep them."""
     del preview_id
     _require_mindmemos_memory_enabled()
-    _resolve_card_scope(db, current_user, scope, project_id, task_id)
-    for memory_id in _unique_ids(memory_ids):
+    scope_data, _, _ = _resolve_card_scope(db, current_user, scope, project_id, task_id)
+    ids = _unique_ids(memory_ids)
+    cards_by_id = _remote_fetch_cards_by_ids(current_user, scope_data, ids)
+    missing_ids = [memory_id for memory_id in ids if memory_id not in cards_by_id]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"记忆不存在或不属于当前范围: {missing_ids[0]}")
+    for memory_id in ids:
         _remote_delete_card(current_user, memory_id)
 
 
@@ -1978,7 +1994,9 @@ def delete_memory_card(
 ) -> None:
     """Delete a MindMemOS card after checking scope authorization."""
     _require_mindmemos_memory_enabled()
-    _resolve_card_scope(db, current_user, scope, project_id, task_id)
+    scope_data, _, _ = _resolve_card_scope(db, current_user, scope, project_id, task_id)
+    if memory_id not in _remote_fetch_cards_by_ids(current_user, scope_data, [memory_id]):
+        raise HTTPException(status_code=404, detail="记忆不存在或不属于当前范围")
     _remote_delete_card(current_user, memory_id)
 
 

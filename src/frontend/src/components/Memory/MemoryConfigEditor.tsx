@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -174,12 +175,7 @@ export default function MemoryConfigEditor({
   }
 
   if (isLoading || !config) {
-    return (
-      <div className="flex min-h-[620px] items-center justify-center rounded-lg border bg-card/60 text-sm text-muted-foreground">
-        <Loader2 className="mr-2 size-4 animate-spin" />
-        正在加载记忆配置...
-      </div>
-    )
+    return <MemoryConfigSkeleton title={title} description={description} />
   }
 
   return (
@@ -353,6 +349,80 @@ export default function MemoryConfigEditor({
           {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
           保存配置
         </Button>
+      </div>
+    </div>
+  )
+}
+
+function MemoryConfigSkeleton({ title, description }: { title: string; description: string }) {
+  return (
+    <div data-testid="memory-settings-skeleton" className="rounded-lg border bg-card/60">
+      <div className="space-y-2 border-b px-4 py-3">
+        <div className="flex items-start gap-2">
+          <ServerCog className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold leading-5">{title}</h2>
+            <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5 pl-6">
+          {[0, 1, 2, 3, 4].map((item) => (
+            <Skeleton key={item} className="h-5 w-24 rounded-full" />
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 p-4">
+        <div className="space-y-4">
+          <div className="rounded-md border bg-muted/20 px-3 py-2">
+            <Skeleton className="h-4 w-full max-w-[440px]" />
+          </div>
+          {CONFIG_FIELDS.map(([, label, , limitLabel]) => (
+            <div key={label} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_132px]">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="size-4 rounded-sm" />
+                  <span className="text-sm font-medium text-muted-foreground">{label}</span>
+                </div>
+                <Skeleton className="h-3 w-full max-w-[320px]" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">{limitLabel}</Label>
+                <Skeleton className="h-9 w-full rounded-md" />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-4 rounded-md border p-3">
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground">搜索策略</Label>
+            <Skeleton className="h-9 w-full rounded-md" />
+            <Skeleton className="h-3 w-full max-w-[420px]" />
+          </div>
+          <div className="grid gap-2">
+            <Label className="text-muted-foreground">搜索阈值</Label>
+            <Skeleton className="h-9 w-full rounded-md" />
+            <Skeleton className="h-3 w-full max-w-[420px]" />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-4 rounded-sm" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+            <Skeleton className="h-3 w-full max-w-[420px]" />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="size-4 rounded-sm" />
+              <Skeleton className="h-4 w-40" />
+            </div>
+            <Skeleton className="h-3 w-full max-w-[420px]" />
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-end border-t px-4 py-3">
+        <Skeleton className="h-9 w-24 rounded-md" />
       </div>
     </div>
   )

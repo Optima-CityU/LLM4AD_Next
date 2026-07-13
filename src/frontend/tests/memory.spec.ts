@@ -112,6 +112,254 @@ test("opening memory default strategy does not refetch in a loop", async ({ page
   expect(requestCounts.config).toBe(1)
 })
 
+test("keeps memory default strategy drawer stable while config loads", async ({ page }) => {
+  let resolveConfig: (() => void) | undefined
+  let configRequested = false
+
+  await page.route("**/api/v1/llm4ad/memory/health", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        message: "ready",
+        system_runtime_available: true,
+        system_enabled: true,
+        system_chat_configured: true,
+        system_embedding_configured: true,
+        system_api_key_configured: true,
+        system_rerank_enabled: false,
+        system_rerank_configured: false,
+        service_reachable: true,
+        auth_ok: true,
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/provider-binding", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        configured: true,
+        binding_id: "binding_1",
+        project_id: "llm4ad_user_1",
+        user_id: "user_1",
+        chat_provider_id: "chat_1",
+        chat_model: "gpt-test",
+        embedding_provider_id: "emb_1",
+        embedding_model: "text-embedding-test",
+        embedding_dim: 1536,
+        embedding_locked: true,
+        message: "configured",
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/user-config", async (route) => {
+    configRequested = true
+    await new Promise<void>((resolve) => {
+      resolveConfig = resolve
+    })
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(memoryConfig),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/cards?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ items: [], page: 1, page_size: 20, total: 0, has_more: false }),
+    })
+  })
+
+  await page.goto("/memory")
+  await expect(page.getByText("用户全局记忆")).toBeVisible()
+  await page.getByRole("button", { name: "默认策略" }).click()
+
+  const drawer = page.getByRole("dialog", { name: "用户默认记忆策略" })
+  await expect(drawer).toBeVisible()
+  await expect(page.getByTestId("memory-settings-skeleton")).toBeVisible()
+  await expect(page.getByText("正在加载记忆配置...")).toBeHidden()
+  await expect.poll(() => configRequested).toBe(true)
+
+  const initialBox = await drawer.boundingBox()
+  expect(initialBox?.width).toBeGreaterThan(500)
+
+  await page.waitForTimeout(600)
+  const loadingBox = await drawer.boundingBox()
+  expect(Math.round(loadingBox?.width ?? 0)).toBe(Math.round(initialBox?.width ?? 0))
+
+  resolveConfig?.()
+  await expect(page.getByText(/fast 延迟低，适合日常任务/)).toBeVisible()
+  await expect(page.getByTestId("memory-settings-skeleton")).toBeHidden()
+
+  const loadedBox = await drawer.boundingBox()
+  expect(Math.round(loadedBox?.width ?? 0)).toBe(Math.round(initialBox?.width ?? 0))
+})
+
+test("shows binding load failure separately from unbound model", async ({ page }) => {
+  await page.route("**/api/v1/llm4ad/memory/health", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        message: "ready",
+        system_runtime_available: true,
+        system_enabled: true,
+        system_chat_configured: true,
+        system_embedding_configured: true,
+        system_api_key_configured: true,
+        system_rerank_enabled: false,
+        system_rerank_configured: false,
+        service_reachable: true,
+        auth_ok: true,
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/provider-binding", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "binding api failed" }),
+    })
+  })
+
+  await page.goto("/memory")
+
+  await expect(page.getByText("绑定状态加载失败")).toBeVisible()
+  await expect(page.getByText("记忆模型未绑定")).toBeHidden()
+})
+
+test("allows manual chat model when selected provider has no model list", async ({ page }) => {
+  let savedBinding: unknown = null
+
+  await page.route("**/api/v1/llm4ad/memory/health", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        message: "ready",
+        system_runtime_available: true,
+        system_enabled: true,
+        system_chat_configured: true,
+        system_embedding_configured: true,
+        system_api_key_configured: true,
+        system_rerank_enabled: false,
+        system_rerank_configured: false,
+        service_reachable: true,
+        auth_ok: true,
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/provider-binding", async (route) => {
+    if (route.request().method() === "PUT") {
+      savedBinding = route.request().postDataJSON()
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          configured: true,
+          binding_id: "binding_manual",
+          project_id: "llm4ad_user_1",
+          user_id: "user_1",
+          chat_provider_id: "chat_manual",
+          chat_model: "custom-chat-model",
+          embedding_provider_id: "emb_1",
+          embedding_model: "text-embedding-test",
+          embedding_dim: 1536,
+          embedding_locked: true,
+          message: "configured",
+        }),
+      })
+      return
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        configured: false,
+        project_id: "llm4ad_user_1",
+        user_id: "user_1",
+        embedding_locked: false,
+        message: "not configured",
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/providers/**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "chat_manual",
+            created_time: "2026-07-07T00:00:00Z",
+            updated_time: "2026-07-07T00:00:00Z",
+            name: "Manual Chat",
+            type: "openai_compatible",
+            api_key: "sk-***",
+            auth_token: "",
+            base_url: "https://llm.example/v1",
+            model: "",
+            temperature: 0.7,
+            max_tokens: 4096,
+            timeout: 60,
+            max_retries: 3,
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/embedding-providers/**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "emb_1",
+            created_time: "2026-07-07T00:00:00Z",
+            updated_time: "2026-07-07T00:00:00Z",
+            name: "Text Embedding",
+            type: "openai",
+            api_key: "sk-***",
+            auth_token: "",
+            base_url: "https://api.openai.com/v1",
+            mode: "shared",
+            model: "text-embedding-3-small",
+            dim: 1536,
+            timeout: 60,
+            embedding_func_max_async: 2,
+            text_type: "openai",
+            text_base_url: null,
+            text_api_key: "",
+            text_auth_token: "",
+            text_model: "",
+            text_task: "text-matching",
+            code_type: "openai",
+            code_base_url: null,
+            code_api_key: "",
+            code_auth_token: "",
+            code_model: "",
+            code_task: "code.passage",
+          },
+        ],
+        total: 1,
+      }),
+    })
+  })
+
+  await page.goto("/memory")
+  await page.getByRole("button", { name: "默认策略" }).click()
+  await page.getByRole("button", { name: "绑定模型" }).click()
+  await page.getByText("选择 Chat 供应商").click()
+  await page.getByRole("option", { name: "Manual Chat" }).click()
+  await page.getByLabel("Chat 模型").fill("custom-chat-model")
+  await page.getByText("选择 Embedding 配置").click()
+  await page.getByRole("option", { name: /Text Embedding/ }).click()
+  await page.getByRole("button", { name: "保存绑定" }).click()
+
+  await expect.poll(() => savedBinding).toEqual({
+    chat_provider_id: "chat_manual",
+    chat_model: "custom-chat-model",
+    embedding_provider_id: "emb_1",
+  })
+})
+
 test("generates a memory preview from raw input before saving", async ({ page }) => {
   let cardsRequestCount = 0
   let extractionPayload: unknown = null

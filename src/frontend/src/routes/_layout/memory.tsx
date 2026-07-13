@@ -36,6 +36,7 @@ export const Route = createFileRoute("/_layout/memory")({
 function MemoryPage() {
   const [health, setHealth] = useState<MemoryHealth | null>(null)
   const [binding, setBinding] = useState<MemoryProviderBinding | null>(null)
+  const [bindingError, setBindingError] = useState<string | null>(null)
   const [isCheckingHealth, setIsCheckingHealth] = useState(true)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const memoryReady = health?.ok === true && binding?.configured === true
@@ -53,9 +54,16 @@ function MemoryPage() {
       if (payload?.ok) {
         const bindingResponse = await authFetch(`${baseUrl}/api/v1/llm4ad/memory/provider-binding`)
         const bindingPayload = await bindingResponse.json().catch(() => null)
-        setBinding(bindingResponse.ok ? bindingPayload : null)
+        if (!bindingResponse.ok) {
+          setBinding(null)
+          setBindingError(bindingPayload?.detail || "绑定状态加载失败")
+        } else {
+          setBinding(bindingPayload)
+          setBindingError(null)
+        }
       } else {
         setBinding(null)
+        setBindingError(null)
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "检测 MindMemOS 状态失败"
@@ -74,6 +82,7 @@ function MemoryPage() {
         error_code: "frontend.health_failed",
       })
       setBinding(null)
+      setBindingError(null)
       toast.error(message)
     } finally {
       setIsCheckingHealth(false)
@@ -106,6 +115,14 @@ function MemoryPage() {
       )
     }
     if (health?.ok && binding?.configured !== true) {
+      if (bindingError) {
+        return (
+          <Badge variant="destructive" className="gap-1.5">
+            <AlertCircle className="size-3" />
+            绑定状态异常
+          </Badge>
+        )
+      }
       return (
         <Badge variant="secondary" className="gap-1.5">
           <AlertCircle className="size-3" />
@@ -158,7 +175,7 @@ function MemoryPage() {
                 默认策略
               </Button>
             </SheetTrigger>
-            <SheetContent className="!w-[min(100vw,36rem)] !max-w-none transform-gpu gap-0 overflow-hidden p-0 will-change-transform data-[state=closed]:duration-200 data-[state=open]:duration-300 sm:!max-w-none">
+            <SheetContent className="h-dvh max-h-dvh !w-[min(100vw,36rem)] min-w-0 !max-w-none transform-gpu gap-0 overflow-hidden p-0 will-change-transform data-[state=closed]:duration-200 data-[state=open]:duration-300 sm:!max-w-none">
               <SheetHeader className="shrink-0 border-b pr-10">
                 <SheetTitle>用户默认记忆策略</SheetTitle>
                 <SheetDescription>
@@ -171,6 +188,13 @@ function MemoryPage() {
                 ) : (
                   <>
                     <MemoryProviderBindingEditor binding={binding} onSaved={refreshMemoryStatus} />
+                    {bindingError && (
+                      <Alert className="mt-4 border-destructive/40 bg-destructive/5 text-destructive">
+                        <AlertCircle className="size-4" />
+                        <AlertTitle>绑定状态加载失败</AlertTitle>
+                        <AlertDescription>{bindingError}</AlertDescription>
+                      </Alert>
+                    )}
                     <div className="h-4" />
                     <MemoryConfigEditor
                       kind="user"
@@ -178,9 +202,11 @@ function MemoryPage() {
                       description="这些设置会影响后续创建的新项目和新任务。"
                       enabled={memoryReady}
                       disabledReason={
-                        health?.ok
-                          ? "当前用户尚未绑定记忆模型。请先在上方绑定 Chat 与 Embedding 模型，再配置默认注入策略。"
-                          : health?.message || "MindMemOS 当前不可用，无法配置默认注入策略。"
+                        bindingError
+                          ? "记忆模型绑定状态加载失败，请重新检测服务状态后再配置默认注入策略。"
+                          : health?.ok
+                            ? "当前用户尚未绑定记忆模型。请先在上方绑定 Chat 与 Embedding 模型，再配置默认注入策略。"
+                            : health?.message || "MindMemOS 当前不可用，无法配置默认注入策略。"
                       }
                       onSaved={refreshMemoryStatus}
                     />
@@ -195,11 +221,15 @@ function MemoryPage() {
       {!memoryReady && !isCheckingHealth && (
         <Alert className="border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <AlertCircle className="size-4" />
-          <AlertTitle>{health?.ok ? "记忆模型未绑定" : "MindMemOS 当前不可用"}</AlertTitle>
+          <AlertTitle>
+            {bindingError ? "绑定状态加载失败" : health?.ok ? "记忆模型未绑定" : "MindMemOS 当前不可用"}
+          </AlertTitle>
           <AlertDescription className="text-amber-900 dark:text-amber-100">
-            {health?.ok
-              ? "请在右上角默认策略中绑定 Chat 与 Embedding 模型后再管理记忆。"
-              : health?.message || "请检查系统环境配置或稍后重新检测。"}
+            {bindingError
+              ? bindingError
+              : health?.ok
+                ? "请在右上角默认策略中绑定 Chat 与 Embedding 模型后再管理记忆。"
+                : health?.message || "请检查系统环境配置或稍后重新检测。"}
           </AlertDescription>
         </Alert>
       )}
@@ -213,9 +243,11 @@ function MemoryPage() {
         disabledReason={
           isCheckingHealth
             ? "正在检测 MindMemOS 服务状态。"
-            : health?.ok
-              ? "当前用户尚未绑定记忆模型，请先在默认策略中绑定 Chat 与 Embedding。"
-              : health?.message || "MindMemOS 当前不可用，无法管理远端记忆。"
+            : bindingError
+              ? "记忆模型绑定状态加载失败，请重新检测服务状态。"
+              : health?.ok
+                ? "当前用户尚未绑定记忆模型，请先在默认策略中绑定 Chat 与 Embedding。"
+                : health?.message || "MindMemOS 当前不可用，无法管理远端记忆。"
         }
       />
     </div>
@@ -224,7 +256,7 @@ function MemoryPage() {
 
 function MemorySettingsSkeleton() {
   return (
-    <div className="space-y-4">
+    <div data-testid="memory-settings-skeleton" className="space-y-4">
       <div className="min-h-[140px] rounded-lg border bg-card/60 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-2">

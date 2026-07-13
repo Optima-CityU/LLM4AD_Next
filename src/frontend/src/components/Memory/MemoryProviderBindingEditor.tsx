@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -65,6 +66,13 @@ export default function MemoryProviderBindingEditor({
       setChatModel(models[0])
     }
   }, [chatModel, models])
+
+  const changeChatProvider = (providerId: string) => {
+    setChatProviderId(providerId)
+    const provider = providers.find((item) => item.id === providerId)
+    const nextModels = providerModels(provider)
+    setChatModel(nextModels[0] ?? "")
+  }
 
   const save = async () => {
     if (!chatProviderId || !chatModel || !embeddingProviderId) {
@@ -194,7 +202,7 @@ export default function MemoryProviderBindingEditor({
               <div className="grid gap-3">
                 <div className="grid gap-2">
                   <Label>Chat 供应商</Label>
-                  <Select value={chatProviderId} onValueChange={setChatProviderId}>
+                  <Select value={chatProviderId} onValueChange={changeChatProvider}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择 Chat 供应商" />
                     </SelectTrigger>
@@ -209,19 +217,36 @@ export default function MemoryProviderBindingEditor({
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Chat 模型</Label>
-                  <Select value={chatModel} onValueChange={setChatModel} disabled={!chatProviderId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择模型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {models.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="memory-chat-model">Chat 模型</Label>
+                  {models.length > 0 ? (
+                    <Select value={chatModel} onValueChange={setChatModel} disabled={!chatProviderId}>
+                      <SelectTrigger id="memory-chat-model">
+                        <SelectValue placeholder="选择模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <>
+                      <Input
+                        id="memory-chat-model"
+                        value={chatModel}
+                        onChange={(event) => setChatModel(event.target.value)}
+                        disabled={!chatProviderId}
+                        placeholder="输入 Chat 模型名称"
+                      />
+                      {chatProviderId && (
+                        <p className="text-xs text-muted-foreground">
+                          当前供应商没有配置模型列表，请手动输入 MindMemOS 调用的 Chat 模型名称。
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 <div className="grid gap-2">
