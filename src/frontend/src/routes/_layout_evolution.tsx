@@ -36,6 +36,7 @@ import EvolutionTaskList, {
   CreateTaskDialog,
   useInfiniteTasks,
 } from "@/components/Evolution/EvolutionTaskList"
+import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import ShortcutsHelp from "@/components/Evolution/ShortcutsHelp"
 import TechBackground from "@/components/Evolution/TechBackground"
 import TechCorner from "@/components/Evolution/TechCorner"
@@ -601,6 +602,14 @@ function Layout() {
     nonce: number
     select: boolean
   } | null>(null)
+  const [taskMemoryCreatedSignal, setTaskMemoryCreatedSignal] = useState<{
+    event: Record<string, unknown>
+    nonce: number
+  } | null>(null)
+  const [taskMemoryInjectedSignal, setTaskMemoryInjectedSignal] = useState<{
+    event: Record<string, unknown>
+    nonce: number
+  } | null>(null)
   const requestFocusNode = useCallback((id: string, select = true) => {
     if (!id) return
     setFocusNodeRequest({ id, nonce: Date.now(), select })
@@ -638,6 +647,7 @@ function Layout() {
     setSelectedNodes([])
     setActiveTab("overview")
     setIsViewingParams(false)
+    setTaskMemoryInjectedSignal(null)
   }, [effectiveTaskId])
 
   // Ref for stable access to selectedTask in callbacks
@@ -730,6 +740,12 @@ function Layout() {
     onResetTask: handleResetTask,
     onStatusChange: handleStatusChange,
     onGenerated: feedGenerated,
+    onMemoryCardCreated: (event) => {
+      setTaskMemoryCreatedSignal({ event, nonce: Date.now() })
+    },
+    onMemoryInjected: (event) => {
+      setTaskMemoryInjectedSignal({ event, nonce: Date.now() })
+    },
   })
 
   // maxGeneration is always derived from the actual node data — no separate state
@@ -845,6 +861,8 @@ function Layout() {
         setLeftCollapsed,
         resetTaskData: handleResetTask,
         updateTaskStatus: handleStatusChange,
+        taskMemoryCreatedSignal,
+        taskMemoryInjectedSignal,
       }}
     >
       <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
@@ -980,6 +998,12 @@ function Layout() {
                 <span className="size-1.5 rounded-full bg-primary animate-pulse" />
                 {t("demo.banner", { defaultValue: "Demo" })}
               </Link>
+            )}
+            {!isDemo && projectValid && projectId && (
+              <ProjectMemoryDialog
+                projectId={projectId}
+                projectName={projectName}
+              />
             )}
             <ConnectionStatus />
             <ShortcutsHelp />

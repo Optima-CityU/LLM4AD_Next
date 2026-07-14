@@ -1324,6 +1324,30 @@ export type MemoryConfigUpdate = {
 };
 
 /**
+ * 单个 scope 的记忆贡献度估算。
+ */
+export type MemoryContributionScopeSummary = {
+    calls?: number;
+    positive_results?: number;
+    best_delta?: (number | null);
+    average_delta?: (number | null);
+};
+
+/**
+ * MindMemOS 注入后候选算法评分变化的聚合估算。
+ */
+export type MemoryContributionSummary = {
+    associated_generations?: number;
+    scored_generations?: number;
+    positive_results?: number;
+    best_delta?: (number | null);
+    average_delta?: (number | null);
+    by_scope?: {
+        [key: string]: MemoryContributionScopeSummary;
+    };
+};
+
+/**
  * System MindMemOS health response for the frontend.
  */
 export type MemoryHealthResponse = {
@@ -1342,6 +1366,21 @@ export type MemoryHealthResponse = {
     details?: {
         [key: string]: unknown;
     };
+};
+
+/**
+ * 单次 MindMemOS 注入事件摘要。
+ */
+export type MemoryInjectionSummary = {
+    sampler?: string;
+    strategy?: string;
+    scope_hits?: {
+        [key: string]: (number);
+    };
+    deduped_hits?: number;
+    injected_chars?: number;
+    elapsed_ms?: number;
+    timestamp?: (string | null);
 };
 
 /**
@@ -2084,6 +2123,28 @@ export type TaskLogsResponse = {
      * 是否还有更早的日志
      */
     has_more?: boolean;
+};
+
+/**
+ * 任务级 MindMemOS 记忆使用统计。
+ */
+export type TaskMemoryObservabilityResponse = {
+    task_id: string;
+    enabled: boolean;
+    injection_calls?: number;
+    scope_hits_total?: {
+        [key: string]: (number);
+    };
+    deduped_hits_total?: number;
+    injected_chars_total?: number;
+    elapsed_ms_total?: number;
+    elapsed_ms_avg?: number;
+    sampler_counts?: {
+        [key: string]: (number);
+    };
+    created_task_memory_count?: number;
+    latest_injection?: (MemoryInjectionSummary | null);
+    contribution?: MemoryContributionSummary;
 };
 
 /**
@@ -3047,6 +3108,12 @@ export type Llm4AdTasksUpsertTaskMemoryData = {
 
 export type Llm4AdTasksUpsertTaskMemoryResponse = (MemoryCardResponse);
 
+export type Llm4AdTasksGetTaskMemoryObservabilityData = {
+    taskId: string;
+};
+
+export type Llm4AdTasksGetTaskMemoryObservabilityResponse = (TaskMemoryObservabilityResponse);
+
 export type Llm4AdTasksUpdateTaskMemoryData = {
     memoryId: string;
     requestBody: MemoryCardUpsertRequest;
@@ -3210,6 +3277,7 @@ export type Llm4AdTasksGetTaskLogsData = {
 export type Llm4AdTasksGetTaskLogsResponse = (TaskLogsResponse);
 
 export type Llm4AdTasksStreamTaskLogsData = {
+    lastId?: string;
     taskId: string;
 };
 

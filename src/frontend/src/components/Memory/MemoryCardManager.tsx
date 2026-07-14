@@ -121,6 +121,20 @@ const EXTRACTION_PROMPT_LANGUAGES: Array<{
   { value: "EN", label: "English" },
 ]
 
+const DEFAULT_EXTRACTION_EXAMPLE_KEYS = [
+  "algorithm",
+  "reflection",
+  "domain",
+  "general",
+] as const
+
+const PROJECT_EXTRACTION_EXAMPLE_KEYS = [
+  "constraints",
+  "evaluation",
+  "algorithm",
+  "reflection",
+] as const
+
 function toDraft(card: MemoryCard): MemoryCardDraft {
   return {
     id: card.id,
@@ -160,29 +174,6 @@ function readOnlyRows(card: MemoryCard | null): Array<[string, string]> {
   ]
   return rows.filter(([, value]) => value.trim())
 }
-
-const EXTRACTION_EXAMPLES = [
-  {
-    label: "算法经验",
-    content:
-      "在 TSP 中小规模实例中，2-opt 局部搜索适合作为后处理算子，通常能稳定改进 nearest-neighbor 初始解；大规模实例应限制候选邻域数量，避免单轮评估耗时过高。",
-  },
-  {
-    label: "错误反思",
-    content:
-      "上一次在进化搜索中把 mutation rate 设置到 0.2 以上后，种群多样性快速下降，优秀个体被破坏，最终收敛变差；后续同类任务应先从 0.01 到 0.05 的范围试探。",
-  },
-  {
-    label: "领域知识",
-    content:
-      "当前项目更重视算法稳定性、可解释性和可复现实验结果，只有在收益明显时才考虑复杂黑盒策略；评估时应优先比较方差、失败率和平均表现。",
-  },
-  {
-    label: "通用经验",
-    content:
-      "当一个启发式算法包含多个强耦合参数时，应先固定算子组合，再逐组调整参数，并记录每次 ablation 的收益和副作用，避免同时修改多个变量导致无法归因。",
-  },
-]
 
 function scopeQuery(scope: MemoryScope, projectId?: string, taskId?: string) {
   const params = new URLSearchParams({ scope })
@@ -313,6 +304,10 @@ export default function MemoryCardManager({
   disabledReason,
   loadEnabled = true,
   className,
+  embedded = false,
+  refreshSignal,
+  onCountChange,
+  defaultExtractionPromptLanguage = "auto",
 }: {
   scope: MemoryScope
   projectId?: string
@@ -323,15 +318,19 @@ export default function MemoryCardManager({
   disabledReason?: string
   loadEnabled?: boolean
   className?: string
+  embedded?: boolean
+  refreshSignal?: number | string | null
+  onCountChange?: (count: number | null) => void
+  defaultExtractionPromptLanguage?: ExtractionPromptLanguage
 }) {
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
   const uiLang: "zh" | "en" = i18n.language?.startsWith("zh") ? "zh" : "en"
   const [cards, setCards] = useState<MemoryCard[]>([])
   const [draft, setDraft] = useState<MemoryCardDraft>(DEFAULT_MEMORY_DRAFT)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<MemoryCard | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>("cards")
+  const [viewMode, setViewMode] = useState<ViewMode>(embedded ? "list" : "cards")
   const [searchText, setSearchText] = useState("")
   const [typeFilter, setTypeFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
@@ -367,10 +366,39 @@ export default function MemoryCardManager({
   const mutationEndpoint = `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/memory/cards`
   const extractionEndpoint = `${mutationEndpoint}/extractions`
   const query = scopeQuery(scope, projectId, taskId)
+  const scopeKey = `${scope}:${projectId ?? ""}:${taskId ?? ""}`
+  const normalizedDefaultExtractionPromptLanguage = (
+    ["auto", "ZH", "EN"].includes(defaultExtractionPromptLanguage)
+      ? defaultExtractionPromptLanguage
+      : "auto"
+  ) as ExtractionPromptLanguage
+  const extractionPromptLanguages = useMemo(
+    () => (
+      EXTRACTION_PROMPT_LANGUAGES.map((item) => ({
+        ...item,
+        label: t(`memory.cardManager.extraction.languages.${item.value}`),
+      }))
+    ),
+    [i18n.language, t],
+  )
+  const extractionExamples = useMemo(() => {
+    const group = scope === "project" ? "project" : "default"
+    const keys = group === "project"
+      ? PROJECT_EXTRACTION_EXAMPLE_KEYS
+      : DEFAULT_EXTRACTION_EXAMPLE_KEYS
+    return keys.map((key) => ({
+      label: t(`memory.cardManager.extraction.examples.${group}.${key}.label`),
+      content: t(`memory.cardManager.extraction.examples.${group}.${key}.content`),
+    }))
+  }, [i18n.language, scope, t])
 
   const loadCards = useCallback(async () => {
     if (!loadEnabled) {
+      setCards([])
+      setTotal(null)
+      setHasMore(false)
       setIsLoading(false)
+      onCountChange?.(null)
       return
     }
     setIsLoading(true)
@@ -381,17 +409,40 @@ export default function MemoryCardManager({
       const items = payload.items ?? []
       setCards(items)
       setTotal(payload.total ?? items.length)
+      onCountChange?.(payload.total ?? items.length)
       setHasMore(items.length > 0 && payload.has_more)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载记忆失败")
     } finally {
       setIsLoading(false)
     }
-  }, [endpoint, loadEnabled])
+  }, [endpoint, loadEnabled, onCountChange])
+
+  const refreshFirstPage = useCallback(() => {
+    setSearchText("")
+    setTypeFilter("all")
+    setStatusFilter("all")
+    setPage(1)
+    if (page === 1) {
+      void loadCards()
+    }
+  }, [loadCards, page])
+
+  useEffect(() => {
+    setCards([])
+    setTotal(null)
+    setHasMore(false)
+    setPage(1)
+  }, [scopeKey])
 
   useEffect(() => {
     void loadCards()
   }, [loadCards])
+
+  useEffect(() => {
+    if (refreshSignal === undefined || refreshSignal === null) return
+    void loadCards()
+  }, [refreshSignal, loadCards])
 
   useEffect(() => {
     if (previewItems.length === 0 || isCommittingPreview) return
@@ -424,6 +475,9 @@ export default function MemoryCardManager({
   }, [cards, searchText, statusFilter, typeFilter])
   const hasLocalFilters =
     searchText.trim().length > 0 || typeFilter !== "all" || statusFilter !== "all"
+  const listGridColumns = embedded
+    ? "grid-cols-[minmax(0,1fr)_86px_72px_108px]"
+    : "grid-cols-[minmax(180px,1.2fr)_130px_90px_minmax(140px,1fr)_120px]"
   const editingCard = useMemo(
     () => (editingId ? cards.find((card) => card.id === editingId) ?? null : null),
     [cards, editingId],
@@ -447,7 +501,7 @@ export default function MemoryCardManager({
 
   const resetExtraction = useCallback(() => {
     setExtractionContent("")
-    setExtractionPromptLanguage("auto")
+    setExtractionPromptLanguage(normalizedDefaultExtractionPromptLanguage)
     setPreviewId(null)
     setPreviewItems([])
     setSelectedPreviewIds([])
@@ -458,7 +512,7 @@ export default function MemoryCardManager({
     extractionAbortRef.current = null
     setIsCommittingPreview(false)
     setIsExtractionCloseConfirmOpen(false)
-  }, [])
+  }, [normalizedDefaultExtractionPromptLanguage])
 
   const replaceCard = useCallback((updatedCard: MemoryCard) => {
     setCards((current) => {
@@ -669,6 +723,9 @@ export default function MemoryCardManager({
           setPreviewItems(items)
           setSelectedPreviewIds(items.map((item) => item.id))
           mergeCards(items)
+          if (items.length > 0) {
+            refreshFirstPage()
+          }
           setExtractionProgress({ stage: "completed", message, percent: event.percent ?? 100 })
           setExtractionLogs((current) => [...current.slice(-5), message])
           if (items.length === 0) {
@@ -716,6 +773,7 @@ export default function MemoryCardManager({
       setIsExtractionOpen(false)
       resetExtraction()
       mergeCards(payload.items ?? [])
+      refreshFirstPage()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "启用选中记忆失败")
     } finally {
@@ -886,48 +944,95 @@ export default function MemoryCardManager({
   }
 
   return (
-    <div className={cn("rounded-lg border bg-card/60", className)}>
-      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
-        <Database className="size-4 text-primary" />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="text-xs text-muted-foreground">{description}</p>
+    <div
+      className={cn(
+        embedded ? "min-h-0 bg-transparent" : "rounded-lg border bg-card/60",
+        className,
+      )}
+    >
+      {!embedded && (
+        <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+          <Database className="size-4 text-primary" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold">{title}</h2>
+            <p className="text-xs text-muted-foreground">{description}</p>
+          </div>
+          {iconAction(
+            "刷新记忆列表",
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              disabled={!loadEnabled}
+              aria-label="刷新记忆列表"
+              onClick={() => void loadCards()}
+            >
+              <RefreshCw className="size-4" />
+            </Button>,
+          )}
+          <Button type="button" size="sm" className="gap-1.5" disabled={disabled} onClick={openCreate}>
+            <Sparkles className="size-3.5" />
+            新增记忆
+          </Button>
         </div>
-        {iconAction(
-          "刷新记忆列表",
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            disabled={!loadEnabled}
-            aria-label="刷新记忆列表"
-            onClick={() => void loadCards()}
-          >
-            <RefreshCw className="size-4" />
-          </Button>,
-        )}
-        <Button type="button" size="sm" className="gap-1.5" disabled={disabled} onClick={openCreate}>
-          <Sparkles className="size-3.5" />
-          新增记忆
-        </Button>
-      </div>
+      )}
 
-      <div className="space-y-3 p-4">
+      <div className={cn("space-y-3", embedded ? "p-0" : "p-4")}>
+        {embedded && (
+          <div className="flex items-center justify-end gap-1">
+            {iconAction(
+              "刷新记忆列表",
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-8"
+                disabled={!loadEnabled}
+                aria-label="刷新记忆列表"
+                onClick={() => void loadCards()}
+              >
+                <RefreshCw className="size-3.5" />
+              </Button>,
+            )}
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              disabled={disabled}
+              onClick={openCreate}
+            >
+              <Sparkles className="size-3.5" />
+              新增记忆
+            </Button>
+          </div>
+        )}
         {disabled && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
             {disabledReason || "当前记忆管理不可用"}
           </div>
         )}
-        <div className="grid gap-2 lg:grid-cols-[1fr_150px_140px_auto]">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <div
+          className={cn(
+            "gap-2",
+            embedded
+              ? "flex flex-wrap items-center"
+              : "grid lg:grid-cols-[minmax(220px,1fr)_150px_140px_auto]",
+          )}
+        >
+          <div className={cn("relative", embedded && "min-w-40 flex-1")}>
+            <Search
+              className={cn(
+                "pointer-events-none absolute top-1/2 -translate-y-1/2 text-muted-foreground",
+                embedded ? "left-2.5 size-3.5" : "left-3 size-4",
+              )}
+            />
             <Input
               value={searchText}
               onChange={(event) => {
                 setPage(1)
                 setSearchText(event.target.value)
               }}
-              className="pl-9"
+              className={cn(embedded ? "h-8 pl-8 text-xs" : "pl-9")}
               placeholder="搜索标题、内容或标签"
             />
           </div>
@@ -938,7 +1043,7 @@ export default function MemoryCardManager({
               setTypeFilter(value)
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger className={cn(embedded && "h-8 w-[118px] text-xs")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -957,7 +1062,7 @@ export default function MemoryCardManager({
               setStatusFilter(value)
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger className={cn(embedded && "h-8 w-[108px] text-xs")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -966,7 +1071,7 @@ export default function MemoryCardManager({
               <SelectItem value="disabled">已禁用</SelectItem>
             </SelectContent>
           </Select>
-          <div className="flex rounded-md border p-1">
+          <div className={cn("flex rounded-md border", embedded ? "h-8 p-0.5" : "p-1")}>
             {iconAction(
               "卡片视图",
               <Button
@@ -974,9 +1079,10 @@ export default function MemoryCardManager({
                 size="sm"
                 variant={viewMode === "cards" ? "secondary" : "ghost"}
                 aria-label="卡片视图"
+                className={cn(embedded && "h-7 px-2")}
                 onClick={() => setViewMode("cards")}
               >
-                <Grid2X2 className="size-4" />
+                <Grid2X2 className={cn(embedded ? "size-3.5" : "size-4")} />
               </Button>,
             )}
             {iconAction(
@@ -986,21 +1092,27 @@ export default function MemoryCardManager({
                 size="sm"
                 variant={viewMode === "list" ? "secondary" : "ghost"}
                 aria-label="列表视图"
+                className={cn(embedded && "h-7 px-2")}
                 onClick={() => setViewMode("list")}
               >
-                <List className="size-4" />
+                <List className={cn(embedded ? "size-3.5" : "size-4")} />
               </Button>,
             )}
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-          <span>
+        <div
+          className={cn(
+            "flex gap-3 text-xs text-muted-foreground",
+            embedded ? "flex-wrap items-center justify-between" : "items-center justify-between",
+          )}
+        >
+          <span className={cn(embedded && "text-[11px]")}>
             第 {page} 页{total !== null ? `，共 ${total} 条` : ""}
             {hasLocalFilters ? `，本页匹配 ${visibleCards.length} 条` : ""}
           </span>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">每页</span>
+          <div className={cn("flex items-center gap-2", embedded && "flex-wrap")}>
+            <span className={cn("text-xs text-muted-foreground", embedded && "text-[11px]")}>每页</span>
             <Select
               value={String(pageSize)}
               onValueChange={(value) => {
@@ -1008,7 +1120,7 @@ export default function MemoryCardManager({
                 setPageSize(Number(value))
               }}
             >
-              <SelectTrigger className="h-8 w-[76px]">
+              <SelectTrigger className={cn("h-8 w-[76px]", embedded && "w-[68px] text-xs")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1023,6 +1135,7 @@ export default function MemoryCardManager({
               type="button"
               size="sm"
               variant="outline"
+              className={cn(embedded && "h-8 px-2 text-xs")}
               disabled={page <= 1 || isLoading}
               onClick={() => setPage((current) => Math.max(1, current - 1))}
             >
@@ -1032,6 +1145,7 @@ export default function MemoryCardManager({
               type="button"
               size="sm"
               variant="outline"
+              className={cn(embedded && "h-8 px-2 text-xs")}
               disabled={!hasMore || isLoading}
               onClick={() => setPage((current) => current + 1)}
             >
@@ -1055,18 +1169,26 @@ export default function MemoryCardManager({
           </div>
         ) : viewMode === "list" ? (
           <div className="overflow-hidden rounded-md border">
-            <div className="grid grid-cols-[minmax(180px,1.2fr)_130px_90px_minmax(140px,1fr)_120px] gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+            <div
+              className={cn(
+                "grid gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground",
+                listGridColumns,
+                embedded && "gap-2 px-2 py-1.5 text-[11px]",
+              )}
+            >
               <span>标题</span>
               <span>类型</span>
               <span>状态</span>
-              <span>标签</span>
+              {!embedded && <span>标签</span>}
               <span className="text-right">操作</span>
             </div>
             {visibleCards.map((card) => (
               <div
                 key={card.id}
                 className={cn(
-                  "grid grid-cols-[minmax(180px,1.2fr)_130px_90px_minmax(140px,1fr)_120px] items-center gap-3 border-b px-3 py-2 last:border-b-0",
+                  "grid items-center gap-3 border-b px-3 py-2 last:border-b-0",
+                  listGridColumns,
+                  embedded && "gap-2 px-2 py-1.5",
                   !card.enabled && "opacity-60",
                   togglingIds.has(card.id) && "opacity-80",
                 )}
@@ -1083,28 +1205,31 @@ export default function MemoryCardManager({
                 <Badge variant={card.enabled ? "secondary" : "outline"} className="w-fit">
                   {card.enabled ? "可注入" : "已禁用"}
                 </Badge>
-                <div className="flex min-w-0 flex-wrap gap-1">
-                  {card.tags.slice(0, 3).map((tag) => (
-                    <Badge
-                      key={tag}
-                      variant="secondary"
-                      className="max-w-28 truncate text-[10px]"
-                    >
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
+                {!embedded && (
+                  <div className="flex min-w-0 flex-wrap gap-1">
+                    {card.tags.slice(0, 3).map((tag) => (
+                      <Badge
+                        key={tag}
+                        variant="secondary"
+                        className="max-w-28 truncate text-[10px]"
+                      >
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
                 <div className="ml-auto">{renderActions(card)}</div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className={cn("grid gap-3", embedded ? "grid-cols-1" : "md:grid-cols-2 xl:grid-cols-3")}>
             {visibleCards.map((card) => (
               <div
                 key={card.id}
                 className={cn(
-                  "flex min-h-48 flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
+                  "flex flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
+                  embedded ? "min-h-32" : "min-h-48",
                   !card.enabled && "opacity-60",
                   togglingIds.has(card.id) && "opacity-80",
                 )}
@@ -1119,7 +1244,7 @@ export default function MemoryCardManager({
                   </div>
                   {renderActions(card)}
                 </div>
-                <p className="mt-3 line-clamp-5 whitespace-pre-wrap text-sm text-muted-foreground">
+                <p className={cn("mt-3 whitespace-pre-wrap text-sm text-muted-foreground", embedded ? "line-clamp-3" : "line-clamp-5")}>
                   {card.content}
                 </p>
                 {card.tags.length > 0 && (
@@ -1154,16 +1279,16 @@ export default function MemoryCardManager({
         >
           <button
             type="button"
-            aria-label="关闭新增记忆"
+            aria-label={t("memory.cardManager.extraction.close")}
             disabled={isExtractionBusy}
             onClick={requestCloseExtraction}
             className="ring-offset-background focus:ring-ring absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none disabled:opacity-30 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
           >
             <X />
-            <span className="sr-only">关闭</span>
+            <span className="sr-only">{t("memory.cardManager.extraction.close")}</span>
           </button>
           <DialogHeader>
-            <DialogTitle>新增记忆</DialogTitle>
+            <DialogTitle>{t("memory.cardManager.extraction.title")}</DialogTitle>
           </DialogHeader>
 
           <div className="grid gap-5">
@@ -1171,29 +1296,33 @@ export default function MemoryCardManager({
               <div className="flex items-start gap-2">
                 <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
                 <div className="space-y-1 text-sm">
-                  <p className="font-medium">输入一段希望系统记住的内容</p>
+                  <p className="font-medium">{t("memory.cardManager.extraction.guideTitle")}</p>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    支持从自然语言中提取事实、经验、错误教训、约束和领域知识。系统会尽量自动归纳标签，保存后仍可编辑。不适合保存无上下文的碎片词、临时闲聊或敏感密钥。
+                    {t("memory.cardManager.extraction.guideDescription")}
                   </p>
                 </div>
               </div>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-extraction-content`}>原始内容</Label>
+              <Label htmlFor={`${scope}-memory-extraction-content`}>
+                {t("memory.cardManager.extraction.contentLabel")}
+              </Label>
               <Textarea
                 id={`${scope}-memory-extraction-content`}
-                aria-label="原始内容"
+                aria-label={t("memory.cardManager.extraction.contentLabel")}
                 className="min-h-40 resize-y leading-6"
                 value={extractionContent}
                 onChange={(event) => setExtractionContent(event.target.value)}
                 disabled={isExtractionBusy || previewItems.length > 0}
-                placeholder="建议写清楚场景、结论、原因或证据，以及后续可复用的建议。例如：在这个项目中，算法更关注稳定性和可解释性；上一次过大的 mutation rate 导致种群退化，后续应从更小范围开始尝试。"
+                placeholder={t("memory.cardManager.extraction.placeholder")}
               />
             </div>
 
             <div className="grid gap-2 sm:max-w-xs">
-              <Label htmlFor={`${scope}-memory-extraction-language`}>提取语言</Label>
+              <Label htmlFor={`${scope}-memory-extraction-language`}>
+                {t("memory.cardManager.extraction.languageLabel")}
+              </Label>
               <Select
                 value={extractionPromptLanguage}
                 onValueChange={(value) => setExtractionPromptLanguage(value as ExtractionPromptLanguage)}
@@ -1203,7 +1332,7 @@ export default function MemoryCardManager({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {EXTRACTION_PROMPT_LANGUAGES.map((item) => (
+                  {extractionPromptLanguages.map((item) => (
                     <SelectItem key={item.value} value={item.value}>
                       {item.label}
                     </SelectItem>
@@ -1213,9 +1342,11 @@ export default function MemoryCardManager({
             </div>
 
             <div className="grid gap-2">
-              <div className="text-xs font-medium text-muted-foreground">可点击示例</div>
+              <div className="text-xs font-medium text-muted-foreground">
+                {t("memory.cardManager.extraction.examplesTitle")}
+              </div>
               <div className="grid gap-2 md:grid-cols-3">
-                {EXTRACTION_EXAMPLES.map((example) => (
+                {extractionExamples.map((example) => (
                   <button
                     key={example.label}
                     type="button"

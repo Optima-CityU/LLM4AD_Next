@@ -166,6 +166,20 @@ def list_task_memory(
     )
 
 
+@router.get(
+    "/{task_id}/memory/observability",
+    response_model=schemas.TaskMemoryObservabilityResponse,
+    summary="获取任务记忆使用统计",
+)
+def get_task_memory_observability(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+):
+    """聚合任务日志中的 MindMemOS 注入事件，返回任务级记忆使用统计。"""
+    return task_service.get_task_memory_observability(db, task_id, current_user)
+
+
 @router.post(
     "/{task_id}/memory",
     response_model=memory_schemas.MemoryCardResponse,
@@ -478,6 +492,7 @@ async def stream_task_logs(
     db: SessionDep,
     current_user: CurrentUser,
     task_id: uuid.UUID,
+    last_id: str = Query(default="0-0", pattern=r"^\d+-\d+$"),
 ):
     """SSE 端点，实时推送任务日志和状态更新。
 
@@ -511,6 +526,7 @@ async def stream_task_logs(
             redis_key=task_logs_key(task_id),
             connected_data={"task_id": str(task_id)},
             entry_handler=_task_log_entry_handler,
+            last_id=last_id,
             max_idle=1800.0,
             use_draining=True,
         )

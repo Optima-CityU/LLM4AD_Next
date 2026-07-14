@@ -360,6 +360,7 @@ def _apply_mindmemos_runtime_config(
     current_user: models.User,
     task_id: uuid.UUID | str,
     project_id: uuid.UUID | str,
+    memory_task_id: uuid.UUID | str | None = None,
 ) -> None:
     """Inject system-level MindMemOS settings into task run arguments."""
     if not settings.mindmemos_runtime_available:
@@ -374,6 +375,7 @@ def _apply_mindmemos_runtime_config(
     if memory.get("type") not in (None, "", "mindmemos_cloud"):
         return
 
+    memory_scope_task_id = memory_task_id or task_id
     memory.update(
         {
             "type": "mindmemos_cloud",
@@ -382,11 +384,14 @@ def _apply_mindmemos_runtime_config(
             "mindmemos_user_id": str(current_user.id),
             "mindmemos_app_id": settings.LLM4AD_MINDMEMOS_APP_ID,
             "mindmemos_agent_id": "task",
-            "mindmemos_session_id": str(task_id),
+            "mindmemos_session_id": str(memory_scope_task_id),
             "mindmemos_project_id": str(project_id),
         }
     )
     memory.setdefault("mindmemos_fail_open", settings.LLM4AD_MINDMEMOS_FAIL_OPEN)
+    memory.setdefault("mindmemos_request_timeout", 60.0)
+    memory.setdefault("mindmemos_add_timeout", settings.LLM4AD_MINDMEMOS_ADD_TIMEOUT)
+    memory.setdefault("mindmemos_extraction_prompt_language", "auto")
     memory.setdefault("include_user_memory", True)
     memory.setdefault("include_project_memory", True)
     memory.setdefault("include_task_memory", True)
@@ -447,6 +452,7 @@ def run_task(
         input_args,
         current_user=current_user,
         task_id=task_id,
+        memory_task_id=task.group_id or task.id,
         project_id=task.project_id,
     )
     task_args = {

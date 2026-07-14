@@ -14,7 +14,6 @@ import {
   Circle,
   Clock,
   Copy,
-  Database,
   FolderOpen,
   Loader2,
   MoreVertical,
@@ -45,7 +44,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogClose,
@@ -72,7 +70,6 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { LoadingButton } from "@/components/ui/loading-button"
 import {
   Select,
@@ -92,8 +89,6 @@ import { getDemoState, setDemoPhase, useDemoState } from "@/hooks/useDemoMode"
 import { useEvolution } from "@/hooks/useEvolution"
 import { formatDateTime } from "@/lib/utils"
 import { handleError } from "@/utils"
-import { authFetch } from "@/utils/auth"
-import type { MemoryConfig } from "@/components/Memory/types"
 
 const AUTO_COLLAPSE_WIDTH = 1600
 
@@ -202,13 +197,6 @@ function getCreateTaskSchema(t: (key: string) => string) {
   return getNameSchema(t).extend({
     template_name: z.string().optional(),
     config_name: z.string().optional(),
-    memory_enabled: z.boolean().default(true),
-    include_user_memory: z.boolean().default(true),
-    include_project_memory: z.boolean().default(true),
-    include_task_memory: z.boolean().default(true),
-    user_memory_limit: z.coerce.number().int().min(0).default(5),
-    project_memory_limit: z.coerce.number().int().min(0).default(5),
-    task_memory_limit: z.coerce.number().int().min(0).default(5),
   })
 }
 type NameFormData = {
@@ -219,13 +207,6 @@ type CreateTaskFormData = {
   name: string
   template_name?: string
   config_name?: string
-  memory_enabled: boolean
-  include_user_memory: boolean
-  include_project_memory: boolean
-  include_task_memory: boolean
-  user_memory_limit: number
-  project_memory_limit: number
-  task_memory_limit: number
 }
 
 export function CreateTaskDialog({
@@ -256,18 +237,6 @@ export function CreateTaskDialog({
     queryFn: () => Llm4AdTasksService.listExampleTemplates(),
     enabled: isOpen,
   })
-  const { data: projectMemoryConfig } = useQuery<MemoryConfig>({
-    queryKey: ["projectMemoryConfig", projectId],
-    queryFn: async () => {
-      const baseUrl = import.meta.env.VITE_API_URL || ""
-      const response = await authFetch(
-        `${baseUrl}/api/v1/llm4ad/memory/projects/${projectId}/config`,
-      )
-      if (!response.ok) throw new Error("Failed to load memory config")
-      return response.json()
-    },
-    enabled: isOpen && !!projectId && !isDemo,
-  })
 
   const form = useForm<CreateTaskFormData>({
     resolver: zodResolver(createTaskSchema) as any,
@@ -278,21 +247,10 @@ export function CreateTaskDialog({
       name: isDemo ? "TSP Heuristic" : "",
       template_name: undefined,
       config_name: undefined,
-      memory_enabled: true,
-      include_user_memory: true,
-      include_project_memory: true,
-      include_task_memory: true,
-      user_memory_limit: 5,
-      project_memory_limit: 5,
-      task_memory_limit: 5,
     },
   })
 
   const isAiMode = buildMode === "ai"
-  const memoryEnabled = form.watch("memory_enabled")
-  const memoryRuntimeAvailable = Boolean(
-    projectMemoryConfig?.system_runtime_available && projectMemoryConfig?.mindmemos_binding_id,
-  )
 
   const selectedTemplateName = form.watch("template_name")
   const selectedConfigName = form.watch("config_name")
@@ -321,20 +279,6 @@ export function CreateTaskDialog({
       form.setValue("config_name", effectiveConfigName)
     }
   }, [effectiveConfigName, selectedConfigName, form])
-
-  useEffect(() => {
-    if (!isOpen || !projectMemoryConfig) return
-    form.setValue(
-      "memory_enabled",
-      Boolean(projectMemoryConfig.system_runtime_available && projectMemoryConfig.mindmemos_binding_id),
-    )
-    form.setValue("include_user_memory", projectMemoryConfig.include_user_memory)
-    form.setValue("include_project_memory", projectMemoryConfig.include_project_memory)
-    form.setValue("include_task_memory", projectMemoryConfig.include_task_memory)
-    form.setValue("user_memory_limit", projectMemoryConfig.user_memory_limit)
-    form.setValue("project_memory_limit", projectMemoryConfig.project_memory_limit)
-    form.setValue("task_memory_limit", projectMemoryConfig.task_memory_limit)
-  }, [form, isOpen, projectMemoryConfig])
 
   const handleBuildModeChange = (mode: "ai" | "manual") => {
     setBuildMode(mode)
@@ -376,18 +320,6 @@ export function CreateTaskDialog({
       project_id: projectId,
       language: i18n.language?.startsWith("zh") ? "zh" : "en",
       ai_built: isAiMode,
-      input_args: {
-        memory: {
-          enabled: data.memory_enabled && memoryRuntimeAvailable,
-          type: data.memory_enabled && memoryRuntimeAvailable ? "mindmemos_cloud" : "local_yaml",
-          include_user_memory: data.include_user_memory,
-          include_project_memory: data.include_project_memory,
-          include_task_memory: data.include_task_memory,
-          user_memory_limit: data.user_memory_limit,
-          project_memory_limit: data.project_memory_limit,
-          task_memory_limit: data.task_memory_limit,
-        },
-      },
     }
     if (!isAiMode && data.template_name) {
       payload.template_name = data.template_name
@@ -768,99 +700,6 @@ export function CreateTaskDialog({
                   )}
                 </>
               )}
-              <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Database className="size-4 text-primary" />
-                  <div className="min-w-0 flex-1">
-                    <Label className="text-sm font-medium">记忆注入</Label>
-                    <p className="text-[11px] text-muted-foreground">
-                      新任务会继承项目默认记忆策略，也可以在这里覆盖本次任务。
-                    </p>
-                  </div>
-                  {projectMemoryConfig && (
-                    <span
-                      className={`rounded px-2 py-0.5 text-[10px] ${
-                        memoryRuntimeAvailable
-                          ? "bg-primary/10 text-primary"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {memoryRuntimeAvailable
-                        ? "MindMemOS 可用"
-                        : "沿用旧记忆"}
-                    </span>
-                  )}
-                </div>
-                <FormField
-                  control={form.control}
-                  name="memory_enabled"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center gap-2 space-y-0">
-                      <FormControl>
-                        <Checkbox
-                          checked={field.value}
-                          disabled={!memoryRuntimeAvailable}
-                          onCheckedChange={(checked) => field.onChange(checked === true)}
-                        />
-                      </FormControl>
-                      <FormLabel className="text-sm font-normal">使用记忆注入</FormLabel>
-                    </FormItem>
-                  )}
-                />
-                {!memoryRuntimeAvailable && (
-                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-                    MindMemOS 服务未就绪或当前用户尚未绑定记忆模型，当前任务将沿用旧记忆模块。
-                  </p>
-                )}
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {[
-                    ["include_user_memory", "user_memory_limit", "用户级"],
-                    ["include_project_memory", "project_memory_limit", "项目级"],
-                    ["include_task_memory", "task_memory_limit", "任务级"],
-                  ].map(([enabledName, limitName, label]) => (
-                    <div key={enabledName} className="rounded-md border bg-background/60 p-2">
-                      <FormField
-                        control={form.control}
-                        name={enabledName as keyof CreateTaskFormData}
-                        render={({ field }) => (
-                          <FormItem className="flex items-center gap-2 space-y-0">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value as boolean}
-                                disabled={!memoryEnabled || !memoryRuntimeAvailable}
-                                onCheckedChange={(checked) => field.onChange(checked === true)}
-                              />
-                            </FormControl>
-                            <FormLabel className="text-xs font-medium">{label}记忆</FormLabel>
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name={limitName as keyof CreateTaskFormData}
-                        render={({ field }) => (
-                          <FormItem className="mt-2">
-                            <FormLabel className="text-[11px] text-muted-foreground">
-                              注入数量
-                            </FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                min={0}
-                                disabled={!memoryEnabled || !memoryRuntimeAvailable}
-                                value={field.value as number}
-                                onChange={(event) =>
-                                  field.onChange(Number.parseInt(event.target.value || "0", 10))
-                                }
-                              />
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
             <DialogFooter>
               <DialogClose asChild>

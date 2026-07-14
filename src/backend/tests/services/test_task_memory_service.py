@@ -216,6 +216,51 @@ def test_mindmemos_stream_add_uses_add_timeout(monkeypatch: pytest.MonkeyPatch):
     assert events[-1]["event"] == "completed"
 
 
+def test_mindmemos_stream_add_treats_zero_timeout_as_infinite(monkeypatch: pytest.MonkeyPatch):
+    captured: dict[str, float | None] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, *_args, **_kwargs):
+            return _FakeMindMemOSStreamContext(
+                _FakeMindMemOSStreamResponse(
+                    [
+                        "event: completed",
+                        'data: {"data": {"memories": []}}',
+                        "",
+                    ]
+                )
+            )
+
+    monkeypatch.setattr(memory_service.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(memory_service.settings, "LLM4AD_MINDMEMOS_ADD_TIMEOUT", 0.0)
+    monkeypatch.setattr(memory_service.settings, "LLM4AD_MINDMEMOS_REQUEST_TIMEOUT", 10.0)
+
+    async def collect():
+        return [
+            event
+            async for event in memory_service._mindmemos_stream_post(
+                models.User(id=uuid.uuid4(), email="stream-zero-timeout@example.com", hashed_password="x"),
+                "/v1/memory/add/stream",
+                {},
+                scopes=["memory:write"],
+            )
+        ]
+
+    events = anyio.run(collect)
+
+    assert captured["timeout"] is None
+    assert events[-1]["event"] == "completed"
+
+
 @pytest.mark.asyncio
 async def test_mindmemos_stream_post_emits_heartbeat_during_idle(monkeypatch: pytest.MonkeyPatch):
     class FakeAsyncClient:
@@ -267,6 +312,68 @@ def _mark_user_memory_bound(db: Session, user_id: uuid.UUID) -> None:
     config.mindmemos_binding_id = "pb_test"
     db.add(config)
     db.commit()
+
+
+def _assert_task_scope_filters(filters: dict, user: models.User, task: models.Task, memory_ids: list[str]) -> None:
+    assert filters["memory_id"] == {"in": memory_ids}
+    assert filters["user_id"] == str(user.id)
+    assert filters["app_id"] == memory_service.settings.LLM4AD_MINDMEMOS_APP_ID
+    assert filters["session_id"] == str(task.id)
+    assert filters["agent_id"] == "task"
+    assert "llm4ad_scope" not in filters
+    assert "project_id" not in filters
+    assert "task_id" not in filters
+
+
+def test_task_memory_scope_uses_root_task_for_child_versions(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    root_task = _create_task_for_user(db, user.id)
+    child_task = models.Task(
+        name="Memory Task Child",
+        project_id=root_task.project_id,
+        group_id=root_task.id,
+        parent_id=root_task.id,
+        input_args=root_task.input_args,
+    )
+    db.add(child_task)
+    db.commit()
+    db.refresh(child_task)
+    _enable_system_mindmemos(monkeypatch)
+    _mark_user_memory_bound(db, user.id)
+    calls: list[dict] = []
+
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        assert path == "/v1/memory/list"
+        calls.append(payload)
+        return {
+            "code": "ok",
+            "data": {
+                "memories": [],
+                "page": payload.get("page", 1),
+                "page_size": payload.get("page_size", 20),
+                "total": 0,
+                "has_more": False,
+            },
+        }
+
+    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
+    monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda db, current_user: None)
+
+    memory_service.list_memory_cards_page(
+        db,
+        user,
+        scope="task",
+        task_id=child_task.id,
+        page=1,
+        page_size=20,
+    )
+
+    assert calls[0]["session_id"] == str(root_task.id)
+    assert calls[0]["filters"]["session_id"] == str(root_task.id)
+    assert calls[0]["agent_id"] == "task"
 
 
 def test_task_memory_crud_uses_mindmemos_when_enabled(
@@ -434,6 +541,9 @@ def test_memory_card_response_splits_editable_and_readonly_fields():
                 "memory_type": "good_algorithm",
                 "title": "",
                 "tags": ["tsp"],
+                "score": 0.87,
+                "generation": 6,
+                "algorithm_id": "algo-6",
                 "content_hash": "internal-hash",
             },
         }
@@ -443,6 +553,9 @@ def test_memory_card_response_splits_editable_and_readonly_fields():
     assert card.content == "2026-07-09 should remain content only when MindMemOS returned it."
     assert card.type == "good_algorithm"
     assert card.tags == ["tsp"]
+    assert card.score == 0.87
+    assert card.generation == 6
+    assert card.algorithm_id == "algo-6"
     assert card.readonly.status == "active"
     assert card.readonly.entity_name == "TSP operator guidance"
     assert card.readonly.property_name == "good_algorithm"
@@ -516,6 +629,10 @@ def test_remote_list_merges_schema_tags_without_rendering_tag_rows(monkeypatch: 
     assert page.items[0].tags == ["TSP", "local-search", "2-opt"]
     assert [payload.get("filters") for _path, payload in calls] == [
         {
+            "user_id": str(user.id),
+            "app_id": "llm4ad",
+            "session_id": "global",
+            "agent_id": "global",
             "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
             "property_name": {
                 "in": [
@@ -527,6 +644,10 @@ def test_remote_list_merges_schema_tags_without_rendering_tag_rows(monkeypatch: 
             },
         },
         {
+            "user_id": str(user.id),
+            "app_id": "llm4ad",
+            "session_id": "global",
+            "agent_id": "global",
             "entity_id": {"in": ["entity-1"]},
             "property_name": "tags",
         },
@@ -826,12 +947,20 @@ def test_remote_list_merges_schema_tags_by_entity_name_metadata(monkeypatch: pyt
     assert [card.id for card in page.items] == ["card-1"]
     assert page.items[0].tags == ["mutation rate", "population collapse", "algorithm design"]
     assert calls[0]["filters"] == {
+        "user_id": str(user.id),
+        "app_id": "llm4ad",
+        "session_id": "global",
+        "agent_id": "global",
         "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
         "property_name": {
             "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
         },
     }
     assert calls[1]["filters"] == {
+        "user_id": str(user.id),
+        "app_id": "llm4ad",
+        "session_id": "global",
+        "agent_id": "global",
         "entity_id": {"in": ["entity-1"]},
         "property_name": "tags",
     }
@@ -904,12 +1033,23 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
     assert page.items[1].tags == []
     assert [payload.get("filters") for _path, payload in calls] == [
         {
+            "user_id": str(user.id),
+            "app_id": "llm4ad",
+            "session_id": "global",
+            "agent_id": "global",
             "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
             "property_name": {
                 "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
             },
         },
-        {"entity_id": {"in": ["entity-1", "entity-2"]}, "property_name": "tags"},
+        {
+            "user_id": str(user.id),
+            "app_id": "llm4ad",
+            "session_id": "global",
+            "agent_id": "global",
+            "entity_id": {"in": ["entity-1", "entity-2"]},
+            "property_name": "tags",
+        },
     ]
 
 
@@ -1035,12 +1175,23 @@ def test_remote_list_cards_merges_entity_name_tags_metadata(monkeypatch: pytest.
     assert page.items[0].tags == ["mutation rate", "population collapse"]
     assert [payload.get("filters") for payload in calls] == [
         {
+            "user_id": str(user.id),
+            "app_id": "llm4ad",
+            "session_id": "global",
+            "agent_id": "global",
             "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
             "property_name": {
                 "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
             },
         },
-        {"entity_id": {"in": ["entity-1"]}, "property_name": "tags"},
+        {
+            "user_id": str(user.id),
+            "app_id": "llm4ad",
+            "session_id": "global",
+            "agent_id": "global",
+            "entity_id": {"in": ["entity-1"]},
+            "property_name": "tags",
+        },
     ]
 
 
@@ -1092,8 +1243,6 @@ def test_remote_items_to_cards_ignores_fact_items_without_schema_property_projec
                         "record_metadata": [
                             {
                                 "source": "llm4ad",
-                                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-                                "llm4ad_scope": "user",
                                 "llm4ad_generation_id": "generation-test",
                                 "enabled": False,
                             }
@@ -1112,8 +1261,6 @@ def test_remote_items_to_cards_ignores_fact_items_without_schema_property_projec
                         "record_metadata": [
                             {
                                 "source": "llm4ad",
-                                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-                                "llm4ad_scope": "user",
                                 "llm4ad_generation_id": "generation-test",
                                 "enabled": False,
                             }
@@ -1160,14 +1307,10 @@ def test_task_memory_update_does_not_echo_readonly_metadata(
     update_payload = [payload for path, payload in calls if path == "/v1/memory/update"][-1]
     assert update_payload["metadata_patch"] == {
         "source": "llm4ad",
-        "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-        "llm4ad_scope": "task",
         "memory_type": "general_insight",
         "title": "Editable title",
         "enabled": True,
         "tags": ["editable"],
-        "project_id": str(task.project_id),
-        "task_id": str(task.id),
     }
 
 
@@ -1358,7 +1501,7 @@ def test_memory_card_extraction_uses_related_memory_ids_from_schema_events(
                 },
             }
         if path == "/v1/memory/list":
-            assert payload["filters"] == {"memory_id": {"in": ["prop-good", "prop-error"]}}
+            _assert_task_scope_filters(payload["filters"], user, task, ["prop-good", "prop-error"])
             return {
                 "code": "ok",
                 "data": {
@@ -1441,7 +1584,8 @@ def test_memory_card_extraction_merges_related_schema_tags(
             }
         if path == "/v1/memory/list":
             filters = payload["filters"]
-            if filters == {"memory_id": {"in": ["prop-good", "tags-1"]}}:
+            if filters.get("memory_id") == {"in": ["prop-good", "tags-1"]}:
+                _assert_task_scope_filters(filters, user, task, ["prop-good", "tags-1"])
                 return {
                     "code": "ok",
                     "data": {
@@ -1518,7 +1662,8 @@ def test_memory_card_extraction_merges_related_schema_tags_by_entity_name(
             }
         if path == "/v1/memory/list":
             filters = payload["filters"]
-            if filters == {"memory_id": {"in": ["prop-good", "tags-1"]}}:
+            if filters.get("memory_id") == {"in": ["prop-good", "tags-1"]}:
+                _assert_task_scope_filters(filters, user, task, ["prop-good", "tags-1"])
                 return {
                     "code": "ok",
                     "data": {
@@ -1712,7 +1857,7 @@ def test_memory_card_extraction_commit_can_activate_disabled_generated_cards(
     def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/list":
-            assert payload["filters"] == {"memory_id": {"in": ["keep-card"]}}
+            _assert_task_scope_filters(payload["filters"], user, task, ["keep-card"])
             return {
                 "code": "ok",
                 "data": {

@@ -325,6 +325,7 @@ class LLM4AD:
         )
 
         memory = create_memory(self.config.memory)
+        memory.set_query_provider(planner_provider)
 
         # Set up memory persistence directory
         if self._state_tracker.memory_dir:
@@ -337,9 +338,14 @@ class LLM4AD:
 
         # Create memory extractor for auto-extraction during evolution
         if self.config.memory.auto_extraction.enabled:
+            auto_extraction_config = self.config.memory.auto_extraction
+            if self.config.memory.type == "mindmemos_cloud":
+                auto_extraction_config = auto_extraction_config.model_copy(
+                    update={"type": "mindmemos_raw_extractor"}
+                )
             memory.extractor = create_memory_extractor(
                 provider=planner_provider,
-                config=self.config.memory.auto_extraction,
+                config=auto_extraction_config,
             )
 
         # Use planner_type from evolution config if available (e.g. MEoH),

@@ -15,6 +15,8 @@ export type MemoryConfig = {
   mindmemos_rerank: boolean
   mindmemos_score_threshold?: number | null
   mindmemos_fail_open: boolean
+  mindmemos_request_timeout?: number | null
+  mindmemos_add_timeout?: number | null
   mindmemos_binding_id?: string | null
   mindmemos_chat_provider_id?: string | null
   mindmemos_chat_model?: string | null

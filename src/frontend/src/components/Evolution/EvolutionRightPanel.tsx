@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Code,
   Crosshair,
+  Database,
   Eye,
   FileText,
   GitBranch,
@@ -23,11 +24,16 @@ import {
   Square,
   X,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import type { TaskResponse } from "@/client"
-import { Llm4AdTasksService } from "@/client"
+import type {
+  MemoryContributionSummary,
+  MemoryInjectionSummary,
+  TaskResponse,
+} from "@/client"
+import { Llm4AdMemoryService, Llm4AdTasksService, UtilsService } from "@/client"
 import PanelErrorBoundary from "@/components/Common/PanelErrorBoundary"
+import MemoryCardManager from "@/components/Memory/MemoryCardManager"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,7 +61,11 @@ import { useCopyBeforeRun } from "@/hooks/useCopyBeforeRun"
 import { useEvolution } from "@/hooks/useEvolution"
 import { useTaskLogsList } from "@/hooks/useTaskLogs"
 import { INPUT_LIMITS } from "@/lib/inputLimits"
-import { resetTaskCaches, taskKeys } from "@/lib/task-queries"
+import {
+  resetTaskCaches,
+  setTaskStatusInCache,
+  taskKeys,
+} from "@/lib/task-queries"
 import { cn, formatDateTime, formatScore } from "@/lib/utils"
 import { type GANode, ISLAND_COLORS } from "./TaskDetail/island-ga-mock-data"
 import {
@@ -64,6 +74,7 @@ import {
   matchesLogLevels,
   renderEntry,
 } from "./TaskDetail/log-renderers"
+
 import { computeNodeClassifications } from "./TaskDetail/node-classification"
 import TaskVersionTree from "./TaskVersionTree"
 
@@ -136,6 +147,7 @@ function useTaskActions(task: TaskResponse) {
     setIsViewingParams,
     setIsViewingAiBuildHistory,
     setForceManualConfigTaskId,
+    updateTaskStatus,
   } = useEvolution()
   const queryClient = useQueryClient()
   const { t } = useTranslation()
@@ -183,10 +195,10 @@ function useTaskActions(task: TaskResponse) {
 
   const runMutation = useMutation({
     mutationFn: () => Llm4AdTasksService.runTask({ taskId: displayTask.id }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: taskKeys.detail(displayTask.id),
-      })
+    onSuccess: (result) => {
+      const nextStatus = result.status ?? "pending"
+      setTaskStatusInCache(queryClient, displayTask.id, nextStatus, projectId)
+      updateTaskStatus(nextStatus)
       setIsConfiguring(false)
       setIsViewingParams(false)
       resetTaskData()
@@ -196,10 +208,10 @@ function useTaskActions(task: TaskResponse) {
   const copyAndRunMutation = useMutation({
     mutationFn: () =>
       withCopyIfNeeded(async (effectiveId) => {
-        await Llm4AdTasksService.runTask({ taskId: effectiveId })
-        queryClient.invalidateQueries({
-          queryKey: taskKeys.detail(effectiveId),
-        })
+        const result = await Llm4AdTasksService.runTask({ taskId: effectiveId })
+        const nextStatus = result.status ?? "pending"
+        setTaskStatusInCache(queryClient, effectiveId, nextStatus, projectId)
+        updateTaskStatus(nextStatus)
         setIsConfiguring(false)
         setIsViewingParams(false)
         resetTaskData()
@@ -642,6 +654,385 @@ function TaskInfoSection({
   )
 }
 
+function TaskMemorySection({
+  task,
+  isOpen,
+  onToggle,
+}: {
+  task: TaskResponse
+  isOpen: boolean
+  onToggle: () => void
+}) {
+  const { t } = useTranslation()
+  const {
+    projectId,
+    taskMemoryCreatedSignal,
+    taskMemoryInjectedSignal,
+  } = useEvolution()
+  const [memoryCount, setMemoryCount] = useState<number | null>(null)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [usageStatsOpen, setUsageStatsOpen] = useState(false)
+  const [contributionOpen, setContributionOpen] = useState(false)
+  const taskScopeId = task.group_id ?? task.id
+
+  useEffect(() => {
+    setMemoryCount(null)
+    setPendingCount(0)
+    setUsageStatsOpen(false)
+    setContributionOpen(false)
+  }, [taskScopeId])
+
+  const { data: featureFlags } = useQuery({
+    queryKey: ["featureFlags"],
+    queryFn: () => UtilsService.featureFlags(),
+    staleTime: 5 * 60 * 1000,
+  })
+  const featureEnabled = featureFlags?.mindmemos_memory_enabled ?? false
+
+  const configQuery = useQuery({
+    queryKey: ["memory", "projectConfig", projectId],
+    queryFn: () => Llm4AdMemoryService.getProjectMemoryConfig({ projectId: projectId! }),
+    enabled: isOpen && featureEnabled && Boolean(projectId),
+    staleTime: 60 * 1000,
+  })
+
+  const memoryEvent = taskMemoryCreatedSignal?.event
+  const memoryEventMatches =
+    memoryEvent?.type === "memory_card_created" &&
+    memoryEvent?.scope === "task" &&
+    String(memoryEvent?.task_id ?? "") === taskScopeId
+  const refreshSignal = memoryEventMatches ? taskMemoryCreatedSignal?.nonce : null
+  const injectionEvent = taskMemoryInjectedSignal?.event
+  const injectionEventMatches =
+    injectionEvent?.type === "mindmemos_memory_injected" &&
+    String(injectionEvent?.task_id ?? "") === taskScopeId
+  const observabilityQuery = useQuery({
+    queryKey: ["memory", "taskObservability", taskScopeId],
+    queryFn: () =>
+      Llm4AdTasksService.getTaskMemoryObservability({ taskId: taskScopeId }),
+    enabled: isOpen && isMindMemOSTask(task),
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: false,
+  })
+  const observability = observabilityQuery.data
+  const latestInjection = injectionEventMatches
+    ? eventToInjectionSummary(injectionEvent ?? {})
+    : observability?.latest_injection
+  const latestScopeHits = latestInjection?.scope_hits
+  const injectedSummary = latestScopeHits
+    ? t("evolution.taskMemory.injectedSummary", {
+        task: Number(latestScopeHits.task ?? 0),
+        project: Number(latestScopeHits.project ?? 0),
+        user: Number(latestScopeHits.user ?? 0),
+        chars: Number(latestInjection?.injected_chars ?? 0),
+      })
+    : null
+
+  useEffect(() => {
+    if (!memoryEventMatches || !taskMemoryCreatedSignal) return
+    if (isOpen) {
+      setPendingCount(0)
+      return
+    }
+    setPendingCount((current) => current + 1)
+  }, [isOpen, memoryEventMatches, taskMemoryCreatedSignal])
+
+  useEffect(() => {
+    if (isOpen) setPendingCount(0)
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen || !injectionEventMatches) return
+    observabilityQuery.refetch()
+  }, [isOpen, injectionEventMatches, taskMemoryInjectedSignal, observabilityQuery.refetch])
+
+  const systemReady = configQuery.data?.system_runtime_available === true
+  const bindingReady = Boolean(configQuery.data?.mindmemos_binding_id)
+  const memoryReady =
+    featureEnabled &&
+    !configQuery.isError &&
+    (!isOpen || (systemReady && bindingReady))
+  const disabledReason = !featureEnabled
+    ? t("evolution.taskMemory.unavailable.featureDisabled")
+    : configQuery.isLoading
+      ? t("evolution.taskMemory.unavailable.checking")
+      : configQuery.isError
+        ? t("evolution.taskMemory.unavailable.checkFailed")
+        : !systemReady
+          ? t("evolution.taskMemory.unavailable.serviceUnavailable")
+          : !bindingReady
+            ? t("evolution.taskMemory.unavailable.modelUnbound")
+            : undefined
+  const canLoadCards = isOpen && featureEnabled && systemReady && bindingReady
+  const injectionCalls = observability?.injection_calls ?? 0
+  const dedupedHitsTotal = observability?.deduped_hits_total ?? 0
+  const elapsedMsAvg = observability?.elapsed_ms_avg ?? 0
+  const createdTaskMemoryCount = observability?.created_task_memory_count ?? 0
+  const scopeHitsTotal = observability?.scope_hits_total ?? {}
+  const contribution = (
+    observability as
+      | { contribution?: MemoryContributionSummary }
+      | undefined
+  )?.contribution
+  const contributionAssociated = Number(contribution?.associated_generations ?? 0)
+  const contributionPositive = Number(contribution?.positive_results ?? 0)
+  const contributionSummary = contributionAssociated
+    ? t("evolution.taskMemory.observability.contributionSummary", {
+        associated: contributionAssociated,
+        positive: contributionPositive,
+      })
+    : t("evolution.taskMemory.observability.contributionEmpty")
+  const summary = pendingCount > 0
+    ? t("evolution.taskMemory.newCount", { count: pendingCount })
+    : injectionCalls
+      ? t("evolution.taskMemory.observability.summary", {
+          calls: injectionCalls,
+          hits: dedupedHitsTotal,
+        })
+    : memoryCount !== null
+      ? t("evolution.taskMemory.count", { count: memoryCount })
+      : featureEnabled
+        ? t("evolution.taskMemory.ready")
+        : t("evolution.taskMemory.unavailable.short")
+
+  return (
+    <div className="flex min-h-0 flex-col shrink-0">
+      <SectionHeader
+        icon={Database}
+        title={t("evolution.taskMemory.title")}
+        isOpen={isOpen}
+        onToggle={onToggle}
+        summary={
+          <span
+            className={cn(
+              "inline-flex max-w-full truncate text-[10px]",
+              pendingCount > 0 ? "text-primary" : "text-muted-foreground/70",
+            )}
+          >
+            {summary}
+          </span>
+        }
+      />
+      {isOpen && (
+        <div className="max-h-[56vh] overflow-y-auto border-b border-border/30 px-3 py-3">
+          <TaskMemoryFoldout
+            open={usageStatsOpen}
+            title={t("evolution.taskMemory.observability.title")}
+            summary={injectedSummary ?? t("evolution.taskMemory.injectedEmpty")}
+            onToggle={() => setUsageStatsOpen((current) => !current)}
+          >
+            {observabilityQuery.isLoading ? (
+              <div className="grid grid-cols-3 gap-1.5">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="h-10 animate-pulse rounded bg-muted/70" />
+                ))}
+              </div>
+            ) : observabilityQuery.isError ? (
+              <p className="text-[11px] leading-4 text-destructive">
+                {t("evolution.taskMemory.observability.loadFailed")}
+              </p>
+            ) : injectionCalls ? (
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.calls")}
+                  value={String(injectionCalls)}
+                />
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.hits")}
+                  value={String(dedupedHitsTotal)}
+                />
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.taskCalls")}
+                  value={String(scopeHitsTotal.task ?? 0)}
+                />
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.projectCalls")}
+                  value={String(scopeHitsTotal.project ?? 0)}
+                />
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.userCalls")}
+                  value={String(scopeHitsTotal.user ?? 0)}
+                />
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.created")}
+                  value={String(createdTaskMemoryCount)}
+                />
+                <TaskMemoryMetric
+                  label={t("evolution.taskMemory.observability.avgLatency")}
+                  value={t("evolution.taskMemory.observability.ms", {
+                    value: elapsedMsAvg,
+                  })}
+                />
+              </div>
+            ) : (
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                {t("evolution.taskMemory.observability.empty")}
+              </p>
+            )}
+            <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+              {t("evolution.taskMemory.injectedHint")}
+            </p>
+          </TaskMemoryFoldout>
+          <TaskMemoryFoldout
+            open={contributionOpen}
+            title={t("evolution.taskMemory.observability.contributionTitle")}
+            summary={contributionSummary}
+            onToggle={() => setContributionOpen((current) => !current)}
+          >
+            {observabilityQuery.isLoading ? (
+              <div className="grid grid-cols-3 gap-1.5">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="h-10 animate-pulse rounded bg-muted/70" />
+                ))}
+              </div>
+            ) : observabilityQuery.isError ? (
+              <p className="text-[11px] leading-4 text-destructive">
+                {t("evolution.taskMemory.observability.loadFailed")}
+              </p>
+            ) : contributionAssociated ? (
+              <>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  <TaskMemoryMetric
+                    label={t("evolution.taskMemory.observability.associated")}
+                    value={String(contributionAssociated)}
+                  />
+                  <TaskMemoryMetric
+                    label={t("evolution.taskMemory.observability.scored")}
+                    value={String(contribution?.scored_generations ?? 0)}
+                  />
+                  <TaskMemoryMetric
+                    label={t("evolution.taskMemory.observability.positive")}
+                    value={String(contributionPositive)}
+                  />
+                  <TaskMemoryMetric
+                    label={t("evolution.taskMemory.observability.bestDelta")}
+                    value={formatContributionDelta(contribution?.best_delta)}
+                  />
+                  <TaskMemoryMetric
+                    label={t("evolution.taskMemory.observability.averageDelta")}
+                    value={formatContributionDelta(contribution?.average_delta)}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1.5">
+                  {(["task", "project", "user"] as const).map((scope) => (
+                    <TaskMemoryMetric
+                      key={scope}
+                      label={t(`evolution.taskMemory.observability.${scope}Contribution`)}
+                      value={t("evolution.taskMemory.observability.scopeContributionValue", {
+                        calls: contribution?.by_scope?.[scope]?.calls ?? 0,
+                        positive: contribution?.by_scope?.[scope]?.positive_results ?? 0,
+                      })}
+                    />
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
+                  {t("evolution.taskMemory.observability.contributionHint")}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                {t("evolution.taskMemory.observability.noContribution")}
+              </p>
+            )}
+          </TaskMemoryFoldout>
+          <div className="mb-2">
+            <div className="text-xs font-medium text-foreground">
+              {t("evolution.taskMemory.storedTitle")}
+            </div>
+          </div>
+          {!memoryReady && (
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+              {disabledReason}
+            </div>
+          )}
+          {canLoadCards && (
+            <MemoryCardManager
+              scope="task"
+              taskId={taskScopeId}
+              title={t("evolution.taskMemory.title")}
+              description={t("evolution.taskMemory.description")}
+              embedded
+              loadEnabled={canLoadCards}
+              refreshSignal={refreshSignal}
+              onCountChange={setMemoryCount}
+              defaultExtractionPromptLanguage={taskMemoryExtractionPromptLanguage(task)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TaskMemoryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-border/40 bg-muted/30 px-2 py-1.5">
+      <div className="truncate text-[10px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-xs font-medium text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function TaskMemoryFoldout({
+  open,
+  title,
+  summary,
+  onToggle,
+  children,
+}: {
+  open: boolean
+  title: string
+  summary: string
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="mb-2 rounded-md border border-border/60 bg-background/70">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        {open ? (
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+          {title}
+        </span>
+        <span className="max-w-[62%] truncate rounded bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+          {summary}
+        </span>
+      </button>
+      {open && <div className="border-t border-border/50 px-3 py-2">{children}</div>}
+    </div>
+  )
+}
+
+function formatContributionDelta(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-"
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(3)}`
+}
+
+function eventToInjectionSummary(event: Record<string, unknown>): MemoryInjectionSummary {
+  const rawScopeHits = event.scope_hits
+  const scopeHits = typeof rawScopeHits === "object" && rawScopeHits !== null
+    ? (rawScopeHits as Record<string, number>)
+    : {}
+  return {
+    sampler: String(event.sampler ?? "unknown"),
+    strategy: String(event.strategy ?? ""),
+    scope_hits: scopeHits,
+    deduped_hits: Number(event.deduped_hits ?? 0),
+    injected_chars: Number(event.injected_chars ?? 0),
+    elapsed_ms: Number(event.elapsed_ms ?? 0),
+  }
+}
+
 /**
  * Compact task actions for the top bar, shown while the right panel is
  * collapsed. Mirrors the panel's primary action (run/stop) as a visible
@@ -776,6 +1167,26 @@ function CollapsedTaskActionButtons({
       <TaskActionDialogs actions={actions} />
     </div>
   )
+}
+
+function taskMemoryExtractionPromptLanguage(task: TaskResponse): "auto" | "ZH" | "EN" {
+  const memory = taskMemoryConfig(task)
+  if (!memory) return "auto"
+  const value = String(
+    memory.mindmemos_extraction_prompt_language ?? "auto",
+  )
+  return value === "ZH" || value === "EN" ? value : "auto"
+}
+
+function taskMemoryConfig(task: TaskResponse): Record<string, unknown> | null {
+  const memory = task.input_args?.memory
+  if (!memory || typeof memory !== "object" || Array.isArray(memory)) return null
+  return memory as Record<string, unknown>
+}
+
+function isMindMemOSTask(task: TaskResponse): boolean {
+  const memory = taskMemoryConfig(task)
+  return memory?.enabled !== false && memory?.type === "mindmemos_cloud"
 }
 
 export function CollapsedRightPanelActions({
@@ -1795,13 +2206,16 @@ export default function EvolutionRightPanel({
     isViewingParams,
     isViewingAiBuildHistory,
     selectedNodes,
+    effectiveTaskId,
   } = useEvolution()
   const { t } = useTranslation()
 
   const isTuning = isConfiguring || isViewingParams || isViewingAiBuildHistory
   const [infoOpen, setInfoOpen] = useState(true)
+  const [memoryOpen, setMemoryOpen] = useState(true)
   const [nodeOpen, setNodeOpen] = useState(!isTuning)
   const [logsOpen, setLogsOpen] = useState(true)
+  const showTaskMemory = task ? isMindMemOSTask(task) : false
 
   useEffect(() => {
     if (isTuning) {
@@ -1810,6 +2224,10 @@ export default function EvolutionRightPanel({
       setNodeOpen(true)
     }
   }, [isTuning])
+
+  useEffect(() => {
+    if (showTaskMemory) setMemoryOpen(true)
+  }, [task?.id, effectiveTaskId, showTaskMemory])
 
   if (!task) {
     return (
@@ -1830,6 +2248,15 @@ export default function EvolutionRightPanel({
           onToggle={() => setInfoOpen(!infoOpen)}
         />
       </PanelErrorBoundary>
+      {showTaskMemory && (
+        <PanelErrorBoundary resetKey={task.id}>
+          <TaskMemorySection
+            task={task}
+            isOpen={memoryOpen}
+            onToggle={() => setMemoryOpen(!memoryOpen)}
+          />
+        </PanelErrorBoundary>
+      )}
       {isTuning ? (
         <PanelErrorBoundary resetKey={task.id}>
           <RunLogsSection

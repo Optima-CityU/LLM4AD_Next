@@ -297,6 +297,7 @@ export default function MemoryConfigEditor({
               max={1}
               step="0.01"
               value={config.mindmemos_score_threshold ?? ""}
+              disabled={!config.mindmemos_rerank}
               onChange={(event) =>
                 update({
                   mindmemos_score_threshold:
@@ -306,14 +307,19 @@ export default function MemoryConfigEditor({
               placeholder="可留空"
             />
             <p className="text-xs text-muted-foreground">
-              相关度过滤门槛。值越高越严格，注入更少但更精准；留空表示不过滤。
+              仅在启用重排时生效。值越高越严格，注入更少但更精准；留空表示不过滤。
             </p>
           </div>
           <div className="space-y-1">
             <label className="flex items-center gap-2 text-sm font-medium">
               <Checkbox
                 checked={config.mindmemos_rerank}
-                onCheckedChange={(checked) => update({ mindmemos_rerank: checked === true })}
+                onCheckedChange={(checked) =>
+                  update({
+                    mindmemos_rerank: checked === true,
+                    ...(checked === true ? {} : { mindmemos_score_threshold: null }),
+                  })
+                }
               />
               启用重排
             </label>

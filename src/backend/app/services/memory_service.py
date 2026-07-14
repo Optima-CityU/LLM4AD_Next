@@ -52,6 +52,7 @@ LLM4AD_MEMORY_ENTITY_FILTER = {"entity_type": LLM4AD_MEMORY_ENTITY_TYPE}
 LLM4AD_MEMORY_CARD_PROPERTY_FILTER = {
     "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
 }
+MINDMEMOS_DEFAULT_SCORE_THRESHOLD = 0.65
 MEMORY_STREAM_HEARTBEAT_SECONDS = 10.0
 
 
@@ -256,10 +257,20 @@ def _raise_for_mindmemos_error(response: httpx.Response) -> None:
         raise HTTPException(status_code=502, detail=detail) from exc
 
 
-def _mindmemos_timeout_for_path(path: str) -> float:
+def _mindmemos_http_timeout(timeout: float | int | None) -> float | None:
+    if timeout is None:
+        return None
+    try:
+        value = float(timeout)
+    except (TypeError, ValueError):
+        return None
+    return None if value == 0 else value
+
+
+def _mindmemos_timeout_for_path(path: str) -> float | None:
     if path in {"/v1/memory/add", "/v1/memory/add/stream"}:
-        return settings.LLM4AD_MINDMEMOS_ADD_TIMEOUT
-    return settings.LLM4AD_MINDMEMOS_REQUEST_TIMEOUT
+        return _mindmemos_http_timeout(settings.LLM4AD_MINDMEMOS_ADD_TIMEOUT)
+    return _mindmemos_http_timeout(settings.LLM4AD_MINDMEMOS_REQUEST_TIMEOUT)
 
 
 def _mindmemos_post(
@@ -389,7 +400,7 @@ def _mindmemos_get(
     scopes: list[str],
 ) -> dict[str, Any]:
     try:
-        with httpx.Client(timeout=settings.LLM4AD_MINDMEMOS_REQUEST_TIMEOUT) as client:
+        with httpx.Client(timeout=_mindmemos_http_timeout(settings.LLM4AD_MINDMEMOS_REQUEST_TIMEOUT)) as client:
             response = client.get(
                 f"{_mindmemos_base_url()}{path}",
                 headers=_mindmemos_headers(current_user, scopes=scopes),
@@ -413,7 +424,7 @@ def _mindmemos_patch(
     scopes: list[str],
 ) -> dict[str, Any]:
     try:
-        with httpx.Client(timeout=settings.LLM4AD_MINDMEMOS_REQUEST_TIMEOUT) as client:
+        with httpx.Client(timeout=_mindmemos_http_timeout(settings.LLM4AD_MINDMEMOS_REQUEST_TIMEOUT)) as client:
             response = client.patch(
                 f"{_mindmemos_base_url()}{path}",
                 headers=_mindmemos_headers(current_user, scopes=scopes),
@@ -639,6 +650,9 @@ def _remote_memory_to_card(item: dict[str, Any]) -> MemoryCardResponse:
     tags = _normalize_tag_values(metadata.get("tags"))
     status = str(item.get("status") or metadata.get("status") or "active")
     enabled = status == "active" and metadata.get("enabled", True) is not False
+    score = _optional_float(item.get("score"))
+    if score is None:
+        score = _optional_float(metadata.get("score"))
     return MemoryCardResponse(
         id=memory_id,
         type=raw_type,
@@ -647,7 +661,9 @@ def _remote_memory_to_card(item: dict[str, Any]) -> MemoryCardResponse:
         enabled=enabled,
         source="mindmemos",
         tags=[str(tag) for tag in tags],
-        score=item.get("score") if isinstance(item.get("score"), int | float) else None,
+        score=score,
+        generation=_optional_int(metadata.get("generation")),
+        algorithm_id=_optional_str(metadata.get("algorithm_id")),
         metadata=metadata,
         readonly=MemoryCardReadonlyInfo(
             source="mindmemos",
@@ -667,6 +683,24 @@ def _optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _memory_card_title(item: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -767,6 +801,16 @@ def _remote_tag_filters(entity_ids: list[str]) -> dict[str, Any]:
     }
 
 
+def _remote_scoped_filters(scope_data: dict[str, str], filters: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "user_id": scope_data["user_id"],
+        "app_id": scope_data["app_id"],
+        "session_id": scope_data["session_id"],
+        "agent_id": scope_data["agent_id"],
+        **filters,
+    }
+
+
 def _memory_page_data(data: dict[str, Any]) -> dict[str, Any]:
     page_data = data.get("data") or {}
     return page_data if isinstance(page_data, dict) else {}
@@ -781,7 +825,7 @@ def _remote_list_cards(
 ) -> MemoryCardPageResponse:
     payload = {
         **scope_data,
-        "filters": _remote_card_filters(),
+        "filters": _remote_scoped_filters(scope_data, _remote_card_filters()),
         "page": page,
         "page_size": page_size,
         "include_total": True,
@@ -810,7 +854,7 @@ def _remote_list_cards(
             "/v1/memory/list",
             {
                 **scope_data,
-                "filters": _remote_tag_filters(entity_ids),
+                "filters": _remote_scoped_filters(scope_data, _remote_tag_filters(entity_ids)),
                 "page": 1,
                 "page_size": max(len(entity_ids), 1),
                 "include_total": False,
@@ -872,7 +916,7 @@ def _remote_fetch_cards_by_ids(
         "/v1/memory/list",
         {
             **scope_data,
-            "filters": {"memory_id": {"in": ids}},
+            "filters": _remote_scoped_filters(scope_data, {"memory_id": {"in": ids}}),
             "page": 1,
             "page_size": max(len(ids), 1),
             "include_total": False,
@@ -897,14 +941,11 @@ def _generated_card_metadata(
     task_id: uuid.UUID | None,
     enabled: bool,
 ) -> dict[str, Any]:
+    del scope_name, project_id, task_id
     return {
         "source": "llm4ad",
-        "entity_type": LLM4AD_MEMORY_ENTITY_TYPE,
-        "llm4ad_scope": scope_name,
         "llm4ad_generation_id": generation_id,
         "enabled": enabled,
-        "project_id": str(project_id) if project_id else None,
-        "task_id": str(task_id) if task_id else None,
     }
 
 
@@ -918,16 +959,13 @@ def _editable_card_metadata(
     project_id: uuid.UUID | None,
     task_id: uuid.UUID | None,
 ) -> dict[str, Any]:
+    del scope_name, project_id, task_id
     return {
         "source": "llm4ad",
-        "entity_type": LLM4AD_MEMORY_ENTITY_TYPE,
-        "llm4ad_scope": scope_name,
         "memory_type": memory_type,
         "title": title,
         "enabled": enabled,
         "tags": tags,
-        "project_id": str(project_id) if project_id else None,
-        "task_id": str(task_id) if task_id else None,
     }
 
 
@@ -1303,8 +1341,16 @@ def _system_config_fields() -> dict[str, Any]:
 
 def _with_system_config(config: models.UserMemoryConfig | models.ProjectMemoryConfig) -> dict[str, Any]:
     data = {field: getattr(config, field) for field in config.__class__.model_fields}
+    if not data.get("mindmemos_rerank"):
+        data["mindmemos_score_threshold"] = None
     data.update(_system_config_fields())
     return data
+
+
+def _normalize_memory_config_rerank_threshold(config: models.UserMemoryConfig | models.ProjectMemoryConfig) -> None:
+    """Keep score threshold meaningful only when MindMemOS rerank is enabled."""
+    if not config.mindmemos_rerank:
+        config.mindmemos_score_threshold = None
 
 
 def _copy_user_binding_fields(data: dict[str, Any], user_defaults: UserMemoryConfigResponse) -> dict[str, Any]:
@@ -1327,7 +1373,12 @@ def get_user_memory_config(db: Session, current_user: models.User) -> UserMemory
     stmt = select(models.UserMemoryConfig).where(models.UserMemoryConfig.user_id == current_user.id)
     config = db.exec(stmt).first()
     if config is None:
-        config = models.UserMemoryConfig(user_id=current_user.id)
+        rerank_enabled = settings.mindmemos_rerank_configured
+        config = models.UserMemoryConfig(
+            user_id=current_user.id,
+            mindmemos_rerank=rerank_enabled,
+            mindmemos_score_threshold=MINDMEMOS_DEFAULT_SCORE_THRESHOLD if rerank_enabled else None,
+        )
         db.add(config)
         db.commit()
         db.refresh(config)
@@ -1345,6 +1396,7 @@ def update_user_memory_config(
         select(models.UserMemoryConfig).where(models.UserMemoryConfig.user_id == current_user.id)
     ).one()
     config.sqlmodel_update(request.model_dump(exclude_unset=True))
+    _normalize_memory_config_rerank_threshold(config)
     config.updated_time = datetime.now(UTC)
     db.add(config)
     db.commit()
@@ -1647,7 +1699,9 @@ def get_project_memory_config(
             task_memory_limit=user_defaults.task_memory_limit,
             mindmemos_search_strategy=user_defaults.mindmemos_search_strategy,
             mindmemos_rerank=user_defaults.mindmemos_rerank,
-            mindmemos_score_threshold=user_defaults.mindmemos_score_threshold,
+            mindmemos_score_threshold=user_defaults.mindmemos_score_threshold
+            if user_defaults.mindmemos_rerank
+            else None,
             mindmemos_fail_open=user_defaults.mindmemos_fail_open,
         )
         db.add(config)
@@ -1669,6 +1723,7 @@ def update_project_memory_config(
         select(models.ProjectMemoryConfig).where(models.ProjectMemoryConfig.project_id == project_id)
     ).one()
     config.sqlmodel_update(request.model_dump(exclude_unset=True))
+    _normalize_memory_config_rerank_threshold(config)
     config.updated_time = datetime.now(UTC)
     db.add(config)
     db.commit()
@@ -1695,7 +1750,8 @@ def _resolve_card_scope(
         if task_id is None:
             raise HTTPException(status_code=400, detail="task_id is required for task memory")
         task = get_task_with_auth(db, task_id, current_user)
-        return _base_mindmemos_scope(current_user, str(task.id), "task"), task.project_id, task.id
+        root_task_id = task.group_id or task.id
+        return _base_mindmemos_scope(current_user, str(root_task_id), "task"), task.project_id, root_task_id
     raise HTTPException(status_code=400, detail=f"Unsupported memory scope: {scope}")
 
 

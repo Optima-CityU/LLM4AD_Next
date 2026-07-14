@@ -289,6 +289,24 @@ class BaseMemory(ABC, Registrable):
         """Build a prompt-ready memory context string."""
         ...
 
+    async def aget_prompt_context(
+        self,
+        query: str = "",
+        max_cards: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Build prompt-ready memory context from async sampler paths.
+
+        Local memory remains synchronous; remote implementations can override
+        this to perform async query planning before retrieval.
+        """
+        del context
+        return self.get_prompt_context(query=query, max_cards=max_cards)
+
+    def set_query_provider(self, provider: Any) -> None:
+        """Attach an optional LLM provider for remote query rewriting."""
+        del provider
+
     @abstractmethod
     def get_stats(self) -> dict[str, Any]:
         """Return memory statistics."""

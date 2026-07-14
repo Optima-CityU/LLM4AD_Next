@@ -309,11 +309,11 @@ class MemoryConfigBase(SQLModel):
     """Shared per-user/per-project memory defaults."""
 
     enabled: bool = Field(default=True, description="Whether memory injection is enabled by default")
-    include_user_memory: bool = Field(default=True, description="Inject user-scoped memories")
-    include_project_memory: bool = Field(default=True, description="Inject project-scoped memories")
+    include_user_memory: bool = Field(default=False, description="Inject user-scoped memories")
+    include_project_memory: bool = Field(default=False, description="Inject project-scoped memories")
     include_task_memory: bool = Field(default=True, description="Inject task-scoped memories")
-    user_memory_limit: int = Field(default=5, ge=0, description="Max user memories injected")
-    project_memory_limit: int = Field(default=5, ge=0, description="Max project memories injected")
+    user_memory_limit: int = Field(default=0, ge=0, description="Max user memories injected")
+    project_memory_limit: int = Field(default=0, ge=0, description="Max project memories injected")
     task_memory_limit: int = Field(default=5, ge=0, description="Max task memories injected")
     mindmemos_search_strategy: str = Field(default="fast", max_length=32)
     mindmemos_rerank: bool = Field(default=False)

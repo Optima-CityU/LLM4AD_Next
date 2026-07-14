@@ -118,6 +118,7 @@ import { useEvolution } from "@/hooks/useEvolution"
 import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { INPUT_LIMITS } from "@/lib/inputLimits"
+import { setTaskStatusInCache } from "@/lib/task-queries"
 import { cn, handleComposerEnter } from "@/lib/utils"
 import { handleError } from "@/utils"
 import type {
@@ -2846,15 +2847,17 @@ function AiBuildRunButton({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const { setActiveTab, resetTaskData, setIsConfiguring, setIsViewingParams } =
+  const { projectId, setActiveTab, resetTaskData, setIsConfiguring, setIsViewingParams, updateTaskStatus } =
     useEvolution()
   const { withCopyIfNeeded, isCopying } = useCopyBeforeRun(task)
 
   const mutation = useMutation({
     mutationFn: async () => {
       await withCopyIfNeeded(async (effectiveId) => {
-        await Llm4AdTasksService.runTask({ taskId: effectiveId })
-        queryClient.invalidateQueries({ queryKey: ["getTask", effectiveId] })
+        const result = await Llm4AdTasksService.runTask({ taskId: effectiveId })
+        const nextStatus = result.status ?? "pending"
+        setTaskStatusInCache(queryClient, effectiveId, nextStatus, projectId)
+        updateTaskStatus(nextStatus)
       })
     },
     onSuccess: () => {

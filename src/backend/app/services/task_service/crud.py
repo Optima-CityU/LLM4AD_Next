@@ -22,7 +22,6 @@ from ._helpers import _MAX_STORAGE_BYTES, DEFAULT_TOP_FOLDER_NAME, _create_top_l
 from .auth import get_task_with_auth
 from .templates import _apply_template
 
-
 def _apply_memory_defaults(
     db: Session,
     input_args: dict,
@@ -38,6 +37,14 @@ def _apply_memory_defaults(
     existing = input_args.get("memory")
     memory = dict(existing) if isinstance(existing, dict) else {}
     mindmemos_available = settings.mindmemos_runtime_available and bool(project_defaults.mindmemos_binding_id)
+    explicit_type = explicit_memory.get("type") if explicit_memory else None
+    if explicit_type == "local_yaml":
+        memory.update(explicit_memory or {})
+        memory.setdefault("enabled", True)
+        memory["type"] = "local_yaml"
+        input_args["memory"] = memory
+        return input_args
+
     defaults = {
         "enabled": True,
         "type": "mindmemos_cloud" if mindmemos_available else "local_yaml",
@@ -49,7 +56,9 @@ def _apply_memory_defaults(
         "task_memory_limit": project_defaults.task_memory_limit,
         "mindmemos_search_strategy": project_defaults.mindmemos_search_strategy,
         "mindmemos_rerank": project_defaults.mindmemos_rerank,
-        "mindmemos_score_threshold": project_defaults.mindmemos_score_threshold,
+        "mindmemos_score_threshold": project_defaults.mindmemos_score_threshold
+        if project_defaults.mindmemos_rerank
+        else None,
         "mindmemos_fail_open": project_defaults.mindmemos_fail_open,
     }
     preserved = {key: value for key, value in memory.items() if key not in defaults}
@@ -62,6 +71,8 @@ def _apply_memory_defaults(
         merged["type"] = "mindmemos_cloud"
     elif not mindmemos_available:
         merged["type"] = "local_yaml"
+    if not merged.get("mindmemos_rerank"):
+        merged["mindmemos_score_threshold"] = None
     input_args["memory"] = merged
     return input_args
 

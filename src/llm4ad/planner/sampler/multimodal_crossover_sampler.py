@@ -180,6 +180,14 @@ class MultimodalCrossoverSampler(BaseSampler):
             generation_time_ms=generation_time_ms,
             tokens_used=response.prompt_tokens + response.completion_tokens,
             agent_name="MultimodalCrossoverSampler",
+            operation_params={
+                "parent_1_id": parent1.id,
+                "parent_1_score": score1,
+                "parent_1_description": parent1.description,
+                "parent_2_id": parent2.id,
+                "parent_2_score": score2,
+                "parent_2_description": parent2.description,
+            },
             change_description=algorithm.description,
             targeted_files=[],
         )

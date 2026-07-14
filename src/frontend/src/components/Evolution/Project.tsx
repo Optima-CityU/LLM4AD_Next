@@ -14,7 +14,6 @@ import {
   type ProjectCreate,
   type ProjectUpdate,
 } from "@/client"
-import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -391,12 +390,6 @@ export function Project({
           })}
         </DropdownMenuContent>
       </DropdownMenu>
-      {selectedProject && (
-        <ProjectMemoryDialog
-          projectId={selectedProject.id}
-          projectName={selectedProject.name}
-        />
-      )}
       <CreateProjectDialog onCreated={(id) => onSelectProject(id)} />
       {editProject && (
         <EditProjectDialog

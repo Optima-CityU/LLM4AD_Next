@@ -61,6 +61,54 @@ export default function MemorySection() {
           </FormItem>
         )}
       />
+      <FormField
+        control={control}
+        name="memory.mindmemos_request_timeout"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosRequestTimeout")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} step={1} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_add_timeout"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosAddTimeout")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} step={1} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_extraction_prompt_language"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosExtractionPromptLanguage")}</FormLabel>
+            <Select value={field.value ?? "auto"} onValueChange={field.onChange}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="auto">{t("configForm.memory.extractionLanguages.auto")}</SelectItem>
+                <SelectItem value="ZH">{t("configForm.memory.extractionLanguages.ZH")}</SelectItem>
+                <SelectItem value="EN">{t("configForm.memory.extractionLanguages.EN")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
       {[
         ["include_user_memory", "user_memory_limit", "includeUserMemory", "userMemoryLimit"],
         ["include_project_memory", "project_memory_limit", "includeProjectMemory", "projectMemoryLimit"],

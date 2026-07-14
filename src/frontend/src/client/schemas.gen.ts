@@ -3778,6 +3778,98 @@ export const MemoryConfigUpdateSchema = {
     description: 'Update request for user/project memory defaults.'
 } as const;
 
+export const MemoryContributionScopeSummarySchema = {
+    properties: {
+        calls: {
+            type: 'integer',
+            title: 'Calls',
+            default: 0
+        },
+        positive_results: {
+            type: 'integer',
+            title: 'Positive Results',
+            default: 0
+        },
+        best_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Delta'
+        },
+        average_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Average Delta'
+        }
+    },
+    type: 'object',
+    title: 'MemoryContributionScopeSummary',
+    description: '单个 scope 的记忆贡献度估算。'
+} as const;
+
+export const MemoryContributionSummarySchema = {
+    properties: {
+        associated_generations: {
+            type: 'integer',
+            title: 'Associated Generations',
+            default: 0
+        },
+        scored_generations: {
+            type: 'integer',
+            title: 'Scored Generations',
+            default: 0
+        },
+        positive_results: {
+            type: 'integer',
+            title: 'Positive Results',
+            default: 0
+        },
+        best_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Delta'
+        },
+        average_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Average Delta'
+        },
+        by_scope: {
+            additionalProperties: {
+                '$ref': '#/components/schemas/MemoryContributionScopeSummary'
+            },
+            type: 'object',
+            title: 'By Scope'
+        }
+    },
+    type: 'object',
+    title: 'MemoryContributionSummary',
+    description: 'MindMemOS 注入后候选算法评分变化的聚合估算。'
+} as const;
+
 export const MemoryHealthResponseSchema = {
     properties: {
         ok: {
@@ -3849,6 +3941,58 @@ export const MemoryHealthResponseSchema = {
     required: ['ok', 'message', 'system_runtime_available', 'system_enabled', 'system_chat_configured', 'system_embedding_configured', 'system_api_key_configured'],
     title: 'MemoryHealthResponse',
     description: 'System MindMemOS health response for the frontend.'
+} as const;
+
+export const MemoryInjectionSummarySchema = {
+    properties: {
+        sampler: {
+            type: 'string',
+            title: 'Sampler',
+            default: 'unknown'
+        },
+        strategy: {
+            type: 'string',
+            title: 'Strategy',
+            default: ''
+        },
+        scope_hits: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Scope Hits'
+        },
+        deduped_hits: {
+            type: 'integer',
+            title: 'Deduped Hits',
+            default: 0
+        },
+        injected_chars: {
+            type: 'integer',
+            title: 'Injected Chars',
+            default: 0
+        },
+        elapsed_ms: {
+            type: 'integer',
+            title: 'Elapsed Ms',
+            default: 0
+        },
+        timestamp: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Timestamp'
+        }
+    },
+    type: 'object',
+    title: 'MemoryInjectionSummary',
+    description: '单次 MindMemOS 注入事件摘要。'
 } as const;
 
 export const MemoryProviderBindingResponseSchema = {
@@ -5935,6 +6079,81 @@ export const TaskLogsResponseSchema = {
     required: ['task_id', 'source'],
     title: 'TaskLogsResponse',
     description: '任务日志游标分页响应。'
+} as const;
+
+export const TaskMemoryObservabilityResponseSchema = {
+    properties: {
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled'
+        },
+        injection_calls: {
+            type: 'integer',
+            title: 'Injection Calls',
+            default: 0
+        },
+        scope_hits_total: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Scope Hits Total'
+        },
+        deduped_hits_total: {
+            type: 'integer',
+            title: 'Deduped Hits Total',
+            default: 0
+        },
+        injected_chars_total: {
+            type: 'integer',
+            title: 'Injected Chars Total',
+            default: 0
+        },
+        elapsed_ms_total: {
+            type: 'integer',
+            title: 'Elapsed Ms Total',
+            default: 0
+        },
+        elapsed_ms_avg: {
+            type: 'integer',
+            title: 'Elapsed Ms Avg',
+            default: 0
+        },
+        sampler_counts: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Sampler Counts'
+        },
+        created_task_memory_count: {
+            type: 'integer',
+            title: 'Created Task Memory Count',
+            default: 0
+        },
+        latest_injection: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/MemoryInjectionSummary'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        contribution: {
+            '$ref': '#/components/schemas/MemoryContributionSummary'
+        }
+    },
+    type: 'object',
+    required: ['task_id', 'enabled'],
+    title: 'TaskMemoryObservabilityResponse',
+    description: '任务级 MindMemOS 记忆使用统计。'
 } as const;
 
 export const TaskResponseSchema = {

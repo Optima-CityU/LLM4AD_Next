@@ -104,6 +104,14 @@ test("opening memory default strategy does not refetch in a loop", async ({ page
   await expect(page.getByText("用户全局记忆")).toBeVisible()
   await page.getByRole("button", { name: "默认策略" }).click()
   await expect(page.getByText("默认注入策略")).toBeVisible()
+  const scoreThresholdInput = page.getByPlaceholder("可留空")
+  await expect(scoreThresholdInput).toBeDisabled()
+  await page.getByLabel("启用重排").check()
+  await expect(scoreThresholdInput).toBeEnabled()
+  await scoreThresholdInput.fill("0.8")
+  await page.getByLabel("启用重排").uncheck()
+  await expect(scoreThresholdInput).toBeDisabled()
+  await expect(scoreThresholdInput).toHaveValue("")
 
   await page.waitForTimeout(1200)
 

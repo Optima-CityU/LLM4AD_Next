@@ -4,7 +4,7 @@ Defines configuration classes for the memory system including
 static memory cards, auto-extraction settings, and prompt integration.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -361,8 +361,8 @@ class MemoryConfig(BaseModel):
         json_schema_extra=ui(
             label_zh="检索分数阈值",
             label_en="Score Threshold",
-            desc_zh="可选，过滤低相关记忆",
-            desc_en="Optional threshold for filtering weak memories",
+            desc_zh="仅在启用重排时传给 MindMemOS，用于过滤低相关记忆",
+            desc_en="Passed to MindMemOS only when rerank is enabled to filter weak memories",
         ),
     )
     mindmemos_fail_open: bool = Field(
@@ -373,6 +373,38 @@ class MemoryConfig(BaseModel):
             label_en="Fail Open",
             desc_zh="MindMemOS 运行中不可用时返回空记忆并记录告警",
             desc_en="Return empty memory context and log warnings when MindMemOS is unavailable",
+        ),
+    )
+    mindmemos_request_timeout: float = Field(
+        default=60.0,
+        ge=0,
+        description="MindMemOS runtime request timeout in seconds",
+        json_schema_extra=ui(
+            label_zh="请求超时",
+            label_en="Request Timeout",
+            desc_zh="单次 MindMemOS 运行时请求的最长等待时间，单位秒；0 表示无限等待",
+            desc_en="Maximum wait time in seconds for each MindMemOS runtime request; 0 waits indefinitely",
+        ),
+    )
+    mindmemos_add_timeout: float = Field(
+        default=120.0,
+        ge=0,
+        description="MindMemOS runtime memory write timeout in seconds",
+        json_schema_extra=ui(
+            label_zh="记忆写入超时",
+            label_en="Memory Write Timeout",
+            desc_zh="单次 MindMemOS 记忆提取和写入的最长等待时间，单位秒；0 表示无限等待",
+            desc_en="Maximum wait time in seconds for each MindMemOS extraction/write request; 0 waits indefinitely",
+        ),
+    )
+    mindmemos_extraction_prompt_language: Literal["auto", "ZH", "EN"] = Field(
+        default="auto",
+        description="Preferred language for MindMemOS memory extraction prompts",
+        json_schema_extra=ui(
+            label_zh="记忆提取语言",
+            label_en="Extraction Language",
+            desc_zh="auto 使用 MindMemOS 默认策略；ZH 强制中文；EN 强制英文",
+            desc_en="auto uses MindMemOS defaults; ZH forces Chinese; EN forces English",
         ),
     )
     mindmemos_sync_static_cards: bool = Field(
@@ -397,7 +429,7 @@ class MemoryConfig(BaseModel):
         ),
     )
     include_project_memory: bool = Field(
-        default=True,
+        default=False,
         description="Include project-scoped memory when building prompt context",
         json_schema_extra=ui(
             label_zh="注入项目级记忆",
@@ -407,7 +439,7 @@ class MemoryConfig(BaseModel):
         ),
     )
     include_user_memory: bool = Field(
-        default=True,
+        default=False,
         description="Include user-scoped memory when building prompt context",
         json_schema_extra=ui(
             label_zh="注入用户级记忆",
@@ -427,7 +459,7 @@ class MemoryConfig(BaseModel):
         ),
     )
     project_memory_limit: int = Field(
-        default=5,
+        default=0,
         ge=0,
         description="Maximum project-scoped memories to include",
         json_schema_extra=ui(
@@ -438,7 +470,7 @@ class MemoryConfig(BaseModel):
         ),
     )
     user_memory_limit: int = Field(
-        default=5,
+        default=0,
         ge=0,
         description="Maximum user-scoped memories to include",
         json_schema_extra=ui(

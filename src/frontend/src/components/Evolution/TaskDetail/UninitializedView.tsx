@@ -30,6 +30,7 @@ import EvolutionProviderSelect, {
   EvaluatorProviderSelect,
 } from "./steps/EvolutionProviderSelect"
 import EvolveAnnotationStep from "./steps/EvolveAnnotationStep"
+import MemoryConfigStep from "./steps/MemoryConfigStep"
 import SchemaStepForm from "./steps/SchemaStepForm"
 
 const STEP_SCHEMA_KEYS: Record<number, string> = {
@@ -46,7 +47,6 @@ const STEP_DESCRIPTIONS_KEYS: Record<number, string> = {
 
 const ADVANCED_KEYS = [
   "providers",
-  "memory",
   "logging",
   "workspace",
   "version_control",
@@ -102,6 +102,7 @@ export default function UninitializedView({
     "evaluator",
     "evolution",
     "coder",
+    "memory",
     "advanced",
     "confirmation",
   ]
@@ -116,6 +117,7 @@ export default function UninitializedView({
       { label: t("evolution.steps.evaluator") },
       { label: t("evolution.steps.evolutionAlgorithm") },
       { label: t("evolution.steps.codeGeneration") },
+      { label: t("evolution.steps.memoryModule") },
       { label: t("evolution.steps.advancedComponents") },
       { label: t("evolution.steps.parameterConfirmation") },
     ],
@@ -270,8 +272,8 @@ export default function UninitializedView({
       )
     }
 
-    // Step 7: Confirmation
-    if (currentStep === 6) {
+    // Step 8: Confirmation
+    if (currentStep === 7) {
       return (
         <ConfirmStep
           taskId={task.id}
@@ -279,6 +281,20 @@ export default function UninitializedView({
           configValues={configValues}
           onChange={setConfigValues}
           onBack={goBack}
+          readOnly={readOnly}
+        />
+      )
+    }
+
+    // Step 6: Memory
+    if (currentStep === 5) {
+      return (
+        <MemoryConfigStep
+          projectId={task.project_id}
+          value={configValues.memory}
+          onChange={(v) => handleSchemaChange("memory", v)}
+          onBack={goBack}
+          onNext={() => goToStep(6)}
           readOnly={readOnly}
         />
       )
@@ -378,8 +394,8 @@ export default function UninitializedView({
       )
     }
 
-    // Step 6: Advanced
-    if (currentStep === 5 && rootSchema) {
+    // Step 7: Advanced
+    if (currentStep === 6 && rootSchema) {
       const advancedValues: Record<string, unknown> = {}
       for (const key of ADVANCED_KEYS) {
         if (configValues[key] !== undefined) {
@@ -393,7 +409,7 @@ export default function UninitializedView({
           value={advancedValues}
           onChange={handleAdvancedChange}
           onBack={goBack}
-          onNext={() => goToStep(6)}
+          onNext={() => goToStep(7)}
         />
       )
     }

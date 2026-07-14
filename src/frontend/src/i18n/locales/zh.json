@@ -173,6 +173,85 @@
     "feedback": "意见反馈",
     "liveCode": "群活码"
   },
+  "memory": {
+    "cardManager": {
+      "extraction": {
+        "title": "新增记忆",
+        "close": "关闭新增记忆",
+        "guideTitle": "输入一段希望系统记住的内容",
+        "guideDescription": "支持从自然语言中提取事实、经验、错误教训、约束和领域知识。系统会尽量自动归纳标签，保存后仍可编辑。不适合保存无上下文的碎片词、临时闲聊或敏感密钥。",
+        "contentLabel": "原始内容",
+        "placeholder": "建议写清楚场景、结论、原因或证据，以及后续可复用的建议。例如：在这个项目中，算法更关注稳定性和可解释性；上一次过大的 mutation rate 导致种群退化，后续应从更小范围开始尝试。",
+        "languageLabel": "提取语言",
+        "examplesTitle": "可点击示例",
+        "languages": {
+          "auto": "自动",
+          "ZH": "中文",
+          "EN": "English"
+        },
+        "examples": {
+          "default": {
+            "algorithm": {
+              "label": "算法经验",
+              "content": "在 TSP 中小规模实例中，2-opt 局部搜索适合作为后处理算子，通常能稳定改进 nearest-neighbor 初始解；大规模实例应限制候选邻域数量，避免单轮评估耗时过高。"
+            },
+            "reflection": {
+              "label": "错误反思",
+              "content": "上一次在进化搜索中把 mutation rate 设置到 0.2 以上后，种群多样性快速下降，优秀个体被破坏，最终收敛变差；后续同类任务应先从 0.01 到 0.05 的范围试探。"
+            },
+            "domain": {
+              "label": "领域知识",
+              "content": "当前任务更重视算法稳定性、可解释性和可复现实验结果，只有在收益明显时才考虑复杂黑盒策略；评估时应优先比较方差、失败率和平均表现。"
+            },
+            "general": {
+              "label": "通用经验",
+              "content": "当一个启发式算法包含多个强耦合参数时，应先固定算子组合，再逐组调整参数，并记录每次 ablation 的收益和副作用，避免同时修改多个变量导致无法归因。"
+            }
+          },
+          "project": {
+            "constraints": {
+              "label": "项目目标约束",
+              "content": "当前项目优先追求稳定性、可解释性和可复现实验结果；只有当收益明显且失败率可控时，才考虑引入复杂黑盒策略或高成本搜索算子。"
+            },
+            "evaluation": {
+              "label": "评估偏好",
+              "content": "本项目比较算法时应优先查看平均表现、方差、失败率和运行时间；单次最优结果只能作为参考，不能替代多次重复实验后的稳定性结论。"
+            },
+            "algorithm": {
+              "label": "可复用算法经验",
+              "content": "在本项目的 TSP 类任务中，nearest-neighbor 初始解结合受限候选邻域的 2-opt 后处理通常比较稳定；实例规模变大时应限制候选邻域数量，避免评估耗时失控。"
+            },
+            "reflection": {
+              "label": "项目级错误教训",
+              "content": "本项目中过高的 mutation rate 曾破坏优秀个体并导致收敛变差；后续同类任务应先在 0.01 到 0.05 的小范围内做 ablation，再决定是否扩大搜索。"
+            }
+          }
+        }
+      }
+    },
+    "projectDialog": {
+      "trigger": "项目记忆",
+      "title": "项目记忆",
+      "description": "管理当前项目的项目级记忆。这里的内容只属于当前项目，不会混入全局记忆。",
+      "descriptionWithProject": "管理「{{projectName}}」的项目级记忆。这里的内容只属于当前项目，不会混入全局记忆。",
+      "cardTitle": "项目级记忆",
+      "cardDescription": "项目内跨任务复用的经验，适合沉淀领域知识和高价值算法模式。",
+      "badges": {
+        "scope": "scope: project",
+        "checking": "检查中",
+        "serviceReady": "服务可用",
+        "serviceUnavailable": "服务不可用",
+        "modelBound": "模型已绑定",
+        "modelUnbound": "模型未绑定"
+      },
+      "disabled": {
+        "checking": "正在检查项目记忆状态，完成后会显示当前项目的记忆列表。",
+        "checkFailed": "检测项目记忆状态失败，请稍后重试。",
+        "serviceUnavailable": "MindMemOS 服务未就绪，当前无法管理项目级记忆。",
+        "modelUnbound": "当前用户尚未绑定记忆模型，请先到全局记忆设置中绑定 Chat 与 Embedding。"
+      }
+    }
+  },
   "projects": {
     "pageTitle": "项目 - LLM4AD_Next",
     "title": "项目",
@@ -608,6 +687,57 @@
         "general_insight": "通用经验"
       }
     },
+    "taskMemory": {
+      "title": "任务记忆",
+      "description": "查看和管理当前任务运行过程中由 MindMemOS 沉淀的任务级记忆。",
+      "ready": "可用",
+      "count": "{{count}} 条",
+      "newCount": "新增 {{count}} 条",
+      "injectedTitle": "最近一次记忆注入",
+      "injectedSummary": "任务 {{task}} / 项目 {{project}} / 全局 {{user}}，已注入 {{chars}} 字符",
+      "injectedEmpty": "暂无注入记录",
+      "injectedHint": "任务、项目和全局记忆可能一起参与提示词注入；下方只管理本任务生成的记忆。",
+      "observability": {
+        "title": "记忆使用统计",
+        "summary": "注入 {{calls}} 次 / 调用 {{hits}} 条",
+        "loadFailed": "加载记忆使用统计失败。",
+        "empty": "暂无记忆注入记录。",
+        "calls": "记忆注入次数",
+        "hits": "累计调用记忆",
+        "taskCalls": "任务记忆调用",
+        "projectCalls": "项目记忆调用",
+        "userCalls": "全局记忆调用",
+        "avgLatency": "平均耗时",
+        "created": "生成任务记忆",
+        "contributionTitle": "记忆贡献度",
+        "contributionSummary": "关联 {{associated}} 个候选 / 正向 {{positive}} 个",
+        "contributionEmpty": "暂无贡献数据",
+        "associated": "关联候选",
+        "scored": "可评分候选",
+        "positive": "正向候选",
+        "bestDelta": "最佳提升",
+        "averageDelta": "平均变化",
+        "taskContribution": "任务",
+        "projectContribution": "项目",
+        "userContribution": "全局",
+        "scopeContributionValue": "{{calls}} 次 / 正向 {{positive}}",
+        "contributionHint": "基于记忆注入后候选评分变化的聚合估算，不代表严格因果贡献。",
+        "noContribution": "暂无可关联的候选评分变化。",
+        "scopes": "命中范围",
+        "scopeCounts": "任务 {{task}} / 项目 {{project}} / 全局 {{user}}",
+        "ms": "{{value}} ms"
+      },
+      "storedTitle": "任务沉淀",
+      "storedHint": "仅显示本任务生成的记忆。",
+      "unavailable": {
+        "short": "不可用",
+        "featureDisabled": "MindMemOS 任务记忆未启用，当前任务会沿用旧记忆实现。",
+        "checking": "正在检查任务记忆配置...",
+        "checkFailed": "加载任务记忆配置失败，请稍后重试。",
+        "serviceUnavailable": "MindMemOS 系统服务未就绪，请先检查系统环境配置。",
+        "modelUnbound": "当前用户尚未绑定 MindMemOS 模型，请先到全局记忆页面完成模型绑定。"
+      }
+    },
     "insights": {
       "tech_change": "整体总结",
       "node_comparison": "节点对比",
@@ -678,6 +808,7 @@
     "connection": {
       "live": "实时同步中",
       "connecting": "连接中…",
+      "reconnecting": "连接断开，正在重连…",
       "disconnected": "连接断开"
     },
     "panel": {
@@ -706,6 +837,7 @@
       "evaluator": "评估器",
       "evolutionAlgorithm": "进化算法",
       "codeGeneration": "代码生成",
+      "memoryModule": "任务记忆配置",
       "advancedComponents": "高级配置",
       "parameterConfirmation": "参数确认"
     },
@@ -716,6 +848,7 @@
       "evaluator": "配置适应度评估方式，指定评估函数和评估超时等参数",
       "evolution": "选择进化算法类型并调整种群大小、迭代次数、选择策略等超参数",
       "coder": "配置代码生成策略，设置 Prompt 模板和代码生成相关参数",
+      "memory": "配置本次任务使用 MindMemOS 记忆还是旧记忆实现，以及可检索的记忆范围和数量",
       "advanced": "配置内存管理、日志记录、工作区路径、版本控制等高级参数，通常使用默认值即可"
     },
     "stepGuide": {
@@ -731,12 +864,56 @@
       "evolutionSuccess": "进化算法配置完成，可点击下一步配置代码生成器",
       "coder": "配置代码生成策略，设置 Prompt 模板和代码生成相关参数",
       "coderSuccess": "代码生成器配置完成，可点击下一步查看高级配置",
+      "memory": "配置本次任务是否使用 MindMemOS 任务记忆；未启用时会沿用旧记忆实现",
+      "memorySuccess": "任务记忆配置完成，可点击下一步查看高级配置",
       "advanced": "配置内存管理、日志记录、工作区路径、版本控制等高级参数，通常使用默认值即可",
       "advancedSuccess": "高级配置完成，可点击下一步确认并提交任务",
       "confirmation": "确认所有参数配置无误后提交任务"
     },
     "loadingConfigTemplate": "加载配置模板...",
     "schemaNotFound": "配置项 \"{{key}}\" 在 Schema 中未找到",
+    "taskMemoryConfig": {
+      "title": "任务记忆配置",
+      "description": "配置本次任务运行时使用的记忆实现和检索策略。MindMemOS 的服务地址、认证令牌和 scope 信息由后端运行时自动注入，不会写入 YAML。",
+      "useMindmemos": "使用 MindMemOS 任务记忆",
+      "useMindmemosHint": "任务运行时会检索用户级、项目级和任务级记忆，并由后端注入 SDK 所需连接配置。",
+      "localFallbackHint": "MindMemOS 当前不可用，本任务将使用旧的本地记忆实现。",
+      "unavailable": "MindMemOS 服务未就绪或当前用户尚未绑定记忆模型，当前任务将沿用旧记忆实现。",
+      "configLoadFailed": "加载项目记忆配置失败，当前任务将沿用旧记忆实现。",
+      "runtimeManaged": "运行时字段（base URL、API key、user/session/project/agent）由后端自动注入，确认页 YAML 不会展示这些敏感配置。",
+      "limit": "注入数量",
+      "searchStrategy": "搜索策略",
+      "searchStrategyHelp": "fast 适合常规检索；agentic 会让记忆系统进行更主动的检索规划，耗时可能更长。",
+      "scoreThreshold": "分数阈值",
+      "scoreThresholdPlaceholder": "默认",
+      "scoreThresholdHelp": "仅在启用重排时生效，用于过滤重排后低相关记忆；未启用重排时不会传给 MindMemOS。",
+      "requestTimeout": "请求超时（秒）",
+      "requestTimeoutHelp": "单次 MindMemOS 检索请求的最长等待时间；留空或填 0 表示无限等待，超时后会按 Fail-open 设置继续或报错。",
+      "addTimeout": "写入超时（秒）",
+      "addTimeoutHelp": "单次 MindMemOS 记忆提取和写入的最长等待时间；生成任务记忆通常比检索更慢，默认 120 秒。留空或填 0 表示无限等待。",
+      "extractionLanguage": "记忆提取语言",
+      "extractionLanguageHelp": "控制任务运行和任务级新增记忆时传给 MindMemOS 的提取语言；自动表示使用记忆系统默认策略。",
+      "extractionLanguages": {
+        "auto": "自动",
+        "ZH": "中文",
+        "EN": "English"
+      },
+      "rerank": "启用重排",
+      "rerankHelp": "对召回结果进行二次排序，提高注入记忆的相关性。",
+      "rerankUnavailable": "系统未启用 Rerank，当前任务不可开启重排。",
+      "failOpen": "Fail-open",
+      "failOpenHelp": "MindMemOS 暂时不可用时继续运行任务，并跳过远端记忆，避免任务中断。",
+      "status": {
+        "checking": "检查中",
+        "ready": "MindMemOS 可用",
+        "local": "使用旧记忆"
+      },
+      "scopes": {
+        "user": "用户级记忆",
+        "project": "项目级记忆",
+        "task": "任务级记忆"
+      }
+    },
     "evolveAnnotation": {
       "tabs": {
         "summary": "总结分析",
@@ -1010,6 +1187,7 @@
       "timeout": "日志流连接超时",
       "taskError": "任务出错",
       "taskEnd": "任务结束",
+      "reconnecting": "日志流连接断开，正在重连",
       "connectionFailed": "日志流连接失败"
     },
     "reportStream": {
@@ -1543,6 +1721,14 @@
       "mindmemosRerank": "MindMemOS 重排",
       "mindmemosScoreThreshold": "MindMemOS 分数阈值",
       "mindmemosFailOpen": "MindMemOS 失败放行",
+      "mindmemosRequestTimeout": "MindMemOS 请求超时（秒）",
+      "mindmemosAddTimeout": "MindMemOS 写入超时（秒）",
+      "mindmemosExtractionPromptLanguage": "MindMemOS 记忆提取语言",
+      "extractionLanguages": {
+        "auto": "自动",
+        "ZH": "中文",
+        "EN": "English"
+      },
       "mindmemosSyncStaticCards": "同步静态记忆",
       "includeUserMemory": "注入用户级记忆",
       "includeProjectMemory": "注入项目级记忆",

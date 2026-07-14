@@ -323,6 +323,8 @@ function DemoLayout() {
       setLeftCollapsed: () => {},
       resetTaskData,
       updateTaskStatus,
+      taskMemoryCreatedSignal: null,
+      taskMemoryInjectedSignal: null,
     }),
     [
       selectedTask,

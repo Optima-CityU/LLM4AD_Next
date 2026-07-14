@@ -48,9 +48,36 @@ def test_apply_mindmemos_runtime_config_overrides_task_memory_when_enabled(
     assert memory["mindmemos_app_id"] == "llm4ad-test"
     assert memory["mindmemos_agent_id"] == "task"
     assert memory["mindmemos_fail_open"] is True
+    assert memory["mindmemos_request_timeout"] == 60.0
+    assert memory["mindmemos_add_timeout"] == 120.0
+    assert memory["mindmemos_extraction_prompt_language"] == "auto"
     assert memory["include_project_memory"] is False
     assert memory["include_task_memory"] is True
     assert memory["static_cards"] == [{"id": "legacy", "content": "local"}]
+
+
+def test_apply_mindmemos_runtime_config_uses_root_task_session_when_provided(
+    monkeypatch,
+):
+    task_id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    root_task_id = uuid.UUID("44444444-4444-4444-4444-444444444444")
+    project_id = uuid.UUID("33333333-3333-3333-3333-333333333333")
+    input_args = {"memory": {"type": "mindmemos_cloud"}}
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_ENABLED", True)
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_BASE_URL", "http://mindmemos-api:8000")
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_JWT_SECRET", "jwt-test-secret")
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_APP_ID", "llm4ad-test")
+    monkeypatch.setattr(execution, "_mindmemos_task_token", lambda _current_user: "jwt-task-token")
+
+    execution._apply_mindmemos_runtime_config(
+        input_args,
+        current_user=_User(),
+        task_id=task_id,
+        project_id=project_id,
+        memory_task_id=root_task_id,
+    )
+
+    assert input_args["memory"]["mindmemos_session_id"] == str(root_task_id)
 
 
 def test_apply_mindmemos_runtime_config_leaves_memory_unchanged_when_disabled(
