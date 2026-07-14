@@ -384,44 +384,43 @@ def start_turn(
     )
 
     # ---- 判定本轮要执行的协程类型，记到 assistant_message 上 ----
-    # 优先级：前端显式指定 target_stage > 后端按状态机自动判断。
-    # 自动判断规则：
-    #   build_status == COMPLETED        → review
-    #   else if is_confirm_build         → ai_build
-    #   else                             → chat_tune（默认）
-    # 这里不再读 task.ai_build_started——该字段已被 session.build_status 取代。
-    is_confirm_build = (
-            locked_message is not None
-            and isinstance(locked_message.payload, dict)
-            and locked_message.payload.get("stage") == "confirm_build"
-            and isinstance(request.submission, dict)
-            and request.submission.get("value") == _CONFIRM_BUILD_VALUE
+    # 默认使用 AI Agent 构建路线（已替代旧的三阶段 consultant）。
+    # Agent 在一轮内承接对话+构建+验证，不依赖三阶段状态机。
+    #
+    # 如果用户明确指定 target_stage，则回退到旧的分阶段行为（向后兼容）。
+    # 如果回复的是 agent 生成的消息，继续走 agent 路径（保持一致性）。
+    replying_to_agent = (
+        locked_message is not None
+        and locked_message.generation_kind == ChatTuneGenerationKind.AI_AGENT.value
     )
-    if request.target_stage is ChatTuneActiveStage.REVIEW:
+
+    # 默认：使用 AI Agent（如果功能开关开启）
+    if settings.ENABLE_AI_AGENT_BUILD and not request.target_stage:
+        generation_kind = ChatTuneGenerationKind.AI_AGENT
+    # 兼容：如果用户手动指定阶段，使用旧的三阶段逻辑
+    elif request.target_stage is ChatTuneActiveStage.REVIEW:
         generation_kind = ChatTuneGenerationKind.REVIEW
     elif request.target_stage is ChatTuneActiveStage.BUILD:
         generation_kind = ChatTuneGenerationKind.AI_BUILD
     elif request.target_stage is ChatTuneActiveStage.GATHERING:
         generation_kind = ChatTuneGenerationKind.CHAT_TUNE
-    elif session.build_status == ChatTuneStageStatus.COMPLETED.value:
-        generation_kind = ChatTuneGenerationKind.REVIEW
-    elif is_confirm_build:
-        generation_kind = ChatTuneGenerationKind.AI_BUILD
+    # 回退：功能开关关闭时的旧逻辑
     else:
-        generation_kind = ChatTuneGenerationKind.CHAT_TUNE
+        is_confirm_build = (
+            locked_message is not None
+            and isinstance(locked_message.payload, dict)
+            and locked_message.payload.get("stage") == "confirm_build"
+            and isinstance(request.submission, dict)
+            and request.submission.get("value") == _CONFIRM_BUILD_VALUE
+        )
+        if session.build_status == ChatTuneStageStatus.COMPLETED.value:
+            generation_kind = ChatTuneGenerationKind.REVIEW
+        elif is_confirm_build:
+            generation_kind = ChatTuneGenerationKind.AI_BUILD
+        else:
+            generation_kind = ChatTuneGenerationKind.CHAT_TUNE
 
-    # AI 构建 (Beta)：前端 beta 标志在后端开关开启时，覆盖为 AgentScope agent
-    # 路径。该 agent 在一轮内承接对话+构建+验证，不依赖三阶段状态机，故无视上面
-    # 的阶段判定。开关关闭时忽略 beta，沿用上面的默认分发。
-    if request.beta and settings.ENABLE_AI_AGENT_BUILD:
-        generation_kind = ChatTuneGenerationKind.AI_AGENT
-
-    # 稳健路由：若本轮是在回复一条 ai_agent 生成的消息（如确认卡片），无论前端是否
-    # 仍带 beta 标志（刷新后可能丢失），都继续走 agent 路径。
-    replying_to_agent = (
-        locked_message is not None
-        and locked_message.generation_kind == ChatTuneGenerationKind.AI_AGENT.value
-    )
+    # 稳健路由：若本轮是在回复 agent 生成的消息，继续走 agent 路径
     if replying_to_agent and settings.ENABLE_AI_AGENT_BUILD:
         generation_kind = ChatTuneGenerationKind.AI_AGENT
 
