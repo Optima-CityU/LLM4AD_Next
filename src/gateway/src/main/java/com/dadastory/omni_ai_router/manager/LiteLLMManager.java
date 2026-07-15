@@ -129,7 +129,11 @@ public class LiteLLMManager {
                         .queryParam("user_ids", userId)
                         .build())
                 .exchangeToMono(this::handleResponse) // 复用响应处理逻辑
-                .map(result -> unwrapSingleUser(result, userId))
+                // Explicit type witness avoids a wildcard-capture mismatch:
+                // unwrapSingleUser returns Result<?>, and without the witness the
+                // compiler infers Mono<Result<capture of ?>>, which is incompatible
+                // with the declared Mono<Result<?>> return type.
+                .<Result<?>>map(result -> unwrapSingleUser(result, userId))
                 .doOnSubscribe(subscription -> log.debug("Calling LiteLLM get user info. user={}", userId))
                 .onErrorResume(e -> {
                     log.warn("LiteLLM get user info request failed. user={}", userId, e);
