@@ -33,7 +33,6 @@ import {
   Settings2,
   Sparkles,
   Square,
-  Target,
   Upload,
   User,
   X,
@@ -246,7 +245,7 @@ export default function ChatTuneView({
 
   // Feature flags (e.g. whether the AI build Beta entry is enabled). Cached
   // long — flags only change on backend redeploy.
-  const { data: featureFlags } = useQuery({
+  const { data: _featureFlags } = useQuery({
     queryKey: ["featureFlags"],
     queryFn: () => UtilsService.featureFlags(),
     staleTime: 5 * 60 * 1000,

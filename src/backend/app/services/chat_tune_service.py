@@ -1037,11 +1037,21 @@ async def _run_ai_build(
                         )
                     elif etype == "build_result":
                         blueprint_data = event.get("blueprint_data")
+                        # Mark BUILD stage as completed
                         await asyncio.to_thread(
                             _update_session_stage,
                             session_id,
                             ChatTuneActiveStage.BUILD,
                             ChatTuneStageStatus.COMPLETED,
+                            turn_id=turn_id,
+                        )
+                        # Activate REVIEW stage now that build is complete
+                        await asyncio.to_thread(
+                            _update_session_stage,
+                            session_id,
+                            ChatTuneActiveStage.REVIEW,
+                            ChatTuneStageStatus.RUNNING,
+                            activate=True,
                             turn_id=turn_id,
                         )
                     elif etype == "error":
@@ -1351,11 +1361,21 @@ async def _run_agent_build(
                         new_agent_state = event.get("state")
                     elif etype == "build_result":
                         blueprint_data = event.get("blueprint_data")
+                        # Mark BUILD stage as completed
                         await asyncio.to_thread(
                             _update_session_stage,
                             session_id,
                             ChatTuneActiveStage.BUILD,
                             ChatTuneStageStatus.COMPLETED,
+                            turn_id=turn_id,
+                        )
+                        # Activate REVIEW stage now that build is complete
+                        await asyncio.to_thread(
+                            _update_session_stage,
+                            session_id,
+                            ChatTuneActiveStage.REVIEW,
+                            ChatTuneStageStatus.RUNNING,
+                            activate=True,
                             turn_id=turn_id,
                         )
                     elif etype == "error":
@@ -1373,6 +1393,13 @@ async def _run_agent_build(
         # Sync produced files: the agent wrote the package under
         # {project_name}/ in the mounted dir. Upload only that subdir and clear
         # all prior objects under input_data_path, matching _run_ai_build.
+        logger.info(
+            f"Upload check: input_data_path={bool(input_data_path)}, "
+            f"docker_workdir={docker_workdir}, "
+            f"blueprint_data type={type(blueprint_data).__name__}, "
+            f"built={blueprint_data.get('built') if isinstance(blueprint_data, dict) else 'N/A'}, "
+            f"project_name={blueprint_data.get('project_name') if isinstance(blueprint_data, dict) else 'N/A'}"
+        )
         if (
             input_data_path
             and docker_workdir
@@ -1387,6 +1414,7 @@ async def _run_agent_build(
 
                 data_path = Path(docker_workdir)
                 product_root = data_path / project_name
+                logger.info(f"Checking product_root: {product_root} (exists={product_root.exists()})")
                 if product_root.is_dir():
                     existing_keys = await asyncio.to_thread(
                         storage.list_objects, input_data_path.rstrip("/") + "/"
@@ -1407,6 +1435,17 @@ async def _run_agent_build(
                     await asyncio.to_thread(
                         _persist_task_input_args, task_id, new_input_args
                     )
+                    logger.info(
+                        f"Agent build uploaded successfully: {project_name} -> {input_data_path}"
+                    )
+                else:
+                    logger.warning(
+                        f"Agent build product_root does not exist: {product_root}"
+                    )
+            else:
+                logger.warning(
+                    "Agent build missing project_name in blueprint_data"
+                )
 
         # Persist gathering_context updates: conversation memory (agent_state),
         # the confirmed/pending proposal, and the build blueprint when present.

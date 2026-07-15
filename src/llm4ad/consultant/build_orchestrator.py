@@ -27,7 +27,28 @@ from llm4ad.infra.provider.base import BaseProvider, ChatMessage
 
 
 class BuildError(Exception):
-    """Raised when the build pipeline fails."""
+    """Raised when the build pipeline fails.
+
+    Carries the partially-built blueprint (when available) so callers that want
+    to inspect or repair the failed artifacts can access them. The interactive
+    ``chat`` path ignores this attribute and behaves exactly as before; the
+    agent build path uses it to persist the failed package to the workspace so
+    the agent can fix it in place.
+
+    Attributes:
+        blueprint: The last blueprint produced before the failure, or ``None``
+            if the failure occurred before any blueprint was created.
+    """
+
+    def __init__(self, message: str, blueprint: TaskBlueprint | None = None) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Human-readable failure description.
+            blueprint: The partially-built blueprint, if one exists.
+        """
+        super().__init__(message)
+        self.blueprint = blueprint
 
 
 class BuildOrchestrator:
@@ -107,7 +128,8 @@ class BuildOrchestrator:
             errors_summary = "\n".join(f"  - {e}" for e in blueprint.validation_errors)
             raise BuildError(
                 f"Validation failed after {blueprint.repair_attempts} attempts:\n"
-                f"{errors_summary}"
+                f"{errors_summary}",
+                blueprint=blueprint,
             )
 
         return blueprint
@@ -276,7 +298,8 @@ class BuildOrchestrator:
             errors_summary = "\n".join(f"  - {e}" for e in blueprint.validation_errors)
             raise BuildError(
                 f"Validation failed after {blueprint.repair_attempts} attempts:\n"
-                f"{errors_summary}"
+                f"{errors_summary}",
+                blueprint=blueprint,
             )
 
         self._console.print("[bold green]  ✓ Project validated successfully.[/bold green]")
@@ -713,7 +736,8 @@ class BuildOrchestrator:
         if not blueprint.is_valid():
             errors_summary = "\n".join(f"  - {e}" for e in blueprint.validation_errors)
             raise BuildError(
-                f"Re-validation failed:\n{errors_summary}"
+                f"Re-validation failed:\n{errors_summary}",
+                blueprint=blueprint,
             )
 
         return blueprint
