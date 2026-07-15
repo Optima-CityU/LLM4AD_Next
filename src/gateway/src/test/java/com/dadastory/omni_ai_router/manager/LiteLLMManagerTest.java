@@ -405,19 +405,23 @@ class LiteLLMManagerTest {
     }
 
     @Test
-    void getUserQuotaNormalizesLiteLlmUserInfoPayload() {
+    void getUserQuotaNormalizesLiteLlmUserListPayload() {
         List<CapturedRequest> requests = new ArrayList<>();
         ExchangeFunction exchangeFunction = request -> {
             requests.add(CapturedRequest.from(request));
-            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/info")) {
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/list")) {
                 return Mono.just(jsonResponse("""
                         {
-                          "user_id": "user-1",
-                          "user_email": "user@example.com",
-                          "user_alias": "User One",
-                          "spend": 3,
-                          "max_budget": 10,
-                          "teams": ["team-1"]
+                          "users": [
+                            {
+                              "user_id": "user-1",
+                              "user_email": "user@example.com",
+                              "user_alias": "User One",
+                              "spend": 3,
+                              "max_budget": 10,
+                              "teams": ["team-1"]
+                            }
+                          ]
                         }
                         """));
             }
@@ -439,8 +443,8 @@ class LiteLLMManagerTest {
                 .verifyComplete();
 
         assertThat(requests).hasSize(1);
-        assertThat(requests.get(0).path()).isEqualTo("/user/info");
-        assertThat(requests.get(0).query()).isEqualTo("user_id=user-1");
+        assertThat(requests.get(0).path()).isEqualTo("/user/list");
+        assertThat(requests.get(0).query()).isEqualTo("user_ids=user-1");
     }
 
     @Test
@@ -449,24 +453,27 @@ class LiteLLMManagerTest {
         ExchangeFunction exchangeFunction = request -> {
             requests.add(CapturedRequest.from(request));
             String path = request.url().getPath();
-            if (request.method() == HttpMethod.GET && path.equals("/user/info")) {
+            if (request.method() == HttpMethod.GET && path.equals("/user/list")) {
                 long infoCalls = requests.stream()
-                        .filter(item -> item.method() == HttpMethod.GET && item.path().equals("/user/info"))
+                        .filter(item -> item.method() == HttpMethod.GET && item.path().equals("/user/list"))
                         .count();
                 if (infoCalls == 1) {
-                    return Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND)
-                            .header("Content-Type", "application/json")
-                            .body("{\"error\":{\"message\":\"User user-1 not found\",\"code\":404}}")
-                            .build());
+                    // /user/list returns 200 with an empty array for unknown users;
+                    // unwrapSingleUser maps that to a 404 to trigger the create flow.
+                    return Mono.just(jsonResponse("{\"users\":[],\"total\":0}"));
                 }
                 return Mono.just(jsonResponse("""
                         {
-                          "user_id": "user-1",
-                          "user_email": "user@example.com",
-                          "user_alias": "User One",
-                          "spend": 0,
-                          "max_budget": 10,
-                          "teams": ["team-1"]
+                          "users": [
+                            {
+                              "user_id": "user-1",
+                              "user_email": "user@example.com",
+                              "user_alias": "User One",
+                              "spend": 0,
+                              "max_budget": 10,
+                              "teams": ["team-1"]
+                            }
+                          ]
                         }
                         """));
             }
@@ -500,14 +507,14 @@ class LiteLLMManagerTest {
 
         assertThat(requests).hasSize(3);
         assertThat(requests.get(0).method()).isEqualTo(HttpMethod.GET);
-        assertThat(requests.get(0).path()).isEqualTo("/user/info");
+        assertThat(requests.get(0).path()).isEqualTo("/user/list");
         assertThat(requests.get(1).method()).isEqualTo(HttpMethod.POST);
         assertThat(requests.get(1).path()).isEqualTo("/user/new");
         assertThat(requests.get(1).body())
                 .contains("\"user_id\":\"user-1\"")
                 .contains("\"teams\":[\"team-1\"]");
         assertThat(requests.get(2).method()).isEqualTo(HttpMethod.GET);
-        assertThat(requests.get(2).path()).isEqualTo("/user/info");
+        assertThat(requests.get(2).path()).isEqualTo("/user/list");
     }
 
     @Test
@@ -515,12 +522,16 @@ class LiteLLMManagerTest {
         List<CapturedRequest> requests = new ArrayList<>();
         ExchangeFunction exchangeFunction = request -> {
             requests.add(CapturedRequest.from(request));
-            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/info")) {
+            if (request.method() == HttpMethod.GET && request.url().getPath().equals("/user/list")) {
                 return Mono.just(jsonResponse("""
                         {
-                          "user_id": "user-1",
-                          "spend": 2,
-                          "max_budget": 10
+                          "users": [
+                            {
+                              "user_id": "user-1",
+                              "spend": 2,
+                              "max_budget": 10
+                            }
+                          ]
                         }
                         """));
             }
@@ -543,8 +554,8 @@ class LiteLLMManagerTest {
 
         assertThat(requests).hasSize(2);
         assertThat(requests.get(0).method()).isEqualTo(HttpMethod.GET);
-        assertThat(requests.get(0).path()).isEqualTo("/user/info");
-        assertThat(requests.get(0).query()).isEqualTo("user_id=user-1");
+        assertThat(requests.get(0).path()).isEqualTo("/user/list");
+        assertThat(requests.get(0).query()).isEqualTo("user_ids=user-1");
         assertThat(requests.get(1).method()).isEqualTo(HttpMethod.POST);
         assertThat(requests.get(1).path()).isEqualTo("/user/update");
         assertThat(requests.get(1).body())

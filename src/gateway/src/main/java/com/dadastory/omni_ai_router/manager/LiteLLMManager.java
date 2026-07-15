@@ -125,15 +125,43 @@ public class LiteLLMManager {
      */
     public Mono<Result<?>> getUserInfo(String userId) {
         return litellmWebClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/user/info")
-                        .queryParam("user_id", userId)
+                .uri(uriBuilder -> uriBuilder.path("/user/list")
+                        .queryParam("user_ids", userId)
                         .build())
                 .exchangeToMono(this::handleResponse) // 复用响应处理逻辑
+                .map(result -> unwrapSingleUser(result, userId))
                 .doOnSubscribe(subscription -> log.debug("Calling LiteLLM get user info. user={}", userId))
                 .onErrorResume(e -> {
                     log.warn("LiteLLM get user info request failed. user={}", userId, e);
                     return Mono.just(Result.failure(500, "Get User Info Request failed: " + e.getMessage()));
                 });
+    }
+
+    /**
+     * Unwraps the single user row from a LiteLLM {@code /user/list} response.
+     *
+     * <p>{@code /user/list} is used instead of {@code /user/info} because the
+     * latter embeds each team's full payload (all API keys and members), which
+     * grows unbounded on a large shared team and overflows the WebClient buffer.
+     * {@code /user/list} returns only the user row wrapped as
+     * {@code {"users": [...]}}, so downstream consumers keep receiving a bare
+     * user object. An empty list is mapped to a 404 failure to preserve the
+     * "user not found" semantics {@code /user/info} used to signal, which drives
+     * the create-user flow in {@link #getOrCreateUserInfo(AuthUser, String)}.
+     *
+     * @param result raw {@code /user/list} result
+     * @param userId requested user id, used for the not-found message
+     * @return success carrying the single user node, or a 404 failure when absent
+     */
+    private Result<?> unwrapSingleUser(Result<?> result, String userId) {
+        if (!isSuccessResult(result) || !(result.getData() instanceof JsonNode payload)) {
+            return result;
+        }
+        JsonNode users = payload.get("users");
+        if (users != null && users.isArray() && !users.isEmpty()) {
+            return Result.success(users.get(0));
+        }
+        return Result.failure(404, "User " + userId + " not found");
     }
 
     /**
