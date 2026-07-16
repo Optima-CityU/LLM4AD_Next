@@ -295,7 +295,7 @@ dependencies = [
     { name = "gevent" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "llm4ad", extra = ["all"] },
+    { name = "llm4ad-next", extra = ["all"] },
     { name = "nest-asyncio" },
     { name = "paramiko" },
     { name = "psycopg", extra = ["binary"] },
@@ -324,7 +324,7 @@ requires-dist = [
     { name = "gevent", specifier = ">=26.4.0" },
     { name = "httpx", specifier = ">=0.25.1,<1.0.0" },
     { name = "jinja2", specifier = ">=3.1.4,<4.0.0" },
-    { name = "llm4ad", extras = ["all"], editable = "../../" },
+    { name = "llm4ad-next", extras = ["all"], editable = "../../" },
     { name = "nest-asyncio", specifier = ">=1.6.0" },
     { name = "paramiko", specifier = ">=4.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.13,<4.0.0" },
@@ -2187,8 +2187,8 @@ wheels = [
 ]
 
 [[package]]
-name = "llm4ad"
-version = "0.1.0"
+name = "llm4ad-next"
+version = "1.0.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "agentscope" },
@@ -2264,7 +2264,7 @@ requires-dist = [
     { name = "gymnasium", extras = ["box2d"], marker = "extra == 'lunarlander'", specifier = ">=0.29.0" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
-    { name = "llm4ad", extras = ["infra", "providers", "eval", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
+    { name = "llm4ad-next", extras = ["infra", "providers", "eval", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
     { name = "llvmlite", marker = "extra == 'eval'", specifier = "==0.44.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", marker = "extra == 'lunarlander'", specifier = ">=3.5.0" },

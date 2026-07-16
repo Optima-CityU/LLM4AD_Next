@@ -1,6 +1,6 @@
 [project]
-name = "llm4ad"
-version = "1.12.0"
+name = "llm4ad-next"
+version = "1.0.0"
 description = "Interactive LLM-driven automated algorithm design with evolutionary optimization"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
@@ -124,7 +124,7 @@ agent = [
     "agentscope>=2.0,<3.0",
 ]
 all = [
-    "llm4ad[infra,providers,eval,dev,docs,tsp,lunarlander,dyca,meoh]"
+    "llm4ad-next[infra,providers,eval,dev,docs,tsp,lunarlander,dyca,meoh]"
 ]
 
 [project.scripts]

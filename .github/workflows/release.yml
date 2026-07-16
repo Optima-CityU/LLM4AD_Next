@@ -86,6 +86,7 @@ jobs:
 
           expected = os.environ["VERSION_NO_V"]
           project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          project_name = project["name"]
           project_version = project["version"]
           if project_version != expected:
               raise SystemExit(
@@ -113,7 +114,7 @@ jobs:
                   parts.pop()
               return tuple(parts)
 
-          url = "https://pypi.org/pypi/llm4ad/json"
+          url = f"https://pypi.org/pypi/{project_name}/json"
           try:
               with urllib.request.urlopen(url, timeout=20) as response:
                   data = json.load(response)
@@ -127,10 +128,10 @@ jobs:
           for published_version, files in data.get("releases", {}).items():
               if files and normalize_version(published_version) == expected_normalized:
                   raise SystemExit(
-                      f"PyPI version conflict: llm4ad {published_version!r} already exists"
+                      f"PyPI version conflict: {project_name} {published_version!r} already exists"
                   )
 
-          print(f"Validated Python package version {expected}; no PyPI version conflict found.")
+          print(f"Validated Python package {project_name} version {expected}; no PyPI version conflict found.")
           PY
 
   docker:
@@ -250,7 +251,7 @@ jobs:
     needs: [prepare, docker]
     environment:
       name: pypi
-      url: https://pypi.org/p/llm4ad
+      url: https://pypi.org/p/llm4ad-next
     permissions:
       contents: read
       id-token: write
@@ -292,16 +293,6 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
           fetch-depth: 0
 
-      - name: Push release tag
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}"
-          git push origin "refs/tags/${RELEASE_VERSION}"
-
       - name: Create GitHub release
         uses: actions/github-script@v7
         env:
@@ -311,10 +302,12 @@ jobs:
           script: |
             const {owner, repo} = context.repo;
             const version = process.env.RELEASE_VERSION;
+            const targetCommitish = context.sha;
             const generated = await github.rest.repos.generateReleaseNotes({
               owner,
               repo,
               tag_name: version,
+              target_commitish: targetCommitish,
             });
             const manualNotes = process.env.RELEASE_NOTES_INPUT.trim();
             const body = manualNotes
@@ -326,6 +319,7 @@ jobs:
                 owner,
                 repo,
                 tag_name: version,
+                target_commitish: targetCommitish,
                 name: `LLM4AD_Next ${version}`,
                 body,
               });

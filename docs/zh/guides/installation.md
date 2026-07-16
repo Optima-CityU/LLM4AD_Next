@@ -53,14 +53,14 @@ pip install -e ".[all]"
 如果你只需要已发布的 Python 包和 CLI，而不需要修改源码，请使用此方法。
 
 ```bash
-pip install llm4ad
+pip install llm4ad-next
 ```
 
 按需安装可选依赖组：
 
 ```bash
-pip install "llm4ad[providers,eval]"
-pip install "llm4ad[all]"
+pip install "llm4ad-next[providers,eval]"
+pip install "llm4ad-next[all]"
 ```
 
 ## 可选依赖

@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/llm4ad/">
-    <img src="https://img.shields.io/pypi/v/llm4ad?color=blue" alt="PyPI Version">
+  <a href="https://pypi.org/project/llm4ad-next/">
+    <img src="https://img.shields.io/pypi/v/llm4ad-next?color=blue" alt="PyPI Version">
   </a>
-  <a href="https://pypi.org/project/llm4ad/">
+  <a href="https://pypi.org/project/llm4ad-next/">
     <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python Versions">
   </a>
   <a href="https://github.com/Optima-CityU/LLM4AD_Next/blob/main/LICENSE">
@@ -244,7 +244,7 @@ Scan the QR code with WeChat to join the LLM4AD_Next community group.
 
 <!-- star-history:start -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history/star-history-dark-20260709012905.svg">
-  <img alt="Star history" src="docs/assets/star-history/star-history-light-20260709012905.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history/star-history-dark.svg">
+  <img alt="Star history" src="docs/assets/star-history/star-history-light.svg">
 </picture>
 <!-- star-history:end -->
