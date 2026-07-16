@@ -86,6 +86,10 @@ services:
       MINDMEMOS_PROJECT_COLLECTION_NAMESPACE_ENABLED: "true"
     volumes:
       - ./mindmemos/config:/app/mindmemos/config/mindmemos:ro
+    # Expose on a stable host port so the local `llm4ad memory` CLI can reach
+    # MindMemOS directly (the web backend still uses the internal network name).
+    ports:
+      - "${MINDMEMOS_API_PORT:-18000}:8000"
     healthcheck:
       test:
         [
