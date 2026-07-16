@@ -1086,7 +1086,27 @@ class Memory(BaseMemory):
         if not sections:
             return ""
 
-        return "\n\n".join(sections)
+        prompt_context = "\n\n".join(sections)
+        # ⏳ marks short-term (local) memory. Local memory only injects task-scope
+        # cards ranked by score, so the strategy is fixed to score-topk.
+        logger.info(
+            "⏳ [short-term memory] injection completed: task_injection=score-topk "
+            "good={} bad={} domain={} injected_chars={}",
+            len(good_cards[:n_good]),
+            len(bad_cards[:n_bad]),
+            len(domain_cards[:n_domain]),
+            len(prompt_context),
+        )
+        logger.bind(
+            event_type="local_memory_injected",
+            memory_kind="short_term",
+            task_injection_mode="score-topk",
+            good_cards=len(good_cards[:n_good]),
+            bad_cards=len(bad_cards[:n_bad]),
+            domain_cards=len(domain_cards[:n_domain]),
+            injected_chars=len(prompt_context),
+        ).info("⏳ short-term memory injection event")
+        return prompt_context
 
     async def summarize(self, max_tokens: int = 2000) -> str:
         """Summarize memory into a prompt for LLM.

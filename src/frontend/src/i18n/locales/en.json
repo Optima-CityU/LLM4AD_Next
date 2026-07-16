@@ -899,9 +899,9 @@
         "help": "The injection count controls how many global/project memories are injected per prompt. Higher values give richer context but use more prompt space."
       },
       "manualPicker": {
-        "help": "Select the memory cards to inject; these memories are always injected at runtime.",
-        "empty": "No memory cards available to select.",
-        "required": "Manual selection mode requires at least one memory."
+        "help": "Select memory cards to pin from global and project memory separately; the pinned memories are always injected at runtime.",
+        "empty": "No memory cards available in this scope.",
+        "optional": "Each scope can be selected independently, or leave both empty to inject no shared memory."
       },
       "injection": {
         "label": "Task Memory Injection Mode",

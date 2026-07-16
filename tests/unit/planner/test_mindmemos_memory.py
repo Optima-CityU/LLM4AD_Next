@@ -252,7 +252,7 @@ def test_memory_config_exposes_mindmemos_request_timeout_default():
     """Expose MindMemOS runtime request timeout in task YAML config."""
     config = MemoryConfig()
 
-    assert config.mindmemos_request_timeout == 60.0
+    assert config.mindmemos_request_timeout == 300.0
 
 
 def test_memory_config_exposes_mindmemos_score_threshold_default():
@@ -266,7 +266,7 @@ def test_memory_config_exposes_mindmemos_add_timeout_default():
     """Expose a separate timeout for slow MindMemOS memory writes."""
     config = MemoryConfig()
 
-    assert config.mindmemos_add_timeout == 120.0
+    assert config.mindmemos_add_timeout == 300.0
 
 
 def test_memory_config_allows_zero_mindmemos_timeouts():
@@ -798,12 +798,13 @@ async def test_async_prompt_context_logs_mindmemos_usage_without_leaking_content
     logs = "\n".join(log_messages)
     assert "MindMemOS memory search started" in logs
     assert "sampler=mutation" in logs
-    assert "strategy=agentic" in logs
+    assert "search_strategy=agentic" in logs
     assert "MindMemOS query rewrite completed" in logs
     assert "MindMemOS scope search completed" in logs
     assert "scope=task" in logs
     assert "hits=1" in logs
-    assert "MindMemOS memory injection completed" in logs
+    assert "[long-term memory] injection completed" in logs
+    assert "task_injection=topk" in logs
     assert "deduped_hits=1" in logs
     assert "injected_chars=" in logs
     assert "Sensitive raw task background should not be logged." not in logs
@@ -1169,3 +1170,57 @@ async def test_add_card_raises_when_fail_open_disabled():
                 content="Useful memory",
             )
         )
+
+
+def test_manual_mode_fetches_pinned_cards_even_when_limit_zero():
+    """Manual mode injects pinned shared cards regardless of the scope limit."""
+    memory = MindMemOSMemory(
+        _config(
+            retrieval_mode="manual",
+            pinned_card_ids=["card-1"],
+            include_user_memory=True,
+            include_project_memory=True,
+            include_task_memory=False,
+            user_memory_limit=0,
+            project_memory_limit=0,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.list_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="card-1",
+                memory="Pinned shared insight.",
+                memory_type="good_algorithm",
+                metadata={},
+            )
+        ]
+    )
+
+    context = memory.get_prompt_context("tour construction")
+
+    # Shared scopes are listed (pinned) rather than searched.
+    listed_agents = {call.get("agent_id") for call in memory.client.memory.list_calls}
+    assert listed_agents == {"project", "global"}
+    assert memory.client.memory.search_calls == []
+    assert "Pinned shared insight." in context
+
+
+def test_manual_mode_with_no_pinned_cards_injects_nothing():
+    """Manual mode with an empty pinned set injects no shared memory."""
+    memory = MindMemOSMemory(
+        _config(
+            retrieval_mode="manual",
+            pinned_card_ids=[],
+            include_user_memory=True,
+            include_project_memory=True,
+            include_task_memory=False,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+
+    context = memory.get_prompt_context("tour construction")
+
+    assert context == ""
+    assert memory.client.memory.list_calls == []
+    assert memory.client.memory.search_calls == []

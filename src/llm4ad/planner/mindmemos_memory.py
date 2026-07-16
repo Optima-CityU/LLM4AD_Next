@@ -396,8 +396,8 @@ class MindMemOSMemory(BaseMemory):
         self.search_strategy = _config_str(config, "mindmemos_search_strategy", "fast")
         self.rerank = _config_bool(config, "mindmemos_rerank", False)
         self.fail_open = _config_bool(config, "mindmemos_fail_open", True)
-        self.request_timeout = _config_timeout(config, "mindmemos_request_timeout", 60.0)
-        self.add_timeout = _config_timeout(config, "mindmemos_add_timeout", 120.0)
+        self.request_timeout = _config_timeout(config, "mindmemos_request_timeout", 300.0)
+        self.add_timeout = _config_timeout(config, "mindmemos_add_timeout", 300.0)
         self.extraction_prompt_language = _config_str(config, "mindmemos_extraction_prompt_language", "auto")
         self.sync_static_cards = _config_bool(config, "mindmemos_sync_static_cards", False)
         self.allow_remote_clear = _config_bool(config, "mindmemos_allow_remote_clear", False)
@@ -652,6 +652,26 @@ class MindMemOSMemory(BaseMemory):
         for enabled, scope, session_id, agent_id, configured_limit in remote_scopes:
             if not enabled or not session_id:
                 continue
+            # Manual retrieval mode injects a fixed, user-selected set for the
+            # shared (user/project) scopes instead of searching. Task scope is
+            # always retrieved so the injection selector has candidates.
+            pinned = self.retrieval_mode == "manual" and scope != "task"
+            if pinned:
+                # Injection count equals the number of pinned cards, so skip the
+                # configured-limit gate. Nothing pinned for this scope -> skip.
+                if not self.pinned_card_ids:
+                    continue
+                search_jobs.append(
+                    {
+                        "scope": scope,
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                        "top_k": len(self.pinned_card_ids),
+                        "fetch_k": len(self.pinned_card_ids),
+                        "pinned": True,
+                    }
+                )
+                continue
             requested_limit = max_cards if max_cards is not None else configured_limit
             top_k = min(requested_limit, configured_limit)
             if top_k <= 0:
@@ -661,10 +681,6 @@ class MindMemOSMemory(BaseMemory):
             # TopK fetches exactly top_k since trimming a ranked list is a no-op.
             needs_pool = scope == "task" and self.task_injection_mode in ("weight", "random")
             fetch_k = max(top_k, self.task_candidate_pool) if needs_pool else top_k
-            # Manual retrieval mode injects a fixed, user-selected set for the
-            # shared (user/project) scopes instead of searching. Task scope is
-            # always retrieved so the injection selector has candidates.
-            pinned = self.retrieval_mode == "manual" and scope != "task"
             search_jobs.append(
                 {
                     "scope": scope,
@@ -672,7 +688,7 @@ class MindMemOSMemory(BaseMemory):
                     "agent_id": agent_id,
                     "top_k": top_k,
                     "fetch_k": fetch_k,
-                    "pinned": pinned,
+                    "pinned": False,
                 }
             )
 
@@ -779,11 +795,18 @@ class MindMemOSMemory(BaseMemory):
         self._stats["last_search_elapsed_ms"] = elapsed_ms
         self._stats["last_search_scope_hits"] = dict(scope_hits)
         self._stats["last_injected_chars"] = len(prompt_context)
+        # Strategy summary for at-a-glance log visibility. 🧠 marks long-term
+        # memory; retrieval_mode covers shared scopes (auto search vs manual
+        # pinned) and task_injection_mode covers task-memory selection.
+        retrieval_label = "manual-pinned" if self.retrieval_mode == "manual" else "auto-search"
         logger.info(
-            "MindMemOS memory injection completed: sampler={} strategy={} "
-            "scope_hits={} deduped_hits={} injected_chars={} elapsed_ms={:.0f}",
+            "🧠 [long-term memory] injection completed: sampler={} retrieval={} "
+            "search_strategy={} task_injection={} scope_hits={} deduped_hits={} "
+            "injected_chars={} elapsed_ms={:.0f}",
             sampler,
+            retrieval_label,
             self.search_strategy,
+            self.task_injection_mode,
             scope_hits,
             len(seen),
             len(prompt_context),
@@ -791,15 +814,18 @@ class MindMemOSMemory(BaseMemory):
         )
         logger.bind(
             event_type="mindmemos_memory_injected",
+            memory_kind="long_term",
             task_id=self.session_id or None,
             project_id=self.project_id or None,
             sampler=sampler,
+            retrieval_mode=self.retrieval_mode,
             strategy=self.search_strategy,
+            task_injection_mode=self.task_injection_mode,
             scope_hits=scope_hits,
             deduped_hits=len(seen),
             injected_chars=len(prompt_context),
             elapsed_ms=round(elapsed_ms),
-        ).info("MindMemOS memory injection event")
+        ).info("🧠 long-term memory injection event")
         return prompt_context
 
     def _select_task_hits(self, hits: list[Any], limit: int) -> list[Any]:

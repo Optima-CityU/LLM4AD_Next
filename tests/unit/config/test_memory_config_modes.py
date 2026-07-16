@@ -15,10 +15,12 @@ def test_defaults():
     assert config.pinned_card_ids == []
 
 
-def test_manual_mode_requires_pinned_cards():
-    """Manual retrieval on the long-term backend requires pinned memories."""
-    with pytest.raises(ValidationError, match="pinned_card_ids"):
-        MemoryConfig(type="mindmemos_cloud", retrieval_mode="manual", pinned_card_ids=[])
+def test_manual_mode_allows_empty_pinned_cards():
+    """Manual retrieval may pin nothing (inject no shared memory)."""
+    config = MemoryConfig(type="mindmemos_cloud", retrieval_mode="manual", pinned_card_ids=[])
+
+    assert config.retrieval_mode == "manual"
+    assert config.pinned_card_ids == []
 
 
 def test_manual_mode_accepts_pinned_cards():

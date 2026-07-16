@@ -6,7 +6,7 @@ static memory cards, auto-extraction settings, and prompt integration.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from llm4ad.config.ui import ui
 
@@ -376,7 +376,7 @@ class MemoryConfig(BaseModel):
         ),
     )
     mindmemos_request_timeout: float = Field(
-        default=60.0,
+        default=300.0,
         ge=0,
         description="MindMemOS runtime request timeout in seconds",
         json_schema_extra=ui(
@@ -387,7 +387,7 @@ class MemoryConfig(BaseModel):
         ),
     )
     mindmemos_add_timeout: float = Field(
-        default=120.0,
+        default=300.0,
         ge=0,
         description="MindMemOS runtime memory write timeout in seconds",
         json_schema_extra=ui(
@@ -580,22 +580,3 @@ class MemoryConfig(BaseModel):
         ),
     )
 
-    @model_validator(mode="after")
-    def _validate_retrieval_mode(self) -> "MemoryConfig":
-        """Ensure manual retrieval mode has pinned memories selected.
-
-        The ``retrieval_mode`` and ``task_injection_mode`` settings only apply to
-        the ``mindmemos_cloud`` backend; they are ignored for other backends.
-
-        Returns:
-            The validated config instance.
-
-        Raises:
-            ValueError: If ``retrieval_mode`` is ``manual`` but no memory cards
-                have been pinned.
-        """
-        if self.type == "mindmemos_cloud" and self.retrieval_mode == "manual" and not self.pinned_card_ids:
-            raise ValueError(
-                "retrieval_mode='manual' requires at least one pinned memory in pinned_card_ids"
-            )
-        return self

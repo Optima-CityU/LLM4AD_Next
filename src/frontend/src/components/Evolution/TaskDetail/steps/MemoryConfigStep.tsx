@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { MemoryCardPage, MemoryConfig } from "@/components/Memory/types"
+import type { MemoryCard, MemoryCardPage, MemoryConfig } from "@/components/Memory/types"
 import { authFetch } from "@/utils/auth"
 
 type MemoryValue = Record<string, unknown>
@@ -115,11 +115,11 @@ function longTermMemory(value: unknown, config?: MemoryConfig): MemoryValue {
     mindmemos_fail_open: boolValue(current.mindmemos_fail_open, config?.mindmemos_fail_open ?? true),
     mindmemos_request_timeout: numberValue(
       current.mindmemos_request_timeout,
-      config?.mindmemos_request_timeout ?? 60,
+      config?.mindmemos_request_timeout ?? 300,
     ),
     mindmemos_add_timeout: numberValue(
       current.mindmemos_add_timeout,
-      config?.mindmemos_add_timeout ?? 120,
+      config?.mindmemos_add_timeout ?? 300,
     ),
     mindmemos_extraction_prompt_language: ["auto", "ZH", "EN"].includes(
       String(current.mindmemos_extraction_prompt_language),
@@ -211,15 +211,10 @@ export default function MemoryConfigStep({
     enabled: isLongTerm && retrievalMode === "manual" && runtimeAvailable && !!projectId,
   })
 
-  const pickerCards = useMemo(() => {
-    const items = [...(userCards?.items ?? []), ...(projectCards?.items ?? [])]
-    const seen = new Set<string>()
-    return items.filter((card) => {
-      if (seen.has(card.id)) return false
-      seen.add(card.id)
-      return true
-    })
-  }, [userCards, projectCards])
+  // Keep global and project cards as separate lists so the user can pick from
+  // each scope independently (or select nothing from either).
+  const globalPickerCards = useMemo(() => userCards?.items ?? [], [userCards])
+  const projectPickerCards = useMemo(() => projectCards?.items ?? [], [projectCards])
 
   const updateField = (key: string, nextValue: unknown) => {
     const nextMemory = { ...longTermMemory(memory, config), [key]: nextValue }
@@ -272,8 +267,9 @@ export default function MemoryConfigStep({
     },
   ]
 
-  const manualIncomplete = isLongTerm && retrievalMode === "manual" && pinnedIds.length === 0
-  const nextDisabled = manualIncomplete
+  // Manual mode allows selecting nothing (inject no shared memory), so the
+  // wizard never blocks progression on an empty selection.
+  const nextDisabled = false
 
   return (
     <div className="flex h-full flex-col">
@@ -406,45 +402,29 @@ export default function MemoryConfigStep({
                 )}
 
                 {retrievalMode === "manual" && (
-                  <div className="space-y-2 rounded-md border bg-background/70 p-3">
+                  <div className="space-y-3 rounded-md border bg-background/70 p-3">
                     <p className="text-xs leading-5 text-muted-foreground">
                       {t("evolution.memoryConfig.manualPicker.help")}
                     </p>
-                    <div className="max-h-56 space-y-1.5 overflow-y-auto">
-                      {pickerCards.length === 0 ? (
-                        <p className="py-4 text-center text-xs text-muted-foreground">
-                          {t("evolution.memoryConfig.manualPicker.empty")}
-                        </p>
-                      ) : (
-                        pickerCards.map((card) => (
-                          <label
-                            key={card.id}
-                            className="flex cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2"
-                          >
-                            <Checkbox
-                              checked={pinnedIds.includes(card.id)}
-                              disabled={readOnly}
-                              onCheckedChange={(checked) =>
-                                togglePinned(card.id, checked === true)
-                              }
-                            />
-                            <span className="min-w-0">
-                              <span className="block truncate text-xs font-medium">
-                                {card.title || card.id}
-                              </span>
-                              <span className="block truncate text-[11px] text-muted-foreground">
-                                {card.content}
-                              </span>
-                            </span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                    {manualIncomplete && (
-                      <p className="text-xs text-destructive">
-                        {t("evolution.memoryConfig.manualPicker.required")}
-                      </p>
-                    )}
+                    <ManualScopePicker
+                      title={t("evolution.memoryConfig.scopes.user")}
+                      cards={globalPickerCards}
+                      pinnedIds={pinnedIds}
+                      readOnly={readOnly}
+                      emptyLabel={t("evolution.memoryConfig.manualPicker.empty")}
+                      onToggle={togglePinned}
+                    />
+                    <ManualScopePicker
+                      title={t("evolution.memoryConfig.scopes.project")}
+                      cards={projectPickerCards}
+                      pinnedIds={pinnedIds}
+                      readOnly={readOnly}
+                      emptyLabel={t("evolution.memoryConfig.manualPicker.empty")}
+                      onToggle={togglePinned}
+                    />
+                    <p className="text-[11px] leading-5 text-muted-foreground">
+                      {t("evolution.memoryConfig.manualPicker.optional")}
+                    </p>
                   </div>
                 )}
               </div>
@@ -549,7 +529,7 @@ export default function MemoryConfigStep({
                       type="number"
                       min={0}
                       step={1}
-                      value={timeoutInputValue(memory.mindmemos_request_timeout, 60)}
+                      value={timeoutInputValue(memory.mindmemos_request_timeout, 300)}
                       disabled={readOnly}
                       onChange={(event) =>
                         updateField("mindmemos_request_timeout", timeoutValue(event.target.value))
@@ -566,7 +546,7 @@ export default function MemoryConfigStep({
                       type="number"
                       min={0}
                       step={1}
-                      value={timeoutInputValue(memory.mindmemos_add_timeout, 120)}
+                      value={timeoutInputValue(memory.mindmemos_add_timeout, 300)}
                       disabled={readOnly}
                       onChange={(event) =>
                         updateField("mindmemos_add_timeout", timeoutValue(event.target.value))
@@ -693,5 +673,57 @@ function EnableCard({ title, hint, selected, disabled, onSelect }: EnableCardPro
       <span className="text-sm font-medium">{title}</span>
       <span className="text-xs leading-5 text-muted-foreground">{hint}</span>
     </button>
+  )
+}
+
+interface ManualScopePickerProps {
+  title: string
+  cards: MemoryCard[]
+  pinnedIds: string[]
+  readOnly: boolean
+  emptyLabel: string
+  onToggle: (cardId: string, checked: boolean) => void
+}
+
+function ManualScopePicker({
+  title,
+  cards,
+  pinnedIds,
+  readOnly,
+  emptyLabel,
+  onToggle,
+}: ManualScopePickerProps) {
+  const selectedCount = cards.filter((card) => pinnedIds.includes(card.id)).length
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium">{title}</span>
+        <span className="text-[11px] text-muted-foreground">{selectedCount}</span>
+      </div>
+      <div className="max-h-44 space-y-1.5 overflow-y-auto">
+        {cards.length === 0 ? (
+          <p className="py-3 text-center text-xs text-muted-foreground">{emptyLabel}</p>
+        ) : (
+          cards.map((card) => (
+            <label
+              key={card.id}
+              className="flex cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2"
+            >
+              <Checkbox
+                checked={pinnedIds.includes(card.id)}
+                disabled={readOnly}
+                onCheckedChange={(checked) => onToggle(card.id, checked === true)}
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium">{card.title || card.id}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {card.content}
+                </span>
+              </span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>
   )
 }
