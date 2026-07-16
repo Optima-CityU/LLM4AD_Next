@@ -315,6 +315,18 @@ class MemoryConfigBase(SQLModel):
     user_memory_limit: int = Field(default=0, ge=0, description="Max user memories injected")
     project_memory_limit: int = Field(default=0, ge=0, description="Max project memories injected")
     task_memory_limit: int = Field(default=5, ge=0, description="Max task memories injected")
+    retrieval_mode: str = Field(
+        default="auto", max_length=16,
+        description="Long-term memory retrieval mode: auto or manual",
+    )
+    pinned_card_ids: list[str] = Field(
+        default_factory=list, sa_type=JSON,
+        description="Fixed memory card ids injected in manual retrieval mode",
+    )
+    task_injection_mode: str = Field(
+        default="topk", max_length=16,
+        description="Task memory injection ordering: topk, weight, or random",
+    )
     mindmemos_search_strategy: str = Field(default="fast", max_length=32)
     mindmemos_rerank: bool = Field(default=False)
     mindmemos_score_threshold: float | None = Field(default=None)

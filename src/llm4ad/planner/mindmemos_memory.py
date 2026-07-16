@@ -15,6 +15,10 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from llm4ad.planner.memory import BaseMemory, BaseMemoryExtractor, MemoryCard, MemoryType
+from llm4ad.planner.task_memory_selector import (
+    TaskMemoryCandidate,
+    create_task_memory_selector,
+)
 
 
 LLM4AD_MEMORY_ENTITY_TYPE = "llm4ad_memory_card"
@@ -406,6 +410,16 @@ class MindMemOSMemory(BaseMemory):
         self.project_memory_limit = int(config.get("project_memory_limit", self.max_prompt_cards))
         self.task_memory_limit = int(config.get("task_memory_limit", self.max_prompt_cards))
         self.context_char_budget = int(config.get("mindmemos_context_char_budget", 6000))
+        self.retrieval_mode = _config_str(config, "retrieval_mode", "auto")
+        self.pinned_card_ids = [str(cid) for cid in (config.get("pinned_card_ids") or []) if str(cid)]
+        self.task_injection_mode = _config_str(config, "task_injection_mode", "topk")
+        # Retrieve a larger task-scope candidate pool so weight/random selection
+        # has something to choose from; the selector trims it to task_memory_limit.
+        self.task_candidate_pool = max(
+            int(config.get("task_candidate_pool", self.task_memory_limit * 4)),
+            self.task_memory_limit,
+        )
+        self._task_selector = create_task_memory_selector(self.task_injection_mode)
         self.query_provider: Any | None = None
         self.memory_dir: Path | None = None
         self._stats = {
@@ -642,28 +656,47 @@ class MindMemOSMemory(BaseMemory):
             top_k = min(requested_limit, configured_limit)
             if top_k <= 0:
                 continue
+            # Weight/random injection needs a wider task-scope candidate pool to
+            # choose from; the pool is trimmed back to top_k after selection.
+            # TopK fetches exactly top_k since trimming a ranked list is a no-op.
+            needs_pool = scope == "task" and self.task_injection_mode in ("weight", "random")
+            fetch_k = max(top_k, self.task_candidate_pool) if needs_pool else top_k
+            # Manual retrieval mode injects a fixed, user-selected set for the
+            # shared (user/project) scopes instead of searching. Task scope is
+            # always retrieved so the injection selector has candidates.
+            pinned = self.retrieval_mode == "manual" and scope != "task"
             search_jobs.append(
                 {
                     "scope": scope,
                     "session_id": session_id,
                     "agent_id": agent_id,
                     "top_k": top_k,
+                    "fetch_k": fetch_k,
+                    "pinned": pinned,
                 }
             )
 
         def run_search(job: dict[str, Any]) -> dict[str, Any]:
             scope_started_at = time.perf_counter()
             try:
-                result = self._search_remote_scope(
-                    query,
-                    job["top_k"],
-                    job["scope"],
-                    job["session_id"],
-                    job["agent_id"],
-                )
+                if job.get("pinned"):
+                    hits = self._fetch_pinned_hits(
+                        job["scope"],
+                        job["session_id"],
+                        job["agent_id"],
+                    )
+                else:
+                    result = self._search_remote_scope(
+                        query,
+                        job.get("fetch_k", job["top_k"]),
+                        job["scope"],
+                        job["session_id"],
+                        job["agent_id"],
+                    )
+                    hits = list(getattr(result, "memories", []) or [])
                 return {
                     **job,
-                    "hits": list(getattr(result, "memories", []) or []),
+                    "hits": hits,
                     "elapsed_ms": (time.perf_counter() - scope_started_at) * 1000,
                     "error": None,
                 }
@@ -698,15 +731,21 @@ class MindMemOSMemory(BaseMemory):
             exc = outcome["error"]
             if exc is None:
                 hits = list(outcome["hits"])
+                # Task-scope candidates are always retrieved first, then ordered
+                # and trimmed by the configured injection selector (topk/weight/
+                # random). Other scopes keep their retrieval order untouched.
+                if scope == "task" and hits:
+                    hits = self._select_task_hits(hits, top_k)
                 scope_hits[scope] = len(hits)
                 logger.info(
                     "MindMemOS scope search completed: sampler={} scope={} agent_id={} "
-                    "session_id={} top_k={} hits={} elapsed_ms={:.0f}",
+                    "session_id={} top_k={} injection_mode={} hits={} elapsed_ms={:.0f}",
                     sampler,
                     scope,
                     agent_id,
                     session_id,
                     top_k,
+                    self.task_injection_mode if scope == "task" else "n/a",
                     len(hits),
                     outcome["elapsed_ms"],
                 )
@@ -762,6 +801,81 @@ class MindMemOSMemory(BaseMemory):
             elapsed_ms=round(elapsed_ms),
         ).info("MindMemOS memory injection event")
         return prompt_context
+
+    def _select_task_hits(self, hits: list[Any], limit: int) -> list[Any]:
+        """Order and trim task-scope hits using the injection selector.
+
+        Retrieved task-scope hits are wrapped as selector candidates (carrying
+        their retrieval score and metadata), passed through the configured
+        selector, and unwrapped back into raw hits preserving the selector's
+        order.
+
+        Args:
+            hits: Raw task-scope search hits from MindMemOS.
+            limit: Maximum number of hits to inject.
+
+        Returns:
+            The selected hits, at most ``limit`` items.
+        """
+        candidates = [
+            TaskMemoryCandidate(
+                key=_hit_key(hit),
+                score=_optional_hit_float(_hit_get(hit, "score", None)),
+                metadata=_hit_metadata(hit),
+                payload=hit,
+            )
+            for hit in hits
+        ]
+        selected = self._task_selector.select(candidates, limit)
+        return [candidate.payload for candidate in selected]
+
+    def _fetch_pinned_hits(self, scope: str, session_id: str, agent_id: str) -> list[Any]:
+        """List a scope's memories and keep only user-pinned cards.
+
+        Used by manual retrieval mode for the shared (user/project) scopes: the
+        user selects fixed memories via the memory-management UI and only those
+        are injected. Ids that no longer resolve are skipped.
+
+        Args:
+            scope: Scope name (``user`` or ``project``).
+            session_id: Scope session identifier.
+            agent_id: Scope agent identifier.
+
+        Returns:
+            The raw hits whose ids are in ``pinned_card_ids``.
+        """
+        if not self.pinned_card_ids:
+            return []
+        pinned = set(self.pinned_card_ids)
+        list_method = getattr(self.client.memory, "list", None)
+        if list_method is None:
+            return []
+        result = list_method(
+            user_id=self.user_id,
+            app_id=self.app_id or None,
+            agent_id=agent_id,
+            session_id=session_id or None,
+            page=1,
+            page_size=max(len(pinned) * 2, 20),
+            include_total=False,
+            include_inactive=False,
+        )
+        hits: list[Any] = []
+        matched: set[str] = set()
+        for item in getattr(result, "memories", []) or []:
+            memory_id = str(_hit_get(item, "id", "") or _hit_get(item, "memory_id", "") or "")
+            if memory_id and memory_id in pinned:
+                hits.append(item)
+                matched.add(memory_id)
+        missing = pinned - matched
+        if missing:
+            logger.warning(
+                "MindMemOS manual mode: {} pinned memory id(s) not found in scope {}: {}",
+                len(missing),
+                scope,
+                sorted(missing),
+            )
+        return hits
 
     async def _rewrite_query(self, query: str, context: dict[str, Any] | None = None) -> str:
         """Use planner provider to compress broad sampler context into a search query."""

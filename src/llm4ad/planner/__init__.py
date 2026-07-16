@@ -22,6 +22,14 @@ from llm4ad.planner.memory import (
 )
 from llm4ad.planner.meoh_evolution import MEoHEvolutionPlanner
 from llm4ad.planner.selector import BaseSelector, SamplerSelector
+from llm4ad.planner.task_memory_selector import (
+    BaseTaskMemorySelector,
+    RandomSelector,
+    TaskMemoryCandidate,
+    TopKSelector,
+    WeightSelector,
+    create_task_memory_selector,
+)
 
 __all__ = [
     "BasePlanner",
@@ -39,4 +47,10 @@ __all__ = [
     "create_memory_extractor",
     "BaseSelector",
     "SamplerSelector",
+    "BaseTaskMemorySelector",
+    "TaskMemoryCandidate",
+    "TopKSelector",
+    "WeightSelector",
+    "RandomSelector",
+    "create_task_memory_selector",
 ]

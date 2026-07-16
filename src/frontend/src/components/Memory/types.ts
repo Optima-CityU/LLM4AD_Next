@@ -11,6 +11,9 @@ export type MemoryConfig = {
   user_memory_limit: number
   project_memory_limit: number
   task_memory_limit: number
+  retrieval_mode: "auto" | "manual"
+  pinned_card_ids: string[]
+  task_injection_mode: "topk" | "weight" | "random"
   mindmemos_search_strategy: string
   mindmemos_rerank: boolean
   mindmemos_score_threshold?: number | null

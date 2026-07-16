@@ -837,7 +837,7 @@
       "evaluator": "评估器",
       "evolutionAlgorithm": "进化算法",
       "codeGeneration": "代码生成",
-      "memoryModule": "任务记忆配置",
+      "memoryModule": "记忆配置",
       "advancedComponents": "高级配置",
       "parameterConfirmation": "参数确认"
     },
@@ -848,7 +848,7 @@
       "evaluator": "配置适应度评估方式，指定评估函数和评估超时等参数",
       "evolution": "选择进化算法类型并调整种群大小、迭代次数、选择策略等超参数",
       "coder": "配置代码生成策略，设置 Prompt 模板和代码生成相关参数",
-      "memory": "配置本次任务使用 MindMemOS 记忆还是旧记忆实现，以及可检索的记忆范围和数量",
+      "memory": "配置本次任务的记忆使用方式：不启用、临时记忆或长期记忆，以及检索与注入策略",
       "advanced": "配置内存管理、日志记录、工作区路径、版本控制等高级参数，通常使用默认值即可"
     },
     "stepGuide": {
@@ -864,35 +864,70 @@
       "evolutionSuccess": "进化算法配置完成，可点击下一步配置代码生成器",
       "coder": "配置代码生成策略，设置 Prompt 模板和代码生成相关参数",
       "coderSuccess": "代码生成器配置完成，可点击下一步查看高级配置",
-      "memory": "配置本次任务是否使用 MindMemOS 任务记忆；未启用时会沿用旧记忆实现",
-      "memorySuccess": "任务记忆配置完成，可点击下一步查看高级配置",
+      "memory": "配置本次任务的记忆使用方式：不启用、临时记忆或长期记忆",
+      "memorySuccess": "记忆配置完成，可点击下一步查看高级配置",
       "advanced": "配置内存管理、日志记录、工作区路径、版本控制等高级参数，通常使用默认值即可",
       "advancedSuccess": "高级配置完成，可点击下一步确认并提交任务",
       "confirmation": "确认所有参数配置无误后提交任务"
     },
     "loadingConfigTemplate": "加载配置模板...",
     "schemaNotFound": "配置项 \"{{key}}\" 在 Schema 中未找到",
-    "taskMemoryConfig": {
-      "title": "任务记忆配置",
-      "description": "配置本次任务运行时使用的记忆实现和检索策略。MindMemOS 的服务地址、认证令牌和 scope 信息由后端运行时自动注入，不会写入 YAML。",
-      "useMindmemos": "使用 MindMemOS 任务记忆",
-      "useMindmemosHint": "任务运行时会检索用户级、项目级和任务级记忆，并由后端注入 SDK 所需连接配置。",
-      "localFallbackHint": "MindMemOS 当前不可用，本任务将使用旧的本地记忆实现。",
-      "unavailable": "MindMemOS 服务未就绪或当前用户尚未绑定记忆模型，当前任务将沿用旧记忆实现。",
-      "configLoadFailed": "加载项目记忆配置失败，当前任务将沿用旧记忆实现。",
-      "runtimeManaged": "运行时字段（base URL、API key、user/session/project/agent）由后端自动注入，确认页 YAML 不会展示这些敏感配置。",
-      "limit": "注入数量",
+    "memoryConfig": {
+      "title": "记忆配置",
+      "description": "配置本次任务的记忆使用方式与检索、注入策略。连接与认证信息由后端运行时自动注入，不会写入 YAML。",
+      "configLoadFailed": "加载记忆配置失败，长期记忆暂不可用。",
+      "unavailable": "长期记忆服务未就绪或当前用户尚未完成记忆模型绑定，暂时只能使用临时记忆。",
+      "runtimeManaged": "连接、认证与作用域等运行时字段由后端自动注入，确认页 YAML 不会展示这些敏感配置。",
+      "enable": {
+        "label": "记忆启用方式",
+        "none": "不启用记忆",
+        "noneHint": "本次任务不使用任何记忆。",
+        "temporary": "临时记忆",
+        "temporaryHint": "仅在本次运行内保留任务记忆，运行结束后不长期沉淀。",
+        "longterm": "长期记忆",
+        "longtermHint": "跨任务沉淀并检索记忆，支持全局与项目级记忆注入。",
+        "longtermUnavailable": "长期记忆服务不可用，暂时无法选择。"
+      },
+      "retrieval": {
+        "label": "检索模式",
+        "auto": "自动检索",
+        "autoHint": "由系统自动检索并注入全局记忆与项目记忆。",
+        "manual": "手动固定",
+        "manualHint": "由你手动选择固定注入的记忆，运行时不再自动检索共享记忆。"
+      },
+      "injectionCount": {
+        "help": "注入数量控制每次提示词中最多注入多少条全局／项目记忆；数量越大上下文越丰富，但也会占用更多提示词空间。"
+      },
+      "manualPicker": {
+        "help": "勾选需要固定注入的记忆卡片，运行时将始终注入这些记忆。",
+        "empty": "暂无可选择的记忆卡片。",
+        "required": "手动固定模式下至少需要选择一条记忆。"
+      },
+      "injection": {
+        "label": "任务记忆注入模式",
+        "help": "任务运行中会不断产生任务记忆，注入时总是先检索出候选，再按下列方式决定注入哪些。",
+        "topk": "TopK 模式",
+        "topkHelp": "按检索相关度排序，注入相关度最高的前 N 条。",
+        "weight": "权重模式",
+        "weightHelp": "按你在记忆管理中为每条任务记忆设置的权重排序注入。",
+        "random": "随机模式",
+        "randomHelp": "从检索出的候选中随机注入，增加多样性。",
+        "taskLimitHelp": "每次提示词中最多注入的任务记忆数量。"
+      },
+      "advanced": {
+        "label": "额外配置（高级）"
+      },
       "searchStrategy": "搜索策略",
-      "searchStrategyHelp": "fast 适合常规检索；agentic 会让记忆系统进行更主动的检索规划，耗时可能更长。",
+      "searchStrategyHelp": "fast 适合常规检索；agentic 会进行更主动的检索规划，耗时可能更长。",
       "scoreThreshold": "分数阈值",
       "scoreThresholdPlaceholder": "默认",
-      "scoreThresholdHelp": "仅在启用重排时生效，用于过滤重排后低相关记忆；未启用重排时不会传给 MindMemOS。",
+      "scoreThresholdHelp": "仅在启用重排时生效，用于过滤重排后低相关记忆；未启用重排时不会生效。",
       "requestTimeout": "请求超时（秒）",
-      "requestTimeoutHelp": "单次 MindMemOS 检索请求的最长等待时间；留空或填 0 表示无限等待，超时后会按 Fail-open 设置继续或报错。",
+      "requestTimeoutHelp": "单次检索请求的最长等待时间；留空或填 0 表示无限等待，超时后会按 Fail-open 设置继续或报错。",
       "addTimeout": "写入超时（秒）",
-      "addTimeoutHelp": "单次 MindMemOS 记忆提取和写入的最长等待时间；生成任务记忆通常比检索更慢，默认 120 秒。留空或填 0 表示无限等待。",
+      "addTimeoutHelp": "单次记忆提取和写入的最长等待时间；生成任务记忆通常比检索更慢，默认 120 秒。留空或填 0 表示无限等待。",
       "extractionLanguage": "记忆提取语言",
-      "extractionLanguageHelp": "控制任务运行和任务级新增记忆时传给 MindMemOS 的提取语言；自动表示使用记忆系统默认策略。",
+      "extractionLanguageHelp": "控制任务运行和新增记忆时的提取语言；自动表示使用默认策略。",
       "extractionLanguages": {
         "auto": "自动",
         "ZH": "中文",
@@ -902,16 +937,16 @@
       "rerankHelp": "对召回结果进行二次排序，提高注入记忆的相关性。",
       "rerankUnavailable": "系统未启用 Rerank，当前任务不可开启重排。",
       "failOpen": "Fail-open",
-      "failOpenHelp": "MindMemOS 暂时不可用时继续运行任务，并跳过远端记忆，避免任务中断。",
+      "failOpenHelp": "长期记忆服务暂时不可用时继续运行任务并跳过远端记忆，避免任务中断。",
       "status": {
         "checking": "检查中",
-        "ready": "MindMemOS 可用",
-        "local": "使用旧记忆"
+        "ready": "长期记忆可用",
+        "unavailable": "长期记忆不可用"
       },
       "scopes": {
-        "user": "用户级记忆",
-        "project": "项目级记忆",
-        "task": "任务级记忆"
+        "user": "全局记忆",
+        "project": "项目记忆",
+        "task": "任务记忆"
       }
     },
     "evolveAnnotation": {

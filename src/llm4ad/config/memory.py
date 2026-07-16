@@ -6,7 +6,7 @@ static memory cards, auto-extraction settings, and prompt integration.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from llm4ad.config.ui import ui
 
@@ -492,6 +492,53 @@ class MemoryConfig(BaseModel):
         ),
     )
 
+    # Long-term memory retrieval / injection modes
+    retrieval_mode: Literal["auto", "manual"] = Field(
+        default="auto",
+        description="How shared (global/project) long-term memory is selected",
+        json_schema_extra=ui(
+            label_zh="检索模式",
+            label_en="Retrieval Mode",
+            desc_zh=(
+                "长期记忆的检索方式：auto 自动检索并注入全局与项目记忆；"
+                "manual 由用户手动选择固定注入的记忆"
+            ),
+            desc_en=(
+                "How long-term memory is selected: auto retrieves and injects "
+                "global/project memory; manual injects a fixed user-selected set"
+            ),
+        ),
+    )
+    pinned_card_ids: list[str] = Field(
+        default_factory=list,
+        description="Fixed memory card ids injected in manual retrieval mode",
+        json_schema_extra=ui(
+            label_zh="固定注入记忆",
+            label_en="Pinned Memories",
+            desc_zh="手动检索模式下，用户选定后固定注入的记忆卡片 id 列表",
+            desc_en="Memory card ids the user pinned for fixed injection in manual mode",
+        ),
+    )
+    task_injection_mode: Literal["topk", "weight", "random"] = Field(
+        default="topk",
+        description="How retrieved task-scoped memories are ordered before injection",
+        json_schema_extra=ui(
+            label_zh="任务记忆注入模式",
+            label_en="Task Memory Injection Mode",
+            desc_zh=(
+                "任务记忆总是先检索出候选，再决定注入方式："
+                "topk 按检索相关度排序取前 N 条；"
+                "weight 按记忆管理中设置的权重排序；"
+                "random 从候选中随机注入"
+            ),
+            desc_en=(
+                "Task memories are always retrieved first, then ordered for "
+                "injection: topk keeps the most relevant, weight orders by the "
+                "per-memory weight set in memory management, random samples the pool"
+            ),
+        ),
+    )
+
     # Static memory cards
     static_cards: list[MemoryCardConfig] = Field(
         default_factory=list,
@@ -532,3 +579,23 @@ class MemoryConfig(BaseModel):
             desc_en="Whether to persist auto-extracted cards to the memory/ directory",
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_retrieval_mode(self) -> "MemoryConfig":
+        """Ensure manual retrieval mode has pinned memories selected.
+
+        The ``retrieval_mode`` and ``task_injection_mode`` settings only apply to
+        the ``mindmemos_cloud`` backend; they are ignored for other backends.
+
+        Returns:
+            The validated config instance.
+
+        Raises:
+            ValueError: If ``retrieval_mode`` is ``manual`` but no memory cards
+                have been pinned.
+        """
+        if self.type == "mindmemos_cloud" and self.retrieval_mode == "manual" and not self.pinned_card_ids:
+            raise ValueError(
+                "retrieval_mode='manual' requires at least one pinned memory in pinned_card_ids"
+            )
+        return self

@@ -837,7 +837,7 @@
       "evaluator": "Evaluator",
       "evolutionAlgorithm": "Evolution Algorithm",
       "codeGeneration": "Code Generation",
-      "memoryModule": "Task Memory Configuration",
+      "memoryModule": "Memory Configuration",
       "advancedComponents": "Advanced Settings",
       "parameterConfirmation": "Confirmation"
     },
@@ -848,7 +848,7 @@
       "evaluator": "Configure fitness evaluation methods, specify evaluation functions and timeout parameters",
       "evolution": "Select evolution algorithm type and adjust hyperparameters: population size, iterations, selection strategy, etc.",
       "coder": "Configure code generation strategy, set prompt templates and code generation parameters",
-      "memory": "Choose whether this task uses MindMemOS or the legacy memory implementation, and configure searchable memory scopes and limits",
+      "memory": "Configure how this task uses memory: disabled, temporary, or long-term, along with retrieval and injection strategy",
       "advanced": "Configure memory management, logging, workspace paths, version control, and other advanced parameters. Default values are usually sufficient"
     },
     "stepGuide": {
@@ -864,7 +864,7 @@
       "evolutionSuccess": "Evolution algorithm configured. Click next to set up the code generator.",
       "coder": "Configure code generation strategy, set prompt templates and code generation parameters.",
       "coderSuccess": "Code generator configured. Click next to review advanced settings.",
-      "memory": "Configure whether this task uses MindMemOS task memory. If disabled, the task uses the legacy memory implementation.",
+      "memory": "Configure how this task uses memory: disabled, temporary, or long-term.",
       "memorySuccess": "Task memory configured. Click next to review advanced settings.",
       "advanced": "Configure memory management, logging, workspace paths, version control, and other advanced parameters. Default values are usually sufficient.",
       "advancedSuccess": "Advanced settings complete. Click next to review and submit.",
@@ -872,27 +872,62 @@
     },
     "loadingConfigTemplate": "Loading config template...",
     "schemaNotFound": "Config key \"{{key}}\" not found in schema",
-    "taskMemoryConfig": {
-      "title": "Task Memory Configuration",
-      "description": "Configure the memory implementation and retrieval policy for this task. MindMemOS service URL, auth token, and scope fields are injected by the backend at runtime and are not written to YAML.",
-      "useMindmemos": "Use MindMemOS task memory",
-      "useMindmemosHint": "The task will retrieve user, project, and task memories. The backend injects the SDK connection fields at runtime.",
-      "localFallbackHint": "MindMemOS is not available right now, so this task will use the legacy local memory implementation.",
-      "unavailable": "MindMemOS is not ready or the current user has not bound memory models. This task will use the legacy memory implementation.",
-      "configLoadFailed": "Failed to load project memory configuration. This task will use the legacy memory implementation.",
-      "runtimeManaged": "Runtime fields (base URL, API key, user/session/project/agent) are injected by the backend and will not appear in the confirmation YAML.",
-      "limit": "Injection limit",
+    "memoryConfig": {
+      "title": "Memory Configuration",
+      "description": "Configure how this task uses memory and its retrieval/injection strategy. Connection and auth details are injected by the backend at runtime and are not written to YAML.",
+      "configLoadFailed": "Failed to load memory configuration. Long-term memory is unavailable for now.",
+      "unavailable": "Long-term memory service is not ready or the current user has not completed memory model binding. Only temporary memory is available for now.",
+      "runtimeManaged": "Connection, auth, and scope runtime fields are injected by the backend and will not appear in the confirmation YAML.",
+      "enable": {
+        "label": "Memory Mode",
+        "none": "No Memory",
+        "noneHint": "This task uses no memory at all.",
+        "temporary": "Temporary Memory",
+        "temporaryHint": "Keeps task memory only within this run; nothing is persisted long-term.",
+        "longterm": "Long-term Memory",
+        "longtermHint": "Persists and retrieves memory across tasks, with global and project memory injection.",
+        "longtermUnavailable": "Long-term memory service is unavailable and cannot be selected."
+      },
+      "retrieval": {
+        "label": "Retrieval Mode",
+        "auto": "Automatic Retrieval",
+        "autoHint": "The system automatically retrieves and injects global and project memory.",
+        "manual": "Manual Selection",
+        "manualHint": "You manually select fixed memories to inject; shared memory is not auto-retrieved at runtime."
+      },
+      "injectionCount": {
+        "help": "The injection count controls how many global/project memories are injected per prompt. Higher values give richer context but use more prompt space."
+      },
+      "manualPicker": {
+        "help": "Select the memory cards to inject; these memories are always injected at runtime.",
+        "empty": "No memory cards available to select.",
+        "required": "Manual selection mode requires at least one memory."
+      },
+      "injection": {
+        "label": "Task Memory Injection Mode",
+        "help": "Task memory is produced during a run. It is always retrieved first, then injected according to the mode below.",
+        "topk": "TopK Mode",
+        "topkHelp": "Order by retrieval relevance and inject the top N most relevant.",
+        "weight": "Weight Mode",
+        "weightHelp": "Order by the per-memory weight you set in memory management.",
+        "random": "Random Mode",
+        "randomHelp": "Randomly inject from the retrieved candidates for more diversity.",
+        "taskLimitHelp": "Maximum number of task memories injected per prompt."
+      },
+      "advanced": {
+        "label": "Extra Settings (Advanced)"
+      },
       "searchStrategy": "Search Strategy",
-      "searchStrategyHelp": "fast is suitable for normal retrieval. agentic lets the memory system plan retrieval more actively and may take longer.",
+      "searchStrategyHelp": "fast is suitable for normal retrieval. agentic plans retrieval more actively and may take longer.",
       "scoreThreshold": "Score Threshold",
       "scoreThresholdPlaceholder": "Default",
-      "scoreThresholdHelp": "Only effective when rerank is enabled. It filters low-relevance reranked memories and is not sent to MindMemOS otherwise.",
+      "scoreThresholdHelp": "Only effective when rerank is enabled; filters low-relevance reranked memories.",
       "requestTimeout": "Request Timeout (seconds)",
-      "requestTimeoutHelp": "Maximum wait time for one MindMemOS search request. Leave empty or enter 0 to wait indefinitely. After timeout, Fail-open decides whether to continue or fail.",
+      "requestTimeoutHelp": "Maximum wait time for one search request. Leave empty or enter 0 to wait indefinitely. After timeout, Fail-open decides whether to continue or fail.",
       "addTimeout": "Write Timeout (seconds)",
-      "addTimeoutHelp": "Maximum wait time for one MindMemOS extraction/write request. Task memory creation is usually slower than search, default 120 seconds. Leave empty or enter 0 to wait indefinitely.",
+      "addTimeoutHelp": "Maximum wait time for one extraction/write request. Task memory creation is usually slower than search, default 120 seconds. Leave empty or enter 0 to wait indefinitely.",
       "extractionLanguage": "Memory Extraction Language",
-      "extractionLanguageHelp": "Controls the extraction language sent to MindMemOS for task runtime writes and task-level manual memory creation. Auto uses the memory system default.",
+      "extractionLanguageHelp": "Controls the extraction language for task runtime writes and new memory creation. Auto uses the default.",
       "extractionLanguages": {
         "auto": "Auto",
         "ZH": "中文",
@@ -902,14 +937,14 @@
       "rerankHelp": "Rerank recalled memories to improve relevance before injection.",
       "rerankUnavailable": "System-level rerank is not enabled, so this task cannot enable reranking.",
       "failOpen": "Fail-open",
-      "failOpenHelp": "Continue running the task when MindMemOS is temporarily unavailable, skipping remote memory to avoid interruption.",
+      "failOpenHelp": "Continue running the task when long-term memory is temporarily unavailable, skipping remote memory to avoid interruption.",
       "status": {
         "checking": "Checking",
-        "ready": "MindMemOS ready",
-        "local": "Legacy memory"
+        "ready": "Long-term memory ready",
+        "unavailable": "Long-term memory unavailable"
       },
       "scopes": {
-        "user": "User Memory",
+        "user": "Global Memory",
         "project": "Project Memory",
         "task": "Task Memory"
       }
