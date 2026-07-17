@@ -687,6 +687,24 @@
         "general_insight": "General Insight"
       }
     },
+    "pinnedMemory": {
+      "title": "Pinned Memory",
+      "hint": "Global/project memories pinned for injection in manual retrieval mode. Edits take effect on the next injection without restarting the task.",
+      "totalSelected": "{{count}} selected",
+      "dialogHint": "Browse memory cards page by page and check the ones to pin; click \"Confirm\" to save after closing.",
+      "loading": "Loading memory cards...",
+      "loadFailed": "Failed to load memory cards. Please retry.",
+      "empty": "No memory cards available in this scope.",
+      "page": "Page {{page}}",
+      "prev": "Previous",
+      "next": "Next",
+      "confirm": "Confirm",
+      "reset": "Reset",
+      "saved": "Saved — applies on next injection",
+      "unsaved": "Unsaved changes",
+      "saveFailed": "Save failed, please retry",
+      "upToDate": "Up to date"
+    },
     "taskMemory": {
       "title": "Task Memory",
       "description": "View and manage task-scoped memories captured by MindMemOS during this task run.",
@@ -899,9 +917,19 @@
         "help": "The injection count controls how many global/project memories are injected per prompt. Higher values give richer context but use more prompt space."
       },
       "manualPicker": {
-        "help": "Select memory cards to pin from global and project memory separately; the pinned memories are always injected at runtime.",
+        "help": "Open the global and project memory pickers separately and check the cards to pin; the pinned memories are always injected at runtime.",
         "empty": "No memory cards available in this scope.",
-        "optional": "Each scope can be selected independently, or leave both empty to inject no shared memory."
+        "optional": "Each scope can be selected independently, or leave both empty to inject no shared memory.",
+        "dialogHint": "Browse memory cards page by page and check the ones to pin; click \"Confirm\" to save this selection.",
+        "totalSelected": "{{count}} selected",
+        "loading": "Loading memory cards...",
+        "loadFailed": "Failed to load memory cards. Please retry.",
+        "pageOf": "Page {{page}} of {{total}}",
+        "page": "Page {{page}}",
+        "prev": "Previous",
+        "next": "Next",
+        "confirm": "Confirm",
+        "cancel": "Cancel"
       },
       "injection": {
         "label": "Task Memory Injection Mode",
@@ -912,7 +940,9 @@
         "weightHelp": "Order by the per-memory weight you set in memory management.",
         "random": "Random Mode",
         "randomHelp": "Randomly inject from the retrieved candidates for more diversity.",
-        "taskLimitHelp": "Maximum number of task memories injected per prompt."
+        "taskLimitHelp": "Maximum number of task memories injected per prompt.",
+        "lambdaLabel": "Similarity Weight (λ)",
+        "lambdaHelp": "Injection weight = λ×similarity + (1-λ)×recency. Higher λ favors relevance, lower favors freshness."
       },
       "advanced": {
         "label": "Extra Settings (Advanced)"

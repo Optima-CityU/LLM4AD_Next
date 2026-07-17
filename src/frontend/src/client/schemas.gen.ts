@@ -3726,6 +3726,44 @@ export const MemoryConfigUpdateSchema = {
             ],
             title: 'Task Memory Limit'
         },
+        retrieval_mode: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['auto', 'manual']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Retrieval Mode'
+        },
+        pinned_card_ids: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pinned Card Ids'
+        },
+        task_injection_mode: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['topk', 'weight', 'random']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Injection Mode'
+        },
         mindmemos_search_strategy: {
             anyOf: [
                 {
@@ -4524,6 +4562,42 @@ export const PermissionBaseSchema = {
     description: '权限基础 Schema，定义权限的公共字段。'
 } as const;
 
+export const PinnedMemoryResponseSchema = {
+    properties: {
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        }
+    },
+    type: 'object',
+    required: ['task_id'],
+    title: 'PinnedMemoryResponse',
+    description: 'Current pinned shared-memory ids for a running task (manual mode).'
+} as const;
+
+export const PinnedMemoryUpdateSchema = {
+    properties: {
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        }
+    },
+    type: 'object',
+    title: 'PinnedMemoryUpdate',
+    description: 'Replace the pinned shared-memory id set for a task.'
+} as const;
+
 export const PrivacyPolicyContentSchema = {
     properties: {
         title: {
@@ -4628,6 +4702,23 @@ export const ProjectMemoryConfigResponseSchema = {
         task_memory_limit: {
             type: 'integer',
             title: 'Task Memory Limit'
+        },
+        retrieval_mode: {
+            type: 'string',
+            title: 'Retrieval Mode',
+            default: 'auto'
+        },
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        },
+        task_injection_mode: {
+            type: 'string',
+            title: 'Task Injection Mode',
+            default: 'topk'
         },
         mindmemos_search_strategy: {
             type: 'string',
@@ -7142,6 +7233,23 @@ export const UserMemoryConfigResponseSchema = {
         task_memory_limit: {
             type: 'integer',
             title: 'Task Memory Limit'
+        },
+        retrieval_mode: {
+            type: 'string',
+            title: 'Retrieval Mode',
+            default: 'auto'
+        },
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        },
+        task_injection_mode: {
+            type: 'string',
+            title: 'Task Injection Mode',
+            default: 'topk'
         },
         mindmemos_search_strategy: {
             type: 'string',

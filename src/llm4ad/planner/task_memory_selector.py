@@ -5,12 +5,20 @@ how the retrieved candidates are ordered and trimmed before they are injected
 into a sampler prompt. Retrieval always happens first; the selector only governs
 ordering/sampling of the already-retrieved candidate pool.
 
+The candidate pool arrives ordered by retrieval similarity (most similar first),
+so a candidate's position in the pool is used as a similarity proxy — the
+backend search API does not expose the raw similarity score, only the ranking.
+
 Three strategies are provided:
 
-- ``topk``: keep the highest retrieval-scored candidates (default behaviour).
-- ``weight``: order by a per-card injection weight stored in card metadata under
-  ``injection_weight`` (default ``1.0``), so users can bias specific task
-  memories via the memory-management UI.
+- ``topk``: keep the most similar candidates (deterministic head of the pool).
+- ``weight``: roulette-wheel (weighted random) sampling where each candidate's
+  selection probability is proportional to a blended weight
+  ``weight = lambda * similarity + (1 - lambda) * recency``. Both terms are
+  rank-based linear decays in ``(0, 1]``: ``similarity`` from the retrieval order
+  (most similar first) and ``recency`` from the candidate timestamp (most recent
+  first). ``lambda`` (default ``0.5``) trades off relevance vs freshness.
+  Selection stays stochastic so lower-weight memories still surface over time.
 - ``random``: sample uniformly at random from the candidate pool. An optional
   seed makes selection reproducible for tests.
 
@@ -28,12 +36,6 @@ from typing import Any
 
 from llm4ad.utils.registry import Registrable
 
-# Metadata key holding a per-card injection weight for the ``weight`` strategy.
-INJECTION_WEIGHT_KEY = "injection_weight"
-
-# Default weight when a candidate carries no explicit injection weight.
-DEFAULT_INJECTION_WEIGHT = 1.0
-
 
 @dataclass
 class TaskMemoryCandidate:
@@ -42,31 +44,19 @@ class TaskMemoryCandidate:
     Attributes:
         key: Stable dedup/identity key for the candidate.
         score: Retrieval relevance score if available, otherwise ``None``.
-        metadata: Arbitrary metadata associated with the candidate. May carry an
-            ``injection_weight`` used by the ``weight`` strategy.
+        timestamp: Epoch seconds for the candidate's recency (larger = newer).
+            ``None`` when no timestamp is available; used by the ``weight``
+            strategy's recency term.
+        metadata: Arbitrary metadata associated with the candidate.
         payload: Opaque backend object (e.g. a raw search hit) carried through so
             the caller can render the selected candidates without re-lookup.
     """
 
     key: str
     score: float | None = None
+    timestamp: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     payload: Any = None
-
-    def weight(self) -> float:
-        """Return this candidate's injection weight (defaults to ``1.0``).
-
-        Returns:
-            The ``injection_weight`` from metadata coerced to ``float``; falls
-            back to :data:`DEFAULT_INJECTION_WEIGHT` when absent or invalid.
-        """
-        raw = self.metadata.get(INJECTION_WEIGHT_KEY)
-        if isinstance(raw, bool) or raw is None:
-            return DEFAULT_INJECTION_WEIGHT
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return DEFAULT_INJECTION_WEIGHT
 
 
 class BaseTaskMemorySelector(ABC, Registrable):
@@ -132,34 +122,83 @@ class TopKSelector(BaseTaskMemorySelector):
 
 @BaseTaskMemorySelector.register("weight")
 class WeightSelector(BaseTaskMemorySelector):
-    """Order candidates by a per-card injection weight from metadata."""
+    """Roulette-wheel sampling weighted by blended similarity and recency.
+
+    Each candidate's weight blends two rank-based linear decays in ``(0, 1]``::
+
+        weight = lambda * similarity + (1 - lambda) * recency
+
+    - ``similarity``: from the retrieval order (most similar first), since the
+      backend exposes only ranking, not the raw score.
+    - ``recency``: from the candidate timestamp (most recent first). Candidates
+      without a timestamp are treated as oldest.
+
+    ``lambda`` (config key ``lambda``, default ``0.5``) trades off relevance vs
+    freshness. Candidates are sampled without replacement with probability
+    proportional to the blended weight, so injection is biased toward relevant
+    and fresh memories while staying stochastic.
+    """
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        """Initialize the selector.
+
+        Args:
+            config: Optional configuration. ``seed`` makes sampling reproducible;
+                ``lambda`` (0..1, default 0.5) weights similarity vs recency.
+        """
+        super().__init__(config)
+        seed = self.config.get("seed")
+        self._rng = random.Random(seed)
+        self._lambda = _clamp_unit(self.config.get("lambda"), default=0.5)
 
     def select(
         self,
         candidates: list[TaskMemoryCandidate],
         limit: int,
     ) -> list[TaskMemoryCandidate]:
-        """Select the ``limit`` highest-weighted candidates.
+        """Roulette-wheel sample ``limit`` candidates by blended weight.
 
-        Weight is read from each candidate's ``injection_weight`` metadata
-        (default ``1.0``). Ties break by descending retrieval score, then by the
-        backend's original ordering.
+        Uses the Efraimidis-Spirakis A-Res scheme for weighted sampling without
+        replacement: each candidate gets a key ``u ** (1 / w)`` with
+        ``u ~ Uniform(0, 1]`` and ``w`` its blended weight, then the highest keys
+        win. This yields the same distribution as repeatedly spinning a roulette
+        wheel and removing the winner, in a single O(n log k) pass.
 
         Args:
-            candidates: Retrieved task-memory candidates.
+            candidates: Retrieved task-memory candidates, ordered most-similar
+                first.
             limit: Maximum number of candidates to inject.
 
         Returns:
-            The highest-weighted candidates, at most ``limit`` items.
+            A weighted-random subset of the candidates, at most ``limit`` items.
         """
         if limit <= 0 or not candidates:
             return []
-        ordered = sorted(
-            candidates,
-            key=lambda c: (c.weight(), c.score if c.score is not None else 0.0),
+        n = len(candidates)
+        # Similarity rank = pool position (most similar first). Recency rank is
+        # derived by ordering candidates newest-first; missing timestamps sort
+        # oldest. Both map to a linear decay in (0, 1].
+        order = sorted(
+            range(n),
+            key=lambda i: (
+                candidates[i].timestamp is not None,
+                candidates[i].timestamp if candidates[i].timestamp is not None else 0.0,
+            ),
             reverse=True,
         )
-        return ordered[:limit]
+        recency_rank = {index: rank for rank, index in enumerate(order)}
+        keyed: list[tuple[float, int, TaskMemoryCandidate]] = []
+        for sim_rank, candidate in enumerate(candidates):
+            similarity = (n - sim_rank) / n
+            recency = (n - recency_rank[sim_rank]) / n
+            weight = self._lambda * similarity + (1.0 - self._lambda) * recency
+            # u in (0, 1] keeps the exponent well-defined; larger weight ->
+            # smaller exponent -> key closer to 1 -> higher selection odds.
+            u = 1.0 - self._rng.random()
+            key = u ** (1.0 / weight)
+            keyed.append((key, sim_rank, candidate))
+        keyed.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+        return [candidate for _, _, candidate in keyed[:limit]]
 
 
 @BaseTaskMemorySelector.register("random")
@@ -199,6 +238,25 @@ class RandomSelector(BaseTaskMemorySelector):
             self._rng.shuffle(shuffled)
             return shuffled
         return self._rng.sample(candidates, limit)
+
+
+def _clamp_unit(value: Any, *, default: float) -> float:
+    """Coerce ``value`` to a float in ``[0, 1]``, falling back to ``default``.
+
+    Args:
+        value: Raw configuration value (may be missing or invalid).
+        default: Value returned when ``value`` is absent or not parseable.
+
+    Returns:
+        A float clamped to the closed unit interval ``[0.0, 1.0]``.
+    """
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, parsed))
 
 
 def create_task_memory_selector(

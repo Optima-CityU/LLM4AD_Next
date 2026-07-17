@@ -527,14 +527,34 @@ class MemoryConfig(BaseModel):
             label_en="Task Memory Injection Mode",
             desc_zh=(
                 "任务记忆总是先检索出候选，再决定注入方式："
-                "topk 按检索相关度排序取前 N 条；"
-                "weight 按记忆管理中设置的权重排序；"
-                "random 从候选中随机注入"
+                "topk 按检索相关度取最相关的前 N 条；"
+                "weight 按“相似度与时间先后”加权做轮盘赌随机抽样；"
+                "random 从候选中均匀随机注入"
             ),
             desc_en=(
                 "Task memories are always retrieved first, then ordered for "
-                "injection: topk keeps the most relevant, weight orders by the "
-                "per-memory weight set in memory management, random samples the pool"
+                "injection: topk keeps the most relevant, weight does roulette-wheel "
+                "sampling weighted by blended similarity and recency, random samples "
+                "the pool uniformly"
+            ),
+        ),
+    )
+    task_injection_lambda: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Similarity-vs-recency blend for weight injection mode",
+        json_schema_extra=ui(
+            label_zh="相似度权重 λ",
+            label_en="Similarity Weight (λ)",
+            desc_zh=(
+                "仅在权重模式生效：注入权重 = λ×相似度 + (1-λ)×时间先后。"
+                "λ 越大越偏向相关性，越小越偏向新鲜度（0-1，默认 0.5）"
+            ),
+            desc_en=(
+                "Only for weight mode: injection weight = λ×similarity + "
+                "(1-λ)×recency. Higher λ favors relevance, lower favors "
+                "freshness (0-1, default 0.5)"
             ),
         ),
     )

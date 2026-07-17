@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,6 +26,25 @@ LLM4AD_MEMORY_ENTITY_TYPE = "llm4ad_memory_card"
 LLM4AD_MEMORY_CARD_PROPERTY_FILTER = {
     "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
 }
+
+# Human-readable labels for memory event/type in user-facing logs. Keeps the
+# implementation name (MindMemOS) out of logs — users just see "long-term memory".
+_MEMORY_EVENT_LABELS = {
+    "good_algorithm": "good algorithm",
+    "error_reflection": "error reflection",
+    "domain_knowledge": "domain knowledge",
+    "general_insight": "general insight",
+}
+
+
+def _memory_event_label(event: str) -> str:
+    """Return a human-readable label for a memory event/type value."""
+    return _MEMORY_EVENT_LABELS.get(str(event), str(event))
+
+# Runtime source of truth for manual-mode pinned shared memory ids. Lives under
+# the run's memory/ dir; seeded from config at run start, then editable while the
+# task runs (task-memory panel) and re-read on each injection.
+PINNED_MEMORY_FILENAME = "pinned_memory.json"
 _LLM4AD_METADATA_WRITE_EXCLUDE = frozenset(
     {
         "llm4ad_scope",
@@ -351,9 +371,9 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         )
         self._cards_this_gen += 1
         logger.info(
-            "MindMemOS raw memory candidate selected: event={} generation={} "
-            "algorithm_id={} score={} budget_used={}",
-            event,
+            "📝 [long-term memory] extracted candidate: type={} generation={} "
+            "algorithm={} score={:.4f} (#{} this generation)",
+            _memory_event_label(event),
             generation,
             getattr(algorithm, "id", None),
             score,
@@ -413,13 +433,17 @@ class MindMemOSMemory(BaseMemory):
         self.retrieval_mode = _config_str(config, "retrieval_mode", "auto")
         self.pinned_card_ids = [str(cid) for cid in (config.get("pinned_card_ids") or []) if str(cid)]
         self.task_injection_mode = _config_str(config, "task_injection_mode", "topk")
+        self.task_injection_lambda = config.get("task_injection_lambda", 0.5)
         # Retrieve a larger task-scope candidate pool so weight/random selection
         # has something to choose from; the selector trims it to task_memory_limit.
         self.task_candidate_pool = max(
             int(config.get("task_candidate_pool", self.task_memory_limit * 4)),
             self.task_memory_limit,
         )
-        self._task_selector = create_task_memory_selector(self.task_injection_mode)
+        self._task_selector = create_task_memory_selector(
+            self.task_injection_mode,
+            {"lambda": self.task_injection_lambda},
+        )
         self.query_provider: Any | None = None
         self.memory_dir: Path | None = None
         self._stats = {
@@ -464,9 +488,35 @@ class MindMemOSMemory(BaseMemory):
         )
 
     def set_memory_dir(self, memory_dir: Path) -> None:
-        """Set the local directory used by the memory interface."""
+        """Set the local directory used by the memory interface.
+
+        (Re)seeds the pinned-memory file from the task config at each run start,
+        so a rerun with changed parameters always reflects the latest config.
+        The file is the runtime source of truth thereafter, so edits made while
+        the task runs (e.g. from the task-memory panel) take effect on the next
+        injection without restarting the task. This only writes for the manual
+        retrieval mode; auto mode injects by retrieval and needs no pinned file.
+        """
         self.memory_dir = memory_dir
         self.memory_dir.mkdir(parents=True, exist_ok=True)
+        if self.retrieval_mode == "manual":
+            pinned_file = self.memory_dir / PINNED_MEMORY_FILENAME
+            _write_pinned_file(pinned_file, self.pinned_card_ids)
+
+    def _current_pinned_ids(self) -> list[str]:
+        """Return the live pinned-memory ids for manual retrieval mode.
+
+        Reads the pinned-memory file each call so runtime edits are picked up.
+        Falls back to the config snapshot when no memory dir/file is available.
+
+        Returns:
+            The list of pinned memory card ids to inject.
+        """
+        if self.memory_dir is None:
+            return self.pinned_card_ids
+        pinned_file = self.memory_dir / PINNED_MEMORY_FILENAME
+        ids = _read_pinned_file(pinned_file)
+        return ids if ids is not None else self.pinned_card_ids
 
     def set_query_provider(self, provider: Any) -> None:
         """Attach planner provider used only for lightweight query rewriting."""
@@ -475,7 +525,7 @@ class MindMemOSMemory(BaseMemory):
     def load_static_cards(self, inline_cards: list[Any]) -> None:
         """Ignore local static cards unless explicit remote sync is enabled."""
         if inline_cards and not self.sync_static_cards:
-            logger.info("MindMemOS static card sync is disabled; ignoring {} inline cards", len(inline_cards))
+            logger.info("[long-term memory] static card sync is disabled; ignoring {} inline cards", len(inline_cards))
 
     async def add_card(self, card: MemoryCard, persist: bool | None = None) -> None:
         """Add a card to MindMemOS through the SDK."""
@@ -506,12 +556,11 @@ class MindMemOSMemory(BaseMemory):
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             memory_id = _memory_id_from_add_result(result)
             logger.info(
-                "MindMemOS memory add completed: event={} scope=task task_id={} "
-                "project_id={} generation={} elapsed_ms={:.0f}",
-                event,
-                self.session_id or None,
-                self.project_id or None,
+                "🧠 [long-term memory] inserted task memory: type={} generation={} "
+                "task={} elapsed_ms={:.0f}",
+                _memory_event_label(event),
                 card.generation,
+                self.session_id or None,
                 elapsed_ms,
             )
             logger.bind(
@@ -523,16 +572,16 @@ class MindMemOSMemory(BaseMemory):
                 generation=card.generation,
                 algorithm_id=card.algorithm_id,
                 memory_type=card.type.value,
-            ).info("MindMemOS task memory created")
+            ).info("🧠 long-term memory inserted")
         except Exception as exc:  # noqa: BLE001
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             self._record_error(exc)
             if not self.fail_open:
                 raise
             logger.warning(
-                "MindMemOS add_card failed: event={} scope=task fail_open={} "
+                "🧠 [long-term memory] insert failed: type={} fail_open={} "
                 "elapsed_ms={:.0f}: {}",
-                event,
+                _memory_event_label(event),
                 self.fail_open,
                 elapsed_ms,
                 exc,
@@ -546,7 +595,7 @@ class MindMemOSMemory(BaseMemory):
             self._record_error(exc)
             if not self.fail_open:
                 raise
-            logger.warning("MindMemOS list_cards failed: {}", exc)
+            logger.warning("[long-term memory] list cards failed: {}", exc)
             return []
 
     async def upsert_card(self, card: MemoryCard, persist: bool | None = None) -> MemoryCard:
@@ -566,7 +615,7 @@ class MindMemOSMemory(BaseMemory):
                 self._record_error(exc)
                 if not self.fail_open:
                     raise
-                logger.warning("MindMemOS upsert_card update failed: {}", exc)
+                logger.warning("[long-term memory] upsert card failed: {}", exc)
                 return card
         await self.add_card(card)
         return card
@@ -582,7 +631,7 @@ class MindMemOSMemory(BaseMemory):
             self._record_error(exc)
             if not self.fail_open:
                 raise
-            logger.warning("MindMemOS delete_card failed: {}", exc)
+            logger.warning("[long-term memory] delete card failed: {}", exc)
 
     async def set_card_enabled(self, card_id: str, enabled: bool) -> MemoryCard:
         """Enable or disable a card in MindMemOS."""
@@ -627,6 +676,9 @@ class MindMemOSMemory(BaseMemory):
         """Build prompt context from MindMemOS search results."""
         started_at = time.perf_counter()
         sampler = _sampler_name(context)
+        # Re-read pinned ids each injection so task-memory-panel edits take effect
+        # without restarting the task (the file is the runtime source of truth).
+        pinned_ids = self._current_pinned_ids()
         sections: dict[MemoryType, list[str]] = {memory_type: [] for memory_type in MemoryType}
         seen: set[str] = set()
         remote_scopes = [
@@ -637,10 +689,21 @@ class MindMemOSMemory(BaseMemory):
         enabled_scope_names = [
             scope
             for enabled, scope, session_id, _agent_id, configured_limit in remote_scopes
-            if enabled and session_id and configured_limit > 0
+            if session_id
+            and (
+                enabled and configured_limit > 0
+                # Fixed shared-memory selection is controlled by the pinned
+                # ids themselves. Honour it for older tasks whose hidden
+                # include_* flags still carry their default false values.
+                or (
+                    self.retrieval_mode == "manual"
+                    and scope != "task"
+                    and bool(pinned_ids)
+                )
+            )
         ]
         logger.debug(
-            "MindMemOS memory search started: sampler={} strategy={} rerank={} "
+            "🔎 [long-term memory] retrieval started: sampler={} strategy={} rerank={} "
             "enabled_scopes={} query_chars={}",
             sampler,
             self.search_strategy,
@@ -650,24 +713,24 @@ class MindMemOSMemory(BaseMemory):
         )
         search_jobs: list[dict[str, Any]] = []
         for enabled, scope, session_id, agent_id, configured_limit in remote_scopes:
-            if not enabled or not session_id:
-                continue
             # Manual retrieval mode injects a fixed, user-selected set for the
             # shared (user/project) scopes instead of searching. Task scope is
             # always retrieved so the injection selector has candidates.
             pinned = self.retrieval_mode == "manual" and scope != "task"
+            if not session_id or (not enabled and not pinned):
+                continue
             if pinned:
                 # Injection count equals the number of pinned cards, so skip the
                 # configured-limit gate. Nothing pinned for this scope -> skip.
-                if not self.pinned_card_ids:
+                if not pinned_ids:
                     continue
                 search_jobs.append(
                     {
                         "scope": scope,
                         "session_id": session_id,
                         "agent_id": agent_id,
-                        "top_k": len(self.pinned_card_ids),
-                        "fetch_k": len(self.pinned_card_ids),
+                        "top_k": len(pinned_ids),
+                        "fetch_k": len(pinned_ids),
                         "pinned": True,
                     }
                 )
@@ -700,6 +763,7 @@ class MindMemOSMemory(BaseMemory):
                         job["scope"],
                         job["session_id"],
                         job["agent_id"],
+                        pinned_ids,
                     )
                 else:
                     result = self._search_remote_scope(
@@ -745,6 +809,11 @@ class MindMemOSMemory(BaseMemory):
             agent_id = str(outcome["agent_id"])
             top_k = int(outcome["top_k"])
             exc = outcome["error"]
+            pinned = bool(outcome.get("pinned"))
+            # Manual mode fetches a fixed, user-selected set of shared cards by id
+            # (no query/search). Auto mode searches. The log reflects which path
+            # ran so "search"/"top_k" never appears for a pinned fetch.
+            retrieval_kind = "pinned-fetch" if pinned else "search"
             if exc is None:
                 hits = list(outcome["hits"])
                 # Task-scope candidates are always retrieved first, then ordered
@@ -753,18 +822,31 @@ class MindMemOSMemory(BaseMemory):
                 if scope == "task" and hits:
                     hits = self._select_task_hits(hits, top_k)
                 scope_hits[scope] = len(hits)
-                logger.info(
-                    "MindMemOS scope search completed: sampler={} scope={} agent_id={} "
-                    "session_id={} top_k={} injection_mode={} hits={} elapsed_ms={:.0f}",
-                    sampler,
-                    scope,
-                    agent_id,
-                    session_id,
-                    top_k,
-                    self.task_injection_mode if scope == "task" else "n/a",
-                    len(hits),
-                    outcome["elapsed_ms"],
-                )
+                if pinned:
+                    logger.info(
+                        "🔎 [long-term memory] scope pinned-fetch completed: sampler={} scope={} agent_id={} "
+                        "session_id={} pinned={} matched={} elapsed_ms={:.0f}",
+                        sampler,
+                        scope,
+                        agent_id,
+                        session_id,
+                        len(pinned_ids),
+                        len(hits),
+                        outcome["elapsed_ms"],
+                    )
+                else:
+                    logger.info(
+                        "🔎 [long-term memory] scope search completed: sampler={} scope={} agent_id={} "
+                        "session_id={} top_k={} injection_mode={} hits={} elapsed_ms={:.0f}",
+                        sampler,
+                        scope,
+                        agent_id,
+                        session_id,
+                        top_k,
+                        self.task_injection_mode if scope == "task" else "n/a",
+                        len(hits),
+                        outcome["elapsed_ms"],
+                    )
                 for hit in hits:
                     dedupe_key = _hit_key(hit)
                     if dedupe_key in seen:
@@ -778,13 +860,13 @@ class MindMemOSMemory(BaseMemory):
                 if not self.fail_open:
                     raise exc
                 logger.warning(
-                    "MindMemOS search failed: sampler={} scope={} agent_id={} "
-                    "session_id={} top_k={} fail_open={} elapsed_ms={:.0f}: {}",
+                    "🔎 [long-term memory] scope {} failed: sampler={} scope={} agent_id={} "
+                    "session_id={} fail_open={} elapsed_ms={:.0f}: {}",
+                    retrieval_kind,
                     sampler,
                     scope,
                     agent_id,
                     session_id,
-                    top_k,
                     self.fail_open,
                     outcome["elapsed_ms"],
                     exc,
@@ -847,6 +929,7 @@ class MindMemOSMemory(BaseMemory):
             TaskMemoryCandidate(
                 key=_hit_key(hit),
                 score=_optional_hit_float(_hit_get(hit, "score", None)),
+                timestamp=_hit_timestamp(hit),
                 metadata=_hit_metadata(hit),
                 payload=hit,
             )
@@ -855,52 +938,71 @@ class MindMemOSMemory(BaseMemory):
         selected = self._task_selector.select(candidates, limit)
         return [candidate.payload for candidate in selected]
 
-    def _fetch_pinned_hits(self, scope: str, session_id: str, agent_id: str) -> list[Any]:
-        """List a scope's memories and keep only user-pinned cards.
+    def _fetch_pinned_hits(
+        self, scope: str, session_id: str, agent_id: str, pinned_ids: list[str]
+    ) -> list[Any]:
+        """List a scope's card rows and keep only user-pinned cards.
 
         Used by manual retrieval mode for the shared (user/project) scopes: the
         user selects fixed memories via the memory-management UI and only those
-        are injected. Ids that no longer resolve are skipped.
+        are injected. The same card filters as the backend/search path are
+        applied so only card content rows are returned (not name/tag/message
+        property rows), and results are paginated until every pinned id is found.
+
+        ``pinned_ids`` is a flat cross-scope list, so an id pinned in the user
+        scope is legitimately absent from the project scope (and vice versa).
+        Each scope therefore returns only the pinned cards it owns and does not
+        warn about ids that belong to the other scope.
 
         Args:
             scope: Scope name (``user`` or ``project``).
             session_id: Scope session identifier.
             agent_id: Scope agent identifier.
+            pinned_ids: Live pinned memory card ids for this injection.
 
         Returns:
-            The raw hits whose ids are in ``pinned_card_ids``.
+            The raw card-row hits whose ids are in ``pinned_ids``.
         """
-        if not self.pinned_card_ids:
+        if not pinned_ids:
             return []
-        pinned = set(self.pinned_card_ids)
+        pinned = set(pinned_ids)
         list_method = getattr(self.client.memory, "list", None)
         if list_method is None:
             return []
-        result = list_method(
-            user_id=self.user_id,
-            app_id=self.app_id or None,
-            agent_id=agent_id,
-            session_id=session_id or None,
-            page=1,
-            page_size=max(len(pinned) * 2, 20),
-            include_total=False,
-            include_inactive=False,
-        )
+        filters = {
+            "user_id": self.user_id,
+            "app_id": self.app_id,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "entity_type": LLM4AD_MEMORY_ENTITY_TYPE,
+            "property_name": LLM4AD_MEMORY_CARD_PROPERTY_FILTER,
+        }
         hits: list[Any] = []
         matched: set[str] = set()
-        for item in getattr(result, "memories", []) or []:
-            memory_id = str(_hit_get(item, "id", "") or _hit_get(item, "memory_id", "") or "")
-            if memory_id and memory_id in pinned:
-                hits.append(item)
-                matched.add(memory_id)
-        missing = pinned - matched
-        if missing:
-            logger.warning(
-                "MindMemOS manual mode: {} pinned memory id(s) not found in scope {}: {}",
-                len(missing),
-                scope,
-                sorted(missing),
+        page = 1
+        page_size = 50
+        max_pages = 20
+        while page <= max_pages and matched != pinned:
+            result = list_method(
+                user_id=self.user_id,
+                app_id=self.app_id or None,
+                agent_id=agent_id,
+                session_id=session_id or None,
+                page=page,
+                page_size=page_size,
+                include_total=False,
+                include_inactive=True,
+                filters=filters,
             )
+            memories = list(getattr(result, "memories", []) or [])
+            for item in memories:
+                memory_id = str(_hit_get(item, "id", "") or _hit_get(item, "memory_id", "") or "")
+                if memory_id and memory_id in pinned and memory_id not in matched:
+                    hits.append(item)
+                    matched.add(memory_id)
+            if len(memories) < page_size:
+                break
+            page += 1
         return hits
 
     async def _rewrite_query(self, query: str, context: dict[str, Any] | None = None) -> str:
@@ -931,7 +1033,7 @@ class MindMemOSMemory(BaseMemory):
             if rewritten:
                 rewritten = " ".join(rewritten.split())[:500]
                 logger.debug(
-                    "MindMemOS query rewrite completed: sampler={} original_chars={} "
+                    "🔎 [long-term memory] query rewrite completed: sampler={} original_chars={} "
                     "rewritten_chars={} elapsed_ms={:.0f}",
                     _sampler_name(context),
                     len(query or ""),
@@ -942,7 +1044,7 @@ class MindMemOSMemory(BaseMemory):
         except Exception as exc:  # noqa: BLE001
             self._record_error(exc)
             logger.warning(
-                "MindMemOS query rewrite failed: sampler={} fail_open={} "
+                "🔎 [long-term memory] query rewrite failed: sampler={} fail_open={} "
                 "elapsed_ms={:.0f}: {}",
                 _sampler_name(context),
                 self.fail_open,
@@ -1068,6 +1170,47 @@ class MindMemOSMemory(BaseMemory):
         return cards
 
 
+def _read_pinned_file(path: Path) -> list[str] | None:
+    """Read pinned memory ids from the runtime pinned-memory file.
+
+    Args:
+        path: Path to the pinned-memory JSON file.
+
+    Returns:
+        The list of pinned ids, or ``None`` when the file is missing or invalid
+        (so the caller can fall back to the config snapshot).
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    raw = data.get("pinned_card_ids") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return None
+    return [str(cid) for cid in raw if str(cid)]
+
+
+def _write_pinned_file(path: Path, pinned_card_ids: list[str]) -> None:
+    """Atomically write pinned memory ids to the runtime pinned-memory file.
+
+    Writes to a temporary file then renames, so a concurrent reader never sees a
+    half-written file.
+
+    Args:
+        path: Path to the pinned-memory JSON file.
+        pinned_card_ids: Pinned memory card ids to persist.
+    """
+    payload = {"pinned_card_ids": [str(cid) for cid in pinned_card_ids if str(cid)]}
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        tmp_path.replace(path)
+    except OSError:
+        logger.warning("Failed to write pinned memory file: {}", path)
+
+
 def _required(config: dict[str, Any], key: str) -> str:
     value = _config_str(config, key)
     if not value:
@@ -1100,6 +1243,32 @@ def _hit_get(hit: Any, key: str, default: Any = None) -> Any:
 def _hit_metadata(hit: Any) -> dict[str, Any]:
     metadata = _hit_get(hit, "metadata", None)
     return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _hit_timestamp(hit: Any) -> float | None:
+    """Extract a recency timestamp (epoch seconds) from a search hit.
+
+    Prefers ``last_update_at``, then ``event_time``, then ``source_timestamp``,
+    all formatted as ``%Y-%m-%d %H:%M:%S`` by MindMemOS. Returns ``None`` when no
+    field parses, so the candidate is treated as oldest by the weight selector.
+
+    Args:
+        hit: Raw MindMemOS search hit (dict or object).
+
+    Returns:
+        Epoch seconds as a float, or ``None`` when unavailable.
+    """
+    metadata = _hit_metadata(hit)
+    for key in ("last_update_at", "event_time", "source_timestamp"):
+        raw = _hit_get(hit, key, None) or metadata.get(key)
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        try:
+            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").timestamp()
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _optional_hit_float(value: Any) -> float | None:
@@ -1292,12 +1461,11 @@ class _HttpMindMemOSMemoryResource:
         return self._parent.post("/v1/memory/search", {"query": query, **kwargs})
 
     def list(self, **kwargs: Any) -> Any:
-        response = self._parent.post("/v1/memory/list", kwargs)
-        data = response.get("data") if isinstance(response, dict) else None
-        memories = []
-        for item in (data or {}).get("memories") or []:
-            memories.append(SimpleNamespace(**item))
-        return SimpleNamespace(memories=memories)
+        # ``post`` already unwraps the ``data.memories`` envelope into a
+        # SimpleNamespace with a ``.memories`` list, so return it directly (the
+        # same as ``search``). Re-parsing here would double-unwrap and drop all
+        # results, silently yielding zero memories.
+        return self._parent.post("/v1/memory/list", kwargs)
 
     def delete(self, **kwargs: Any) -> Any:
         memory_id = kwargs.get("memory_id") or kwargs.get("id")

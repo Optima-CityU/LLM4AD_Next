@@ -1317,6 +1317,9 @@ export type MemoryConfigUpdate = {
     user_memory_limit?: (number | null);
     project_memory_limit?: (number | null);
     task_memory_limit?: (number | null);
+    retrieval_mode?: ('auto' | 'manual' | null);
+    pinned_card_ids?: (Array<(string)> | null);
+    task_injection_mode?: ('topk' | 'weight' | 'random' | null);
     mindmemos_search_strategy?: (string | null);
     mindmemos_rerank?: (boolean | null);
     mindmemos_score_threshold?: (number | null);
@@ -1567,6 +1570,21 @@ export type PermissionBase = {
 };
 
 /**
+ * Current pinned shared-memory ids for a running task (manual mode).
+ */
+export type PinnedMemoryResponse = {
+    task_id: string;
+    pinned_card_ids?: Array<(string)>;
+};
+
+/**
+ * Replace the pinned shared-memory id set for a task.
+ */
+export type PinnedMemoryUpdate = {
+    pinned_card_ids?: Array<(string)>;
+};
+
+/**
  * 隐私协议内容响应。
  */
 export type PrivacyPolicyContent = {
@@ -1599,6 +1617,9 @@ export type ProjectMemoryConfigResponse = {
     user_memory_limit: number;
     project_memory_limit: number;
     task_memory_limit: number;
+    retrieval_mode?: string;
+    pinned_card_ids?: Array<(string)>;
+    task_injection_mode?: string;
     mindmemos_search_strategy: string;
     mindmemos_rerank: boolean;
     mindmemos_score_threshold: (number | null);
@@ -2382,6 +2403,9 @@ export type UserMemoryConfigResponse = {
     user_memory_limit: number;
     project_memory_limit: number;
     task_memory_limit: number;
+    retrieval_mode?: string;
+    pinned_card_ids?: Array<(string)>;
+    task_injection_mode?: string;
     mindmemos_search_strategy: string;
     mindmemos_rerank: boolean;
     mindmemos_score_threshold: (number | null);
@@ -3113,6 +3137,19 @@ export type Llm4AdTasksGetTaskMemoryObservabilityData = {
 };
 
 export type Llm4AdTasksGetTaskMemoryObservabilityResponse = (TaskMemoryObservabilityResponse);
+
+export type Llm4AdTasksGetTaskPinnedMemoryData = {
+    taskId: string;
+};
+
+export type Llm4AdTasksGetTaskPinnedMemoryResponse = (PinnedMemoryResponse);
+
+export type Llm4AdTasksSetTaskPinnedMemoryData = {
+    requestBody: PinnedMemoryUpdate;
+    taskId: string;
+};
+
+export type Llm4AdTasksSetTaskPinnedMemoryResponse = (PinnedMemoryResponse);
 
 export type Llm4AdTasksUpdateTaskMemoryData = {
     memoryId: string;

@@ -36,6 +36,7 @@ import EvolutionTaskList, {
   CreateTaskDialog,
   useInfiniteTasks,
 } from "@/components/Evolution/EvolutionTaskList"
+import { resolvePanelTask } from "@/components/Evolution/task-panel-task"
 import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import ShortcutsHelp from "@/components/Evolution/ShortcutsHelp"
 import TechBackground from "@/components/Evolution/TechBackground"
@@ -1114,7 +1115,7 @@ function Layout() {
               style={{ width: `${rightWidth}px` }}
             >
               <TechPanel className="h-full flex flex-col">
-                <EvolutionRightPanel task={selectedTask} />
+                <EvolutionRightPanel task={resolvePanelTask(selectedTask, effectiveTask)} />
               </TechPanel>
             </div>
           </aside>

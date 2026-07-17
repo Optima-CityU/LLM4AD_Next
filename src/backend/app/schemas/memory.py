@@ -167,6 +167,19 @@ class MemoryCardPageResponse(BaseModel):
 MemoryScope = Literal["user", "project", "task"]
 
 
+class PinnedMemoryResponse(BaseModel):
+    """Current pinned shared-memory ids for a running task (manual mode)."""
+
+    task_id: uuid.UUID
+    pinned_card_ids: list[str] = Field(default_factory=list)
+
+
+class PinnedMemoryUpdate(BaseModel):
+    """Replace the pinned shared-memory id set for a task."""
+
+    pinned_card_ids: list[str] = Field(default_factory=list)
+
+
 class MemoryConfigUpdate(BaseModel):
     """Update request for user/project memory defaults."""
 
@@ -177,6 +190,9 @@ class MemoryConfigUpdate(BaseModel):
     user_memory_limit: int | None = Field(default=None, ge=0)
     project_memory_limit: int | None = Field(default=None, ge=0)
     task_memory_limit: int | None = Field(default=None, ge=0)
+    retrieval_mode: Literal["auto", "manual"] | None = None
+    pinned_card_ids: list[str] | None = None
+    task_injection_mode: Literal["topk", "weight", "random"] | None = None
     mindmemos_search_strategy: str | None = None
     mindmemos_rerank: bool | None = None
     mindmemos_score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -198,6 +214,9 @@ class MemoryConfigResponse(BaseModel):
     user_memory_limit: int
     project_memory_limit: int
     task_memory_limit: int
+    retrieval_mode: str = "auto"
+    pinned_card_ids: list[str] = Field(default_factory=list)
+    task_injection_mode: str = "topk"
     mindmemos_search_strategy: str
     mindmemos_rerank: bool
     mindmemos_score_threshold: float | None

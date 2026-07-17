@@ -125,6 +125,10 @@ export const memoryConfigSchema = z.object({
   user_memory_limit: z.coerce.number().int().min(0).default(0),
   project_memory_limit: z.coerce.number().int().min(0).default(0),
   task_memory_limit: z.coerce.number().int().min(0).default(5),
+  retrieval_mode: z.enum(["auto", "manual"]).default("auto"),
+  pinned_card_ids: z.array(z.string()).default([]),
+  task_injection_mode: z.enum(["topk", "weight", "random"]).default("topk"),
+  task_injection_lambda: z.coerce.number().min(0).max(1).default(0.5),
 })
 
 // --- Logging ---

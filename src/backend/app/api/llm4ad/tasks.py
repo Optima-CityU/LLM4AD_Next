@@ -180,6 +180,39 @@ def get_task_memory_observability(
     return task_service.get_task_memory_observability(db, task_id, current_user)
 
 
+@router.get(
+    "/{task_id}/memory/pinned",
+    response_model=memory_schemas.PinnedMemoryResponse,
+    summary="获取任务固定注入的共享记忆",
+)
+def get_task_pinned_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+):
+    """读取手动模式下任务固定注入的全局/项目记忆 id 列表。"""
+    pinned = task_service.get_task_pinned_memory(db, task_id, current_user)
+    return memory_schemas.PinnedMemoryResponse(task_id=task_id, pinned_card_ids=pinned)
+
+
+@router.put(
+    "/{task_id}/memory/pinned",
+    response_model=memory_schemas.PinnedMemoryResponse,
+    summary="更新任务固定注入的共享记忆",
+)
+def set_task_pinned_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    request: memory_schemas.PinnedMemoryUpdate,
+):
+    """替换任务固定注入的记忆 id 集合；运行中的任务下一轮注入即生效。"""
+    pinned = task_service.set_task_pinned_memory(
+        db, task_id, current_user, request.pinned_card_ids
+    )
+    return memory_schemas.PinnedMemoryResponse(task_id=task_id, pinned_card_ids=pinned)
+
+
 @router.post(
     "/{task_id}/memory",
     response_model=memory_schemas.MemoryCardResponse,

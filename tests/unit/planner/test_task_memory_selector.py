@@ -13,12 +13,12 @@ from llm4ad.planner.task_memory_selector import (
 
 
 def _candidates() -> list[TaskMemoryCandidate]:
-    """Build a fixed candidate pool with distinct scores and weights."""
+    """Build a fixed candidate pool with distinct retrieval scores."""
     return [
-        TaskMemoryCandidate(key="a", score=0.1, metadata={"injection_weight": 5.0}),
-        TaskMemoryCandidate(key="b", score=0.9, metadata={"injection_weight": 1.0}),
-        TaskMemoryCandidate(key="c", score=0.5, metadata={}),
-        TaskMemoryCandidate(key="d", score=0.7, metadata={"injection_weight": 3.0}),
+        TaskMemoryCandidate(key="a", score=0.1),
+        TaskMemoryCandidate(key="b", score=0.9),
+        TaskMemoryCandidate(key="c", score=0.5),
+        TaskMemoryCandidate(key="d", score=0.7),
     ]
 
 
@@ -46,30 +46,99 @@ def test_topk_treats_missing_score_as_lowest():
     assert [c.key for c in selected] == ["scored"]
 
 
-def test_weight_orders_by_injection_weight_desc():
-    """Weight selector orders by the injection_weight metadata."""
-    selected = WeightSelector().select(_candidates(), 2)
+def test_weight_is_reproducible_with_seed():
+    """Seeded roulette-wheel sampling is deterministic across runs."""
+    candidates = _candidates()
 
-    assert [c.key for c in selected] == ["a", "d"]
+    first = WeightSelector({"seed": 7}).select(candidates, 2)
+    second = WeightSelector({"seed": 7}).select(candidates, 2)
+
+    assert [c.key for c in first] == [c.key for c in second]
 
 
-def test_weight_defaults_missing_weight_to_one():
-    """A candidate without an explicit weight defaults to 1.0."""
+def test_weight_favors_most_similar_by_rank():
+    """The most-similar (rank 0) candidate is selected more often than the least."""
+    # Pool is ordered most-similar first; keys encode the rank position.
+    candidates = [TaskMemoryCandidate(key=f"r{i}") for i in range(10)]
+
+    top_first = 0
+    bottom_first = 0
+    trials = 2000
+    for seed in range(trials):
+        selected = WeightSelector({"seed": seed}).select(candidates, 1)
+        if selected[0].key == "r0":
+            top_first += 1
+        elif selected[0].key == "r9":
+            bottom_first += 1
+
+    # Linear decay (weight 1 vs 1/10) must bias the single pick toward rank 0.
+    assert top_first > bottom_first
+
+
+def test_weight_lambda_zero_favors_most_recent():
+    """With lambda=0 the weight is pure recency, favoring the newest candidate."""
+    # Least similar (last in pool) but newest timestamp.
     candidates = [
-        TaskMemoryCandidate(key="light", score=0.9, metadata={"injection_weight": 0.5}),
-        TaskMemoryCandidate(key="default", score=0.1, metadata={}),
+        TaskMemoryCandidate(key="old_similar", timestamp=100.0),
+        TaskMemoryCandidate(key="new_distant", timestamp=999.0),
     ]
 
-    selected = WeightSelector().select(candidates, 1)
+    newest_first = 0
+    trials = 2000
+    for seed in range(trials):
+        selected = WeightSelector({"seed": seed, "lambda": 0.0}).select(candidates, 1)
+        if selected[0].key == "new_distant":
+            newest_first += 1
 
-    assert [c.key for c in selected] == ["default"]
+    # Pure recency: the newest card (recency rank 0) must dominate.
+    assert newest_first > trials * 0.6
 
 
-def test_weight_ignores_invalid_weight():
-    """Non-numeric weights fall back to the default weight."""
-    candidate = TaskMemoryCandidate(key="x", metadata={"injection_weight": "not-a-number"})
+def test_weight_lambda_one_ignores_recency():
+    """With lambda=1 the weight is pure similarity, ignoring timestamps."""
+    # Most similar (rank 0) but oldest; least similar but newest.
+    candidates = [
+        TaskMemoryCandidate(key="similar_old", timestamp=1.0),
+        TaskMemoryCandidate(key="distant_new", timestamp=999.0),
+    ]
 
-    assert candidate.weight() == 1.0
+    similar_first = 0
+    trials = 2000
+    for seed in range(trials):
+        selected = WeightSelector({"seed": seed, "lambda": 1.0}).select(candidates, 1)
+        if selected[0].key == "similar_old":
+            similar_first += 1
+
+    # Pure similarity: the most-similar card must dominate despite being oldest.
+    assert similar_first > trials * 0.6
+
+
+def test_weight_lambda_out_of_range_falls_back_to_default():
+    """Invalid lambda values fall back to the 0.5 default without error."""
+    candidates = _candidates()
+
+    # Should not raise and should return a valid subset.
+    selected = WeightSelector({"seed": 1, "lambda": "bogus"}).select(candidates, 2)
+
+    assert len(selected) == 2
+
+
+def test_weight_returns_all_when_limit_exceeds_pool():
+    """When limit >= pool size, all candidates are returned."""
+    candidates = _candidates()
+
+    selected = WeightSelector({"seed": 1}).select(candidates, 10)
+
+    assert {c.key for c in selected} == {c.key for c in candidates}
+
+
+def test_weight_single_candidate_is_selected():
+    """A single-candidate pool always returns that candidate."""
+    candidates = [TaskMemoryCandidate(key="only")]
+
+    selected = WeightSelector({"seed": 3}).select(candidates, 1)
+
+    assert [c.key for c in selected] == ["only"]
 
 
 def test_random_is_reproducible_with_seed():

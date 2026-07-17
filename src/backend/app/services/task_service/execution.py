@@ -389,7 +389,7 @@ def _apply_mindmemos_runtime_config(
         }
     )
     memory.setdefault("mindmemos_fail_open", settings.LLM4AD_MINDMEMOS_FAIL_OPEN)
-    memory.setdefault("mindmemos_request_timeout", 60.0)
+    memory.setdefault("mindmemos_request_timeout", 300.0)
     memory.setdefault("mindmemos_add_timeout", settings.LLM4AD_MINDMEMOS_ADD_TIMEOUT)
     memory.setdefault("mindmemos_extraction_prompt_language", "auto")
     memory.setdefault("include_user_memory", True)
@@ -455,6 +455,18 @@ def run_task(
         memory_task_id=task.group_id or task.id,
         project_id=task.project_id,
     )
+    # Seed the pinned-memory file from the latest config now (synchronously), so
+    # the right-panel editor reflects this run's selection immediately instead of
+    # a stale value from a previous run. Manual retrieval mode only.
+    _memory_cfg = input_args.get("memory")
+    if isinstance(_memory_cfg, dict) and _memory_cfg.get("retrieval_mode") == "manual":
+        from .pinned_memory import seed_task_pinned_memory
+
+        seed_task_pinned_memory(
+            task,
+            current_user,
+            list(_memory_cfg.get("pinned_card_ids") or []),
+        )
     task_args = {
         "task_id": task_id,
         "project_id": task.project_id,

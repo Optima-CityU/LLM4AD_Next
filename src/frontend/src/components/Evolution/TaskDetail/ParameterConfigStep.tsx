@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useEvolution } from "@/hooks/useEvolution"
-import { setTaskStatusInCache } from "@/lib/task-queries"
+import { setTaskStatusInCache, taskKeys } from "@/lib/task-queries"
 import { handleError } from "@/utils"
 import AppConfigForm from "./config-form/AppConfigForm"
 import type { AppConfig } from "./config-form/appConfigSchema"
@@ -22,6 +22,7 @@ export default function ParameterConfigStep({
 }: ParameterConfigStepProps) {
   const {
     projectId,
+    selectedTask,
     resetTaskData,
     setSelectedTask,
     setActiveTab,
@@ -34,25 +35,34 @@ export default function ParameterConfigStep({
 
   const mutation = useMutation({
     mutationFn: async (data: AppConfig) => {
-      await Llm4AdTasksService.updateTask({
+      const updatedTask = await Llm4AdTasksService.updateTask({
         taskId: task.id,
         requestBody: { input_args: data as unknown as Record<string, unknown> },
       })
+      queryClient.setQueryData(taskKeys.detail(task.id), updatedTask)
       const result = await Llm4AdTasksService.runTask({ taskId: task.id })
       const nextStatus = result.status ?? "pending"
       setTaskStatusInCache(queryClient, task.id, nextStatus, projectId)
       updateTaskStatus(nextStatus)
+      return { updatedTask, nextStatus }
     },
-    onSuccess: () => {
+    onSuccess: ({ updatedTask, nextStatus }) => {
       showSuccessToast("任务已提交运行")
       setIsConfiguring(false)
       setIsViewingParams(false)
       setActiveTab("overview")
-      setSelectedTask({
-        ...task,
-        status: "pending" as TaskResponse["status"],
-      })
+      if (selectedTask?.id === updatedTask.id) {
+        setSelectedTask({
+          ...updatedTask,
+          status: nextStatus,
+          active_status: nextStatus,
+        })
+      }
       resetTaskData()
+      // Refresh after the server-side update so consumers sharing the detail
+      // query, including the right panel, receive the latest input_args.
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(task.id) })
+      queryClient.invalidateQueries({ queryKey: ["memory", "pinned", task.id] })
     },
     onError: handleError.bind(showErrorToast),
   })

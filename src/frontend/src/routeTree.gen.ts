@@ -370,18 +370,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProjectsRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/llm_rovider': {
-      id: '/_layout/llm_rovider'
-      path: '/llm_rovider'
-      fullPath: '/llm_rovider'
-      preLoaderRoute: typeof LayoutLlm_roviderRouteImport
-      parentRoute: typeof LayoutRoute
-    }
     '/_layout/memory': {
       id: '/_layout/memory'
       path: '/memory'
       fullPath: '/memory'
       preLoaderRoute: typeof LayoutMemoryRouteImport
+      parentRoute: typeof LayoutRoute
+    }
+    '/_layout/llm_rovider': {
+      id: '/_layout/llm_rovider'
+      path: '/llm_rovider'
+      fullPath: '/llm_rovider'
+      preLoaderRoute: typeof LayoutLlm_roviderRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/live-codes': {

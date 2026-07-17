@@ -1,11 +1,24 @@
 import { useQuery } from "@tanstack/react-query"
 import { Database, Info, Loader2 } from "lucide-react"
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import {
+  Llm4AdMemoryService,
+  type MemoryCardResponse,
+  type ProjectMemoryConfigResponse,
+} from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -15,10 +28,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { MemoryCard, MemoryCardPage, MemoryConfig } from "@/components/Memory/types"
-import { authFetch } from "@/utils/auth"
 
 type MemoryValue = Record<string, unknown>
+
+// The manual picker only browses the shared scopes (task memory is retrieved,
+// not pinned). Matches the generated listMemoryCards scope literal.
+type PickerScope = "user" | "project"
+
+const CARD_PICKER_PAGE_SIZE = 10
 
 interface MemoryConfigStepProps {
   projectId: string
@@ -45,6 +62,12 @@ function boolValue(value: unknown, fallback: boolean) {
 function numberValue(value: unknown, fallback: number) {
   const parsed = typeof value === "number" ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function clampUnit(value: unknown, fallback: number) {
+  const parsed = typeof value === "number" ? value : Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(0, Math.min(1, parsed))
 }
 
 function timeoutInputValue(value: unknown, fallback: number): number | "" {
@@ -82,11 +105,12 @@ function temporaryMemory(): MemoryValue {
   return { enabled: true, type: "local_yaml" }
 }
 
-function longTermMemory(value: unknown, config?: MemoryConfig): MemoryValue {
+function longTermMemory(value: unknown, config?: ProjectMemoryConfigResponse): MemoryValue {
   const current = safeMemory(value)
   const rerank = boolValue(current.mindmemos_rerank, config?.mindmemos_rerank ?? false)
   const retrievalMode: RetrievalMode =
     current.retrieval_mode === "manual" ? "manual" : "auto"
+  const pinsControlSharedScopes = retrievalMode === "manual"
   return {
     enabled: true,
     type: "mindmemos_cloud",
@@ -97,10 +121,16 @@ function longTermMemory(value: unknown, config?: MemoryConfig): MemoryValue {
     )
       ? String(current.task_injection_mode)
       : "topk") as InjectionMode,
-    // In auto mode we retrieve+inject the shared scopes; in manual mode the
-    // pinned set is injected instead, so the shared toggles stay enabled.
-    include_user_memory: boolValue(current.include_user_memory, config?.include_user_memory ?? true),
-    include_project_memory: boolValue(current.include_project_memory, config?.include_project_memory ?? true),
+    task_injection_lambda: clampUnit(current.task_injection_lambda, 0.5),
+    // The manual picker is the sole shared-scope selector in manual mode, so
+    // persist both scopes as enabled. This also keeps future task runs clear
+    // of the hidden legacy include_* flags.
+    include_user_memory: pinsControlSharedScopes
+      ? true
+      : boolValue(current.include_user_memory, config?.include_user_memory ?? true),
+    include_project_memory: pinsControlSharedScopes
+      ? true
+      : boolValue(current.include_project_memory, config?.include_project_memory ?? true),
     include_task_memory: true,
     user_memory_limit: numberValue(current.user_memory_limit, config?.user_memory_limit ?? DEFAULT_SHARED_LIMIT),
     project_memory_limit: numberValue(current.project_memory_limit, config?.project_memory_limit ?? DEFAULT_SHARED_LIMIT),
@@ -113,14 +143,8 @@ function longTermMemory(value: unknown, config?: MemoryConfig): MemoryValue {
       ? scoreValue(current.mindmemos_score_threshold ?? config?.mindmemos_score_threshold ?? DEFAULT_SCORE_THRESHOLD)
       : null,
     mindmemos_fail_open: boolValue(current.mindmemos_fail_open, config?.mindmemos_fail_open ?? true),
-    mindmemos_request_timeout: numberValue(
-      current.mindmemos_request_timeout,
-      config?.mindmemos_request_timeout ?? 300,
-    ),
-    mindmemos_add_timeout: numberValue(
-      current.mindmemos_add_timeout,
-      config?.mindmemos_add_timeout ?? 300,
-    ),
+    mindmemos_request_timeout: numberValue(current.mindmemos_request_timeout, 300),
+    mindmemos_add_timeout: numberValue(current.mindmemos_add_timeout, 300),
     mindmemos_extraction_prompt_language: ["auto", "ZH", "EN"].includes(
       String(current.mindmemos_extraction_prompt_language),
     )
@@ -147,16 +171,10 @@ export default function MemoryConfigStep({
   const { t } = useTranslation()
   const memory = safeMemory(value)
 
-  const { data: config, isLoading, isError } = useQuery<MemoryConfig>({
+  const { data: config, isLoading, isError } = useQuery({
     queryKey: ["projectMemoryConfig", projectId],
-    queryFn: async () => {
-      const baseUrl = import.meta.env.VITE_API_URL || ""
-      const response = await authFetch(
-        `${baseUrl}/api/v1/llm4ad/memory/projects/${projectId}/config`,
-      )
-      if (!response.ok) throw new Error("Failed to load project memory config")
-      return response.json()
-    },
+    queryFn: () =>
+      Llm4AdMemoryService.getProjectMemoryConfig({ projectId }),
     enabled: !!projectId,
   })
 
@@ -185,50 +203,23 @@ export default function MemoryConfigStep({
     }
   }, [isLoading, onChange, readOnly, runtimeAvailable, value])
 
-  // Available memory cards for the manual retrieval picker (user + project scope).
-  const { data: userCards } = useQuery<MemoryCardPage>({
-    queryKey: ["memoryCards", "user", projectId],
-    queryFn: async () => {
-      const baseUrl = import.meta.env.VITE_API_URL || ""
-      const response = await authFetch(
-        `${baseUrl}/api/v1/llm4ad/memory/cards?scope=user&page=1&page_size=50`,
-      )
-      if (!response.ok) throw new Error("Failed to load user memory cards")
-      return response.json()
-    },
-    enabled: isLongTerm && retrievalMode === "manual" && runtimeAvailable,
-  })
-  const { data: projectCards } = useQuery<MemoryCardPage>({
-    queryKey: ["memoryCards", "project", projectId],
-    queryFn: async () => {
-      const baseUrl = import.meta.env.VITE_API_URL || ""
-      const response = await authFetch(
-        `${baseUrl}/api/v1/llm4ad/memory/cards?scope=project&project_id=${projectId}&page=1&page_size=50`,
-      )
-      if (!response.ok) throw new Error("Failed to load project memory cards")
-      return response.json()
-    },
-    enabled: isLongTerm && retrievalMode === "manual" && runtimeAvailable && !!projectId,
-  })
-
-  // Keep global and project cards as separate lists so the user can pick from
-  // each scope independently (or select nothing from either).
-  const globalPickerCards = useMemo(() => userCards?.items ?? [], [userCards])
-  const projectPickerCards = useMemo(() => projectCards?.items ?? [], [projectCards])
-
   const updateField = (key: string, nextValue: unknown) => {
     const nextMemory = { ...longTermMemory(memory, config), [key]: nextValue }
+    if (key === "retrieval_mode" && nextValue === "manual") {
+      nextMemory.include_user_memory = true
+      nextMemory.include_project_memory = true
+    }
     if (key === "mindmemos_rerank" && nextValue !== true) {
       nextMemory.mindmemos_score_threshold = null
     }
     onChange(nextMemory)
   }
 
-  const togglePinned = (cardId: string, checked: boolean) => {
-    const next = new Set(pinnedIds)
-    if (checked) next.add(cardId)
-    else next.delete(cardId)
-    updateField("pinned_card_ids", Array.from(next))
+  // The dialog seeds its draft from the full flat pinned list and only edits
+  // the cards visible in its own scope, so the committed array already carries
+  // the other scope's pinned ids untouched.
+  const commitPinned = (nextPinnedIds: string[]) => {
+    updateField("pinned_card_ids", nextPinnedIds)
   }
 
   const sharedScopeRows = useMemo(
@@ -403,25 +394,33 @@ export default function MemoryConfigStep({
 
                 {retrievalMode === "manual" && (
                   <div className="space-y-3 rounded-md border bg-background/70 p-3">
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {t("evolution.memoryConfig.manualPicker.help")}
-                    </p>
-                    <ManualScopePicker
-                      title={t("evolution.memoryConfig.scopes.user")}
-                      cards={globalPickerCards}
-                      pinnedIds={pinnedIds}
-                      readOnly={readOnly}
-                      emptyLabel={t("evolution.memoryConfig.manualPicker.empty")}
-                      onToggle={togglePinned}
-                    />
-                    <ManualScopePicker
-                      title={t("evolution.memoryConfig.scopes.project")}
-                      cards={projectPickerCards}
-                      pinnedIds={pinnedIds}
-                      readOnly={readOnly}
-                      emptyLabel={t("evolution.memoryConfig.manualPicker.empty")}
-                      onToggle={togglePinned}
-                    />
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        {t("evolution.memoryConfig.manualPicker.help")}
+                      </p>
+                      <Badge variant="secondary" className="ml-2 shrink-0">
+                        {t("evolution.memoryConfig.manualPicker.totalSelected", {
+                          count: pinnedIds.length,
+                        })}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <ManualScopePickerButton
+                        scope="user"
+                        title={t("evolution.memoryConfig.scopes.user")}
+                        pinnedIds={pinnedIds}
+                        readOnly={readOnly}
+                        onCommit={commitPinned}
+                      />
+                      <ManualScopePickerButton
+                        scope="project"
+                        projectId={projectId}
+                        title={t("evolution.memoryConfig.scopes.project")}
+                        pinnedIds={pinnedIds}
+                        readOnly={readOnly}
+                        onCommit={commitPinned}
+                      />
+                    </div>
                     <p className="text-[11px] leading-5 text-muted-foreground">
                       {t("evolution.memoryConfig.manualPicker.optional")}
                     </p>
@@ -450,6 +449,32 @@ export default function MemoryConfigStep({
                     />
                   ))}
                 </div>
+                {injectionMode === "weight" && (
+                  <div className="grid gap-1.5 rounded-md border bg-background/70 p-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-medium">
+                        {t("evolution.memoryConfig.injection.lambdaLabel")}
+                      </Label>
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {clampUnit(memory.task_injection_lambda, 0.5).toFixed(2)}
+                      </span>
+                    </div>
+                    <Input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={clampUnit(memory.task_injection_lambda, 0.5)}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        updateField("task_injection_lambda", clampUnit(event.target.value, 0.5))
+                      }
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("evolution.memoryConfig.injection.lambdaHelp")}
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-1.5 rounded-md border bg-background/70 p-3">
                   <Label className="text-xs font-medium">
                     {t("evolution.memoryConfig.scopes.task")}
@@ -676,53 +701,236 @@ function EnableCard({ title, hint, selected, disabled, onSelect }: EnableCardPro
   )
 }
 
-interface ManualScopePickerProps {
+interface ManualScopePickerButtonProps {
+  scope: PickerScope
+  projectId?: string
   title: string
-  cards: MemoryCard[]
   pinnedIds: string[]
   readOnly: boolean
-  emptyLabel: string
+  onCommit: (nextPinnedIds: string[]) => void
+}
+
+// A dialog-based paginated picker so large user/project memory sets stay
+// browsable (the shared scopes can grow without bound over time). The dialog
+// edits a local draft and only commits to the parent on confirm; the button
+// shows how many pinned ids belong to this scope.
+function ManualScopePickerButton({
+  scope,
+  projectId,
+  title,
+  pinnedIds,
+  readOnly,
+  onCommit,
+}: ManualScopePickerButtonProps) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [page, setPage] = useState(1)
+  const [draftIds, setDraftIds] = useState<string[]>(pinnedIds)
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["memoryCardsPage", scope, projectId, page],
+    queryFn: () =>
+      Llm4AdMemoryService.listMemoryCards({
+        scope,
+        projectId: scope === "project" ? projectId : undefined,
+        page,
+        pageSize: CARD_PICKER_PAGE_SIZE,
+      }),
+    enabled: open,
+  })
+
+  // Scope card ids (first page, larger size) for per-scope count + partitioning
+  // the flat pinned list on commit. Enabled whenever the scope is usable.
+  const { data: scopeIndex } = useQuery({
+    queryKey: ["memoryScopeIndex", scope, projectId],
+    queryFn: () =>
+      Llm4AdMemoryService.listMemoryCards({
+        scope,
+        projectId: scope === "project" ? projectId : undefined,
+        page: 1,
+        pageSize: 100,
+      }),
+    enabled: !readOnly && (scope === "user" || Boolean(projectId)),
+  })
+  const scopeCardIds = useMemo(
+    () => new Set(((scopeIndex?.items ?? []) as MemoryCardResponse[]).map((c) => c.id)),
+    [scopeIndex],
+  )
+  const selectedInScope = pinnedIds.filter((id) => scopeCardIds.has(id)).length
+
+  // Only offer enabled memories; disabled cards are never injectable.
+  const cards = ((data?.items ?? []) as MemoryCardResponse[]).filter(
+    (card) => card.enabled !== false,
+  )
+  const total = data?.total ?? null
+  const hasMore = data?.has_more ?? false
+
+  const openDialog = (next: boolean) => {
+    if (next) setDraftIds(pinnedIds)
+    setOpen(next)
+  }
+
+  const toggleDraft = (cardId: string, checked: boolean) => {
+    setDraftIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(cardId)
+      else next.delete(cardId)
+      return Array.from(next)
+    })
+  }
+
+  const confirm = () => {
+    onCommit(draftIds)
+    setOpen(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={openDialog}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" className="justify-between" disabled={readOnly}>
+          <span className="truncate">{title}</span>
+          <Badge variant="secondary" className="ml-2 shrink-0">
+            {selectedInScope}
+          </Badge>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            {t("evolution.memoryConfig.manualPicker.dialogHint")}
+          </DialogDescription>
+        </DialogHeader>
+        <ManualScopePickerList
+          cards={cards}
+          pinnedIds={draftIds}
+          readOnly={readOnly}
+          isLoading={isLoading}
+          isError={isError}
+          onToggle={toggleDraft}
+        />
+        <ManualScopePickerPager
+          page={page}
+          hasMore={hasMore}
+          total={total}
+          pageSize={CARD_PICKER_PAGE_SIZE}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => p + 1)}
+        />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
+            {t("evolution.memoryConfig.manualPicker.cancel")}
+          </Button>
+          <Button type="button" size="sm" onClick={confirm}>
+            {t("evolution.memoryConfig.manualPicker.confirm")}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface ManualScopePickerListProps {
+  cards: MemoryCardResponse[]
+  pinnedIds: string[]
+  readOnly: boolean
+  isLoading: boolean
+  isError: boolean
   onToggle: (cardId: string, checked: boolean) => void
 }
 
-function ManualScopePicker({
-  title,
+function ManualScopePickerList({
   cards,
   pinnedIds,
   readOnly,
-  emptyLabel,
+  isLoading,
+  isError,
   onToggle,
-}: ManualScopePickerProps) {
-  const selectedCount = cards.filter((card) => pinnedIds.includes(card.id)).length
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium">{title}</span>
-        <span className="text-[11px] text-muted-foreground">{selectedCount}</span>
+}: ManualScopePickerListProps) {
+  const { t } = useTranslation()
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <Loader2 className="mr-2 size-4 animate-spin" />
+        <span className="text-xs">{t("evolution.memoryConfig.manualPicker.loading")}</span>
       </div>
-      <div className="max-h-44 space-y-1.5 overflow-y-auto">
-        {cards.length === 0 ? (
-          <p className="py-3 text-center text-xs text-muted-foreground">{emptyLabel}</p>
-        ) : (
-          cards.map((card) => (
-            <label
-              key={card.id}
-              className="flex cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2"
-            >
-              <Checkbox
-                checked={pinnedIds.includes(card.id)}
-                disabled={readOnly}
-                onCheckedChange={(checked) => onToggle(card.id, checked === true)}
-              />
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium">{card.title || card.id}</span>
-                <span className="block truncate text-[11px] text-muted-foreground">
-                  {card.content}
-                </span>
-              </span>
-            </label>
-          ))
-        )}
+    )
+  }
+  if (isError) {
+    return (
+      <p className="py-8 text-center text-xs text-destructive">
+        {t("evolution.memoryConfig.manualPicker.loadFailed")}
+      </p>
+    )
+  }
+  if (cards.length === 0) {
+    return (
+      <p className="py-8 text-center text-xs text-muted-foreground">
+        {t("evolution.memoryConfig.manualPicker.empty")}
+      </p>
+    )
+  }
+  return (
+    <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+      {cards.map((card) => (
+        <label
+          key={card.id}
+          className="flex cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2"
+        >
+          <Checkbox
+            checked={pinnedIds.includes(card.id)}
+            disabled={readOnly}
+            onCheckedChange={(checked) => onToggle(card.id, checked === true)}
+          />
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-medium">{card.title || card.id}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">{card.content}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+interface ManualScopePickerPagerProps {
+  page: number
+  hasMore: boolean
+  total: number | null
+  pageSize: number
+  onPrev: () => void
+  onNext: () => void
+}
+
+function ManualScopePickerPager({
+  page,
+  hasMore,
+  total,
+  pageSize,
+  onPrev,
+  onNext,
+}: ManualScopePickerPagerProps) {
+  const { t } = useTranslation()
+  const totalPages = total != null ? Math.max(1, Math.ceil(total / pageSize)) : null
+  return (
+    <div className="flex items-center justify-between pt-1">
+      <span className="text-[11px] text-muted-foreground">
+        {totalPages != null
+          ? t("evolution.memoryConfig.manualPicker.pageOf", { page, total: totalPages })
+          : t("evolution.memoryConfig.manualPicker.page", { page })}
+      </span>
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={onPrev}>
+          {t("evolution.memoryConfig.manualPicker.prev")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!hasMore}
+          onClick={onNext}
+        >
+          {t("evolution.memoryConfig.manualPicker.next")}
+        </Button>
       </div>
     </div>
   )

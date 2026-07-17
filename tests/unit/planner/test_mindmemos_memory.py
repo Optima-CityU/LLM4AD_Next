@@ -206,6 +206,33 @@ def test_mindmemos_backend_falls_back_to_http_when_optional_sdk_is_missing(monke
     assert memory.client.__class__.__name__ == "_HttpMindMemOSClient"
 
 
+def test_http_client_list_does_not_double_unwrap_memories():
+    """HTTP client list() must return post()'s already-parsed memories, not zero.
+
+    Regression: post() unwraps data.memories into a SimpleNamespace; list()
+    previously re-parsed it as a dict, silently dropping every memory.
+    """
+    from llm4ad.planner.mindmemos_memory import _HttpMindMemOSClient
+
+    client = _HttpMindMemOSClient(
+        base_url="http://mindmemos-api:8000",
+        api_key="sk-test",
+        user_id="user-1",
+    )
+    # Stub the transport layer the way post() returns it: a SimpleNamespace with
+    # an already-parsed .memories list.
+    client.post = lambda path, payload: SimpleNamespace(  # type: ignore[method-assign]
+        code="ok",
+        request_id="req",
+        message="",
+        memories=[SimpleNamespace(id="card-1"), SimpleNamespace(id="card-2")],
+    )
+
+    result = client.memory.list(user_id="user-1", page=1, page_size=50)
+
+    assert [m.id for m in result.memories] == ["card-1", "card-2"]
+
+
 def test_mindmemos_client_receives_configured_request_timeout():
     """Pass runtime request timeout through to the MindMemOS client."""
     memory = MindMemOSMemory(
@@ -796,11 +823,11 @@ async def test_async_prompt_context_logs_mindmemos_usage_without_leaking_content
     )
 
     logs = "\n".join(log_messages)
-    assert "MindMemOS memory search started" in logs
+    assert "[long-term memory] retrieval started" in logs
     assert "sampler=mutation" in logs
     assert "search_strategy=agentic" in logs
-    assert "MindMemOS query rewrite completed" in logs
-    assert "MindMemOS scope search completed" in logs
+    assert "[long-term memory] query rewrite completed" in logs
+    assert "[long-term memory] scope search completed" in logs
     assert "scope=task" in logs
     assert "hits=1" in logs
     assert "[long-term memory] injection completed" in logs
@@ -890,7 +917,7 @@ def test_get_prompt_context_logs_fail_open_search_warning(log_messages):
     memory.get_prompt_context("query")
 
     logs = "\n".join(log_messages)
-    assert "MindMemOS search failed" in logs
+    assert "[long-term memory] scope search failed" in logs
     assert "scope=task" in logs
     assert "fail_open=True" in logs
     assert "service unavailable" in logs
@@ -947,10 +974,10 @@ async def test_mindmemos_raw_extractor_keeps_old_thresholds_without_llm_extracti
     assert "what key design decisions led to this good performance" in card.content
     assert "patterns or strategies are worth reusing" in card.content
     logs = "\n".join(log_messages)
-    assert "MindMemOS raw memory candidate selected" in logs
-    assert "event=good_algorithm" in logs
+    assert "[long-term memory] extracted candidate" in logs
+    assert "type=good algorithm" in logs
     assert "generation=4" in logs
-    assert "algorithm_id=algo-good" in logs
+    assert "algorithm=algo-good" in logs
 
 
 @pytest.mark.asyncio
@@ -1118,10 +1145,9 @@ async def test_add_card_sends_raw_extraction_observation_without_card_formatting
     assert "task_id" not in call["metadata"]
     assert "session_id" not in call["metadata"]
     logs = "\n".join(log_messages)
-    assert "MindMemOS memory add completed" in logs
-    assert "event=good_algorithm" in logs
-    assert "scope=task" in logs
-    assert "task_id=task-1" in logs
+    assert "[long-term memory] inserted task memory" in logs
+    assert "type=good algorithm" in logs
+    assert "task=task-1" in logs
 
 
 @pytest.mark.asyncio
@@ -1173,13 +1199,15 @@ async def test_add_card_raises_when_fail_open_disabled():
 
 
 def test_manual_mode_fetches_pinned_cards_even_when_limit_zero():
-    """Manual mode injects pinned shared cards regardless of the scope limit."""
+    """Manual mode injects pinned shared cards regardless of legacy scope settings."""
     memory = MindMemOSMemory(
         _config(
             retrieval_mode="manual",
             pinned_card_ids=["card-1"],
-            include_user_memory=True,
-            include_project_memory=True,
+            # Manual mode owns shared-scope selection. Older tasks may retain
+            # the default false flags, so those flags must not suppress pins.
+            include_user_memory=False,
+            include_project_memory=False,
             include_task_memory=False,
             user_memory_limit=0,
             project_memory_limit=0,
@@ -1204,6 +1232,40 @@ def test_manual_mode_fetches_pinned_cards_even_when_limit_zero():
     assert listed_agents == {"project", "global"}
     assert memory.client.memory.search_calls == []
     assert "Pinned shared insight." in context
+    # The list call must carry the card filters so only card-content rows are
+    # returned (the bug that caused pinned ids to be "not found").
+    for call in memory.client.memory.list_calls:
+        filters = call.get("filters") or {}
+        assert filters.get("entity_type") == "llm4ad_memory_card"
+        assert "property_name" in filters
+        assert call.get("include_inactive") is True
+
+
+def test_manual_mode_logs_pinned_fetch_not_search(log_messages):
+    """Manual mode logs a pinned-fetch line, never a search/top_k line."""
+    memory = MindMemOSMemory(
+        _config(
+            retrieval_mode="manual",
+            pinned_card_ids=["card-1"],
+            include_user_memory=True,
+            include_project_memory=False,
+            include_task_memory=False,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.list_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(id="card-1", memory="Pinned insight.", memory_type="good_algorithm", metadata={})
+        ]
+    )
+
+    memory.get_prompt_context("query")
+
+    logs = "\n".join(log_messages)
+    assert "scope pinned-fetch completed" in logs
+    assert "retrieval=manual-pinned" in logs
+    # The pinned shared scope must not be logged as a search with top_k.
+    assert "scope=user top_k" not in logs
 
 
 def test_manual_mode_with_no_pinned_cards_injects_nothing():
@@ -1224,3 +1286,60 @@ def test_manual_mode_with_no_pinned_cards_injects_nothing():
     assert context == ""
     assert memory.client.memory.list_calls == []
     assert memory.client.memory.search_calls == []
+
+
+def test_manual_mode_seeds_and_rereads_pinned_file(tmp_path):
+    """Pinned ids seed a runtime file that is re-read on each injection."""
+    from llm4ad.planner.mindmemos_memory import PINNED_MEMORY_FILENAME, _write_pinned_file
+
+    memory = MindMemOSMemory(
+        _config(
+            retrieval_mode="manual",
+            pinned_card_ids=["card-1"],
+            include_user_memory=True,
+            include_project_memory=False,
+            include_task_memory=False,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.set_memory_dir(tmp_path)
+
+    # set_memory_dir seeds the file from the config snapshot.
+    pinned_file = tmp_path / PINNED_MEMORY_FILENAME
+    assert pinned_file.exists()
+    assert memory._current_pinned_ids() == ["card-1"]
+
+    # A runtime edit to the file is picked up without touching the config.
+    _write_pinned_file(pinned_file, ["card-2", "card-3"])
+    assert memory._current_pinned_ids() == ["card-2", "card-3"]
+
+
+def test_pinned_file_reseeds_from_config_on_rerun(tmp_path):
+    """Each run start re-seeds the pinned file from config (rerun picks up changes)."""
+    from llm4ad.planner.mindmemos_memory import PINNED_MEMORY_FILENAME, _write_pinned_file
+
+    pinned_file = tmp_path / PINNED_MEMORY_FILENAME
+    # Simulate a stale file from a previous run.
+    _write_pinned_file(pinned_file, ["stale-1"])
+
+    memory = MindMemOSMemory(
+        _config(retrieval_mode="manual", pinned_card_ids=["config-1"]),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.set_memory_dir(tmp_path)
+
+    # Rerun re-seeds from the (new) config, overwriting the stale file.
+    assert memory._current_pinned_ids() == ["config-1"]
+
+
+def test_auto_mode_does_not_write_pinned_file(tmp_path):
+    """Auto retrieval mode injects by search and writes no pinned file."""
+    from llm4ad.planner.mindmemos_memory import PINNED_MEMORY_FILENAME
+
+    memory = MindMemOSMemory(
+        _config(retrieval_mode="auto"),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.set_memory_dir(tmp_path)
+
+    assert not (tmp_path / PINNED_MEMORY_FILENAME).exists()

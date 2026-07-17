@@ -27,6 +27,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type {
+  MemoryCardResponse,
   MemoryContributionSummary,
   MemoryInjectionSummary,
   TaskResponse,
@@ -44,7 +45,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -202,6 +213,9 @@ function useTaskActions(task: TaskResponse) {
       setIsConfiguring(false)
       setIsViewingParams(false)
       resetTaskData()
+      // The backend re-seeds the pinned-memory file from the latest config on
+      // run, so refresh the right-panel editor to drop any stale selection.
+      queryClient.invalidateQueries({ queryKey: ["memory", "pinned", displayTask.id] })
     },
   })
 
@@ -215,6 +229,7 @@ function useTaskActions(task: TaskResponse) {
         setIsConfiguring(false)
         setIsViewingParams(false)
         resetTaskData()
+        queryClient.invalidateQueries({ queryKey: ["memory", "pinned", effectiveId] })
       }),
   })
 
@@ -664,6 +679,7 @@ function TaskMemorySection({
   onToggle: () => void
 }) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const {
     projectId,
     taskMemoryCreatedSignal,
@@ -673,6 +689,7 @@ function TaskMemorySection({
   const [pendingCount, setPendingCount] = useState(0)
   const [usageStatsOpen, setUsageStatsOpen] = useState(false)
   const [contributionOpen, setContributionOpen] = useState(false)
+  const [pinnedOpen, setPinnedOpen] = useState(false)
   const taskScopeId = task.group_id ?? task.id
 
   useEffect(() => {
@@ -680,6 +697,7 @@ function TaskMemorySection({
     setPendingCount(0)
     setUsageStatsOpen(false)
     setContributionOpen(false)
+    setPinnedOpen(false)
   }, [taskScopeId])
 
   const { data: featureFlags } = useQuery({
@@ -715,6 +733,15 @@ function TaskMemorySection({
     refetchOnWindowFocus: false,
   })
   const observability = observabilityQuery.data
+  // Pinned-memory count drives the foldout summary (manual mode only).
+  const pinnedManual = isManualRetrievalTask(task)
+  const pinnedCountQuery = useQuery({
+    queryKey: ["memory", "pinned", task.id],
+    queryFn: () => Llm4AdTasksService.getTaskPinnedMemory({ taskId: task.id }),
+    enabled: isOpen && pinnedManual,
+    staleTime: 15 * 1000,
+  })
+  const pinnedCount = pinnedCountQuery.data?.pinned_card_ids?.length ?? 0
   const latestInjection = injectionEventMatches
     ? eventToInjectionSummary(injectionEvent ?? {})
     : observability?.latest_injection
@@ -744,7 +771,18 @@ function TaskMemorySection({
   useEffect(() => {
     if (!isOpen || !injectionEventMatches) return
     observabilityQuery.refetch()
-  }, [isOpen, injectionEventMatches, taskMemoryInjectedSignal, observabilityQuery.refetch])
+    if (pinnedManual) {
+      queryClient.invalidateQueries({ queryKey: ["memory", "pinned", task.id] })
+    }
+  }, [
+    injectionEventMatches,
+    isOpen,
+    observabilityQuery.refetch,
+    pinnedManual,
+    queryClient,
+    task.id,
+    taskMemoryInjectedSignal,
+  ])
 
   const systemReady = configQuery.data?.system_runtime_available === true
   const bindingReady = Boolean(configQuery.data?.mindmemos_binding_id)
@@ -935,6 +973,16 @@ function TaskMemorySection({
               </p>
             )}
           </TaskMemoryFoldout>
+          {canLoadCards && pinnedManual && (
+            <TaskMemoryFoldout
+              open={pinnedOpen}
+              title={t("evolution.pinnedMemory.title")}
+              summary={t("evolution.pinnedMemory.totalSelected", { count: pinnedCount })}
+              onToggle={() => setPinnedOpen((current) => !current)}
+            >
+              <PinnedMemoryEditor task={task} projectId={projectId ?? undefined} />
+            </TaskMemoryFoldout>
+          )}
           <div className="mb-2">
             <div className="text-xs font-medium text-foreground">
               {t("evolution.taskMemory.storedTitle")}
@@ -961,6 +1009,272 @@ function TaskMemorySection({
         </div>
       )}
     </div>
+  )
+}
+
+const PINNED_PICKER_PAGE_SIZE = 10
+
+// Runtime editor for manual-mode pinned shared memory. Reads/writes the task's
+// pinned_memory.json via the API; edits take effect on the next injection
+// without restarting the task.
+function PinnedMemoryEditor({
+  task,
+  projectId,
+}: {
+  task: TaskResponse
+  projectId?: string
+}) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const taskId = task.id
+  const pinnedQueryKey = ["memory", "pinned", taskId]
+
+  const { data: pinned } = useQuery({
+    queryKey: pinnedQueryKey,
+    queryFn: () => Llm4AdTasksService.getTaskPinnedMemory({ taskId }),
+    staleTime: 15 * 1000,
+    refetchOnMount: "always",
+  })
+  // Saved (server) selection.
+  const savedIds = useMemo(() => pinned?.pinned_card_ids ?? [], [pinned])
+  // Local draft the user edits; only pushed to the server on explicit confirm.
+  const [draftIds, setDraftIds] = useState<string[]>(savedIds)
+  const [justSaved, setJustSaved] = useState(false)
+
+  // Reset the draft whenever a fresh saved value arrives (task switch / refetch).
+  useEffect(() => {
+    setDraftIds(savedIds)
+  }, [savedIds])
+
+  const mutation = useMutation({
+    mutationFn: (nextIds: string[]) =>
+      Llm4AdTasksService.setTaskPinnedMemory({
+        taskId,
+        requestBody: { pinned_card_ids: nextIds },
+      }),
+    onSuccess: (result) => {
+      queryClient.setQueryData(pinnedQueryKey, result)
+      setJustSaved(true)
+    },
+  })
+
+  const dirty = useMemo(() => {
+    if (draftIds.length !== savedIds.length) return true
+    const saved = new Set(savedIds)
+    return draftIds.some((id) => !saved.has(id))
+  }, [draftIds, savedIds])
+
+  const toggle = (cardId: string, checked: boolean) => {
+    setJustSaved(false)
+    setDraftIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(cardId)
+      else next.delete(cardId)
+      return Array.from(next)
+    })
+  }
+
+  return (
+    <div>
+      <p className="mb-2 text-[11px] leading-4 text-muted-foreground">
+        {t("evolution.pinnedMemory.hint")}
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <PinnedScopePickerButton
+          scope="user"
+          title={t("evolution.memoryConfig.scopes.user")}
+          pinnedIds={draftIds}
+          disabled={mutation.isPending}
+          onToggle={toggle}
+        />
+        <PinnedScopePickerButton
+          scope="project"
+          projectId={projectId}
+          title={t("evolution.memoryConfig.scopes.project")}
+          pinnedIds={draftIds}
+          disabled={mutation.isPending}
+          onToggle={toggle}
+        />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-[11px] leading-4">
+          {mutation.isError ? (
+            <span className="text-destructive">
+              {t("evolution.pinnedMemory.saveFailed")}
+            </span>
+          ) : justSaved && !dirty ? (
+            <span className="text-emerald-600 dark:text-emerald-400">
+              {t("evolution.pinnedMemory.saved")}
+            </span>
+          ) : dirty ? (
+            <span className="text-amber-600 dark:text-amber-400">
+              {t("evolution.pinnedMemory.unsaved")}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              {t("evolution.pinnedMemory.upToDate")}
+            </span>
+          )}
+        </span>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!dirty || mutation.isPending}
+            onClick={() => {
+              setJustSaved(false)
+              setDraftIds(savedIds)
+            }}
+          >
+            {t("evolution.pinnedMemory.reset")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!dirty || mutation.isPending}
+            onClick={() => mutation.mutate(draftIds)}
+          >
+            {mutation.isPending && <Loader2 className="mr-1 size-3 animate-spin" />}
+            {t("evolution.pinnedMemory.confirm")}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PinnedScopePickerButton({
+  scope,
+  projectId,
+  title,
+  pinnedIds,
+  disabled,
+  onToggle,
+}: {
+  scope: "user" | "project"
+  projectId?: string
+  title: string
+  pinnedIds: string[]
+  disabled: boolean
+  onToggle: (cardId: string, checked: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [page, setPage] = useState(1)
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["memory", "pinnedPicker", scope, projectId, page],
+    queryFn: () =>
+      Llm4AdMemoryService.listMemoryCards({
+        scope,
+        projectId: scope === "project" ? projectId : undefined,
+        page,
+        pageSize: PINNED_PICKER_PAGE_SIZE,
+      }),
+    enabled: open,
+  })
+  // Scope card index for the per-scope selected count (partitions the flat
+  // pinned list). Loaded eagerly so the count shows without opening the dialog.
+  const { data: scopeIndex } = useQuery({
+    queryKey: ["memory", "pinnedScopeIndex", scope, projectId],
+    queryFn: () =>
+      Llm4AdMemoryService.listMemoryCards({
+        scope,
+        projectId: scope === "project" ? projectId : undefined,
+        page: 1,
+        pageSize: 100,
+      }),
+    enabled: scope === "user" || Boolean(projectId),
+  })
+  const scopeCardIds = useMemo(
+    () => new Set(((scopeIndex?.items ?? []) as MemoryCardResponse[]).map((c) => c.id)),
+    [scopeIndex],
+  )
+  const selectedInScope = pinnedIds.filter((id) => scopeCardIds.has(id)).length
+  // Disabled cards are not injectable, so keep them out of the picker.
+  const cards = ((data?.items ?? []) as MemoryCardResponse[]).filter(
+    (card) => card.enabled !== false,
+  )
+  const hasMore = data?.has_more ?? false
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="justify-between" disabled={disabled}>
+          <span className="truncate">{title}</span>
+          <Badge variant="secondary" className="ml-2 shrink-0">
+            {selectedInScope}
+          </Badge>
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{t("evolution.pinnedMemory.dialogHint")}</DialogDescription>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <Loader2 className="mr-2 size-4 animate-spin" />
+            <span className="text-xs">{t("evolution.pinnedMemory.loading")}</span>
+          </div>
+        ) : isError ? (
+          <p className="py-8 text-center text-xs text-destructive">
+            {t("evolution.pinnedMemory.loadFailed")}
+          </p>
+        ) : cards.length === 0 ? (
+          <p className="py-8 text-center text-xs text-muted-foreground">
+            {t("evolution.pinnedMemory.empty")}
+          </p>
+        ) : (
+          <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
+            {cards.map((card) => (
+              <label
+                key={card.id}
+                className="flex cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2"
+              >
+                <Checkbox
+                  checked={pinnedIds.includes(card.id)}
+                  disabled={disabled}
+                  onCheckedChange={(checked) => onToggle(card.id, checked === true)}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium">{card.title || card.id}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {card.content}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-[11px] text-muted-foreground">
+            {t("evolution.pinnedMemory.page", { page })}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              {t("evolution.pinnedMemory.prev")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!hasMore}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              {t("evolution.pinnedMemory.next")}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -1187,6 +1501,10 @@ function taskMemoryConfig(task: TaskResponse): Record<string, unknown> | null {
 function isMindMemOSTask(task: TaskResponse): boolean {
   const memory = taskMemoryConfig(task)
   return memory?.enabled !== false && memory?.type === "mindmemos_cloud"
+}
+
+function isManualRetrievalTask(task: TaskResponse): boolean {
+  return isMindMemOSTask(task) && taskMemoryConfig(task)?.retrieval_mode === "manual"
 }
 
 export function CollapsedRightPanelActions({
