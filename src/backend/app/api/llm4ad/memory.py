@@ -216,6 +216,28 @@ def stream_extract_memory_cards(
 
 
 @router.post(
+    "/cards/promotions/stream",
+    summary="将任务记忆流式提升为项目记忆预览",
+)
+def stream_promote_task_memory_cards(
+    db: SessionDep,
+    current_user: CurrentUser,
+    request: schemas.TaskMemoryPromotionRequest,
+):
+    async def stream():
+        async for item in memory_service.stream_promote_task_memory_cards(
+            db,
+            current_user=current_user,
+            request=request,
+        ):
+            event_name = str(item.get("event") or "progress")
+            data = {key: value for key, value in item.items() if key != "event"}
+            yield f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    return sse_response(stream())
+
+
+@router.post(
     "/cards/extractions/{preview_id}/commit",
     response_model=schemas.MemoryCardExtractionResponse,
     summary="确认保存记忆预览",

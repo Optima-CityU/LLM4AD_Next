@@ -14,6 +14,7 @@ from app.schemas.memory import (
     MemoryCardExtractionRequest,
     MemoryCardResponse,
     MemoryCardUpsertRequest,
+    TaskMemoryPromotionRequest,
 )
 from app.services import memory_service
 from tests.utils.user import create_random_user
@@ -442,6 +443,36 @@ def test_task_memory_crud_uses_mindmemos_when_enabled(
     ]
 
 
+def test_filter_active_task_pinned_memory_ids_excludes_disabled_cards(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    task = _create_task_for_user(db, user.id)
+    _enable_system_mindmemos(monkeypatch)
+    _mark_user_memory_bound(db, user.id)
+    _fake_mindmemos(
+        monkeypatch,
+        initial={
+            "enabled-card": "An active shared memory.",
+            "disabled-card": "A disabled shared memory.",
+        },
+        initial_metadata={
+            "enabled-card": {"enabled": True},
+            "disabled-card": {"enabled": False},
+        },
+    )
+
+    pinned_ids = memory_service.filter_active_task_pinned_memory_ids(
+        db,
+        current_user=user,
+        task_id=task.id,
+        pinned_card_ids=["enabled-card", "disabled-card", "missing-card"],
+    )
+
+    assert pinned_ids == ["enabled-card"]
+
+
 def test_task_memory_update_preserves_remote_id(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -768,6 +799,156 @@ async def test_stream_extract_memory_cards_reports_empty_completion_message(
     assert events[-1]["items"] == []
     assert events[-1]["message_i18n"]["zh"] == "没有提取到可保存的记忆"
     assert "LLM4AD" in events[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_stream_promote_task_memory_cards_uses_structured_sources_and_project_scope(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    task = _create_task_for_user(db, user.id)
+    _enable_system_mindmemos(monkeypatch)
+    _mark_user_memory_bound(db, user.id)
+    source_cards = {
+        "task-card-1": MemoryCardResponse(
+            id="task-card-1",
+            type="good_algorithm",
+            title="2-opt refinement",
+            content="Apply 2-opt after nearest-neighbor construction.",
+            tags=["TSP", "local-search"],
+        ),
+        "task-card-2": MemoryCardResponse(
+            id="task-card-2",
+            type="error_reflection",
+            title="Large instance limit",
+            content="For large instances, restrict the neighborhood size.",
+            tags=["TSP"],
+        ),
+    }
+    captured: dict[str, object] = {}
+
+    def fake_fetch(_current_user, scope_data: dict[str, str], memory_ids: list[str]):
+        captured["source_scope"] = scope_data
+        assert memory_ids == ["task-card-1", "task-card-2"]
+        return source_cards
+
+    async def fake_stream(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        captured["path"] = path
+        captured["payload"] = payload
+        captured["scopes"] = scopes
+        yield {
+            "event": "completed",
+            "data": {
+                "memories": [
+                    {
+                        "operation": "add",
+                        "memory_id": "project-preview-1",
+                        "content": "Use 2-opt with a bounded neighborhood for TSP.",
+                        "property_name": "good_algorithm",
+                        "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                        "entity_id": "project-entity-1",
+                    }
+                ]
+            },
+        }
+
+    archived: list[dict] = []
+
+    def fake_archive(_current_user, memory_id: str, *, scope_data: dict, status: str, metadata_patch: dict):
+        archived.append(
+            {
+                "memory_id": memory_id,
+                "scope_data": scope_data,
+                "status": status,
+                "metadata": metadata_patch,
+            }
+        )
+
+    monkeypatch.setattr(memory_service, "_remote_fetch_cards_by_ids", fake_fetch)
+    monkeypatch.setattr(memory_service, "_mindmemos_stream_post", fake_stream)
+    monkeypatch.setattr(memory_service, "_remote_update_card_status", fake_archive)
+    monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda *_args, **_kwargs: None)
+
+    events = [
+        event
+        async for event in memory_service.stream_promote_task_memory_cards(
+            db,
+            current_user=user,
+            request=TaskMemoryPromotionRequest(
+                project_id=task.project_id,
+                task_id=task.id,
+                memory_ids=["task-card-1", "task-card-2"],
+                prompt_language="EN",
+            ),
+        )
+    ]
+
+    payload = captured["payload"]
+    assert captured["path"] == "/v1/memory/add/stream"
+    assert captured["scopes"] == ["memory:write"]
+    assert captured["source_scope"] == {
+        "user_id": str(user.id),
+        "app_id": "llm4ad",
+        "agent_id": "task",
+        "session_id": str(task.id),
+    }
+    assert payload["agent_id"] == "project"
+    assert payload["session_id"] == str(task.project_id)
+    assert payload["messages"] == [
+        {
+            "role": "user",
+            "content": "User explicitly confirms and requests promotion of the following selected task-memory cards into reusable project memory.",
+        },
+        {
+            "role": "assistant",
+            "content": "Selected task memory card (ID: task-card-1)\nTitle: 2-opt refinement\nType: good_algorithm\nTags: TSP, local-search\nContent:\nApply 2-opt after nearest-neighbor construction.",
+        },
+        {
+            "role": "assistant",
+            "content": "Selected task memory card (ID: task-card-2)\nTitle: Large instance limit\nType: error_reflection\nTags: TSP\nContent:\nFor large instances, restrict the neighborhood size.",
+        },
+    ]
+    assert payload["metadata"]["llm4ad_source_task_id"] == str(task.id)
+    assert payload["metadata"]["llm4ad_source_memory_ids"] == ["task-card-1", "task-card-2"]
+    assert "task_id" not in payload
+    assert events[-1]["items"][0]["enabled"] is False
+    assert archived[0]["scope_data"] == {
+        "user_id": str(user.id),
+        "app_id": "llm4ad",
+        "agent_id": "project",
+        "session_id": str(task.project_id),
+    }
+    assert archived[0]["metadata"]["llm4ad_source_task_id"] == str(task.id)
+    assert archived[0]["metadata"]["llm4ad_source_memory_ids"] == ["task-card-1", "task-card-2"]
+
+
+@pytest.mark.asyncio
+async def test_stream_promote_task_memory_cards_rejects_missing_task_scope_card(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    task = _create_task_for_user(db, user.id)
+    _enable_system_mindmemos(monkeypatch)
+    _mark_user_memory_bound(db, user.id)
+    monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(memory_service, "_remote_fetch_cards_by_ids", lambda *_args, **_kwargs: {})
+
+    with pytest.raises(HTTPException) as exc:
+        async for _event in memory_service.stream_promote_task_memory_cards(
+            db,
+            current_user=user,
+            request=TaskMemoryPromotionRequest(
+                project_id=task.project_id,
+                task_id=task.id,
+                memory_ids=["missing-card"],
+            ),
+        ):
+            pass
+
+    assert exc.value.status_code == 404
+    assert "当前任务范围" in str(exc.value.detail)
 
 
 def test_remote_list_groups_llm4ad_schema_properties_into_lightweight_cards(monkeypatch: pytest.MonkeyPatch):

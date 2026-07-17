@@ -997,7 +997,12 @@ class MindMemOSMemory(BaseMemory):
             memories = list(getattr(result, "memories", []) or [])
             for item in memories:
                 memory_id = str(_hit_get(item, "id", "") or _hit_get(item, "memory_id", "") or "")
-                if memory_id and memory_id in pinned and memory_id not in matched:
+                if (
+                    memory_id
+                    and memory_id in pinned
+                    and memory_id not in matched
+                    and _hit_is_enabled(item)
+                ):
                     hits.append(item)
                     matched.add(memory_id)
             if len(memories) < page_size:
@@ -1243,6 +1248,13 @@ def _hit_get(hit: Any, key: str, default: Any = None) -> Any:
 def _hit_metadata(hit: Any) -> dict[str, Any]:
     metadata = _hit_get(hit, "metadata", None)
     return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _hit_is_enabled(hit: Any) -> bool:
+    """Return whether a remote hit is active and eligible for injection."""
+    metadata = _hit_metadata(hit)
+    status = str(_hit_get(hit, "status", "") or metadata.get("status") or "active")
+    return status == "active" and metadata.get("enabled", True) is not False
 
 
 def _hit_timestamp(hit: Any) -> float | None:

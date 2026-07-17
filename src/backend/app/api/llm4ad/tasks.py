@@ -191,7 +191,12 @@ def get_task_pinned_memory(
     task_id: uuid.UUID,
 ):
     """读取手动模式下任务固定注入的全局/项目记忆 id 列表。"""
-    pinned = task_service.get_task_pinned_memory(db, task_id, current_user)
+    pinned = memory_service.filter_active_task_pinned_memory_ids(
+        db,
+        current_user=current_user,
+        task_id=task_id,
+        pinned_card_ids=task_service.get_task_pinned_memory(db, task_id, current_user),
+    )
     return memory_schemas.PinnedMemoryResponse(task_id=task_id, pinned_card_ids=pinned)
 
 
@@ -207,8 +212,14 @@ def set_task_pinned_memory(
     request: memory_schemas.PinnedMemoryUpdate,
 ):
     """替换任务固定注入的记忆 id 集合；运行中的任务下一轮注入即生效。"""
+    active_pinned_ids = memory_service.filter_active_task_pinned_memory_ids(
+        db,
+        current_user=current_user,
+        task_id=task_id,
+        pinned_card_ids=request.pinned_card_ids,
+    )
     pinned = task_service.set_task_pinned_memory(
-        db, task_id, current_user, request.pinned_card_ids
+        db, task_id, current_user, active_pinned_ids
     )
     return memory_schemas.PinnedMemoryResponse(task_id=task_id, pinned_card_ids=pinned)
 

@@ -2169,6 +2169,16 @@ export type TaskMemoryObservabilityResponse = {
 };
 
 /**
+ * Promote selected task-memory cards into project-memory previews.
+ */
+export type TaskMemoryPromotionRequest = {
+    project_id: string;
+    task_id: string;
+    memory_ids: Array<(string)>;
+    prompt_language?: ('ZH' | 'EN' | null);
+};
+
+/**
  * 任务基础响应。
  */
 export type TaskResponse = {
@@ -2857,6 +2867,12 @@ export type Llm4AdMemoryStreamExtractMemoryCardsData = {
 };
 
 export type Llm4AdMemoryStreamExtractMemoryCardsResponse = (unknown);
+
+export type Llm4AdMemoryStreamPromoteTaskMemoryCardsData = {
+    requestBody: TaskMemoryPromotionRequest;
+};
+
+export type Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse = (unknown);
 
 export type Llm4AdMemoryCommitMemoryCardExtractionData = {
     previewId: string;

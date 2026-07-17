@@ -6247,6 +6247,46 @@ export const TaskMemoryObservabilityResponseSchema = {
     description: '任务级 MindMemOS 记忆使用统计。'
 } as const;
 
+export const TaskMemoryPromotionRequestSchema = {
+    properties: {
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        memory_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            maxItems: 50,
+            minItems: 1,
+            title: 'Memory Ids'
+        },
+        prompt_language: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['ZH', 'EN']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Language'
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'task_id', 'memory_ids'],
+    title: 'TaskMemoryPromotionRequest',
+    description: 'Promote selected task-memory cards into project-memory previews.'
+} as const;
+
 export const TaskResponseSchema = {
     properties: {
         id: {

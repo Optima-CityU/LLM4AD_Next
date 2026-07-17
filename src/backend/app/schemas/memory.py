@@ -154,6 +154,15 @@ class MemoryCardExtractionDiscardRequest(BaseModel):
     memory_ids: list[str] = Field(default_factory=list)
 
 
+class TaskMemoryPromotionRequest(BaseModel):
+    """Promote selected task-memory cards into project-memory previews."""
+
+    project_id: uuid.UUID
+    task_id: uuid.UUID
+    memory_ids: list[str] = Field(min_length=1, max_length=50)
+    prompt_language: Literal["ZH", "EN"] | None = None
+
+
 class MemoryCardPageResponse(BaseModel):
     """Paged MindMemOS memory list response."""
 

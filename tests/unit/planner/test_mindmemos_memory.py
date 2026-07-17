@@ -1241,6 +1241,49 @@ def test_manual_mode_fetches_pinned_cards_even_when_limit_zero():
         assert call.get("include_inactive") is True
 
 
+def test_manual_mode_does_not_inject_disabled_pinned_cards():
+    """Archived or metadata-disabled pins must never reach prompt context."""
+    memory = MindMemOSMemory(
+        _config(
+            retrieval_mode="manual",
+            pinned_card_ids=["active-card", "archived-card", "metadata-disabled-card"],
+            include_task_memory=False,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.list_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="active-card",
+                memory="Active pinned insight.",
+                memory_type="good_algorithm",
+                status="active",
+                metadata={},
+            ),
+            SimpleNamespace(
+                id="archived-card",
+                memory="Archived pinned insight.",
+                memory_type="good_algorithm",
+                status="archived",
+                metadata={},
+            ),
+            SimpleNamespace(
+                id="metadata-disabled-card",
+                memory="Disabled pinned insight.",
+                memory_type="good_algorithm",
+                status="active",
+                metadata={"enabled": False},
+            ),
+        ]
+    )
+
+    context = memory.get_prompt_context("tour construction")
+
+    assert "Active pinned insight." in context
+    assert "Archived pinned insight." not in context
+    assert "Disabled pinned insight." not in context
+
+
 def test_manual_mode_logs_pinned_fetch_not_search(log_messages):
     """Manual mode logs a pinned-fetch line, never a search/top_k line."""
     memory = MindMemOSMemory(

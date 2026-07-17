@@ -1004,6 +1004,7 @@ function TaskMemorySection({
               refreshSignal={refreshSignal}
               onCountChange={setMemoryCount}
               defaultExtractionPromptLanguage={taskMemoryExtractionPromptLanguage(task)}
+              promotionProjectId={task.project_id}
             />
           )}
         </div>
@@ -1187,11 +1188,16 @@ function PinnedScopePickerButton({
       }),
     enabled: scope === "user" || Boolean(projectId),
   })
-  const scopeCardIds = useMemo(
-    () => new Set(((scopeIndex?.items ?? []) as MemoryCardResponse[]).map((c) => c.id)),
+  const activeScopeCardIds = useMemo(
+    () =>
+      new Set(
+        ((scopeIndex?.items ?? []) as MemoryCardResponse[])
+          .filter((card) => card.enabled !== false)
+          .map((card) => card.id),
+      ),
     [scopeIndex],
   )
-  const selectedInScope = pinnedIds.filter((id) => scopeCardIds.has(id)).length
+  const selectedInScope = pinnedIds.filter((id) => activeScopeCardIds.has(id)).length
   // Disabled cards are not injectable, so keep them out of the picker.
   const cards = ((data?.items ?? []) as MemoryCardResponse[]).filter(
     (card) => card.enabled !== false,

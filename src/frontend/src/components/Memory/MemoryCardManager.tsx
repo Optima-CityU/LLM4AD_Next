@@ -308,6 +308,7 @@ export default function MemoryCardManager({
   refreshSignal,
   onCountChange,
   defaultExtractionPromptLanguage = "auto",
+  promotionProjectId,
 }: {
   scope: MemoryScope
   projectId?: string
@@ -322,6 +323,7 @@ export default function MemoryCardManager({
   refreshSignal?: number | string | null
   onCountChange?: (count: number | null) => void
   defaultExtractionPromptLanguage?: ExtractionPromptLanguage
+  promotionProjectId?: string
 }) {
   const { t, i18n } = useTranslation()
   const uiLang: "zh" | "en" = i18n.language?.startsWith("zh") ? "zh" : "en"
@@ -357,6 +359,9 @@ export default function MemoryCardManager({
   const [extractionLogs, setExtractionLogs] = useState<string[]>([])
   const [isCommittingPreview, setIsCommittingPreview] = useState(false)
   const [isExtractionCloseConfirmOpen, setIsExtractionCloseConfirmOpen] = useState(false)
+  const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([])
+  const [isPromotionMode, setIsPromotionMode] = useState(false)
+  const [previewTargetScope, setPreviewTargetScope] = useState<MemoryScope>(scope)
   const togglingIdsRef = useRef<Set<string>>(new Set())
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
   const skipNextPreviewDiscard = useRef(false)
@@ -366,7 +371,9 @@ export default function MemoryCardManager({
   const mutationEndpoint = `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/memory/cards`
   const extractionEndpoint = `${mutationEndpoint}/extractions`
   const query = scopeQuery(scope, projectId, taskId)
+  const projectPreviewQuery = scopeQuery("project", promotionProjectId)
   const scopeKey = `${scope}:${projectId ?? ""}:${taskId ?? ""}`
+  const canPromoteTaskCards = scope === "task" && Boolean(promotionProjectId && taskId)
   const normalizedDefaultExtractionPromptLanguage = (
     ["auto", "ZH", "EN"].includes(defaultExtractionPromptLanguage)
       ? defaultExtractionPromptLanguage
@@ -433,6 +440,7 @@ export default function MemoryCardManager({
     setTotal(null)
     setHasMore(false)
     setPage(1)
+    setSelectedPromotionIds([])
   }, [scopeKey])
 
   useEffect(() => {
@@ -512,7 +520,10 @@ export default function MemoryCardManager({
     extractionAbortRef.current = null
     setIsCommittingPreview(false)
     setIsExtractionCloseConfirmOpen(false)
-  }, [normalizedDefaultExtractionPromptLanguage])
+    setIsPromotionMode(false)
+    setPreviewTargetScope(scope)
+    setSelectedPromotionIds([])
+  }, [normalizedDefaultExtractionPromptLanguage, scope])
 
   const replaceCard = useCallback((updatedCard: MemoryCard) => {
     setCards((current) => {
@@ -565,6 +576,27 @@ export default function MemoryCardManager({
     setIsExtractionOpen(true)
   }
 
+  const togglePromotionSelection = (cardId: string, checked: boolean) => {
+    setSelectedPromotionIds((current) => (
+      checked
+        ? Array.from(new Set([...current, cardId]))
+        : current.filter((id) => id !== cardId)
+    ))
+  }
+
+  const openPromotion = () => {
+    if (!canPromoteTaskCards || !promotionProjectId || !taskId) return
+    if (selectedPromotionIds.length === 0) {
+      toast.error("请先选择至少一条任务记忆")
+      return
+    }
+    const selectedIds = selectedPromotionIds
+    resetExtraction()
+    setSelectedPromotionIds(selectedIds)
+    setIsPromotionMode(true)
+    setIsExtractionOpen(true)
+  }
+
   const openEdit = (card: MemoryCard) => {
     if (disabled) return
     setDraft(toDraft(card))
@@ -596,7 +628,7 @@ export default function MemoryCardManager({
     }
     try {
       const response = await authFetch(
-        `${extractionEndpoint}/${previewId}?${query}`,
+        `${extractionEndpoint}/${previewId}?${previewTargetScope === "project" ? projectPreviewQuery : query}`,
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -604,14 +636,23 @@ export default function MemoryCardManager({
         },
       )
       if (!response.ok) throw new Error(await responseError(response, "删除本次生成记忆失败"))
-      removeCards(ids)
+      if (previewTargetScope !== "project") removeCards(ids)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "删除本次生成记忆失败")
     } finally {
       resetExtraction()
       setIsExtractionOpen(false)
     }
-  }, [extractionEndpoint, previewId, previewItems, query, removeCards, resetExtraction])
+  }, [
+    extractionEndpoint,
+    previewId,
+    previewItems,
+    previewTargetScope,
+    projectPreviewQuery,
+    query,
+    removeCards,
+    resetExtraction,
+  ])
 
   const closeExtractionImmediately = useCallback(() => {
     resetExtraction()
@@ -664,8 +705,12 @@ export default function MemoryCardManager({
 
   const generatePreview = async () => {
     const content = extractionContent.trim()
-    if (!content) {
+    if (!isPromotionMode && !content) {
       toast.error("请先输入内容")
+      return
+    }
+    if (isPromotionMode && (!promotionProjectId || selectedPromotionIds.length === 0)) {
+      toast.error("请先选择至少一条任务记忆")
       return
     }
     if (disabled) {
@@ -680,11 +725,22 @@ export default function MemoryCardManager({
     const abortController = new AbortController()
     extractionAbortRef.current = abortController
     try {
-      const requestBody =
-        extractionPromptLanguage === "auto"
+      const requestBody = isPromotionMode
+        ? {
+            project_id: promotionProjectId,
+            task_id: taskId,
+            memory_ids: selectedPromotionIds,
+            ...(extractionPromptLanguage === "auto"
+              ? {}
+              : { prompt_language: extractionPromptLanguage }),
+          }
+        : extractionPromptLanguage === "auto"
           ? { content }
           : { content, prompt_language: extractionPromptLanguage }
-      const response = await authFetch(`${extractionEndpoint}/stream?${query}`, {
+      const streamUrl = isPromotionMode
+        ? `${mutationEndpoint}/promotions/stream`
+        : `${extractionEndpoint}/stream?${query}`
+      const response = await authFetch(streamUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -722,8 +778,11 @@ export default function MemoryCardManager({
           setPreviewId(event.preview_id ?? null)
           setPreviewItems(items)
           setSelectedPreviewIds(items.map((item) => item.id))
-          mergeCards(items)
-          if (items.length > 0) {
+          setPreviewTargetScope(isPromotionMode ? "project" : scope)
+          if (!isPromotionMode) {
+            mergeCards(items)
+          }
+          if (items.length > 0 && !isPromotionMode) {
             refreshFirstPage()
           }
           setExtractionProgress({ stage: "completed", message, percent: event.percent ?? 100 })
@@ -758,22 +817,27 @@ export default function MemoryCardManager({
     }
     setIsCommittingPreview(true)
     try {
-      const response = await authFetch(`${extractionEndpoint}/${previewId}/commit?${query}`, {
+      const response = await authFetch(
+        `${extractionEndpoint}/${previewId}/commit?${previewTargetScope === "project" ? projectPreviewQuery : query}`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selected_ids: selectedPreviewIds,
           all_ids: previewItems.map((item) => item.id),
         }),
-      })
+        },
+      )
       if (!response.ok) throw new Error(await responseError(response, "启用选中记忆失败"))
       const payload = (await response.json()) as MemoryCardExtractionResponse
       toast.success("选中记忆已启用")
       skipNextPreviewDiscard.current = true
       setIsExtractionOpen(false)
       resetExtraction()
-      mergeCards(payload.items ?? [])
-      refreshFirstPage()
+      if (previewTargetScope !== "project") {
+        mergeCards(payload.items ?? [])
+        refreshFirstPage()
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "启用选中记忆失败")
     } finally {
@@ -980,6 +1044,19 @@ export default function MemoryCardManager({
       <div className={cn("space-y-3", embedded ? "p-0" : "p-4")}>
         {embedded && (
           <div className="flex items-center justify-end gap-1">
+            {canPromoteTaskCards && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 px-2 text-xs"
+                disabled={disabled || selectedPromotionIds.length === 0}
+                onClick={openPromotion}
+              >
+                <Sparkles className="size-3.5" />
+                提升到项目记忆{selectedPromotionIds.length > 0 ? ` (${selectedPromotionIds.length})` : ""}
+              </Button>
+            )}
             {iconAction(
               "刷新记忆列表",
               <Button
@@ -1176,7 +1253,7 @@ export default function MemoryCardManager({
                 embedded && "gap-2 px-2 py-1.5 text-[11px]",
               )}
             >
-              <span>标题</span>
+              <span>{canPromoteTaskCards ? "选择与标题" : "标题"}</span>
               <span>类型</span>
               <span>状态</span>
               {!embedded && <span>标签</span>}
@@ -1193,14 +1270,24 @@ export default function MemoryCardManager({
                   togglingIds.has(card.id) && "opacity-80",
                 )}
               >
-                <button
-                  type="button"
-                  className="min-w-0 text-left"
-                  onClick={() => openEdit(card)}
-                >
-                  <div className="truncate text-sm font-medium">{card.title}</div>
-                  <div className="truncate text-xs text-muted-foreground">{card.content}</div>
-                </button>
+                <div className="flex min-w-0 items-center gap-2">
+                  {canPromoteTaskCards && (
+                    <Checkbox
+                      checked={selectedPromotionIds.includes(card.id)}
+                      aria-label={`选择记忆：${card.title}`}
+                      disabled={disabled}
+                      onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => openEdit(card)}
+                  >
+                    <div className="truncate text-sm font-medium">{card.title}</div>
+                    <div className="truncate text-xs text-muted-foreground">{card.content}</div>
+                  </button>
+                </div>
                 <Badge variant="outline" className="w-fit">{memoryTypeLabel(card.type)}</Badge>
                 <Badge variant={card.enabled ? "secondary" : "outline"} className="w-fit">
                   {card.enabled ? "可注入" : "已禁用"}
@@ -1231,10 +1318,19 @@ export default function MemoryCardManager({
                   "flex flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
                   embedded ? "min-h-32" : "min-h-48",
                   !card.enabled && "opacity-60",
+                  canPromoteTaskCards && selectedPromotionIds.includes(card.id) && "border-primary/60 bg-primary/5",
                   togglingIds.has(card.id) && "opacity-80",
                 )}
               >
                 <div className="flex items-start gap-2">
+                  {canPromoteTaskCards && (
+                    <Checkbox
+                      checked={selectedPromotionIds.includes(card.id)}
+                      aria-label={`选择记忆：${card.title}`}
+                      disabled={disabled}
+                      onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
                     <h3 className="truncate text-sm font-semibold">{card.title}</h3>
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -1288,7 +1384,9 @@ export default function MemoryCardManager({
             <span className="sr-only">{t("memory.cardManager.extraction.close")}</span>
           </button>
           <DialogHeader>
-            <DialogTitle>{t("memory.cardManager.extraction.title")}</DialogTitle>
+            <DialogTitle>
+              {isPromotionMode ? "提升到项目记忆" : t("memory.cardManager.extraction.title")}
+            </DialogTitle>
           </DialogHeader>
 
           <div className="grid gap-5">
@@ -1296,28 +1394,34 @@ export default function MemoryCardManager({
               <div className="flex items-start gap-2">
                 <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
                 <div className="space-y-1 text-sm">
-                  <p className="font-medium">{t("memory.cardManager.extraction.guideTitle")}</p>
+                  <p className="font-medium">
+                    {isPromotionMode ? "将已选任务经验归纳为项目记忆" : t("memory.cardManager.extraction.guideTitle")}
+                  </p>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    {t("memory.cardManager.extraction.guideDescription")}
+                    {isPromotionMode
+                      ? `将使用 ${selectedPromotionIds.length} 条已选任务记忆生成项目记忆预览。原始卡片不会被修改。`
+                      : t("memory.cardManager.extraction.guideDescription")}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-extraction-content`}>
-                {t("memory.cardManager.extraction.contentLabel")}
-              </Label>
-              <Textarea
-                id={`${scope}-memory-extraction-content`}
-                aria-label={t("memory.cardManager.extraction.contentLabel")}
-                className="min-h-40 resize-y leading-6"
-                value={extractionContent}
-                onChange={(event) => setExtractionContent(event.target.value)}
-                disabled={isExtractionBusy || previewItems.length > 0}
-                placeholder={t("memory.cardManager.extraction.placeholder")}
-              />
-            </div>
+            {!isPromotionMode && (
+              <div className="grid gap-2">
+                <Label htmlFor={`${scope}-memory-extraction-content`}>
+                  {t("memory.cardManager.extraction.contentLabel")}
+                </Label>
+                <Textarea
+                  id={`${scope}-memory-extraction-content`}
+                  aria-label={t("memory.cardManager.extraction.contentLabel")}
+                  className="min-h-40 resize-y leading-6"
+                  value={extractionContent}
+                  onChange={(event) => setExtractionContent(event.target.value)}
+                  disabled={isExtractionBusy || previewItems.length > 0}
+                  placeholder={t("memory.cardManager.extraction.placeholder")}
+                />
+              </div>
+            )}
 
             <div className="grid gap-2 sm:max-w-xs">
               <Label htmlFor={`${scope}-memory-extraction-language`}>
@@ -1341,27 +1445,29 @@ export default function MemoryCardManager({
               </Select>
             </div>
 
-            <div className="grid gap-2">
-              <div className="text-xs font-medium text-muted-foreground">
-                {t("memory.cardManager.extraction.examplesTitle")}
+            {!isPromotionMode && (
+              <div className="grid gap-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t("memory.cardManager.extraction.examplesTitle")}
+                </div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {extractionExamples.map((example) => (
+                    <button
+                      key={example.label}
+                      type="button"
+                      disabled={isExtractionBusy || previewItems.length > 0}
+                      className="rounded-md border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setExtractionContent(example.content)}
+                    >
+                      <div className="text-sm font-medium">{example.label}</div>
+                      <div className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">
+                        {example.content}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-3">
-                {extractionExamples.map((example) => (
-                  <button
-                    key={example.label}
-                    type="button"
-                    disabled={isExtractionBusy || previewItems.length > 0}
-                    className="rounded-md border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
-                    onClick={() => setExtractionContent(example.content)}
-                  >
-                    <div className="text-sm font-medium">{example.label}</div>
-                    <div className="mt-1 line-clamp-3 text-xs leading-5 text-muted-foreground">
-                      {example.content}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
 
             {(isGeneratingPreview || extractionProgress) && (
               <div className="grid gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-3">
@@ -1422,9 +1528,13 @@ export default function MemoryCardManager({
               <div className="grid gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium">提取结果预览</p>
+                    <p className="text-sm font-medium">
+                      {isPromotionMode ? "项目记忆预览" : "提取结果预览"}
+                    </p>
                     <p className="text-xs text-muted-foreground">
-                      生成后已默认保存为已禁用记忆，启用后才会参与注入。
+                      {isPromotionMode
+                        ? "生成后已默认保存为已禁用项目记忆，启用后会在项目范围参与注入。"
+                        : "生成后已默认保存为已禁用记忆，启用后才会参与注入。"}
                     </p>
                   </div>
                   <Badge variant="secondary">{selectedPreviewIds.length}/{previewItems.length} 已选择</Badge>
@@ -1503,7 +1613,7 @@ export default function MemoryCardManager({
                 onClick={() => void generatePreview()}
               >
                 {isGeneratingPreview && <Loader2 className="mr-1 size-4 animate-spin" />}
-                生成预览
+                {isPromotionMode ? "生成项目预览" : "生成预览"}
               </Button>
             ) : (
               <Button
@@ -1529,9 +1639,11 @@ export default function MemoryCardManager({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>关闭新增记忆</AlertDialogTitle>
+            <AlertDialogTitle>{isPromotionMode ? "关闭项目记忆提升" : "关闭新增记忆"}</AlertDialogTitle>
             <AlertDialogDescription>
-              本次生成的记忆已经保存为已禁用状态。可以保留它们继续在列表中管理，也可以删除本次生成的记忆。
+              {isPromotionMode
+                ? "本次生成的项目记忆已经保存为已禁用状态。可以保留它们继续在项目记忆中管理，也可以删除本次生成的记忆。"
+                : "本次生成的记忆已经保存为已禁用状态。可以保留它们继续在列表中管理，也可以删除本次生成的记忆。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
