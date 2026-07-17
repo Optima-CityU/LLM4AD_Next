@@ -894,7 +894,7 @@
       "title": "Memory Configuration",
       "description": "Configure how this task uses memory and its retrieval/injection strategy. Connection and auth details are injected by the backend at runtime and are not written to YAML.",
       "configLoadFailed": "Failed to load memory configuration. Long-term memory is unavailable for now.",
-      "unavailable": "Long-term memory service is not ready or the current user has not completed memory model binding. Only temporary memory is available for now.",
+      "unavailable": "Long-term memory service is not ready or the current user has not completed memory model binding. You can use temporary memory or choose not to use memory.",
       "runtimeManaged": "Connection, auth, and scope runtime fields are injected by the backend and will not appear in the confirmation YAML.",
       "enable": {
         "label": "Memory Mode",

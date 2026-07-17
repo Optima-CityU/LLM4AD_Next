@@ -29,6 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+import { downgradeUnavailableLongTermMemory } from "./memoryMode"
+
 type MemoryValue = Record<string, unknown>
 
 // The manual picker only browses the shared scopes (task memory is retrieved,
@@ -193,13 +195,13 @@ export default function MemoryConfigStep({
       ? t("evolution.memoryConfig.status.checking")
       : t("evolution.memoryConfig.status.unavailable")
 
-  // Long-term memory needs an available runtime; fall back to disabled state
+  // Long-term memory needs an available runtime; fall back to temporary memory
   // if a previously-selected long-term config can no longer be served.
   useEffect(() => {
     if (readOnly || isLoading) return
     const current = safeMemory(value)
     if (current.type === "mindmemos_cloud" && current.enabled !== false && !runtimeAvailable) {
-      onChange(disabledMemory())
+      onChange(downgradeUnavailableLongTermMemory(current))
     }
   }, [isLoading, onChange, readOnly, runtimeAvailable, value])
 
