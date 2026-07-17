@@ -207,245 +207,306 @@ def show_config():
 
 
 @app.command("chat")
-def chat_consultant(
+def chat_agent_build(
     provider_name: str | None = typer.Option(
         None,
         "--provider",
         "-p",
         help="Provider name defined in global settings (~/.llm4ad/settings.yaml). "
-        "Uses the first provider in global settings if not specified.",
-    ),
-    resume: str | None = typer.Option(
-        None,
-        "--resume",
-        "-r",
-        help="Resume a previous session (session ID or state file path)",
+        "Uses the first provider if not specified.",
     ),
     output: str = typer.Option(
         "./",
         "--output",
         "-o",
-        help="Output directory for generated files",
-    ),
-    list_sessions: bool = typer.Option(
-        False,
-        "--list-sessions",
-        "-l",
-        help="List saved sessions and exit",
-    ),
-    max_repair: int = typer.Option(
-        10,
-        "--max-repair",
-        help="Maximum auto-repair attempts during validation",
+        help="Output directory where the built LLM4AD task package will be written.",
     ),
     prompt: str | None = typer.Option(
         None,
         "--prompt",
-        help="Provide full problem description directly (skips Phase 1 conversation)",
+        help="Problem description passed directly to the agent. "
+        "If omitted, the agent will ask you interactively.",
     ),
-    non_interactive: bool = typer.Option(
-        False,
-        "--non-interactive",
-        help="Skip all interactive phases (requires --prompt). "
-        "Builds and writes output without user confirmation.",
-    ),
-    code_path: str | None = typer.Option(
-        None,
-        "--code-path",
-        help="Path to existing algorithm code (used with --prompt)",
-    ),
-    data_path: str | None = typer.Option(
-        None,
-        "--data-path",
-        help="Path to dataset directory or files (used with --prompt)",
-    ),
-    lang: str = typer.Option(
-        "auto",
-        "--lang",
-        help="Language for LLM responses: auto (detect from first input), en (English), zh (Chinese)",
-    ),
-    max_rounds: int | None = typer.Option(
-        None,
-        "--max-rounds",
-        help="Maximum conversation rounds to keep in context window (default: 20)",
-    ),
-    max_tokens: int | None = typer.Option(
-        None,
-        "--max-tokens",
-        help="Maximum token budget for conversation context (default: 100000)",
+    max_iters: int = typer.Option(
+        40,
+        "--max-iters",
+        help="Maximum agent ReAct loop iterations.",
     ),
 ):
-    """Interactive assistant that builds a complete LLM4AD pipeline.
+    """Build an LLM4AD task package using an AI agent.
 
-    Guides you through describing your problem, then automatically generates
-    evaluator code, algorithm template, and pipeline configuration.
+    Launches a single AgentScope ReAct agent that gathers your requirements,
+    generates a complete task package (evaluator, algorithm, config, test scripts)
+    via the proven build engine, and self-verifies the result by running the
+    generated scripts.
 
-    Uses a provider from global settings (~/.llm4ad/settings.yaml).
-    If --provider is not specified, the first provider in global settings is used.
+    The agent reads and runs files inside the output directory; it cannot access
+    anything outside it. The generated code runs with your local user privileges —
+    intended for local developer use.
 
-    Use --prompt to provide the problem description directly (skips conversation).
-    Combine with --non-interactive to skip all interactive phases.
+    Requires Python >=3.12. agentscope is a base dependency, so a plain ``uv sync``
+    (or ``pip install llm4ad``) installs everything needed — no extra step.
+
+    Configure a provider in ~/.llm4ad/settings.yaml, for example::
+
+        providers:
+          - name: deepseek
+            type: anthropic
+            base_url: https://api.deepseek.com/anthropic
+            auth_token: sk-...
+            model: deepseek-v4-pro
     """
+    import contextlib
+    import sys
     from pathlib import Path
 
+    # Reconfigure stdout/stderr to UTF-8 so streamed agent output (which may contain
+    # non-ASCII / emoji) does not crash on a legacy Windows cp1252 console.
+    for _stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(_stream, "reconfigure", None)
+        if reconfigure is not None:
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+    # ---- Dependency check (friendly error before any import hang) ----
+    try:
+        import agentscope  # noqa: F401
+    except ImportError:
+        console.print(
+            "[bold red]Error:[/bold red] [bold]agentscope[/bold] is not installed.\n"
+            "Reinstall dependencies with:\n\n"
+            "    [bold]uv sync[/bold]   (or: pip install llm4ad)\n\n"
+            "Note: this project requires Python >=3.12.\n"
+            f"You are running Python {sys.version_info.major}.{sys.version_info.minor}."
+        )
+        raise typer.Exit(code=1) from None
+
     from llm4ad.config.settings import load_global_settings
-    from llm4ad.consultant.session import ConsultantSession
-    from llm4ad.consultant.state import ConversationState
+    from llm4ad.infra.provider.base import BaseProvider
 
-    # Handle --list-sessions
-    if list_sessions:
-        ConsultantSession.list_saved_sessions()
-        raise typer.Exit()
-
-    # Validate --prompt / --non-interactive combinations
-    if non_interactive and not prompt:
-        console.print(
-            "[bold red]Error:[/bold red] --non-interactive requires --prompt"
-        )
-        raise typer.Exit(code=1)
-    if prompt is not None and prompt.strip() == "":
-        console.print("[bold red]Error:[/bold red] --prompt cannot be empty")
-        raise typer.Exit(code=1)
-    if lang not in ("auto", "en", "zh"):
-        console.print(
-            f"[bold red]Error:[/bold red] --lang must be one of: auto, en, zh (got '{lang}')"
-        )
-        raise typer.Exit(code=1)
-    if code_path and not Path(code_path).exists():
-        console.print(
-            f"[bold red]Error:[/bold red] code path not found: {code_path}"
-        )
-        raise typer.Exit(code=1)
-    if data_path and not Path(data_path).exists():
-        console.print(
-            f"[bold red]Error:[/bold red] data path not found: {data_path}"
-        )
-        raise typer.Exit(code=1)
-
-    # Load global settings and resolve provider
+    # ---- Provider resolution (same pattern as original chat) ----
     global_data = load_global_settings()
     global_providers = global_data.get("providers", [])
-
-    # When resuming, load saved provider name as fallback
-    if resume and provider_name is None:
-        try:
-            state = ConversationState.load(resume)
-            provider_name = state.provider_config.get("provider_name")
-        except FileNotFoundError:
-            console.print(f"[bold red]Error:[/bold red] Session not found: {resume}")
-            raise typer.Exit(code=1) from None
 
     if not global_providers:
         console.print(
             "[bold red]Error:[/bold red] No providers found in global settings.\n"
-            "Please configure providers in [bold]~/.llm4ad/settings.yaml[/bold].\n"
+            "Please configure a provider in [bold]~/.llm4ad/settings.yaml[/bold].\n"
             "Example:\n"
             "  providers:\n"
-            '    - name: "default"\n'
-            '      type: "openai_compatible"\n'
-            '      api_key: "${OPENAI_API_KEY}"\n'
-            '      model: "gpt-4o"'
+            '    - name: "deepseek"\n'
+            '      type: "anthropic"\n'
+            '      base_url: "https://api.deepseek.com/anthropic"\n'
+            '      auth_token: "${DEEPSEEK_API_KEY}"\n'
+            '      model: "deepseek-v4-pro"'
         )
         raise typer.Exit(code=1)
 
-    # Resolve provider config from global settings
     providers_by_name = {p.get("name", "default"): p for p in global_providers}
 
     if provider_name is None:
-        # Use first provider
         provider_cfg = global_providers[0]
         provider_name = provider_cfg.get("name", "default")
-        console.print(f"[dim]Using default provider: {provider_name}[/dim]")
+        console.print(f"[dim]Using provider: {provider_name}[/dim]")
     else:
         if provider_name not in providers_by_name:
             console.print(
-                f"[bold red]Error:[/bold red] Provider '{provider_name}' "
-                f"not found in global settings.\n"
-                f"Available providers: {', '.join(providers_by_name.keys())}"
+                f"[bold red]Error:[/bold red] Provider '{provider_name}' not found.\n"
+                f"Available: {', '.join(providers_by_name.keys())}"
             )
             raise typer.Exit(code=1)
         provider_cfg = providers_by_name[provider_name]
 
-    # Discover and create provider
+    # Validate base_dir
+    base_dir = str(Path(output).resolve())
+    Path(base_dir).mkdir(parents=True, exist_ok=True)
+
+    # ---- Collect problem description ----
+    user_content = prompt or ""
+    if not user_content.strip():
+        console.print(
+            "[bold]AI Build[/bold] — describe your optimization problem\n"
+            "(or press Ctrl-C to cancel)"
+        )
+        user_content = typer.prompt("Problem description")
+
+    # ---- Security notice ----
+    console.print(
+        f"\n[yellow]! The agent will run generated Python code inside "
+        f"[bold]{base_dir}[/bold] with your local privileges.[/yellow]\n"
+    )
+
+    # Need a BaseProvider for the build engine; agentscope model is built inside core.
     BaseProvider.discover("llm4ad.infra.provider")
-    provider_type = provider_cfg.get("type", "openai_compatible")
-    try:
-        provider = BaseProvider.create(provider_type, config=provider_cfg)
-    except Exception as e:
-        console.print(f"[bold red]Error creating provider:[/bold red] {e}")
-        raise typer.Exit(code=1) from e
 
-    # Build state-persistable provider config (for resume)
-    persistable_provider_config = {"provider_name": provider_name}
+    # ---- Run agent loop (multi-turn: gather -> confirm -> build) ----
+    from llm4ad.agent.runner import AgentBuildConfig, run_agent_build
 
-    # Resolve context limits: CLI flags > settings.yaml > defaults
-    from llm4ad.consultant.context_limiter import ContextLimits
+    console.print("[bold green]Starting agent...[/bold green]\n")
 
-    settings_consultant = global_data.get("consultant", {})
-    settings_context = settings_consultant.get("context_limits", {})
-    resolved_max_rounds = (
-        max_rounds
-        or settings_context.get("max_rounds")
-        or ContextLimits.max_rounds
-    )
-    resolved_max_tokens = (
-        max_tokens
-        or settings_context.get("max_tokens")
-        or ContextLimits.max_tokens
-    )
-    context_limits = ContextLimits(
-        max_rounds=resolved_max_rounds,
-        max_tokens=resolved_max_tokens,
-    )
+    async def _run_turn(
+        turn_input: str,
+        *,
+        allow_build: bool,
+        prior_state: dict | None,
+        proposed: dict | None,
+    ) -> dict:
+        """Run one agent turn; return {state, proposed, card, built, project_name}."""
+        cfg = AgentBuildConfig(
+            provider_config=provider_cfg,
+            base_dir=base_dir,
+            user_content=turn_input,
+            allow_build=allow_build,
+            prior_state=prior_state,
+            proposed=proposed,
+            max_iters=max_iters,
+            surface="cli",
+        )
+        result: dict = {
+            "state": prior_state,
+            "proposed": None,
+            "card": None,
+            "built": False,
+            "project_name": "",
+        }
+        async for event in run_agent_build(cfg):
+            etype = event.get("type")
+            if etype == "chunk":
+                # Straight to stdout (UTF-8 reconfigured above), bypassing rich's
+                # legacy-Windows console path which can crash on emoji.
+                sys.stdout.write(event.get("content", ""))
+                sys.stdout.flush()
+            elif etype == "payload":
+                # `proposed` marks a build-plan confirm card; `data` carries the
+                # interactive choice card (ask_choice) or the confirm card body.
+                result["proposed"] = event.get("proposed")
+                result["card"] = event.get("data")
+            elif etype == "build_result":
+                bp = event.get("blueprint_data", {})
+                result["built"] = bool(bp.get("built"))
+                result["project_name"] = bp.get("project_name", "")
+            elif etype == "agent_state":
+                result["state"] = event.get("state")
+            elif etype == "error":
+                console.print(f"\n[bold red]Error:[/bold red] {event.get('error', '')}")
+        return result
 
-    # Run the session
-    session = ConsultantSession(
-        provider=provider,
-        console=console,
-        resume_path=resume,
-        output_path=output,
-        provider_config=persistable_provider_config,
-        max_repair_attempts=max_repair,
-        prompt=prompt,
-        non_interactive=non_interactive,
-        code_path=code_path,
-        data_path=data_path,
-        lang=lang,
-        context_limits=context_limits,
-    )
+    async def _select_from_card(card: dict) -> str:
+        """Render a gather-phase choice card as an interactive selector."""
+        options = card.get("options") or []
+        question = (card.get("prompt") or "").strip()
 
-    try:
-        config_path = asyncio.run(session.run())
-    except (KeyboardInterrupt, EOFError):
-        raise typer.Exit(code=130) from None
-    except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
-        traceback.print_exc()
-        raise typer.Exit(code=1) from e
-
-    if config_path:
-        # User chose to start evolution immediately
-        # Resolve to absolute path so LLM4AD can derive config_dir for
-        # relative path resolution (evaluator module, dataset, etc.)
-        config_path = str(Path(config_path).resolve())
-        console.print(f"\n[bold blue]Starting pipeline with config:[/bold blue] {config_path}")
-        try:
-            llm4ad = LLM4AD(config_path)
-            llm4ad.print_run_summary()
-            result = asyncio.run(llm4ad.run())
-
+        # No preset options -> behave like the old plain-text path.
+        if not options:
+            if question:
+                console.print(Markdown(question))
             console.print()
-            if result.state.value == "completed":
-                console.print(
-                    f"[bold green]Pipeline completed![/bold green] "
-                    f"Best score: [bold]{result.best_individual.score:.4f}[/bold]"
+            return typer.prompt("You")
+
+        try:
+            from InquirerPy import inquirer
+            from InquirerPy.base.control import Choice
+        except ImportError:
+            # InquirerPy missing: show the question + options as text, then prompt.
+            if question:
+                console.print(Markdown(question))
+            for i, opt in enumerate(options, 1):
+                label = opt.get("label", opt.get("value", ""))
+                desc = opt.get("description", "")
+                console.print(f"  [bold]{i}.[/bold] {label}" + (f" — {desc}" if desc else ""))
+            console.print()
+            return typer.prompt("You")
+
+        if question:
+            console.print()
+            console.print(Markdown(question))
+
+        iq_choices = []
+        for i, opt in enumerate(options):
+            label = opt.get("label", opt.get("value", ""))
+            desc = opt.get("description", "")
+            name = f"{label} — {desc}" if desc else label
+            iq_choices.append(Choice(value=i, name=name))
+
+        try:
+            selected = await inquirer.select(  # type: ignore[func-returns-value]
+                message="",
+                choices=iq_choices,
+                pointer=">",
+                qmark="",
+                amark="",
+                instruction="(arrow keys to move, Enter to select)",
+            ).execute_async()
+        except OSError:
+            # Non-interactive terminal: fall back to a plain prompt.
+            console.print()
+            return typer.prompt("You")
+
+        opt = options[int(selected)]
+        # Custom / free-text option -> let the user type their own answer.
+        if opt.get("is_custom"):
+            console.print()
+            return typer.prompt("You")
+        # File / directory pick options -> ask for the path, keep the option's
+        # meaning so the agent knows why the path was provided.
+        if opt.get("ask_for_dir") or opt.get("ask_for_path"):
+            what = "目录路径 / directory path" if opt.get("ask_for_dir") else "文件路径 / file path"
+            path = typer.prompt(what)
+            label = opt.get("label", opt.get("value", ""))
+            return f"{label}: {path}" if label and not label.startswith("__") else path
+        return opt.get("value", opt.get("label", ""))
+
+    async def _run() -> bool:
+        """Gather step-by-step, confirm, then build."""
+        prior_state: dict | None = None
+        turn_input = user_content
+        # Gather loop: keep talking until the agent proposes a plan the user accepts.
+        for _ in range(50):
+            r = await _run_turn(
+                turn_input, allow_build=False, prior_state=prior_state, proposed=None
+            )
+            prior_state = r["state"]
+            proposed = r["proposed"]
+            if proposed is None:
+                # Agent asked a question. If it offered preset options (ask_choice),
+                # render them as an interactive selector; otherwise plain prompt.
+                card = r["card"]
+                if card and card.get("options"):
+                    turn_input = await _select_from_card(card)
+                else:
+                    console.print()
+                    turn_input = typer.prompt("You")
+                continue
+            # Agent proposed a build plan -> show the plan card, then confirm.
+            if r["card"] and (r["card"].get("prompt") or "").strip():
+                console.print()
+                console.print(Markdown(r["card"]["prompt"]))
+            console.print()
+            if typer.confirm("确认按此方案开始构建? (Confirm build?)", default=True):
+                br = await _run_turn(
+                    "", allow_build=True, prior_state=prior_state, proposed=proposed
                 )
-            else:
-                console.print(f"[bold red]Pipeline {result.state.value}[/bold red]")
-        except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
-            traceback.print_exc()
-            raise typer.Exit(code=1) from e
+                if br["built"]:
+                    console.print(
+                        f"\n\n[bold green]Build complete![/bold green] "
+                        f"Project: [bold]{br['project_name'] or '?'}[/bold]\n"
+                        f"Output: {base_dir}"
+                    )
+                    return True
+                console.print("\n[yellow]Build finished but no package was produced.[/yellow]")
+                return False
+            # User declined -> keep adjusting.
+            console.print()
+            turn_input = typer.prompt("You (keep adjusting)")
+        console.print("\n[yellow]Reached max gather turns without building.[/yellow]")
+        return False
+
+    try:
+        ok = asyncio.run(_run())
+        raise typer.Exit(code=0 if ok else 1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(code=1) from None
 
 
 @app.command("advise")
@@ -1192,8 +1253,8 @@ def evolve_clean(
         raise typer.Exit(code=1)
 
 
-@app.command("chatv2")
-def chat_agent_build(
+@app.command("chat-legacy")
+def chat_consultant_legacy(
     provider_name: str | None = typer.Option(
         None,
         "--provider",
@@ -1219,29 +1280,16 @@ def chat_agent_build(
         help="Maximum agent ReAct loop iterations.",
     ),
 ):
-    """Build an LLM4AD task package using an AI agent (beta).
+    """[DEPRECATED] Legacy consultant-based chat (use 'llm4ad chat' instead).
 
-    Launches a single AgentScope ReAct agent that gathers your requirements,
-    generates a complete task package (evaluator, algorithm, config, test scripts)
-    via the proven build engine, and self-verifies the result by running the
-    generated scripts.
+    This command is deprecated and kept for backward compatibility only.
+    The new 'llm4ad chat' command uses an improved AI agent architecture.
 
-    The agent reads and runs files inside the output directory; it cannot access
-    anything outside it. The generated code runs with your local user privileges —
-    intended for local developer use.
-
-    Requires Python >=3.12. agentscope is a base dependency, so a plain ``uv sync``
-    (or ``pip install llm4ad``) installs everything needed — no extra step.
-
-    Configure a provider in ~/.llm4ad/settings.yaml, for example::
-
-        providers:
-          - name: deepseek
-            type: anthropic
-            base_url: https://api.deepseek.com/anthropic
-            auth_token: sk-...
-            model: deepseek-v4-pro
+    This legacy version will be removed in a future release.
     """
+    console.print(
+        "[yellow]Warning: 'chat-legacy' is deprecated. Use 'llm4ad chat' instead.[/yellow]\n"
+    )
     import asyncio
     import contextlib
     import sys

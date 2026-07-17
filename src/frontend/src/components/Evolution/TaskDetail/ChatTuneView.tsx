@@ -33,7 +33,6 @@ import {
   Settings2,
   Sparkles,
   Square,
-  Target,
   Upload,
   User,
   X,
@@ -168,16 +167,6 @@ function snapshotFromSession(session: ChatTuneSessionItem): StageSnapshot {
   }
 }
 
-const TARGET_STAGE_OPTIONS: Array<{
-  value: ChatTuneActiveStage | null
-  key: string
-}> = [
-  { value: null, key: "auto" },
-  { value: "gathering", key: "gathering" },
-  { value: "build", key: "build" },
-  { value: "review", key: "review" },
-]
-
 const MAX_FILE_BYTES = 50 * 1024 * 1024
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_FILE_COUNT = 100
@@ -254,19 +243,14 @@ export default function ChatTuneView({
   const [providerId, setProviderId] = useState("default")
   const [modelName, setModelName] = useState("")
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
-  const [targetStage, setTargetStage] = useState<ChatTuneActiveStage | null>(
-    null,
-  )
-  const [betaBuild, setBetaBuild] = useState(false)
 
   // Feature flags (e.g. whether the AI build Beta entry is enabled). Cached
   // long — flags only change on backend redeploy.
-  const { data: featureFlags } = useQuery({
+  const { data: _featureFlags } = useQuery({
     queryKey: ["featureFlags"],
     queryFn: () => UtilsService.featureFlags(),
     staleTime: 5 * 60 * 1000,
   })
-  const betaEnabled = featureFlags?.enable_ai_agent_build ?? false
 
   const selectedProvider = providerList.find((p) => p.id === providerId)
   const availableModels = useMemo(
@@ -633,9 +617,7 @@ export default function ChatTuneView({
               : undefined,
             provider_id: providerId || undefined,
             model_name: modelName || undefined,
-            target_stage: targetStage,
             language: i18n.language?.startsWith("zh") ? "zh" : "en",
-            beta: betaBuild || undefined,
           },
         })
         // The backend has accepted the turn; if the user has since switched
@@ -661,9 +643,6 @@ export default function ChatTuneView({
         needScrollToBottom.current = true
         setActiveTurnId(resp.turn_id)
         setStreamingMsgId(resp.assistant_message.id)
-        // target_stage is a single-turn override; reset back to "auto" so the
-        // next turn falls back to backend-driven stage selection.
-        setTargetStage(null)
         connectToStream(task.id, resp.turn_id, resp.assistant_message.id)
       } catch (err: unknown) {
         if (!mountedRef.current) return
@@ -693,8 +672,6 @@ export default function ChatTuneView({
       task.id,
       providerId,
       modelName,
-      targetStage,
-      betaBuild,
       connectToStream,
       refetchSession,
       i18n.language,
@@ -1243,28 +1220,6 @@ export default function ChatTuneView({
                     </PopoverContent>
                   </Popover>
                   <div className="flex items-center gap-1.5">
-                    <TargetStageSelector
-                      value={targetStage}
-                      onChange={setTargetStage}
-                      disabled={isGenerating}
-                      t={t}
-                    />
-                    {betaEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => setBetaBuild((v) => !v)}
-                        disabled={isGenerating}
-                        title={t("evolution.chatTune.betaBuild.desc")}
-                        className={`h-6 px-2 flex items-center gap-1 rounded-md border text-[11px] font-medium transition-colors disabled:opacity-50 ${
-                          betaBuild
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-transparent text-muted-foreground/60 hover:text-foreground hover:bg-muted"
-                        }`}
-                      >
-                        <Sparkles className="size-3" />
-                        <span>{t("evolution.chatTune.betaBuild.label")}</span>
-                      </button>
-                    )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <button
@@ -3115,89 +3070,7 @@ function ChatTuneProviderSelect({
   )
 }
 
-/* ──────────────── Target stage selector ──────────────── */
-
-function TargetStageSelector({
-  value,
-  onChange,
-  disabled,
-  t,
-}: {
-  value: ChatTuneActiveStage | null
-  onChange: (v: ChatTuneActiveStage | null) => void
-  disabled?: boolean
-  t: (key: string) => string
-}) {
-  const [open, setOpen] = useState(false)
-  const current =
-    TARGET_STAGE_OPTIONS.find((o) => o.value === value) ??
-    TARGET_STAGE_OPTIONS[0]
-
-  return (
-    <Popover open={open} onOpenChange={(v) => !disabled && setOpen(v)}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          title={t("evolution.chatTune.targetStage.label")}
-          className={cn(
-            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all",
-            value !== null
-              ? "bg-primary/10 text-primary border border-primary/25 shadow-sm shadow-primary/10"
-              : "bg-muted/60 text-muted-foreground border border-border/40 hover:border-primary/30 hover:text-foreground",
-            disabled && "opacity-60 cursor-not-allowed",
-          )}
-        >
-          <Target className="size-3" />
-          <span>{t(`evolution.chatTune.targetStage.${current.key}`)}</span>
-          <ChevronDown
-            className={cn(
-              "size-3 opacity-50 transition-transform",
-              open && "rotate-180",
-            )}
-          />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-[240px] p-1"
-        align="start"
-        side="top"
-        sideOffset={6}
-      >
-        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-2 py-1">
-          {t("evolution.chatTune.targetStage.label")}
-        </p>
-        {TARGET_STAGE_OPTIONS.map((opt) => {
-          const isSel = opt.value === value
-          return (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => {
-                onChange(opt.value)
-                setOpen(false)
-              }}
-              className={cn(
-                "w-full flex flex-col items-start gap-0.5 px-2 py-1.5 rounded-md text-left transition-colors",
-                isSel ? "bg-primary/10" : "hover:bg-accent",
-              )}
-            >
-              <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                <Check
-                  className={cn("size-3 text-primary", !isSel && "opacity-0")}
-                />
-                {t(`evolution.chatTune.targetStage.${opt.key}`)}
-              </span>
-              <span className="ml-[18px] text-[10px] text-muted-foreground leading-snug">
-                {t(`evolution.chatTune.targetStage.${opt.key}Desc`)}
-              </span>
-            </button>
-          )
-        })}
-      </PopoverContent>
-    </Popover>
-  )
-}
+/* ──────────────── Model input component ──────────────── */
 
 function ChatTuneModelInput({
   value,

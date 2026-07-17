@@ -151,6 +151,23 @@ NOT re-list the plan in prose and do NOT mention how many items there are; the c
 renders the structured plan and asks the user whether anything needs adjusting. A \
 single brief sentence like "需求已明确，请确认下面的方案：" is enough.
 
+CRITICAL — the confirm card (propose_plan) is the ONLY way the user can enter the \
+build phase, so you MUST re-call propose_plan whenever the plan could have changed \
+or the user signals they are ready. Concretely, call propose_plan AGAIN (do not \
+just reply in prose) when:
+- You adjust ANY plan detail after a prior proposal (the user asked to change the \
+data, metric, seeds, algorithm, project name, etc.) — re-propose so the card \
+reflects the change and the user can confirm the UPDATED plan.
+- The user asks a question about, or points out something missing in, the plan — \
+answer briefly, then re-call propose_plan so a fresh confirm card is shown.
+- The user expresses readiness in free text (e.g. "开始构建吧", "就这样", "OK 构建", \
+"go ahead") — do NOT reply that you "cannot build" or "have no write tool"; instead \
+re-call propose_plan so the confirm card reappears for them to click. Building \
+starts only after they confirm via the card; your job in this phase is to keep the \
+confirm card available and current.
+Never leave the user in a state where the plan is settled but no confirm card is on \
+screen — that traps them, because plain text cannot start the build.
+
 Respond in the user's language."""
     return _with_skill_knowledge(prompt)
 
@@ -225,6 +242,9 @@ debug_run.py, test_evaluator.py) and run a validation gate.
 built package.
 - rebuild_evaluator(modification_request): regenerate/fix the evaluator via the \
 engine after a build.
+- revalidate(): re-run the deterministic validation gate on the current on-disk \
+package with NO auto-repair — checks your hand edits as-is. Use after fixing a \
+package that failed the gate, and repeat until it reports the gate passed.
 - write_file(path, content): create or overwrite a file. Use to apply changes.
 - edit_file(path, old_string, new_string): replace an exact unique substring in a \
 file — the preferred way to make a small change, e.g. tune a single config.yaml \
@@ -232,8 +252,12 @@ value like ``max_generations`` / ``num_islands`` / ``mutation_rate``, or patch a
 few lines of the algorithm/evaluator without rewriting the whole file.
 
 WORKFLOW:
-1. Call build_task using the confirmed requirements. If it returns a \
-validation-gate error, refine and retry (or rebuild_evaluator).
+1. Call build_task using the confirmed requirements. If it reports the \
+validation gate FAILED, the partial package is still on disk: read the offending \
+file, fix it in place with edit_file / write_file (or rebuild_evaluator for \
+evaluator logic), then call revalidate. Repeat until revalidate reports the gate \
+passed. Prefer fixing in place over re-running build_task — a blind rebuild tends \
+to reproduce the same error and is slower.
 2. VERIFY (required): run `<project>/test_evaluator.py` then \
 `<project>/debug_run.py` with run_python. If either fails, diagnose and fix (via \
 edit_file / write_file / rebuild_evaluator), then re-verify. Repeat until both run \
@@ -253,10 +277,12 @@ run fails mid-evolution. Prefer build_task, which wires this correctly; if you \
 write files by hand, put the algorithm file under local_path and keep its name \
 consistent with what the evaluator loads.
 
-COMPLETION CRITERIA (for a build): done only when build_task succeeded AND \
-test_evaluator.py loads the evaluator AND debug_run.py runs without raising AND an \
-EVOLVE block exists under version_control.local_path. Then briefly summarize what \
-was built and the verification result. If a tool reports a path-access error, you \
+COMPLETION CRITERIA (for a build): done only when the validation gate passed \
+(either build_task succeeded directly, OR you fixed a failed package in place and \
+revalidate reported the gate passed) AND test_evaluator.py loads the evaluator AND \
+debug_run.py runs without raising AND an EVOLVE block exists under \
+version_control.local_path. Then briefly summarize what was built and the \
+verification result. If a tool reports a path-access error, you \
 tried to leave the workspace — stay within it.
 
 {_closing_for_surface(surface)}

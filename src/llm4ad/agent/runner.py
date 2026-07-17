@@ -318,10 +318,14 @@ def make_tools(
     - GATHER phase (``allow_build=False``): only ``read_file``, ``list_dir`` and
       ``propose_build``. No build tools, so the agent cannot start building before
       the user confirms — a hard gate, not just a prompt instruction.
-    - BUILD phase (``allow_build=True``): adds ``run_python``, ``build_task`` and
-      ``rebuild_evaluator``. ``build_task`` runs the existing
-      :class:`BuildOrchestrator` (engine generates everything and runs its
-      deterministic validation gate).
+    - BUILD phase (``allow_build=True``): adds ``run_python``, ``build_task``,
+      ``rebuild_evaluator``, ``revalidate``, ``write_file`` and ``edit_file``.
+      ``build_task`` runs the existing :class:`BuildOrchestrator` (engine
+      generates everything and runs its deterministic validation gate). If the
+      gate fails, the partial package is still written to the workspace so the
+      agent can fix it in place (edit_file / write_file / rebuild_evaluator) and
+      re-check with ``revalidate`` — which re-runs the gate once with no
+      auto-repair, so the agent's hand edits are never overwritten.
 
     Inspection and execution tools are fenced to ``base_dir``.
 
@@ -504,6 +508,42 @@ def make_tools(
             f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
         )
 
+    def _reload_edits_onto_blueprint(bp: Any) -> None:
+        """Reload the agent's on-disk edits onto ``bp`` in place.
+
+        The inverse of ``write_task_directory``'s field->file mapping: reads each
+        artifact file back from the workspace and, when present, overwrites the
+        matching blueprint field. Missing files are left untouched (the blueprint
+        keeps its in-memory value), so a package that never wrote a given file is
+        not clobbered with ``None``. Keeps disk (the source of truth after hand
+        edits) and the blueprint object in sync before validation / rebuild.
+
+        Args:
+            bp: The blueprint to update in place.
+        """
+        project_dir = base / bp.project_name
+
+        def _read(rel: str) -> str | None:
+            fp = project_dir / rel
+            if not fp.is_file():
+                return None
+            try:
+                return fp.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return None
+
+        for rel, attr in (
+            ("config.yaml", "config_yaml"),
+            (bp.evaluator_file_name, "evaluator_code"),
+            (f"{bp.algorithm_dir_name}/{bp.algorithm_file_name}", "algorithm_code"),
+            ("debug_run.py", "debug_run_code"),
+            ("test_evaluator.py", "test_evaluator_code"),
+            ("requirements.txt", "requirements_txt"),
+        ):
+            content = _read(rel)
+            if content is not None:
+                setattr(bp, attr, content)
+
     async def build_task(
         description: str,
         project_name: str = "",
@@ -560,7 +600,73 @@ def make_tools(
         try:
             blueprint = await orchestrator.build(needs)
         except BuildError as exc:
-            return f"Build failed at validation gate: {exc}"
+            # The engine exhausted its auto-repair budget. If a partial package
+            # was produced, persist it to the workspace and record it in state so
+            # the agent can fix it in place (read_file / edit_file / write_file /
+            # rebuild_evaluator) and re-check with revalidate, instead of blindly
+            # re-running the whole engine (which tends to reproduce the error).
+            if exc.blueprint is None:
+                # Failure happened before any blueprint existed (e.g. the LLM
+                # analysis/generation call failed). Nothing on disk to fix in
+                # place — the agent's only recourse is to retry build_task,
+                # ideally with a clearer/simpler description.
+                return (
+                    f"Build failed before any package was produced: {exc}\n\n"
+                    "No files were written, so there is nothing to fix in place. "
+                    "Re-run build_task — if it keeps failing here, simplify or "
+                    "clarify the description (e.g. narrow the problem, spell out "
+                    "the evaluation metric)."
+                )
+            write_task_directory(exc.blueprint, str(base))
+            state.blueprint = exc.blueprint
+            state.needs = needs
+            state.project_name = exc.blueprint.project_name
+            failed_files = sorted(
+                p.relative_to(base).as_posix()
+                for p in (base / exc.blueprint.project_name).rglob("*")
+                if p.is_file()
+            )
+            # Report which CORE artifacts made it to disk vs are missing, so the
+            # agent knows whether it can fix in place (all present) or must
+            # regenerate (a core file is empty/absent). A partial blueprint may
+            # have generated only some artifacts before the gate failed.
+            bp = exc.blueprint
+            core_artifacts = {
+                "config.yaml": bool(bp.config_yaml.strip()),
+                bp.evaluator_file_name: bool(bp.evaluator_code.strip()),
+                f"{bp.algorithm_dir_name}/{bp.algorithm_file_name}": bool(
+                    bp.algorithm_code.strip()
+                ),
+            }
+            missing = [name for name, present in core_artifacts.items() if not present]
+            core_status = "\n".join(
+                f"  {'[OK]' if present else '[MISSING]'} {name}"
+                for name, present in core_artifacts.items()
+            )
+            missing_hint = (
+                (
+                    "\nSome CORE files are missing/empty: "
+                    + ", ".join(missing)
+                    + ". Fixing in place is unlikely to work — re-run build_task "
+                    "to regenerate them.\n"
+                )
+                if missing
+                else "\nAll core files are present, so fixing in place is viable.\n"
+            )
+            return (
+                "Build did NOT pass the validation gate, but a partial package "
+                "was written to the workspace so you can fix it in place.\n"
+                f"Project: {bp.project_name}\n"
+                f"Validation error(s):\n{exc}\n\n"
+                f"Core artifacts:\n{core_status}\n"
+                f"{missing_hint}\n"
+                "Files on disk:\n" + "\n".join(f"  {f}" for f in failed_files) + "\n\n"
+                "To fix: read the offending file with read_file, apply a targeted "
+                "fix with edit_file/write_file (or rebuild_evaluator for evaluator "
+                "logic), then call revalidate to re-run the validation gate. "
+                "Repeat until revalidate reports the gate passed. Prefer fixing in "
+                "place over calling build_task again."
+            )
         write_task_directory(blueprint, str(base))
         state.blueprint = blueprint
         state.needs = needs
@@ -597,6 +703,10 @@ def make_tools(
         """
         if state.blueprint is None or state.needs is None:
             return "Error: no current build. Call build_task first."
+        # Sync any hand edits from disk onto the blueprint first, so the rebuild
+        # starts from what's actually on disk (the agent may have edited files
+        # since the last build) rather than a stale in-memory copy.
+        _reload_edits_onto_blueprint(state.blueprint)
         provider = _build_llm_provider(provider_config)
         orchestrator = BuildOrchestrator(provider, console=None, max_repair_attempts=_MAX_REPAIR_ATTEMPTS)
         try:
@@ -610,6 +720,52 @@ def make_tools(
         return (
             "Evaluator updated and rewritten to the workspace. "
             f"Re-verify with run_python on `{state.project_name}/test_evaluator.py`."
+        )
+
+    async def revalidate() -> str:
+        """Re-run the deterministic validation gate on the current on-disk package.
+
+        Use after fixing a package that failed the gate (via edit_file /
+        write_file / rebuild_evaluator): this reloads your on-disk edits onto the
+        current blueprint and runs the validation gate ONCE with no auto-repair,
+        so your hand edits are checked as-is (never overwritten). Requires a prior
+        build_task (successful or failed) that produced a package.
+
+        Returns:
+            A confirmation that the gate passed, or the remaining validation
+            error(s) to fix.
+        """
+        from llm4ad.builder.validator import TaskValidator
+
+        if state.blueprint is None:
+            return "Error: no current package. Call build_task first."
+        bp = state.blueprint
+
+        # Sync disk edits onto the blueprint before checking.
+        _reload_edits_onto_blueprint(bp)
+
+        # Match the validation conditions the original build used, so revalidate
+        # neither over- nor under-checks relative to build_task. multimodal is
+        # recovered from the recorded needs (defaults False when unavailable).
+        multimodal = bool(getattr(state.needs, "multimodal", False))
+
+        # check() needs a provider for TaskValidator.__init__ but never calls the
+        # LLM itself (zero auto-repair) — the whole point of this tool.
+        provider = _build_llm_provider(provider_config)
+        validator = TaskValidator(provider)
+        bp = validator.check(bp, multimodal=multimodal)
+        state.blueprint = bp
+
+        if bp.is_valid():
+            return (
+                "Validation gate PASSED on the current on-disk package. "
+                f"Now verify at runtime: run `{bp.project_name}/test_evaluator.py` "
+                f"and `{bp.project_name}/debug_run.py` with run_python."
+            )
+        errors = "\n".join(f"  - {e}" for e in bp.validation_errors)
+        return (
+            f"Validation gate still FAILING:\n{errors}\n\n"
+            "Fix the offending file and call revalidate again."
         )
 
     def propose_plan(
@@ -779,6 +935,7 @@ def make_tools(
         _tool(run_python),
         _tool(build_task),
         _tool(rebuild_evaluator),
+        _tool(revalidate),
         _tool(write_file),
         _tool(edit_file),
     ]

@@ -441,8 +441,17 @@ def run_task(
     input_args = _resolve_providers(db, input_args, current_user, access_token, task_id=task_id)
 
     # 准备运行参数
+    from app.core.env_detect import get_project_home
+
     container_name = f"code_user-{current_user.id}"
-    user_home = f"{settings.DOCKER_PROJECT_HOME}{container_name}/"
+
+    # 自动检测运行环境并选择正确的路径（无需手动配置）
+    project_home = get_project_home(
+        host_home=settings.HOST_PROJECT_HOME,
+        docker_home=settings.DOCKER_PROJECT_HOME,
+    )
+
+    user_home = f"{project_home}/{container_name}/"
     run_dir = f"{user_home}{task_id}/"
 
     input_args["project_name"] = "llm4ad"
