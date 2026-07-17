@@ -1,0 +1,207 @@
+# ==============================================================================
+# LLM4AD Configuration for CVRP Construct (Python) - Island GA
+# Migrated from legacy LLM4AD task: llm4ad/task/optimization/cvrp_construct
+# ==============================================================================
+
+project_name: "cvrp_construct_python"
+
+description_en: "Evolve Python greedy route-construction heuristics for the Capacitated Vehicle Routing Problem (CVRP)."
+description_zh: "为带容量约束的车辆路径问题（CVRP）进化 Python 贪心路径构造启发式。"
+
+background: |
+  Given a set of customers with known demands and a fleet of capacity-limited
+  vehicles based at a central depot, the task is to design a heuristic that
+  selects the next node to visit at each construction step. The evolved
+  select_next_node function is called repeatedly to build complete routes;
+  returning the depot (node 0) closes the current vehicle trip. The objective
+  is to minimize total travel distance relative to a per-instance baseline.
+
+random_seed: 42
+base_dir: "./runs"
+
+# ==============================================================================
+# Workspace Configuration
+# ==============================================================================
+workspace:
+  auto_create: true
+  subdirs:
+    output: "output"
+    logs: "logs"
+    checkpoints: "checkpoints"
+    generated: "generated"
+    cache: "cache"
+    temp: "temp"
+
+# ==============================================================================
+# LLM Provider Configuration
+# ==============================================================================
+providers:
+  - name: "default"
+    type: "openai_compatible"
+    base_url: ${LLM_BASE_URL}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL}
+    temperature: 0.7
+    max_tokens: 8192
+    timeout: 120.0
+
+# ==============================================================================
+# Coder Configuration
+# ==============================================================================
+coder:
+  type: "custom"
+  provider: "default"
+  timeout: 180.0
+  max_retries: 2
+  temperature: 0.7
+  max_gen_tokens: 4096
+  context_max_tokens: 4096
+  default_extension: "py"
+  log_to_console: false
+
+  prompt_template: |
+    You are tasked with implementing a heuristic for the Capacitated Vehicle
+    Routing Problem (CVRP) in Python.
+
+    Problem Description:
+    A fleet of capacity-limited vehicles must serve all customers from a
+    central depot (node 0). At each step the route-construction driver calls
+    your function to pick the next node to visit.
+
+    Implement the select_next_node function between EVOLVE_START and EVOLVE_END:
+
+    ```python
+    import copy
+    import json
+    import sys
+    from typing import List
+    import numpy as np
+
+    # EVOLVE_START
+    def select_next_node(current_node: int, depot: int, unvisited_nodes: np.ndarray,
+                         rest_capacity: float, demands: np.ndarray,
+                         distance_matrix: np.ndarray) -> int:
+        '''Select the next node to visit (return depot id 0 to start a new trip).'''
+        best_score = -1.0
+        next_node = -1
+        for node in unvisited_nodes:
+            demand = demands[node]
+            distance = distance_matrix[current_node][node]
+            if demand <= rest_capacity:
+                score = demand / distance if distance > 0 else float('inf')
+                if score > best_score:
+                    best_score = score
+                    next_node = node
+        return next_node
+    # EVOLVE_END
+    ```
+
+    Requirements:
+    1. Implement select_next_node between the EVOLVE_START and EVOLVE_END markers.
+    2. Input: current_node (int), depot (int, always 0), unvisited_nodes
+       (np.ndarray of feasible unvisited node IDs), rest_capacity (float),
+       demands (np.ndarray), distance_matrix (2D np.ndarray).
+    3. Output: a single integer node ID. Returning 0 closes the current trip.
+    4. Goal: minimize total route distance (maximize normalized_gap).
+
+    Provide only the complete implementation of select_next_node between the
+    EVOLVE_START and EVOLVE_END markers.
+
+# ==============================================================================
+# Planner Configuration
+# ==============================================================================
+planner:
+  type: "llm_evolution"
+  provider: "default"
+  selection_strategy: "weighted"
+  parent_selection_strategy: "tournament"
+  build:
+    script: {}
+  samplers:
+    - name: "init_sampler"
+    - name: "mutation_sampler"
+    - name: "crossover_sampler"
+
+# ==============================================================================
+# Evaluator Configuration
+# ==============================================================================
+evaluator:
+  type: "custom"
+  module: "cvrp_evaluator.py:CVRPConstructEvaluator"
+  timeout: 60.0
+  max_retries: 2
+  parallel: true
+  batch_size: 4
+  dataset:
+    mode: "directory"
+    path: "data/instances"
+    recursive: false
+  metrics:
+    - "normalized_gap"
+    - "total_cost"
+    - "valid_route"
+
+# ==============================================================================
+# Evolution Configuration
+# ==============================================================================
+evolution:
+  type: "island_ga"
+  max_generations: 5
+  early_stop_patience: 10
+  early_stop_threshold: 0.000001
+  checkpoint_interval: 5
+  max_checkpoints: 3
+  elite_ratio: 0.1
+  mutation_rate: 0.3
+  crossover_rate: 0.5
+  parent_selection_strategy: "tournament"
+  survival_selection_strategy: "truncation"
+  tournament_size: 3
+  num_islands: 2
+  island_population_size: 4
+  migration_interval: 5
+  migration_rate: 0.1
+  migration_strategy: "random"
+  migration_topology: "full"
+  parallel_islands: true
+  human_readable_timing: true
+
+# ==============================================================================
+# Logging Configuration
+# ==============================================================================
+logging:
+  level: "INFO"
+  format: null
+  file: null
+  console: true
+  json_format: false
+
+# ==============================================================================
+# Version Control Configuration
+# ==============================================================================
+version_control:
+  enabled: true
+  type: "git_worktree"
+  local_path: "cvrp_algorithm"
+  remote_url: null
+  revision: null
+  auto_initialize: true
+  auto_cleanup: true
+  max_worktree_age_days: 7
+  max_worktrees: 100
+  default_branch: "main"
+  commit_message_template: "Algorithm {algorithm_id}: {description}"
+
+# ==============================================================================
+# Repository Analyzer Configuration
+# ==============================================================================
+repo_analyzer:
+  type: "evolve_detector"
+  context_lines_before: 5
+  context_lines_after: 5
+  include:
+    - "*.py"
+  exclude:
+    - ".git/**"
+    - "__pycache__/**"
+    - "*.pyc"

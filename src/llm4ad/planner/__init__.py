@@ -16,6 +16,7 @@ from llm4ad.planner.memory import (
     MemoryType,
 )
 from llm4ad.planner.meoh_evolution import MEoHEvolutionPlanner
+from llm4ad.planner.reevo_evolution import ReEvoEvolutionPlanner
 from llm4ad.planner.selector import BaseSelector, SamplerSelector
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "InsightType",
     "LLMEvolutionPlanner",
     "MEoHEvolutionPlanner",
+    "ReEvoEvolutionPlanner",
     "Memory",
     "MemoryEntry",
     "MemoryType",
