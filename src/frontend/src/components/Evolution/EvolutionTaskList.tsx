@@ -190,11 +190,20 @@ function getNameSchema(t: (key: string) => string) {
       .string()
       .min(1, { message: t("validation.taskNameRequired") })
       .max(255),
+  })
+}
+
+function getCreateTaskSchema(t: (key: string) => string) {
+  return getNameSchema(t).extend({
     template_name: z.string().optional(),
     config_name: z.string().optional(),
   })
 }
 type NameFormData = {
+  name: string
+}
+
+type CreateTaskFormData = {
   name: string
   template_name?: string
   config_name?: string
@@ -221,7 +230,7 @@ export function CreateTaskDialog({
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { t, i18n } = useTranslation()
   const isZh = i18n.language?.startsWith("zh")
-  const nameSchema = getNameSchema(t)
+  const createTaskSchema = getCreateTaskSchema(t)
 
   const { data: templateList } = useQuery({
     queryKey: ["listExampleTemplates"],
@@ -229,8 +238,8 @@ export function CreateTaskDialog({
     enabled: isOpen,
   })
 
-  const form = useForm<NameFormData>({
-    resolver: zodResolver(nameSchema),
+  const form = useForm<CreateTaskFormData>({
+    resolver: zodResolver(createTaskSchema) as any,
     mode: "onBlur",
     defaultValues: {
       // Pre-fill the task name in the demo so the user can land on a single
@@ -293,7 +302,7 @@ export function CreateTaskDialog({
     },
   })
 
-  const submitTask = (data: NameFormData) => {
+  const submitTask = (data: CreateTaskFormData) => {
     // Demo mode: skip the real createTask API. Whichever mode the user picked
     // (AI build / Manual stepper) we land on the simulated AI Build view —
     // demo only mocks the AI path. Setting demo phase to "configuring"
@@ -321,7 +330,7 @@ export function CreateTaskDialog({
     mutation.mutate(payload)
   }
 
-  const onSubmit = (data: NameFormData) => {
+  const onSubmit = (data: CreateTaskFormData) => {
     // Demo mode: short-circuit every branch so the user always lands on the
     // simulated build session regardless of which mode they ticked or whether
     // they picked a template.

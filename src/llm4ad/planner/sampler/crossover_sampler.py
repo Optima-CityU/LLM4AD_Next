@@ -97,7 +97,16 @@ class CrossoverSampler(BaseSampler):
         background: str = kwargs.get("background", "")
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "crossover",
+                "parent_1_score": score1,
+                "parent_1_description": parent1.description,
+                "parent_2_score": score2,
+                "parent_2_description": parent2.description,
+            },
+        ) if self.memory else ""
 
         # Track generation time
         start_time = time.time()
@@ -166,6 +175,14 @@ class CrossoverSampler(BaseSampler):
             generation_time_ms=generation_time_ms,
             tokens_used=total_prompt_tokens + total_completion_tokens,
             agent_name="CrossoverSampler",
+            operation_params={
+                "parent_1_id": parent1.id,
+                "parent_1_score": score1,
+                "parent_1_description": parent1.description,
+                "parent_2_id": parent2.id,
+                "parent_2_score": score2,
+                "parent_2_description": parent2.description,
+            },
             change_description=algorithm.description,
             targeted_files=[],
         )

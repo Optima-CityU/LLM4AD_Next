@@ -8,7 +8,15 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export default function MemorySection() {
   const { control } = useFormContext()
@@ -16,6 +24,128 @@ export default function MemorySection() {
 
   return (
     <div className="grid grid-cols-2 gap-4">
+      <FormField
+        control={control}
+        name="memory.enabled"
+        render={({ field }) => (
+          <FormItem className="col-span-2 flex items-center gap-2 space-y-0">
+            <FormControl>
+              <Checkbox
+                checked={field.value}
+                onCheckedChange={(checked) => field.onChange(checked === true)}
+              />
+            </FormControl>
+            <FormLabel>{t("configForm.memory.enabled")}</FormLabel>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_search_strategy"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosSearchStrategy")}</FormLabel>
+            <Select value={field.value ?? "fast"} onValueChange={field.onChange}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="fast">fast</SelectItem>
+                <SelectItem value="agentic">agentic</SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_request_timeout"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosRequestTimeout")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} step={1} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_add_timeout"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosAddTimeout")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} step={1} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_extraction_prompt_language"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosExtractionPromptLanguage")}</FormLabel>
+            <Select value={field.value ?? "auto"} onValueChange={field.onChange}>
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="auto">{t("configForm.memory.extractionLanguages.auto")}</SelectItem>
+                <SelectItem value="ZH">{t("configForm.memory.extractionLanguages.ZH")}</SelectItem>
+                <SelectItem value="EN">{t("configForm.memory.extractionLanguages.EN")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      {[
+        ["include_user_memory", "user_memory_limit", "includeUserMemory", "userMemoryLimit"],
+        ["include_project_memory", "project_memory_limit", "includeProjectMemory", "projectMemoryLimit"],
+        ["include_task_memory", "task_memory_limit", "includeTaskMemory", "taskMemoryLimit"],
+      ].map(([enabledName, limitName, enabledLabel, limitLabel]) => (
+        <div key={enabledName} className="col-span-2 grid grid-cols-[1fr_160px] gap-3 rounded-md border p-3">
+          <FormField
+            control={control}
+            name={`memory.${enabledName}`}
+            render={({ field }) => (
+              <FormItem className="flex items-center gap-2 space-y-0">
+                <FormControl>
+                  <Checkbox
+                    checked={field.value}
+                    onCheckedChange={(checked) => field.onChange(checked === true)}
+                  />
+                </FormControl>
+                <FormLabel>{t(`configForm.memory.${enabledLabel}`)}</FormLabel>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={control}
+            name={`memory.${limitName}`}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t(`configForm.memory.${limitLabel}`)}</FormLabel>
+                <FormControl>
+                  <Input type="number" min={0} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+      ))}
       <FormField
         control={control}
         name="memory.embedding_dim"

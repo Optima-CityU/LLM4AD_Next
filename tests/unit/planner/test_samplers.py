@@ -42,6 +42,7 @@ def mock_memory():
     """Create a mock memory."""
     memory = MagicMock()
     memory.search = MagicMock(return_value=[])
+    memory.aget_prompt_context = AsyncMock(return_value="")
     return memory
 
 
@@ -146,6 +147,9 @@ class TestMutationSampler:
         assert algorithm.generation == 1
         assert algorithm.generation_meta is not None
         assert algorithm.generation_meta.operator == "mutation_sampler"
+        assert algorithm.generation_meta.operation_params["parent_score"] == 0.8
+        assert algorithm.generation_meta.operation_params["parent_description"] == parent.description
+        assert algorithm.generation_meta.operation_params["parent_id"] == "parent-1"
 
     @pytest.mark.asyncio
     async def test_mutation_sampler_no_block(
@@ -246,6 +250,10 @@ class TestCrossoverSampler:
         assert algorithm.generation == 1
         assert algorithm.generation_meta is not None
         assert algorithm.generation_meta.operator == "crossover_sampler"
+        assert algorithm.generation_meta.operation_params["parent_1_score"] == 0.8
+        assert algorithm.generation_meta.operation_params["parent_1_description"] == parent1.description
+        assert algorithm.generation_meta.operation_params["parent_2_score"] == 0.9
+        assert algorithm.generation_meta.operation_params["parent_2_description"] == parent2.description
 
     @pytest.mark.asyncio
     async def test_crossover_sampler_with_parent_kwargs(

@@ -1,0 +1,104 @@
+name: ${PROJECT_NAME:-llm4ad-web}
+
+services:
+  mindmemos-qdrant:
+    image: qdrant/qdrant:v1.18.0
+    restart: always
+    volumes:
+      - ./app-data/mindmemos/qdrant/storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333' 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mindmemos-neo4j:
+    image: neo4j:2026.05.0
+    restart: always
+    environment:
+      NEO4J_AUTH: "${MINDMEMOS_NEO4J_USERNAME:-neo4j}/${MINDMEMOS_NEO4J_PASSWORD:-mindmemos_dev_password}"
+    volumes:
+      - ./app-data/mindmemos/neo4j/data:/data
+      - ./app-data/mindmemos/neo4j/logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      start_period: 180s
+      retries: 30
+
+  mindmemos-kafka:
+    image: apache/kafka:3.9.0
+    restart: always
+    environment:
+      KAFKA_NODE_ID: "0"
+      KAFKA_PROCESS_ROLES: "controller,broker"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "0@mindmemos-kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENERS: "INTERNAL://:29092,CONTROLLER://:9093,EXTERNAL://:9092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://mindmemos-kafka:29092,EXTERNAL://localhost:${MINDMEMOS_KAFKA_PORT:-19092}"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_NUM_PARTITIONS: "${MINDMEMOS_KAFKA_NUM_PARTITIONS:-32}"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - ./app-data/mindmemos/kafka/data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server mindmemos-kafka:29092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  mindmemos-api:
+    build:
+      context: ../
+      dockerfile: docker/mindmemos/Dockerfile
+      network: host
+      args:
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: llm4ad-mindmemos:latest
+    pull_policy: never
+    restart: always
+    depends_on:
+      mindmemos-qdrant:
+        condition: service_healthy
+      mindmemos-neo4j:
+        condition: service_healthy
+      mindmemos-kafka:
+        condition: service_healthy
+    environment:
+      MINDMEMOS_CONFIG_PATH: /app/mindmemos/config/mindmemos/dev.yaml
+      MINDMEMOS_QDRANT_URL: http://mindmemos-qdrant:6333
+      MINDMEMOS_QDRANT_GRPC_PORT: 6334
+      MINDMEMOS_QDRANT_PREFER_GRPC: "true"
+      MINDMEMOS_NEO4J_URI: bolt://mindmemos-neo4j:7687
+      MINDMEMOS_NEO4J_USERNAME: "${MINDMEMOS_NEO4J_USERNAME:-neo4j}"
+      MINDMEMOS_NEO4J_PASSWORD: "${MINDMEMOS_NEO4J_PASSWORD:-mindmemos_dev_password}"
+      MINDMEMOS_KAFKA_BOOTSTRAP_SERVERS: mindmemos-kafka:29092
+      MINDMEMOS_AUTH_MODE: gateway_jwt
+      MINDMEMOS_GATEWAY_JWT_SECRET: "${LLM4AD_MINDMEMOS_JWT_SECRET:-demo-jwt-secret-key}"
+      MINDMEMOS_GATEWAY_JWT_ISSUER: "${LLM4AD_MINDMEMOS_JWT_ISSUER:-demo-jwt-gateway}"
+      MINDMEMOS_GATEWAY_JWT_AUDIENCE: "${LLM4AD_MINDMEMOS_JWT_AUDIENCE:-demo-jwt-audience}"
+      MINDMEMOS_PROVIDER_BINDING_ENABLED: "true"
+      MINDMEMOS_PROJECT_COLLECTION_NAMESPACE_ENABLED: "true"
+    volumes:
+      - ./mindmemos/config:/app/mindmemos/config/mindmemos:ro
+    # Expose on a stable host port so the local `llm4ad memory` CLI can reach
+    # MindMemOS directly (the web backend still uses the internal network name).
+    ports:
+      - "${MINDMEMOS_API_PORT:-18000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

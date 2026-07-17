@@ -1,0 +1,9 @@
+api_keys:
+  - key_id: key_llm4ad_dev
+    api_key: sk-llm4ad-dev
+    project_id: proj_llm4ad_dev
+    memory_algorithm: vanilla
+    enabled: true
+    scopes:
+      - memory:read
+      - memory:write

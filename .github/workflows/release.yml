@@ -74,6 +74,7 @@ jobs:
         env:
           VERSION_NO_V: ${{ steps.version.outputs.version_no_v }}
         run: |
+          python scripts/project_version.py --check --expected "$VERSION_NO_V"
           python - <<'PY'
           from pathlib import Path
           import json
@@ -240,6 +241,7 @@ jobs:
           build-args: |
             VITE_API_URL=
             VITE_CODE_SERVER_URL=${{ vars.VITE_CODE_SERVER_URL || '/code_ide' }}
+            VITE_FOOTER_BEIAN=${{ vars.VITE_FOOTER_BEIAN || '' }}
           tags: ${{ steps.frontend-meta.outputs.tags }}
           labels: ${{ steps.frontend-meta.outputs.labels }}
           cache-from: type=gha,scope=frontend

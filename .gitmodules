@@ -1,0 +1,3 @@
+[submodule "third_party/MindMemOS"]
+	path = third_party/MindMemOS
+	url = git@github.com:dadastory/MindMemOS.git

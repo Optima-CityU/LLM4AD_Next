@@ -59,7 +59,6 @@ export default function InitializedView({ task }: InitializedViewProps) {
   const [isDownloadingWorkspace, setIsDownloadingWorkspace] = useState(false)
   const { activeTab, setActiveTab, selectedNodes } = useEvolution()
   const { resolvedTheme } = useTheme()
-
   const loadCodeToken = useCallback(() => {
     setIdeState("loading")
     return UtilsCodeServerService.getCodeToken({
@@ -91,6 +90,12 @@ export default function InitializedView({ task }: InitializedViewProps) {
       loadCodeToken()
     }
   }, [activeTab, ideState, loadCodeToken, task.id])
+
+  useEffect(() => {
+    if (activeTab === "memory") {
+      setActiveTab("overview")
+    }
+  }, [activeTab, setActiveTab])
 
   const handleRefreshIDE = () => {
     if (isRefreshing) return

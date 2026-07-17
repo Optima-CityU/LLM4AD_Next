@@ -19,6 +19,33 @@ import { initOpenApi } from "./utils/request"
 
 initOpenApi()
 
+if (import.meta.env.DEV) {
+  window.addEventListener("beforeunload", () => {
+    console.warn("[LLM4AD diagnostics] beforeunload fired", {
+      href: window.location.href,
+      visibilityState: document.visibilityState,
+    })
+  })
+  window.addEventListener("pagehide", (event) => {
+    console.warn("[LLM4AD diagnostics] pagehide fired", {
+      href: window.location.href,
+      persisted: event.persisted,
+      visibilityState: document.visibilityState,
+    })
+  })
+  window.addEventListener("error", (event) => {
+    console.error("[LLM4AD diagnostics] window error", {
+      message: event.message,
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+    })
+  })
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[LLM4AD diagnostics] unhandled rejection", event.reason)
+  })
+}
+
 // Lazily-loaded route chunks are fetched via dynamic import(), which bypasses
 // the axios interceptor. When such a chunk 503s behind the maintenance gateway,
 // Vite fires `vite:preloadError` instead. preventDefault() must run
@@ -30,6 +57,9 @@ initOpenApi()
 //     still self-heal, while a tight reload loop is still prevented.
 window.addEventListener("vite:preloadError", (event) => {
   event.preventDefault()
+  if (import.meta.env.DEV) {
+    console.warn("[LLM4AD diagnostics] vite preload error", event)
+  }
   void checkMaintenance().then((isMaintenance) => {
     if (isMaintenance) {
       showMaintenanceOverlay()
@@ -39,6 +69,9 @@ window.addEventListener("vite:preloadError", (event) => {
     const last = Number(sessionStorage.getItem(RELOAD_KEY) || 0)
     if (Date.now() - last > 10_000) {
       sessionStorage.setItem(RELOAD_KEY, String(Date.now()))
+      if (import.meta.env.DEV) {
+        console.warn("[LLM4AD diagnostics] reloading after preload error")
+      }
       window.location.reload()
     }
   })

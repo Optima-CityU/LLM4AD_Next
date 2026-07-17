@@ -99,10 +99,14 @@ class MutationSampler(BaseSampler):
         parent_score = parent.evaluation.score if parent.evaluation else 0.0
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
-
-        # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "mutation",
+                "parent_score": parent_score,
+                "parent_description": parent.description,
+            },
+        ) if self.memory else ""
 
         # Track generation time
         start_time = time.time()
@@ -163,6 +167,11 @@ class MutationSampler(BaseSampler):
             generation_time_ms=generation_time_ms,
             tokens_used=total_prompt_tokens + total_completion_tokens,
             agent_name="MutationSampler",
+            operation_params={
+                "parent_id": parent.id,
+                "parent_score": parent_score,
+                "parent_description": parent.description,
+            },
             change_description=algorithm.description,
             targeted_files=[block.file_path] if block else [],
         )

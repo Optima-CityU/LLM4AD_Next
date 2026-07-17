@@ -33,16 +33,22 @@ export const embeddingProvidersQueryOptions = {
   staleTime: 5 * 60 * 1000,
 }
 
-export function useProviders() {
-  return useQuery(providersQueryOptions)
+export function useProviders(options?: { enabled?: boolean }) {
+  return useQuery({
+    ...providersQueryOptions,
+    enabled: options?.enabled ?? true,
+  })
 }
 
 export function useUserDefaultModels() {
   return useQuery(userDefaultModelsQueryOptions)
 }
 
-export function useEmbeddingProviders() {
-  return useQuery(embeddingProvidersQueryOptions)
+export function useEmbeddingProviders(options?: { enabled?: boolean }) {
+  return useQuery({
+    ...embeddingProvidersQueryOptions,
+    enabled: options?.enabled ?? true,
+  })
 }
 
 export function usePrefetchProviders() {

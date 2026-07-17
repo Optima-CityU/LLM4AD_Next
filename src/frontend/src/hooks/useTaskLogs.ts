@@ -25,10 +25,16 @@ export interface UseTaskLogsOptions {
   onResetTask?: () => void
   onStatusChange?: (status: string) => void
   onGenerated?: (entry: Record<string, unknown>) => void
+  onMemoryCardCreated?: (entry: Record<string, unknown>) => void
+  onMemoryInjected?: (entry: Record<string, unknown>) => void
 }
 
 function nowISO() {
   return new Date().toISOString()
+}
+
+function reconnectDelayMs(attempt: number) {
+  return Math.min(1000 * 2 ** Math.max(attempt - 1, 0), 5000)
 }
 
 export function normalizeLogEntries(
@@ -69,6 +75,10 @@ export function useTaskLogs(
   onStatusChangeRef.current = options?.onStatusChange
   const onGeneratedRef = useRef(options?.onGenerated)
   onGeneratedRef.current = options?.onGenerated
+  const onMemoryCardCreatedRef = useRef(options?.onMemoryCardCreated)
+  onMemoryCardCreatedRef.current = options?.onMemoryCardCreated
+  const onMemoryInjectedRef = useRef(options?.onMemoryInjected)
+  onMemoryInjectedRef.current = options?.onMemoryInjected
 
   // ---------- SSE path (active states only) ----------
   const [streamEntries, setStreamEntries] = useState<LogEntry[]>([])
@@ -93,8 +103,11 @@ export function useTaskLogs(
     entriesBuffer.current = []
     setStreamEntries([])
 
-    const abortController = new AbortController()
     let cancelled = false
+    let reconnectAttempt = 0
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let activeAbortController: AbortController | null = null
+    let lastEventId = "0-0"
 
     const flushEntries = () => {
       if (!cancelled) setStreamEntries([...entriesBuffer.current])
@@ -121,22 +134,33 @@ export function useTaskLogs(
     }
 
     const baseUrl = import.meta.env.VITE_API_URL || ""
-    const streamUrl = `${baseUrl}/api/v1/llm4ad/tasks/${taskId}/logs/stream`
+    const buildStreamUrl = () => {
+      const url = `${baseUrl}/api/v1/llm4ad/tasks/${taskId}/logs/stream`
+      if (lastEventId === "0-0") return url
+      const params = new URLSearchParams({ last_id: lastEventId })
+      return `${url}?${params.toString()}`
+    }
 
-    ;(async () => {
+    const connect = async () => {
+      activeAbortController?.abort()
+      activeAbortController = new AbortController()
+      let terminal = false
       try {
-        const response = await authFetch(streamUrl, {
-          signal: abortController.signal,
+        const response = await authFetch(buildStreamUrl(), {
+          signal: activeAbortController.signal,
         })
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         setStreamLoading(false)
+        setStreamError(null)
+        reconnectAttempt = 0
 
         const reader = response.body!.getReader()
         const decoder = new TextDecoder()
         let buffer = ""
         let currentEvent = ""
         let currentData = ""
+        let currentId = ""
 
         while (true) {
           const { done, value } = await reader.read()
@@ -149,9 +173,12 @@ export function useTaskLogs(
           for (const line of lines) {
             if (line.startsWith("event:")) {
               currentEvent = line.slice(6).trim()
+            } else if (line.startsWith("id:")) {
+              currentId = line.slice(3).trim()
             } else if (line.startsWith("data:")) {
               currentData = line.slice(5).trim()
             } else if (line.trim() === "") {
+              if (currentId) lastEventId = currentId
               switch (currentEvent) {
                 case "connected":
                   pushSystem(
@@ -166,6 +193,7 @@ export function useTaskLogs(
                 case "timeout":
                   pushSystem("timeout", t("evolution.logStream.timeout"))
                   if (!cancelled) onResetTaskRef.current?.()
+                  terminal = true
                   currentEvent = ""
                   currentData = ""
                   return
@@ -180,6 +208,7 @@ export function useTaskLogs(
                     })
                     onStatusChangeRef.current?.("done")
                   }
+                  terminal = true
                   currentEvent = ""
                   currentData = ""
                   return
@@ -201,9 +230,10 @@ export function useTaskLogs(
                             t("evolution.logStream.taskError"),
                         )
                         if (!cancelled) onResetTaskRef.current?.()
+                        terminal = true
                         currentEvent = ""
                         currentData = ""
-                        break
+                        return
 
                       case "system":
                         pushSystem(
@@ -221,9 +251,10 @@ export function useTaskLogs(
                           parsed.message ?? t("evolution.logStream.taskEnd"),
                         )
                         if (!cancelled) onResetTaskRef.current?.()
+                        terminal = true
                         currentEvent = ""
                         currentData = ""
-                        break
+                        return
 
                       case "log":
                         entriesBuffer.current.push({
@@ -235,6 +266,14 @@ export function useTaskLogs(
 
                       case "generated":
                         if (!cancelled) onGeneratedRef.current?.(parsed)
+                        break
+
+                      case "memory_card_created":
+                        if (!cancelled) onMemoryCardCreatedRef.current?.(parsed)
+                        break
+
+                      case "mindmemos_memory_injected":
+                        if (!cancelled) onMemoryInjectedRef.current?.(parsed)
                         break
 
                       case "status":
@@ -259,6 +298,7 @@ export function useTaskLogs(
 
               currentEvent = ""
               currentData = ""
+              currentId = ""
             }
           }
         }
@@ -270,11 +310,21 @@ export function useTaskLogs(
           setStreamLoading(false)
         }
       }
-    })()
+
+      if (!cancelled && !terminal) {
+        reconnectAttempt += 1
+        setStreamLoading(true)
+        setStreamError(t("evolution.logStream.reconnecting"))
+        reconnectTimer = setTimeout(connect, reconnectDelayMs(reconnectAttempt))
+      }
+    }
+
+    void connect()
 
     return () => {
       cancelled = true
-      abortController.abort()
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      activeAbortController?.abort()
       cancelAnimationFrame(rafId.current)
     }
   }, [taskId, isActive, enabled, queryClient, t])

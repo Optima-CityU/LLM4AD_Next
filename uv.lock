@@ -1497,8 +1497,20 @@ wheels = [
 ]
 
 [[package]]
-name = "llm4ad"
-version = "0.1.0"
+name = "linkify-it-py"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "uc-micro-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2e/c9/06ea13676ef354f0af6169587ae292d3e2406e212876a413bf9eece4eb23/linkify_it_py-2.1.0.tar.gz", hash = "sha256:43360231720999c10e9328dc3691160e27a718e280673d444c38d7d3aaa3b98b", size = 29158, upload-time = "2026-03-01T07:48:47.683Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/de/88b3be5c31b22333b3ca2f6ff1de4e863d8fe45aaea7485f591970ec1d3e/linkify_it_py-2.1.0-py3-none-any.whl", hash = "sha256:0d252c1594ecba2ecedc444053db5d3a9b7ec1b0dd929c8f1d74dce89f86c05e", size = 19878, upload-time = "2026-03-01T07:48:46.098Z" },
+]
+
+[[package]]
+name = "llm4ad-next"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "agentscope" },
@@ -1607,6 +1619,12 @@ meoh = [
     { name = "scikit-learn" },
     { name = "tree-sitter-python" },
 ]
+mindmemos = [
+    { name = "httpx" },
+    { name = "mindmemos-sdk", marker = "python_full_version < '3.14'" },
+    { name = "pyyaml" },
+    { name = "textual" },
+]
 providers = [
     { name = "anthropic" },
     { name = "openai" },
@@ -1628,12 +1646,14 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.1" },
     { name = "codebleu", marker = "extra == 'meoh'", specifier = ">=0.7.0" },
     { name = "gymnasium", extras = ["box2d"], marker = "extra == 'lunarlander'", specifier = ">=0.29.0" },
+    { name = "httpx", marker = "extra == 'mindmemos'", specifier = ">=0.27.0,<1" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
-    { name = "llm4ad", extras = ["infra", "providers", "eval", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
+    { name = "llm4ad-next", extras = ["infra", "providers", "eval", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
     { name = "llvmlite", marker = "extra == 'eval'", specifier = "==0.44.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", marker = "extra == 'lunarlander'", specifier = ">=3.5.0" },
+    { name = "mindmemos-sdk", marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'mindmemos'", specifier = ">=0.1.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
     { name = "mkdocs-git-committers-plugin-2", marker = "extra == 'docs'", specifier = ">=2.5.0" },
     { name = "mkdocs-git-revision-date-localized-plugin", marker = "extra == 'docs'", specifier = ">=1.5.1" },
@@ -1661,6 +1681,7 @@ requires-dist = [
     { name = "pytest-custom-exit-code", specifier = ">=0.3.0" },
     { name = "pytest-custom-exit-code", marker = "extra == 'dev'", specifier = ">=0.3.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "pyyaml", marker = "extra == 'mindmemos'", specifier = ">=6.0,<7" },
     { name = "rich", specifier = ">=13.0.0,<14.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.2.0" },
     { name = "scikit-learn", specifier = ">=1.3.0" },
@@ -1668,6 +1689,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'meoh'", specifier = ">=1.3.0" },
     { name = "scipy", marker = "extra == 'eval'", specifier = ">=1.10.0" },
     { name = "sympy", marker = "extra == 'eval'", specifier = ">=1.12.0" },
+    { name = "textual", marker = "extra == 'mindmemos'", specifier = ">=1.0.0,<2" },
     { name = "tiktoken", marker = "extra == 'providers'", specifier = ">=0.6.0" },
     { name = "tree-sitter-python", marker = "extra == 'meoh'", specifier = "==0.21.0" },
     { name = "typer", specifier = ">=0.24.1" },
@@ -1675,7 +1697,7 @@ requires-dist = [
     { name = "umap-learn", marker = "extra == 'eval'", specifier = ">=0.5.12" },
     { name = "xgboost", specifier = ">=3.2.0" },
 ]
-provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "dev", "docs", "agent", "all"]
+provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "mindmemos", "dev", "docs", "agent", "all"]
 
 [[package]]
 name = "llvmlite"
@@ -1727,6 +1749,14 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5b/f5/4ec618ed16cc4f8fb3b701563655a69816155e79e24a17b651541804721d/markdown_it_py-4.0.0.tar.gz", hash = "sha256:cb0a2b4aa34f932c007117b194e945bd74e0ec24133ceb5bac59009cda1cb9f3", size = 73070, upload-time = "2025-08-11T12:57:52.854Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
+]
+
+[package.optional-dependencies]
+linkify = [
+    { name = "linkify-it-py" },
+]
+plugins = [
+    { name = "mdit-py-plugins" },
 ]
 
 [[package]]
@@ -1872,6 +1902,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mdit-py-plugins"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/fc/f8d0863f8862f25602c0404d75568e89fb6b4109804645e5cdfb1be5cf56/mdit_py_plugins-0.6.1.tar.gz", hash = "sha256:a2bca0f039f39dbd35fb74ae1b5f998608c437463371f0ff7f49a19a17a114d0", size = 56114, upload-time = "2026-05-13T09:03:38.91Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/69/6da5581c6a7fede7dc261bf4e67d6adca4196f176b43288b55b3db395b6e/mdit_py_plugins-0.6.1-py3-none-any.whl", hash = "sha256:214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d", size = 66663, upload-time = "2026-05-13T09:03:37.76Z" },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1887,6 +1929,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/3a/41/580bb4006e3ed0361b8151a01d324fb03f420815446c7def45d02f74c270/mergedeep-1.3.4.tar.gz", hash = "sha256:0096d52e9dad9939c3d975a774666af186eda617e6ca84df4c94dec30004f2a8", size = 4661, upload-time = "2021-02-05T18:55:30.623Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/19/04f9b178c2d8a15b076c8b5140708fa6ffc5601fb6f1e975537072df5b2a/mergedeep-1.3.4-py3-none-any.whl", hash = "sha256:70775750742b25c0d8f36c55aed03d24c3384d17c951b3175d898bd778ef0307", size = 6354, upload-time = "2021-02-05T18:55:29.583Z" },
+]
+
+[[package]]
+name = "mindmemos-sdk"
+version = "0.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx", marker = "python_full_version < '3.14'" },
+    { name = "pydantic", marker = "python_full_version < '3.14'" },
+    { name = "pyyaml", marker = "python_full_version < '3.14'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d8/e5/e882b853fa2c9bbdcebb86bf5526593f25158007cb2d6eea100b5d569660/mindmemos_sdk-0.1.3.tar.gz", hash = "sha256:0681f5ddd85f8f3206675262550894ef2d1545310fd196ba94f88aea420277ce", size = 34273, upload-time = "2026-06-30T12:30:58.201Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/bd/279cc948104997f210adc176a936b67eff7b46dd4b6b70844caf1c6f46e4/mindmemos_sdk-0.1.3-py3-none-any.whl", hash = "sha256:4d4b8ba500ab88185d01d0566ed2833efb776c16726fa0fcf7a37b67921c21a7", size = 46102, upload-time = "2026-06-30T12:30:56.72Z" },
 ]
 
 [[package]]
@@ -3755,6 +3811,21 @@ wheels = [
 ]
 
 [[package]]
+name = "textual"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown-it-py", extra = ["linkify", "plugins"] },
+    { name = "platformdirs" },
+    { name = "rich" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/b6/59b1de04bb4dca0f21ed7ba0b19309ed7f3f5de4396edf20cc2855e53085/textual-1.0.0.tar.gz", hash = "sha256:bec9fe63547c1c552569d1b75d309038b7d456c03f86dfa3706ddb099b151399", size = 1532733, upload-time = "2024-12-12T10:42:03.286Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/bb/5fb6656c625019cd653d5215237d7cd6e0b12e7eae4195c3d1c91b2136fc/textual-1.0.0-py3-none-any.whl", hash = "sha256:2d4a701781c05104925e463ae370c630567c70c2880e92ab838052e3e23c986f", size = 660456, upload-time = "2024-12-12T10:42:00.375Z" },
+]
+
+[[package]]
 name = "threadpoolctl"
 version = "3.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3910,6 +3981,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/a7/c202b344c5ca7daf398f3b8a477eeb205cf3b6f32e7ec3a6bac0629ca975/tzdata-2025.3.tar.gz", hash = "sha256:de39c2ca5dc7b0344f2eba86f49d614019d29f060fc4ebc8a417896a620b56a7", size = 196772, upload-time = "2025-12-13T17:45:35.667Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/b0/003792df09decd6849a5e39c28b513c06e84436a54440380862b5aeff25d/tzdata-2025.3-py2.py3-none-any.whl", hash = "sha256:06a47e5700f3081aab02b2e513160914ff0694bce9947d6b76ebd6bf57cfc5d1", size = 348521, upload-time = "2025-12-13T17:45:33.889Z" },
+]
+
+[[package]]
+name = "uc-micro-py"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/67/9a363818028526e2d4579334460df777115bdec1bb77c08f9db88f6389f2/uc_micro_py-2.0.0.tar.gz", hash = "sha256:c53691e495c8db60e16ffc4861a35469b0ba0821fe409a8a7a0a71864d33a811", size = 6611, upload-time = "2026-03-01T06:31:27.526Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/73/d21edf5b204d1467e06500080a50f79d49ef2b997c79123a536d4a17d97c/uc_micro_py-2.0.0-py3-none-any.whl", hash = "sha256:3603a3859af53e5a39bc7677713c78ea6589ff188d70f4fee165db88e22b242c", size = 6383, upload-time = "2026-03-01T06:31:26.257Z" },
 ]
 
 [[package]]

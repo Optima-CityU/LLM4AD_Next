@@ -61,6 +61,8 @@ Copy-Item .env.develop.local.example .env
 
 其余变量（端口、镜像名、SMTP、APT/PyPI 镜像源等）可沿用示例文件中的默认值，完整说明见 `.env.develop.local.example`。
 
+页脚备案信息可通过 `VITE_FOOTER_BEIAN` 配置；留空时不会显示。前端镜像的页脚版本在构建时固定读取仓库根目录的 `VERSION` 文件。
+
 ## 本地开发
 
 首次本地开发推荐只启动基础设施：

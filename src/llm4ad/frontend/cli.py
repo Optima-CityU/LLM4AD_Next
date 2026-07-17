@@ -16,6 +16,7 @@ from llm4ad import LLM4AD, __version__
 from llm4ad.coder.base import BaseCoder
 from llm4ad.evaluator.base import BaseEvaluator
 from llm4ad.infra.provider.base import BaseProvider
+from llm4ad.memory.cli_commands import app as memory_app
 from llm4ad.orchestrator.base import BaseOrchestrator
 from llm4ad.planner.base import BasePlanner
 
@@ -36,6 +37,9 @@ evolve_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(evolve_app, name="evolve")
+
+# Register memory management commands (interactive TUI).
+app.add_typer(memory_app, name="memory")
 
 load_dotenv()
 

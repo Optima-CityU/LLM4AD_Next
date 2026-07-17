@@ -1,0 +1,18 @@
+services:
+  mindmemos-qdrant:
+    ports:
+      - "${MINDMEMOS_QDRANT_HTTP_PORT:-16333}:6333"
+      - "${MINDMEMOS_QDRANT_GRPC_PORT:-16334}:6334"
+
+  mindmemos-neo4j:
+    ports:
+      - "${MINDMEMOS_NEO4J_HTTP_PORT:-17474}:7474"
+      - "${MINDMEMOS_NEO4J_BOLT_PORT:-17687}:7687"
+
+  mindmemos-kafka:
+    ports:
+      - "${MINDMEMOS_KAFKA_PORT:-19092}:9092"
+
+  mindmemos-api:
+    ports:
+      - "${MINDMEMOS_API_PORT:-18000}:8000"

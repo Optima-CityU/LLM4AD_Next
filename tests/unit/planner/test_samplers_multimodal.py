@@ -240,6 +240,7 @@ class TestTextOnlySamplersIgnoreBehavior:
         """MutationSampler should use generate() even when parent has behavior."""
         provider = _mock_provider()
         memory = MagicMock()
+        memory.aget_prompt_context = AsyncMock(return_value="")
         parent = _make_algorithm_with_behavior()
 
         sampler = MutationSampler(
@@ -258,6 +259,7 @@ class TestTextOnlySamplersIgnoreBehavior:
         """CrossoverSampler should use generate() even when parents have behavior."""
         provider = _mock_provider()
         memory = MagicMock()
+        memory.aget_prompt_context = AsyncMock(return_value="")
         parent1 = _make_algorithm_with_behavior("p1", 0.8)
         parent2 = _make_algorithm_with_behavior("p2", 0.9)
 

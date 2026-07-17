@@ -16,12 +16,13 @@ from app.api.deps import CurrentUser, SessionDep, TokenDep
 from app.api.llm4ad.sse_utils import redis_sse_stream, sse_response
 from app.core.redis import task_logs_key
 from app.models import Message
+from app.schemas import memory as memory_schemas
 from app.schemas import task as schemas
 from app.schemas.result_render import (
     ResultRenderGenerateRequest,
     ResultRenderGenerateResponse,
 )
-from app.services import task_service
+from app.services import memory_service, task_service
 
 # tags 加前缀防止前端 OpenAPI 重名冲突
 router = APIRouter(prefix="/tasks", tags=["llm4ad.tasks"])
@@ -141,6 +142,135 @@ def copy_task(
 def delete_task(db: SessionDep, current_user: CurrentUser, task_id: uuid.UUID):
     """删除任务及其关联的存储数据。任务运行中（pending/running）时不允许操作，需先停止任务。"""
     return task_service.delete_task(db, task_id, current_user)
+
+
+# ---- 任务记忆管理 ----
+
+
+@router.get("/{task_id}/memory", response_model=memory_schemas.MemoryCardPageResponse, summary="获取任务记忆卡片")
+def list_task_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 20,
+):
+    """获取 MindMemOS 中的任务级记忆。"""
+    return memory_service.list_memory_cards_page(
+        db,
+        current_user,
+        scope="task",
+        task_id=task_id,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/{task_id}/memory/observability",
+    response_model=schemas.TaskMemoryObservabilityResponse,
+    summary="获取任务记忆使用统计",
+)
+def get_task_memory_observability(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+):
+    """聚合任务日志中的 MindMemOS 注入事件，返回任务级记忆使用统计。"""
+    return task_service.get_task_memory_observability(db, task_id, current_user)
+
+
+@router.get(
+    "/{task_id}/memory/pinned",
+    response_model=memory_schemas.PinnedMemoryResponse,
+    summary="获取任务固定注入的共享记忆",
+)
+def get_task_pinned_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+):
+    """读取手动模式下任务固定注入的全局/项目记忆 id 列表。"""
+    pinned = memory_service.filter_active_task_pinned_memory_ids(
+        db,
+        current_user=current_user,
+        task_id=task_id,
+        pinned_card_ids=task_service.get_task_pinned_memory(db, task_id, current_user),
+    )
+    return memory_schemas.PinnedMemoryResponse(task_id=task_id, pinned_card_ids=pinned)
+
+
+@router.put(
+    "/{task_id}/memory/pinned",
+    response_model=memory_schemas.PinnedMemoryResponse,
+    summary="更新任务固定注入的共享记忆",
+)
+def set_task_pinned_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    request: memory_schemas.PinnedMemoryUpdate,
+):
+    """替换任务固定注入的记忆 id 集合；运行中的任务下一轮注入即生效。"""
+    active_pinned_ids = memory_service.filter_active_task_pinned_memory_ids(
+        db,
+        current_user=current_user,
+        task_id=task_id,
+        pinned_card_ids=request.pinned_card_ids,
+    )
+    pinned = task_service.set_task_pinned_memory(
+        db, task_id, current_user, active_pinned_ids
+    )
+    return memory_schemas.PinnedMemoryResponse(task_id=task_id, pinned_card_ids=pinned)
+
+
+@router.post(
+    "/{task_id}/memory",
+    response_model=memory_schemas.MemoryCardResponse,
+    status_code=201,
+    summary="新增或更新任务记忆卡片",
+)
+def upsert_task_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    card: memory_schemas.MemoryCardUpsertRequest,
+):
+    """新增或更新 MindMemOS 中的任务级记忆。"""
+    return memory_service.upsert_task_memory_card(db, task_id, current_user, card)
+
+
+@router.patch(
+    "/{task_id}/memory/{memory_id}",
+    response_model=memory_schemas.MemoryCardResponse,
+    summary="更新任务记忆卡片",
+)
+def update_task_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    memory_id: str,
+    card: memory_schemas.MemoryCardUpsertRequest,
+):
+    """按 ID 更新 MindMemOS 中的任务级记忆。"""
+    return memory_service.upsert_task_memory_card(
+        db,
+        task_id,
+        current_user,
+        card.model_copy(update={"id": memory_id}),
+    )
+
+
+@router.delete("/{task_id}/memory/{memory_id}", response_model=Message, summary="删除任务记忆卡片")
+def delete_task_memory(
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    memory_id: str,
+):
+    """删除 MindMemOS 中的任务级记忆。"""
+    memory_service.delete_task_memory_card(db, task_id, current_user, memory_id)
+    return Message(message="记忆卡片已删除")
 
 
 # ---- 运行 / 停止 ----
@@ -406,6 +536,7 @@ async def stream_task_logs(
     db: SessionDep,
     current_user: CurrentUser,
     task_id: uuid.UUID,
+    last_id: str = Query(default="0-0", pattern=r"^\d+-\d+$"),
 ):
     """SSE 端点，实时推送任务日志和状态更新。
 
@@ -439,6 +570,7 @@ async def stream_task_logs(
             redis_key=task_logs_key(task_id),
             connected_data={"task_id": str(task_id)},
             entry_handler=_task_log_entry_handler,
+            last_id=last_id,
             max_idle=1800.0,
             use_draining=True,
         )

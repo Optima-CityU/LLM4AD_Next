@@ -165,6 +165,10 @@ class Project(ProjectBase, TimeMixin, table=True):
     user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE")
     user: Optional["User"] = Relationship(back_populates="projects")  # type: ignore[name-defined]  # noqa: F821
     tasks: list["Task"] = Relationship(back_populates="project", cascade_delete=True)
+    memory_config: Optional["ProjectMemoryConfig"] = Relationship(
+        back_populates="project",
+        cascade_delete=True,
+    )  # type: ignore[name-defined]  # noqa: F821
 
 
 # ---- 任务 ----
@@ -299,6 +303,69 @@ class UserDefaultModel(UserDefaultModelBase, TimeMixin, table=True):
         foreign_key="user.id", ondelete="CASCADE", unique=True, index=True,
     )
     user: Optional["User"] = Relationship(back_populates="default_model")  # type: ignore[name-defined]  # noqa: F821
+
+
+class MemoryConfigBase(SQLModel):
+    """Shared per-user/per-project memory defaults."""
+
+    enabled: bool = Field(default=True, description="Whether memory injection is enabled by default")
+    include_user_memory: bool = Field(default=False, description="Inject user-scoped memories")
+    include_project_memory: bool = Field(default=False, description="Inject project-scoped memories")
+    include_task_memory: bool = Field(default=True, description="Inject task-scoped memories")
+    user_memory_limit: int = Field(default=0, ge=0, description="Max user memories injected")
+    project_memory_limit: int = Field(default=0, ge=0, description="Max project memories injected")
+    task_memory_limit: int = Field(default=5, ge=0, description="Max task memories injected")
+    retrieval_mode: str = Field(
+        default="auto", max_length=16,
+        description="Long-term memory retrieval mode: auto or manual",
+    )
+    pinned_card_ids: list[str] = Field(
+        default_factory=list, sa_type=JSON,
+        description="Fixed memory card ids injected in manual retrieval mode",
+    )
+    task_injection_mode: str = Field(
+        default="topk", max_length=16,
+        description="Task memory injection ordering: topk, weight, or random",
+    )
+    mindmemos_search_strategy: str = Field(default="fast", max_length=32)
+    mindmemos_rerank: bool = Field(default=False)
+    mindmemos_score_threshold: float | None = Field(default=None)
+    mindmemos_fail_open: bool = Field(default=True)
+    mindmemos_binding_id: str | None = Field(default=None, max_length=128)
+    mindmemos_chat_provider_id: uuid.UUID | None = Field(default=None)
+    mindmemos_chat_model: str | None = Field(default=None, max_length=255)
+    mindmemos_embedding_provider_id: uuid.UUID | None = Field(default=None)
+    mindmemos_embedding_model: str | None = Field(default=None, max_length=255)
+    mindmemos_embedding_dim: int | None = Field(default=None, gt=0)
+
+
+class UserMemoryConfig(MemoryConfigBase, TimeMixin, table=True):
+    """User-level memory defaults, one row per user."""
+
+    __tablename__ = "user_memory_config"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        ondelete="CASCADE",
+        unique=True,
+        index=True,
+    )
+
+
+class ProjectMemoryConfig(MemoryConfigBase, TimeMixin, table=True):
+    """Project-level memory defaults, one row per project."""
+
+    __tablename__ = "project_memory_config"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(
+        foreign_key="project.id",
+        ondelete="CASCADE",
+        unique=True,
+        index=True,
+    )
+    project: Project = Relationship(back_populates="memory_config")
 
 
 class TaskLog(SQLModel, TimeMixin, table=True):

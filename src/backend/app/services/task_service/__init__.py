@@ -62,6 +62,8 @@ from .files import (
     upload_task_data,
 )
 from .logs import get_task_logs, has_persisted_logs
+from .memory_observability import get_task_memory_observability
+from .pinned_memory import get_task_pinned_memory, set_task_pinned_memory
 from .stats import generate_result_render, get_config_schema, get_task_stats
 from .templates import EXAMPLES_DIR, list_example_templates
 from .workspace_download import (
@@ -111,6 +113,9 @@ __all__ = [
     # logs
     "has_persisted_logs",
     "get_task_logs",
+    "get_task_memory_observability",
+    "get_task_pinned_memory",
+    "set_task_pinned_memory",
     # stats
     "get_task_stats",
     "get_config_schema",
