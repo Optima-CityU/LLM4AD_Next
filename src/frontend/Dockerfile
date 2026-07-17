@@ -9,10 +9,20 @@ RUN bun install
 
 COPY ./src/frontend /app
 COPY ./docs /docs
+COPY ./VERSION /app/VERSION
 ARG VITE_API_URL
 ARG VITE_CODE_SERVER_URL
+ARG VITE_FOOTER_BEIAN
 
-RUN bun run build
+RUN APP_VERSION="$(tr -d '\r\n' < /app/VERSION)" && \
+    if [ "$APP_VERSION" = "develop" ]; then \
+      VITE_APP_VERSION="develop"; \
+    else \
+      VITE_APP_VERSION="v$APP_VERSION"; \
+    fi && \
+    VITE_APP_VERSION="$VITE_APP_VERSION" \
+    VITE_FOOTER_BEIAN="${VITE_FOOTER_BEIAN:-}" \
+    bun run build
 
 
 # Stage 1, based on Nginx, to have only the compiled app, ready for production with Nginx

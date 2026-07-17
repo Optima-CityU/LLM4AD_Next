@@ -24,6 +24,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Validate project version
+        run: python scripts/project_version.py --check
+
       - name: Validate Docker Hub configuration
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -114,6 +117,7 @@ jobs:
           build-args: |
             VITE_API_URL=
             VITE_CODE_SERVER_URL=${{ vars.VITE_CODE_SERVER_URL || '/code_ide' }}
+            VITE_FOOTER_BEIAN=${{ vars.VITE_FOOTER_BEIAN || '' }}
           tags: ${{ steps.frontend-meta.outputs.tags }}
           labels: ${{ steps.frontend-meta.outputs.labels }}
           cache-from: type=gha,scope=frontend

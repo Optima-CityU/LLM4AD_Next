@@ -28,11 +28,13 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import useAuth from "@/hooks/useAuth"
+import { GITHUB_ISSUES_URL } from "@/lib/siteMetadata"
 
 type Item = {
   icon: LucideIcon
   title: string
-  path: string
+  path?: string
+  href?: string
 }
 
 function NavItems({ items }: { items: Item[] }) {
@@ -58,13 +60,25 @@ function NavItems({ items }: { items: Item[] }) {
           <SidebarMenuButton
             className="h-10"
             tooltip={item.title}
-            isActive={currentPath === item.path}
+            isActive={item.path ? currentPath === item.path : false}
             asChild
           >
-            <RouterLink to={item.path} onClick={handleMenuClick}>
-              <item.icon />
-              <span>{item.title}</span>
-            </RouterLink>
+            {item.href ? (
+              <a
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handleMenuClick}
+              >
+                <item.icon />
+                <span>{item.title}</span>
+              </a>
+            ) : (
+              <RouterLink to={item.path!} onClick={handleMenuClick}>
+                <item.icon />
+                <span>{item.title}</span>
+              </RouterLink>
+            )}
           </SidebarMenuButton>
         </SidebarMenuItem>
       ))}
@@ -98,7 +112,7 @@ export function AppSidebar() {
     {
       icon: MessageSquareText,
       title: t("sidebar.feedback"),
-      path: "/feedback",
+      href: GITHUB_ISSUES_URL,
     },
     {
       icon: ScrollText,

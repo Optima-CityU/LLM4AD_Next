@@ -1,6 +1,7 @@
 import IslandBackground from "@/components/Common/IslandBackground"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import { Logo } from "@/components/Common/Logo"
+import { FooterMetadataLinks } from "@/components/Common/Footer"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { useTheme } from "@/components/theme-provider"
 
@@ -56,9 +57,10 @@ export function AuthLayout({ children }: AuthLayoutProps) {
           </div>
 
           {/* Footer */}
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            LLM4AD_Next - {new Date().getFullYear()}
-          </p>
+          <div className="mt-4 space-y-1 text-center text-xs text-muted-foreground">
+            <p>LLM4AD_Next - {new Date().getFullYear()}</p>
+            <FooterMetadataLinks />
+          </div>
         </div>
       </div>
     </div>

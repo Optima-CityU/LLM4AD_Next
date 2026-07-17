@@ -241,6 +241,7 @@ services:
       args:
         - VITE_API_URL=
         - VITE_CODE_SERVER_URL=${VITE_CODE_SERVER_URL:-/code_ide}
+        - VITE_FOOTER_BEIAN=${VITE_FOOTER_BEIAN:-}
         - NODE_ENV=production
     volumes:
       - ../src/frontend/nginx-api-proxy.conf:/etc/nginx/extra-conf.d/api-proxy.conf:ro
