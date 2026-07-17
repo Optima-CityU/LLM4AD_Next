@@ -26,6 +26,7 @@ from llm4ad.orchestrator.island_ga import (
     MigrationStrategy,
     MigrationTopology,
 )
+from llm4ad.orchestrator.mcts_ahd import MCTSAHDOrchestrator
 from llm4ad.orchestrator.meoh import MEoHOrchestrator
 from llm4ad.orchestrator.meoh_population import MEoHPopulation
 
@@ -48,6 +49,8 @@ __all__ = [
     # MEoH
     "MEoHOrchestrator",
     "MEoHPopulation",
+    # MCTS-AHD
+    "MCTSAHDOrchestrator",
     # State tracking
     "StateTracker",
     "StateTrackerConfig",

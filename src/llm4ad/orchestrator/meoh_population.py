@@ -176,40 +176,34 @@ class MEoHPopulation(BaseModel):
         return random.choices(valid, weights=weights, k=count)
 
     def has_duplicate(self, candidate: Algorithm) -> bool:
-        """Check whether a candidate should be treated as duplicate or dominated clone.
+        """Check whether a candidate is a duplicate of an existing individual.
 
-        A candidate is duplicate if its code is identical to an existing
-        individual, or if both share the same fully-valid objective vector
-        (no missing metrics) and the existing individual scores at least
-        as high.
+        A candidate is a duplicate only when its code is byte-for-byte identical
+        to an existing individual's code. This matches the legacy MEoH behaviour
+        (``has_duplicate_function`` compared ``str(f) == str(func)`` only).
+
+        Note: objective-vector deduplication was intentionally removed. Many
+        semantically distinct heuristics can produce the identical objective
+        vector (e.g. multiple different implementations that both degenerate to
+        the per-instance baseline cost). Rejecting them by objective vector
+        collapses the population — observed on CVRP where 31/32 candidates were
+        wrongly rejected, leaving a single baseline individual. Diversity among
+        equal-scoring individuals is instead handled downstream by the AST
+        similarity penalty in ``_dominance_scores``.
         """
         candidate_code = self._code_signature(candidate)
-        candidate_vector = self.get_objective_vector(candidate)
-        candidate_evaluated = candidate.is_evaluated()
-        # Skip objective-vector comparison when any metric is missing (-inf)
-        vector_valid = all(v != float("-inf") for v in candidate_vector)
+        if not candidate_code:
+            # No code to compare against — treat as unique so evolution proceeds.
+            return False
 
         code_len = len(candidate_code)
         has_artifacts = bool(candidate.code_artifacts)
         for existing in self.population + self.next_pop + self.elitist_archive:
             existing_code = self._code_signature(existing)
-            if candidate_code and candidate_code == existing_code:
+            if candidate_code == existing_code:
                 logger.debug(
                     f"[Dup-Code] candidate={candidate.id} matches={existing.id} "
                     f"code_len={code_len} artifacts={has_artifacts}"
-                )
-                return True
-            if not candidate_evaluated or not existing.is_evaluated():
-                continue
-            if not vector_valid:
-                continue
-            existing_vector = self.get_objective_vector(existing)
-            if any(v == float("-inf") for v in existing_vector):
-                continue
-            if candidate_vector == existing_vector and existing.score >= candidate.score:
-                logger.debug(
-                    f"[Dup-Vector] candidate={candidate.id} matches={existing.id} "
-                    f"vector={candidate_vector}"
                 )
                 return True
         return False
