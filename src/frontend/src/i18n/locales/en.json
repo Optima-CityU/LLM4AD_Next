@@ -1584,10 +1584,23 @@
       "taskModeContent": "No memory and temporary memory are always available. Long-term memory uses the bound service and lets this task reuse global, project, and task-scoped lessons.",
       "retrievalTitle": "Choose how to obtain shared memory",
       "retrievalContent": "Automatic retrieval recalls relevant global and project memories. Manual selection injects only the global or project cards you check. Pinned memory does not change task-memory injection.",
+      "autoRetrievalTitle": "Automatic retrieval: recall by relevance",
+      "autoRetrievalContent": "The system recalls relevant enabled global and project memories. Choose each scope independently and set how many cards each scope may inject.",
+      "manualRetrievalTitle": "Manual pinning: inject selected cards only",
+      "manualRetrievalContent": "Manual mode does not automatically search shared memory. Select pinned cards from global and project scopes separately; this is independent of task-memory injection.",
       "taskInjectionTitle": "Configure task-memory injection",
       "taskInjectionContent": "Memories produced while the task runs are injected according to this setting. Summarize and promote conclusions you want to reuse long term into project memory.",
+      "taskPromotionTitle": "Promote task lessons into project memory",
+      "taskPromotionContent": "Select one or more task-memory cards first, then use this action to generate a project-memory preview. After confirmation, the summary enters the current project and the original task memories remain unchanged.",
+      "advancedConfigTitle": "Advanced retrieval and reliability settings",
+      "advancedConfigContent": "Adjust search strategy, reranking and its score threshold, plus timeouts, extraction language, and fail-open behavior. Defaults suit most tasks; change them only when needed.",
+      "longTermUnavailableContent": "Long-term memory or its model binding is unavailable. You can still choose no memory or temporary memory; finish binding models in global memory to unlock long-term memory and its full retrieval settings.",
+      "projectScopeTitle": "Project memory: reusable in this project only",
+      "projectScopeContent": "Project memory sits between global and task memory: it never enters other projects, while later tasks in this project can retrieve and use it.",
       "projectTitle": "Manage project memory",
-      "projectContent": "This holds knowledge that belongs only to the current project and can be reused by its tasks. Select, summarize, and save valuable task lessons here from task cards."
+      "projectContent": "This holds knowledge that belongs only to the current project and can be reused by its tasks. Additions are previewed first and written only after confirmation; disabled cards are not retrieved or injected into later tasks.",
+      "projectPromotionTitle": "Promote task lessons into the project",
+      "projectPromotionContent": "Select several task-memory cards in the task side panel, then use Promote to project memory to generate a summary preview. After you confirm it, the result appears here as project memory."
     }
   },
   "demo": {

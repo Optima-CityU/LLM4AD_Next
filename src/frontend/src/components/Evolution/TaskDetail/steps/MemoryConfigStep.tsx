@@ -30,7 +30,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-import { downgradeUnavailableLongTermMemory } from "./memoryMode"
+import {
+  createTaskMemoryOnboardingPresentation,
+  downgradeUnavailableLongTermMemory,
+  type TaskMemoryOnboardingPhase,
+} from "./memoryMode"
 
 type MemoryValue = Record<string, unknown>
 
@@ -172,7 +176,8 @@ export default function MemoryConfigStep({
   readOnly = false,
 }: MemoryConfigStepProps) {
   const { t } = useTranslation()
-  const memory = safeMemory(value)
+  const [tourStep, setTourStep] = useState<number | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const { data: config, isLoading, isError } = useQuery({
     queryKey: ["projectMemoryConfig", projectId],
@@ -184,6 +189,18 @@ export default function MemoryConfigStep({
   const runtimeAvailable = Boolean(
     config?.system_runtime_available && config?.mindmemos_binding_id,
   )
+  const tourPhase: TaskMemoryOnboardingPhase = tourStep === 2
+    ? "manual"
+    : tourStep === 3
+      ? "injection"
+      : tourStep === 4
+        ? "advanced"
+        : "auto"
+  const isTaskMemoryTourActive = tourStep !== null
+  const memory = isTaskMemoryTourActive && runtimeAvailable
+    ? createTaskMemoryOnboardingPresentation(safeMemory(value), tourPhase)
+    : safeMemory(value)
+  const interactionLocked = readOnly || isTaskMemoryTourActive
   const enableMode = enableModeOf(memory)
   const isLongTerm = enableMode === "longterm"
   const retrievalMode: RetrievalMode = memory.retrieval_mode === "manual" ? "manual" : "auto"
@@ -199,12 +216,12 @@ export default function MemoryConfigStep({
   // Long-term memory needs an available runtime; fall back to temporary memory
   // if a previously-selected long-term config can no longer be served.
   useEffect(() => {
-    if (readOnly || isLoading) return
+    if (interactionLocked || isLoading) return
     const current = safeMemory(value)
     if (current.type === "mindmemos_cloud" && current.enabled !== false && !runtimeAvailable) {
       onChange(downgradeUnavailableLongTermMemory(current))
     }
-  }, [isLoading, onChange, readOnly, runtimeAvailable, value])
+  }, [interactionLocked, isLoading, onChange, runtimeAvailable, value])
 
   const updateField = (key: string, nextValue: unknown) => {
     const nextMemory = { ...longTermMemory(memory, config), [key]: nextValue }
@@ -269,8 +286,11 @@ export default function MemoryConfigStep({
     <div className="flex h-full flex-col">
       <OnboardingTour
         tourId="memory-task-config"
-        enabled={isLongTerm && runtimeAvailable}
-        steps={[
+        enabled={!isLoading}
+        stepIndex={tourStep ?? 0}
+        onStepIndexChange={setTourStep}
+        onStepChange={setTourStep}
+        steps={runtimeAvailable ? [
           {
             selector: '[data-tour="memory-mode-selector"]',
             title: t("tour.memory.taskModeTitle"),
@@ -278,9 +298,15 @@ export default function MemoryConfigStep({
             placement: "bottom",
           },
           {
-            selector: '[data-tour="memory-retrieval"]',
-            title: t("tour.memory.retrievalTitle"),
-            content: t("tour.memory.retrievalContent"),
+            selector: '[data-tour="memory-retrieval-auto"]',
+            title: t("tour.memory.autoRetrievalTitle"),
+            content: t("tour.memory.autoRetrievalContent"),
+            placement: "bottom",
+          },
+          {
+            selector: '[data-tour="memory-retrieval-manual"]',
+            title: t("tour.memory.manualRetrievalTitle"),
+            content: t("tour.memory.manualRetrievalContent"),
             placement: "bottom",
           },
           {
@@ -289,9 +315,22 @@ export default function MemoryConfigStep({
             content: t("tour.memory.taskInjectionContent"),
             placement: "top",
           },
+          {
+            selector: '[data-tour="memory-advanced-config"]',
+            title: t("tour.memory.advancedConfigTitle"),
+            content: t("tour.memory.advancedConfigContent"),
+            placement: "top",
+          },
+        ] : [
+          {
+            selector: '[data-tour="memory-mode-selector"]',
+            title: t("tour.memory.taskModeTitle"),
+            content: t("tour.memory.longTermUnavailableContent"),
+            placement: "bottom",
+          },
         ]}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1" inert={isTaskMemoryTourActive}>
         <div className="space-y-5">
           {/* Header */}
           <div className="rounded-md border bg-card/60 p-4">
@@ -326,14 +365,14 @@ export default function MemoryConfigStep({
                 title={t("evolution.memoryConfig.enable.none")}
                 hint={t("evolution.memoryConfig.enable.noneHint")}
                 selected={enableMode === "none"}
-                disabled={readOnly}
+                disabled={interactionLocked}
                 onSelect={() => onChange(disabledMemory())}
               />
               <EnableCard
                 title={t("evolution.memoryConfig.enable.temporary")}
                 hint={t("evolution.memoryConfig.enable.temporaryHint")}
                 selected={enableMode === "temporary"}
-                disabled={readOnly}
+                disabled={interactionLocked}
                 onSelect={() => onChange(temporaryMemory())}
               />
               <EnableCard
@@ -344,7 +383,7 @@ export default function MemoryConfigStep({
                     : t("evolution.memoryConfig.enable.longtermUnavailable")
                 }
                 selected={enableMode === "longterm"}
-                disabled={readOnly || !runtimeAvailable}
+                disabled={interactionLocked || !runtimeAvailable}
                 onSelect={() => onChange(longTermMemory(memory, config))}
               />
             </div>
@@ -363,7 +402,10 @@ export default function MemoryConfigStep({
           {isLongTerm && (
             <>
               {/* Step 2: retrieval mode */}
-              <div className="space-y-2" data-tour="memory-retrieval">
+              <div
+                className="space-y-2"
+                data-tour={retrievalMode === "auto" ? "memory-retrieval-auto" : "memory-retrieval-manual"}
+              >
                 <Label className="text-sm font-medium">
                   {t("evolution.memoryConfig.retrieval.label")}
                   <span className="ml-1 text-destructive">*</span>
@@ -373,14 +415,14 @@ export default function MemoryConfigStep({
                     title={t("evolution.memoryConfig.retrieval.auto")}
                     hint={t("evolution.memoryConfig.retrieval.autoHint")}
                     selected={retrievalMode === "auto"}
-                    disabled={readOnly}
+                    disabled={interactionLocked}
                     onSelect={() => updateField("retrieval_mode", "auto")}
                   />
                   <EnableCard
                     title={t("evolution.memoryConfig.retrieval.manual")}
                     hint={t("evolution.memoryConfig.retrieval.manualHint")}
                     selected={retrievalMode === "manual"}
-                    disabled={readOnly}
+                    disabled={interactionLocked}
                     onSelect={() => updateField("retrieval_mode", "manual")}
                   />
                 </div>
@@ -395,7 +437,7 @@ export default function MemoryConfigStep({
                         <div className="flex items-center gap-2">
                           <Checkbox
                             checked={boolValue(memory[row.enabledName], true)}
-                            disabled={readOnly}
+                            disabled={interactionLocked}
                             onCheckedChange={(checked) =>
                               updateField(row.enabledName, checked === true)
                             }
@@ -406,7 +448,7 @@ export default function MemoryConfigStep({
                           type="number"
                           min={0}
                           value={numberValue(memory[row.limitName], row.defaultLimit)}
-                          disabled={readOnly || !boolValue(memory[row.enabledName], true)}
+                          disabled={interactionLocked || !boolValue(memory[row.enabledName], true)}
                           onChange={(event) =>
                             updateField(
                               row.limitName,
@@ -436,7 +478,7 @@ export default function MemoryConfigStep({
                         scope="user"
                         title={t("evolution.memoryConfig.scopes.user")}
                         pinnedIds={pinnedIds}
-                        readOnly={readOnly}
+                        readOnly={interactionLocked}
                         onCommit={commitPinned}
                       />
                       <ManualScopePickerButton
@@ -444,7 +486,7 @@ export default function MemoryConfigStep({
                         projectId={projectId}
                         title={t("evolution.memoryConfig.scopes.project")}
                         pinnedIds={pinnedIds}
-                        readOnly={readOnly}
+                        readOnly={interactionLocked}
                         onCommit={commitPinned}
                       />
                     </div>
@@ -471,7 +513,7 @@ export default function MemoryConfigStep({
                       title={mode.label}
                       hint={mode.help}
                       selected={injectionMode === mode.value}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onSelect={() => updateField("task_injection_mode", mode.value)}
                     />
                   ))}
@@ -492,7 +534,7 @@ export default function MemoryConfigStep({
                       max={1}
                       step={0.05}
                       value={clampUnit(memory.task_injection_lambda, 0.5)}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onChange={(event) =>
                         updateField("task_injection_lambda", clampUnit(event.target.value, 0.5))
                       }
@@ -510,7 +552,7 @@ export default function MemoryConfigStep({
                     type="number"
                     min={0}
                     value={numberValue(memory.task_memory_limit, DEFAULT_TASK_LIMIT)}
-                    disabled={readOnly}
+                    disabled={interactionLocked}
                     onChange={(event) =>
                       updateField(
                         "task_memory_limit",
@@ -525,7 +567,14 @@ export default function MemoryConfigStep({
               </div>
 
               {/* Step 4: advanced config */}
-              <details className="rounded-md border bg-background/70">
+              <details
+                className="rounded-md border bg-background/70"
+                data-tour="memory-advanced-config"
+                open={isTaskMemoryTourActive ? tourStep === 4 : advancedOpen}
+                onToggle={(event) => {
+                  if (!isTaskMemoryTourActive) setAdvancedOpen(event.currentTarget.open)
+                }}
+              >
                 <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
                   {t("evolution.memoryConfig.advanced.label")}
                 </summary>
@@ -534,7 +583,7 @@ export default function MemoryConfigStep({
                     <Label>{t("evolution.memoryConfig.searchStrategy")}</Label>
                     <Select
                       value={String(memory.mindmemos_search_strategy || "fast")}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onValueChange={(nextValue) =>
                         updateField("mindmemos_search_strategy", nextValue)
                       }
@@ -564,7 +613,7 @@ export default function MemoryConfigStep({
                           ? ""
                           : String(memory.mindmemos_score_threshold)
                       }
-                      disabled={readOnly || !boolValue(memory.mindmemos_rerank, false)}
+                      disabled={interactionLocked || !boolValue(memory.mindmemos_rerank, false)}
                       placeholder={t("evolution.memoryConfig.scoreThresholdPlaceholder")}
                       onChange={(event) =>
                         updateField("mindmemos_score_threshold", scoreValue(event.target.value))
@@ -582,7 +631,7 @@ export default function MemoryConfigStep({
                       min={0}
                       step={1}
                       value={timeoutInputValue(memory.mindmemos_request_timeout, 300)}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onChange={(event) =>
                         updateField("mindmemos_request_timeout", timeoutValue(event.target.value))
                       }
@@ -599,7 +648,7 @@ export default function MemoryConfigStep({
                       min={0}
                       step={1}
                       value={timeoutInputValue(memory.mindmemos_add_timeout, 300)}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onChange={(event) =>
                         updateField("mindmemos_add_timeout", timeoutValue(event.target.value))
                       }
@@ -613,7 +662,7 @@ export default function MemoryConfigStep({
                     <Label>{t("evolution.memoryConfig.extractionLanguage")}</Label>
                     <Select
                       value={String(memory.mindmemos_extraction_prompt_language || "auto")}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onValueChange={(nextValue) =>
                         updateField("mindmemos_extraction_prompt_language", nextValue)
                       }
@@ -641,7 +690,7 @@ export default function MemoryConfigStep({
                   <div className="flex items-start gap-2 rounded-md border bg-muted/20 p-3">
                     <Checkbox
                       checked={boolValue(memory.mindmemos_rerank, false)}
-                      disabled={readOnly || !config?.system_rerank_enabled}
+                      disabled={interactionLocked || !config?.system_rerank_enabled}
                       onCheckedChange={(checked) =>
                         updateField("mindmemos_rerank", checked === true)
                       }
@@ -659,7 +708,7 @@ export default function MemoryConfigStep({
                   <div className="flex items-start gap-2 rounded-md border bg-muted/20 p-3">
                     <Checkbox
                       checked={boolValue(memory.mindmemos_fail_open, true)}
-                      disabled={readOnly}
+                      disabled={interactionLocked}
                       onCheckedChange={(checked) =>
                         updateField("mindmemos_fail_open", checked === true)
                       }
@@ -685,12 +734,12 @@ export default function MemoryConfigStep({
       <div className="shrink-0 py-2">
         <div className="flex justify-center gap-6">
           {onBack && (
-            <Button type="button" variant="outline" onClick={onBack}>
+            <Button type="button" variant="outline" onClick={onBack} disabled={interactionLocked}>
               {t("common.previousStep")}
             </Button>
           )}
           {onNext && (
-            <Button type="button" onClick={onNext} disabled={nextDisabled}>
+            <Button type="button" onClick={onNext} disabled={nextDisabled || interactionLocked}>
               {t("common.nextStep")}
             </Button>
           )}

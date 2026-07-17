@@ -30,10 +30,12 @@ export default function ProjectMemoryDialog({
   const [config, setConfig] = useState<MemoryConfig | null>(null)
   const [isLoadingConfig, setIsLoadingConfig] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
+  const [tourStep, setTourStep] = useState<number | null>(null)
 
   useEffect(() => {
     setConfig(null)
     setLoadFailed(false)
+    setTourStep(null)
   }, [projectId])
 
   const hasProject = Boolean(projectId)
@@ -103,7 +105,23 @@ export default function ProjectMemoryDialog({
     ? t("memory.projectDialog.badges.modelBound")
     : t("memory.projectDialog.badges.modelUnbound")
 
+  // The walkthrough is portalled to document.body so it can spotlight a
+  // dialog target. While the Radix dialog is intentionally non-modal for
+  // that portal to remain accessible, inert the application root and the
+  // dialog content; only the walkthrough controls remain keyboard reachable.
+  useEffect(() => {
+    if (tourStep === null) return
+    const appRoot = document.getElementById("root")
+    if (!appRoot) return
+    const wasInert = appRoot.hasAttribute("inert")
+    appRoot.setAttribute("inert", "")
+    return () => {
+      if (!wasInert) appRoot.removeAttribute("inert")
+    }
+  }, [tourStep])
+
   const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && tourStep !== null) return
     if (nextOpen) {
       setIsLoadingConfig(true)
       setLoadFailed(false)
@@ -112,15 +130,30 @@ export default function ProjectMemoryDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} modal={tourStep === null} onOpenChange={handleOpenChange}>
       <OnboardingTour
         tourId="project-memory"
-        enabled={open && !isConfigLoading && memoryReady}
+        enabled={open && !isConfigLoading && !loadFailed}
+        stepIndex={tourStep ?? 0}
+        onStepIndexChange={setTourStep}
+        onStepChange={setTourStep}
         steps={[
+          {
+            selector: '[data-tour="project-memory-scope"]',
+            title: t("tour.memory.projectScopeTitle"),
+            content: t("tour.memory.projectScopeContent"),
+            placement: "bottom",
+          },
           {
             selector: '[data-tour="project-memory-manager"]',
             title: t("tour.memory.projectTitle"),
             content: t("tour.memory.projectContent"),
+            placement: "left",
+          },
+          {
+            selector: '[data-tour="project-memory-manager"]',
+            title: t("tour.memory.projectPromotionTitle"),
+            content: t("tour.memory.projectPromotionContent"),
             placement: "left",
           },
         ]}
@@ -138,35 +171,47 @@ export default function ProjectMemoryDialog({
           <span>{t("memory.projectDialog.trigger")}</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-hidden p-0 sm:max-w-6xl">
-        <DialogHeader className="border-b px-5 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-3 pr-8">
-            <div className="min-w-0">
-              <DialogTitle className="flex items-center gap-2">
-                <FolderKanban className="size-4 text-primary" />
-                {t("memory.projectDialog.title")}
-              </DialogTitle>
-              <DialogDescription className="mt-1">{dialogDescription}</DialogDescription>
+      <DialogContent
+        className="max-h-[90vh] overflow-hidden p-0 sm:max-w-6xl"
+        showCloseButton={false}
+        onEscapeKeyDown={(event) => {
+          if (tourStep !== null) event.preventDefault()
+        }}
+        onPointerDownOutside={(event) => {
+          if (tourStep !== null) event.preventDefault()
+        }}
+      >
+        <div inert={tourStep !== null}>
+          <DialogHeader className="border-b px-5 py-4" data-tour="project-memory-scope">
+            <div className="flex flex-wrap items-start justify-between gap-3 pr-8">
+              <div className="min-w-0">
+                <DialogTitle className="flex items-center gap-2">
+                  <FolderKanban className="size-4 text-primary" />
+                  {t("memory.projectDialog.title")}
+                </DialogTitle>
+                <DialogDescription className="mt-1">{dialogDescription}</DialogDescription>
+              </div>
+              <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                <Badge variant="outline">{t("memory.projectDialog.badges.scope")}</Badge>
+                <Badge variant={systemReady ? "default" : "secondary"}>{serviceLabel}</Badge>
+                <Badge variant={bindingReady ? "outline" : "secondary"}>{bindingLabel}</Badge>
+              </div>
             </div>
-            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-              <Badge variant="outline">{t("memory.projectDialog.badges.scope")}</Badge>
-              <Badge variant={systemReady ? "default" : "secondary"}>{serviceLabel}</Badge>
-              <Badge variant={bindingReady ? "outline" : "secondary"}>{bindingLabel}</Badge>
-            </div>
-          </div>
-        </DialogHeader>
+          </DialogHeader>
 
-        <div className="max-h-[calc(90vh-96px)] min-h-[560px] overflow-y-auto p-4">
-          <div data-tour="project-memory-manager">
-            <MemoryCardManager
-              scope="project"
-              projectId={projectId}
-              title={t("memory.projectDialog.cardTitle")}
-              description={t("memory.projectDialog.cardDescription")}
-              disabled={memoryDisabled}
-              disabledReason={disabledReason}
-              loadEnabled={memoryReady}
-            />
+          <div className="max-h-[calc(90vh-96px)] min-h-[560px] overflow-y-auto p-4">
+            <div data-tour="project-memory-manager">
+              <MemoryCardManager
+                scope="project"
+                projectId={projectId}
+                title={t("memory.projectDialog.cardTitle")}
+                description={t("memory.projectDialog.cardDescription")}
+                disabled={memoryDisabled}
+                disabledReason={disabledReason}
+                loadEnabled={memoryReady}
+                onboardingLocked={tourStep !== null}
+              />
+            </div>
           </div>
         </div>
       </DialogContent>

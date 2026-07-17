@@ -35,6 +35,7 @@ import type {
 import { Llm4AdMemoryService, Llm4AdTasksService, UtilsService } from "@/client"
 import PanelErrorBoundary from "@/components/Common/PanelErrorBoundary"
 import MemoryCardManager from "@/components/Memory/MemoryCardManager"
+import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -690,7 +691,9 @@ function TaskMemorySection({
   const [usageStatsOpen, setUsageStatsOpen] = useState(false)
   const [contributionOpen, setContributionOpen] = useState(false)
   const [pinnedOpen, setPinnedOpen] = useState(false)
+  const [promotionTourStep, setPromotionTourStep] = useState<number | null>(null)
   const taskScopeId = task.group_id ?? task.id
+  const promotionTourActive = promotionTourStep !== null
 
   useEffect(() => {
     setMemoryCount(null)
@@ -698,6 +701,7 @@ function TaskMemorySection({
     setUsageStatsOpen(false)
     setContributionOpen(false)
     setPinnedOpen(false)
+    setPromotionTourStep(null)
   }, [taskScopeId])
 
   const { data: featureFlags } = useQuery({
@@ -994,18 +998,36 @@ function TaskMemorySection({
             </div>
           )}
           {canLoadCards && (
-            <MemoryCardManager
-              scope="task"
-              taskId={taskScopeId}
-              title={t("evolution.taskMemory.title")}
-              description={t("evolution.taskMemory.description")}
-              embedded
-              loadEnabled={canLoadCards}
-              refreshSignal={refreshSignal}
-              onCountChange={setMemoryCount}
-              defaultExtractionPromptLanguage={taskMemoryExtractionPromptLanguage(task)}
-              promotionProjectId={task.project_id}
-            />
+            <>
+              <OnboardingTour
+                tourId="task-memory-promotion"
+                enabled={isOpen && canLoadCards && Boolean(task.project_id)}
+                stepIndex={promotionTourStep ?? 0}
+                onStepIndexChange={setPromotionTourStep}
+                onStepChange={setPromotionTourStep}
+                steps={[
+                  {
+                    selector: '[data-tour="task-memory-promotion"]',
+                    title: t("tour.memory.taskPromotionTitle"),
+                    content: t("tour.memory.taskPromotionContent"),
+                    placement: "top",
+                  },
+                ]}
+              />
+              <MemoryCardManager
+                scope="task"
+                taskId={taskScopeId}
+                title={t("evolution.taskMemory.title")}
+                description={t("evolution.taskMemory.description")}
+                embedded
+                loadEnabled={canLoadCards}
+                refreshSignal={refreshSignal}
+                onCountChange={setMemoryCount}
+                defaultExtractionPromptLanguage={taskMemoryExtractionPromptLanguage(task)}
+                promotionProjectId={task.project_id}
+                onboardingLocked={promotionTourActive}
+              />
+            </>
           )}
         </div>
       )}

@@ -330,6 +330,7 @@ export default function MemoryCardManager({
   defaultExtractionPromptLanguage = "auto",
   promotionProjectId,
   onboardingDemoActive = false,
+  onboardingLocked = false,
   onboardingDemoPhase = null,
   onOnboardingDemoComplete,
 }: {
@@ -348,6 +349,8 @@ export default function MemoryCardManager({
   defaultExtractionPromptLanguage?: ExtractionPromptLanguage
   promotionProjectId?: string
   onboardingDemoActive?: boolean
+  /** Lock ordinary card management while a parent walkthrough is active. */
+  onboardingLocked?: boolean
   onboardingDemoPhase?: OnboardingMemoryDemoPhase | null
   onOnboardingDemoComplete?: (phase: "preview" | "saved") => void
 }) {
@@ -401,6 +404,7 @@ export default function MemoryCardManager({
   const projectPreviewQuery = scopeQuery("project", promotionProjectId)
   const scopeKey = `${scope}:${projectId ?? ""}:${taskId ?? ""}`
   const canPromoteTaskCards = scope === "task" && Boolean(promotionProjectId && taskId)
+  const interactionLocked = onboardingDemoActive || onboardingLocked
   const normalizedDefaultExtractionPromptLanguage = (
     ["auto", "ZH", "EN"].includes(defaultExtractionPromptLanguage)
       ? defaultExtractionPromptLanguage
@@ -604,7 +608,7 @@ export default function MemoryCardManager({
   }, [])
 
   const openCreate = () => {
-    if (disabled || onboardingDemoActive) return
+    if (disabled || interactionLocked) return
     resetExtraction()
     setIsExtractionOpen(true)
   }
@@ -618,7 +622,7 @@ export default function MemoryCardManager({
   }
 
   const openPromotion = () => {
-    if (!canPromoteTaskCards || !promotionProjectId || !taskId) return
+    if (interactionLocked || !canPromoteTaskCards || !promotionProjectId || !taskId) return
     if (selectedPromotionIds.length === 0) {
       toast.error("请先选择至少一条任务记忆")
       return
@@ -631,7 +635,7 @@ export default function MemoryCardManager({
   }
 
   const openEdit = (card: MemoryCard) => {
-    if (disabled) return
+    if (disabled || interactionLocked) return
     setDraft(toDraft(card))
     setEditingId(card.id)
     setIsEditorOpen(true)
@@ -936,7 +940,7 @@ export default function MemoryCardManager({
   }
 
   const toggleCard = async (card: MemoryCard) => {
-    if (onboardingDemoActive) return
+    if (interactionLocked) return
     if (disabled) {
       toast.error(disabledReason || "当前记忆管理不可用")
       return
@@ -1061,11 +1065,11 @@ export default function MemoryCardManager({
   ])
 
   useEffect(() => {
-    if (!onboardingDemoActive) return
+    if (!interactionLocked) return
     setIsEditorOpen(false)
     setDeleteTarget(null)
     setIsExtractionCloseConfirmOpen(false)
-  }, [onboardingDemoActive])
+  }, [interactionLocked])
 
   const iconAction = (
     label: string,
@@ -1146,6 +1150,7 @@ export default function MemoryCardManager({
 
   return (
     <div
+      inert={interactionLocked}
       className={cn(
         embedded ? "min-h-0 bg-transparent" : "rounded-lg border bg-card/60",
         className,
@@ -1196,6 +1201,7 @@ export default function MemoryCardManager({
                 className="h-8 gap-1.5 px-2 text-xs"
                 disabled={disabled || selectedPromotionIds.length === 0}
                 onClick={openPromotion}
+                data-tour="task-memory-promotion"
               >
                 <Sparkles className="size-3.5" />
                 提升到项目记忆{selectedPromotionIds.length > 0 ? ` (${selectedPromotionIds.length})` : ""}

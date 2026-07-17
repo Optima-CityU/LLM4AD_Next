@@ -160,6 +160,16 @@ export default function OnboardingTour({
     return () => window.clearTimeout(t)
   }, [enabled, tourId, startDelay, isDemoTour])
 
+  // A tour can lose its target while a parent dialog closes, a task changes,
+  // or the prerequisite data becomes unavailable. Explicitly end it so a
+  // portal overlay can never outlive the UI it is explaining.
+  useEffect(() => {
+    if (enabled) return
+    setActive(false)
+    setRect(null)
+    setTooltipPos(null)
+  }, [enabled])
+
   const stepIndex = controlledStepIndex ?? uncontrolledStepIndex
   const setStepIndex = (nextStepIndex: number) => {
     if (controlledStepIndex === undefined) setUncontrolledStepIndex(nextStepIndex)
@@ -229,6 +239,12 @@ export default function OnboardingTour({
     ro.observe(el)
     return () => ro.disconnect()
   }, [tooltipHeight])
+
+  useEffect(() => {
+    if (!active || !tooltipPos) return
+    const frame = window.requestAnimationFrame(() => tooltipRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [active, tooltipPos])
 
   if (!active || !currentStep || !rect || !tooltipPos) return null
 
@@ -346,6 +362,7 @@ export default function OnboardingTour({
         ref={tooltipRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         style={{
           position: "fixed",
           top: tooltipPos.top,
