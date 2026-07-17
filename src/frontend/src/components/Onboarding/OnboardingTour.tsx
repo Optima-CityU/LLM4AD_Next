@@ -33,6 +33,9 @@ interface OnboardingTourProps {
    * to avoid stacking with the demo walkthrough.
    */
   isDemoTour?: boolean
+  onStepChange?: (stepIndex: number | null) => void
+  stepIndex?: number
+  onStepIndexChange?: (stepIndex: number) => void
 }
 
 interface Rect {
@@ -127,10 +130,13 @@ export default function OnboardingTour({
   enabled = true,
   startDelay = 200,
   isDemoTour = false,
+  onStepChange,
+  stepIndex: controlledStepIndex,
+  onStepIndexChange,
 }: OnboardingTourProps) {
   const { t } = useTranslation()
   const [active, setActive] = useState(false)
-  const [stepIndex, setStepIndex] = useState(0)
+  const [uncontrolledStepIndex, setUncontrolledStepIndex] = useState(0)
   const [rect, setRect] = useState<Rect | null>(null)
   const [tooltipHeight, setTooltipHeight] = useState(TOOLTIP_HEIGHT_EST)
   const [tooltipPos, setTooltipPos] = useState<{
@@ -154,6 +160,11 @@ export default function OnboardingTour({
     return () => window.clearTimeout(t)
   }, [enabled, tourId, startDelay, isDemoTour])
 
+  const stepIndex = controlledStepIndex ?? uncontrolledStepIndex
+  const setStepIndex = (nextStepIndex: number) => {
+    if (controlledStepIndex === undefined) setUncontrolledStepIndex(nextStepIndex)
+    onStepIndexChange?.(nextStepIndex)
+  }
   const currentStep = steps[stepIndex]
 
   // Notify the active step that it has become current. Wrapped in an effect
@@ -164,64 +175,44 @@ export default function OnboardingTour({
     currentStep.onEnter?.()
   }, [active, stepIndex])
 
+  useEffect(() => {
+    onStepChange?.(active ? stepIndex : null)
+  }, [active, onStepChange, stepIndex])
+
   // Locate the current target element and recompute geometry.
   useLayoutEffect(() => {
     if (!active || !currentStep) return
 
     let cancelled = false
-    let attempts = 0
+    let frame: number | null = null
 
-    const tick = () => {
+    const updateTarget = () => {
       if (cancelled) return
       const el = document.querySelector(currentStep.selector)
       if (el) {
         const r = getRect(el)
-        // Scroll into view if necessary
+        setRect(r)
+        setTooltipPos(
+          computeTooltipPosition(r, currentStep.placement, tooltipHeight),
+        )
         if (r.top < 0 || r.top + r.height > window.innerHeight) {
           ;(el as HTMLElement).scrollIntoView({
             block: "center",
             behavior: "smooth",
           })
-          // Recompute after scroll on next frame
-          rafRef.current = requestAnimationFrame(() => {
-            const r2 = getRect(el)
-            setRect(r2)
-            setTooltipPos(
-              computeTooltipPosition(r2, currentStep.placement, tooltipHeight),
-            )
-          })
-        } else {
-          setRect(r)
-          setTooltipPos(
-            computeTooltipPosition(r, currentStep.placement, tooltipHeight),
-          )
         }
-        return
+      } else {
+        setRect(null)
+        setTooltipPos(null)
       }
-      attempts += 1
-      if (attempts < 30) {
-        window.setTimeout(tick, 100)
-      }
+      frame = requestAnimationFrame(updateTarget)
     }
-    tick()
-
-    const onUpdate = () => {
-      const el = document.querySelector(currentStep.selector)
-      if (!el) return
-      const r = getRect(el)
-      setRect(r)
-      setTooltipPos(
-        computeTooltipPosition(r, currentStep.placement, tooltipHeight),
-      )
-    }
-    window.addEventListener("resize", onUpdate)
-    window.addEventListener("scroll", onUpdate, true)
+    updateTarget()
 
     return () => {
       cancelled = true
+      if (frame !== null) cancelAnimationFrame(frame)
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      window.removeEventListener("resize", onUpdate)
-      window.removeEventListener("scroll", onUpdate, true)
     }
   }, [active, currentStep, tooltipHeight])
 
@@ -252,9 +243,9 @@ export default function OnboardingTour({
   }
   const next = () => {
     if (isLast) finish()
-    else setStepIndex((i) => i + 1)
+    else setStepIndex(stepIndex + 1)
   }
-  const prev = () => setStepIndex((i) => Math.max(0, i - 1))
+  const prev = () => setStepIndex(Math.max(0, stepIndex - 1))
 
   // Spotlight cutout via four overlay rectangles around the target.
   const overlayBg = "rgba(0, 8, 24, 0.55)"

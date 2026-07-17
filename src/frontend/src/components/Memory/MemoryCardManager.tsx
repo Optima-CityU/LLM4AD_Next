@@ -68,6 +68,14 @@ import TagInput from "./TagInput"
 
 type ViewMode = "cards" | "list"
 type ExtractionPromptLanguage = "auto" | "ZH" | "EN"
+export type OnboardingMemoryDemoPhase =
+  | "input"
+  | "generating"
+  | "preview"
+  | "saving"
+  | "saved"
+  | "disabled"
+  | "enabled"
 type ExtractionStreamEvent = {
   event?: "progress" | "completed" | "cancelled" | "error" | string
   stage?: string
@@ -134,6 +142,18 @@ const PROJECT_EXTRACTION_EXAMPLE_KEYS = [
   "algorithm",
   "reflection",
 ] as const
+
+const ONBOARDING_DEMO_CARD: MemoryCard = {
+  id: "__onboarding_demo_stability_first__",
+  type: "general_insight",
+  title: "稳定性优先",
+  content: "评估算法时优先比较稳定性、方差与失败率；单次最优结果不能替代重复实验结论。",
+  enabled: true,
+  source: "onboarding_demo",
+  tags: ["稳定性", "评估"],
+}
+const ONBOARDING_DEMO_PREVIEW_ID = "__onboarding_demo_preview__"
+const ONBOARDING_DEMO_CONTENT = "评估算法时优先比较稳定性、方差与失败率；单次最优结果不能替代重复实验结论。"
 
 function toDraft(card: MemoryCard): MemoryCardDraft {
   return {
@@ -309,6 +329,9 @@ export default function MemoryCardManager({
   onCountChange,
   defaultExtractionPromptLanguage = "auto",
   promotionProjectId,
+  onboardingDemoActive = false,
+  onboardingDemoPhase = null,
+  onOnboardingDemoComplete,
 }: {
   scope: MemoryScope
   projectId?: string
@@ -324,6 +347,9 @@ export default function MemoryCardManager({
   onCountChange?: (count: number | null) => void
   defaultExtractionPromptLanguage?: ExtractionPromptLanguage
   promotionProjectId?: string
+  onboardingDemoActive?: boolean
+  onboardingDemoPhase?: OnboardingMemoryDemoPhase | null
+  onOnboardingDemoComplete?: (phase: "preview" | "saved") => void
 }) {
   const { t, i18n } = useTranslation()
   const uiLang: "zh" | "en" = i18n.language?.startsWith("zh") ? "zh" : "en"
@@ -366,6 +392,7 @@ export default function MemoryCardManager({
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
   const skipNextPreviewDiscard = useRef(false)
   const extractionAbortRef = useRef<AbortController | null>(null)
+  const onboardingDemoTimerRef = useRef<number | null>(null)
 
   const endpoint = cardsEndpoint(scope, projectId, taskId, page, pageSize)
   const mutationEndpoint = `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/memory/cards`
@@ -388,6 +415,7 @@ export default function MemoryCardManager({
     ),
     [i18n.language, t],
   )
+
   const extractionExamples = useMemo(() => {
     const group = scope === "project" ? "project" : "default"
     const keys = group === "project"
@@ -537,8 +565,13 @@ export default function MemoryCardManager({
   }, [])
 
   const removeCard = useCallback((cardId: string) => {
-    setCards((current) => current.filter((card) => card.id !== cardId))
-    setTotal((value) => (value === null ? value : Math.max(0, value - 1)))
+    setCards((current) => {
+      const next = current.filter((card) => card.id !== cardId)
+      if (next.length !== current.length) {
+        setTotal((value) => (value === null ? value : Math.max(0, value - 1)))
+      }
+      return next
+    })
   }, [])
 
   const removeCards = useCallback((cardIds: string[]) => {
@@ -571,7 +604,7 @@ export default function MemoryCardManager({
   }, [])
 
   const openCreate = () => {
-    if (disabled) return
+    if (disabled || onboardingDemoActive) return
     resetExtraction()
     setIsExtractionOpen(true)
   }
@@ -903,6 +936,7 @@ export default function MemoryCardManager({
   }
 
   const toggleCard = async (card: MemoryCard) => {
+    if (onboardingDemoActive) return
     if (disabled) {
       toast.error(disabledReason || "当前记忆管理不可用")
       return
@@ -930,6 +964,108 @@ export default function MemoryCardManager({
       setCardToggling(card.id, false)
     }
   }
+
+  useEffect(() => {
+    const clearTimer = () => {
+      if (onboardingDemoTimerRef.current !== null) {
+        window.clearTimeout(onboardingDemoTimerRef.current)
+        onboardingDemoTimerRef.current = null
+      }
+    }
+    const showPreview = () => {
+      setExtractionContent(ONBOARDING_DEMO_CONTENT)
+      setExtractionPromptLanguage("ZH")
+      setIsPromotionMode(false)
+      setIsExtractionOpen(true)
+      setPreviewId(ONBOARDING_DEMO_PREVIEW_ID)
+      setPreviewItems([ONBOARDING_DEMO_CARD])
+      setSelectedPreviewIds([ONBOARDING_DEMO_CARD.id])
+      setPreviewTargetScope(scope)
+      setIsGeneratingPreview(false)
+      setIsCommittingPreview(false)
+      setExtractionProgress({ stage: "completed", message: "记忆提取完成", percent: 100 })
+      setExtractionLogs(["正在分析内容边界", "正在提取结构化记忆", "记忆提取完成"])
+    }
+
+    clearTimer()
+    if (onboardingDemoPhase === null) {
+      removeCard(ONBOARDING_DEMO_CARD.id)
+      resetExtraction()
+      setIsExtractionOpen(false)
+      return clearTimer
+    }
+
+    if (onboardingDemoPhase === "input") {
+      removeCard(ONBOARDING_DEMO_CARD.id)
+      resetExtraction()
+      setExtractionContent(ONBOARDING_DEMO_CONTENT)
+      setExtractionPromptLanguage("ZH")
+      setIsExtractionOpen(true)
+      return clearTimer
+    }
+
+    if (onboardingDemoPhase === "generating") {
+      setIsPromotionMode(false)
+      setIsExtractionOpen(true)
+      setExtractionContent(ONBOARDING_DEMO_CONTENT)
+      setExtractionPromptLanguage("ZH")
+      setPreviewId(null)
+      setPreviewItems([])
+      setSelectedPreviewIds([])
+      setIsGeneratingPreview(true)
+      setExtractionProgress({ stage: "llm_extracting", message: "正在提取结构化记忆", percent: 58 })
+      setExtractionLogs(["正在分析内容边界", "正在提取结构化记忆"])
+      onboardingDemoTimerRef.current = window.setTimeout(() => {
+        onboardingDemoTimerRef.current = null
+        showPreview()
+        onOnboardingDemoComplete?.("preview")
+      }, 650)
+      return clearTimer
+    }
+
+    if (onboardingDemoPhase === "preview") {
+      showPreview()
+      return clearTimer
+    }
+
+    if (onboardingDemoPhase === "saving") {
+      showPreview()
+      setIsCommittingPreview(true)
+      onboardingDemoTimerRef.current = window.setTimeout(() => {
+        onboardingDemoTimerRef.current = null
+        mergeCards([ONBOARDING_DEMO_CARD])
+        resetExtraction()
+        setIsExtractionOpen(false)
+        onOnboardingDemoComplete?.("saved")
+      }, 350)
+      return clearTimer
+    }
+
+    if (onboardingDemoPhase === "saved") {
+      mergeCards([ONBOARDING_DEMO_CARD])
+      setIsExtractionOpen(false)
+      return clearTimer
+    }
+
+    replaceCard({ ...ONBOARDING_DEMO_CARD, enabled: onboardingDemoPhase === "enabled" })
+    setIsExtractionOpen(false)
+    return clearTimer
+  }, [
+    mergeCards,
+    onboardingDemoPhase,
+    onOnboardingDemoComplete,
+    removeCard,
+    replaceCard,
+    resetExtraction,
+    scope,
+  ])
+
+  useEffect(() => {
+    if (!onboardingDemoActive) return
+    setIsEditorOpen(false)
+    setDeleteTarget(null)
+    setIsExtractionCloseConfirmOpen(false)
+  }, [onboardingDemoActive])
 
   const iconAction = (
     label: string,
@@ -962,9 +1098,10 @@ export default function MemoryCardManager({
             type="button"
             size="icon"
             variant="ghost"
-            disabled={disabled || isToggling}
+            disabled={disabled || isToggling || onboardingDemoActive}
             aria-label={toggleAriaLabel}
             className="transition-opacity"
+            data-tour={card.id === ONBOARDING_DEMO_CARD.id ? "memory-onboarding-toggle" : undefined}
             onClick={() => void toggleCard(card)}
           >
             {isToggling ? (
@@ -982,7 +1119,7 @@ export default function MemoryCardManager({
             type="button"
             size="icon"
             variant="ghost"
-            disabled={disabled}
+            disabled={disabled || onboardingDemoActive}
             aria-label="编辑记忆"
             onClick={() => openEdit(card)}
           >
@@ -995,7 +1132,7 @@ export default function MemoryCardManager({
             type="button"
             size="icon"
             variant="ghost"
-            disabled={disabled}
+            disabled={disabled || onboardingDemoActive}
             aria-label="删除记忆"
             className="text-destructive hover:text-destructive"
             onClick={() => setDeleteTarget(card)}
@@ -1034,7 +1171,14 @@ export default function MemoryCardManager({
               <RefreshCw className="size-4" />
             </Button>,
           )}
-          <Button type="button" size="sm" className="gap-1.5" disabled={disabled} onClick={openCreate}>
+          <Button
+            type="button"
+            size="sm"
+            className="gap-1.5"
+            disabled={disabled || onboardingDemoActive}
+            onClick={openCreate}
+            data-tour="memory-add-button"
+          >
             <Sparkles className="size-3.5" />
             新增记忆
           </Button>
@@ -1262,6 +1406,7 @@ export default function MemoryCardManager({
             {visibleCards.map((card) => (
               <div
                 key={card.id}
+                data-tour={card.id === ONBOARDING_DEMO_CARD.id ? "memory-onboarding-card" : undefined}
                 className={cn(
                   "grid items-center gap-3 border-b px-3 py-2 last:border-b-0",
                   listGridColumns,
@@ -1314,6 +1459,7 @@ export default function MemoryCardManager({
             {visibleCards.map((card) => (
               <div
                 key={card.id}
+                data-tour={card.id === ONBOARDING_DEMO_CARD.id ? "memory-onboarding-card" : undefined}
                 className={cn(
                   "flex flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
                   embedded ? "min-h-32" : "min-h-48",
@@ -1366,6 +1512,8 @@ export default function MemoryCardManager({
         <DialogContent
           className="max-h-[92vh] overflow-y-auto sm:max-w-4xl"
           showCloseButton={false}
+          data-tour="memory-extraction-dialog"
+          inert={onboardingDemoActive}
           onEscapeKeyDown={(event) => {
             event.preventDefault()
           }}
@@ -1376,7 +1524,7 @@ export default function MemoryCardManager({
           <button
             type="button"
             aria-label={t("memory.cardManager.extraction.close")}
-            disabled={isExtractionBusy}
+            disabled={isExtractionBusy || onboardingDemoActive}
             onClick={requestCloseExtraction}
             className="ring-offset-background focus:ring-ring absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none disabled:opacity-30 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
           >
@@ -1417,7 +1565,8 @@ export default function MemoryCardManager({
                   className="min-h-40 resize-y leading-6"
                   value={extractionContent}
                   onChange={(event) => setExtractionContent(event.target.value)}
-                  disabled={isExtractionBusy || previewItems.length > 0}
+                  disabled={onboardingDemoActive || isExtractionBusy || previewItems.length > 0}
+                  data-tour="memory-extraction-content"
                   placeholder={t("memory.cardManager.extraction.placeholder")}
                 />
               </div>
@@ -1430,7 +1579,7 @@ export default function MemoryCardManager({
               <Select
                 value={extractionPromptLanguage}
                 onValueChange={(value) => setExtractionPromptLanguage(value as ExtractionPromptLanguage)}
-                disabled={previewItems.length > 0 || isExtractionBusy}
+                disabled={onboardingDemoActive || previewItems.length > 0 || isExtractionBusy}
               >
                 <SelectTrigger id={`${scope}-memory-extraction-language`}>
                   <SelectValue />
@@ -1455,7 +1604,7 @@ export default function MemoryCardManager({
                     <button
                       key={example.label}
                       type="button"
-                      disabled={isExtractionBusy || previewItems.length > 0}
+                      disabled={onboardingDemoActive || isExtractionBusy || previewItems.length > 0}
                       className="rounded-md border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={() => setExtractionContent(example.content)}
                     >
@@ -1470,7 +1619,10 @@ export default function MemoryCardManager({
             )}
 
             {(isGeneratingPreview || extractionProgress) && (
-              <div className="grid gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-3">
+              <div
+                className="grid gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-3"
+                data-tour="memory-extraction-progress"
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     {isGeneratingPreview ? (
@@ -1525,7 +1677,7 @@ export default function MemoryCardManager({
             )}
 
             {previewItems.length > 0 && (
-              <div className="grid gap-3">
+              <div className="grid gap-3" data-tour="memory-extraction-preview">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">
@@ -1550,8 +1702,9 @@ export default function MemoryCardManager({
                           checked ? "border-primary/50" : "opacity-70",
                         )}
                       >
-                        <Checkbox
-                          checked={checked}
+                          <Checkbox
+                            checked={checked}
+                            disabled={onboardingDemoActive}
                           onCheckedChange={(value) => {
                             setSelectedPreviewIds((current) =>
                               value === true
@@ -1590,7 +1743,7 @@ export default function MemoryCardManager({
             <Button
               type="button"
               variant="outline"
-              disabled={isCommittingPreview || isCancellingPreview || isPersistingPreview}
+              disabled={onboardingDemoActive || isCommittingPreview || isCancellingPreview || isPersistingPreview}
               onClick={requestCloseExtraction}
             >
               {isGeneratingPreview || isCancellingPreview ? (
@@ -1609,7 +1762,7 @@ export default function MemoryCardManager({
             {previewItems.length === 0 ? (
               <Button
                 type="button"
-                disabled={isGeneratingPreview || disabled}
+                disabled={onboardingDemoActive || isGeneratingPreview || disabled}
                 onClick={() => void generatePreview()}
               >
                 {isGeneratingPreview && <Loader2 className="mr-1 size-4 animate-spin" />}
@@ -1618,7 +1771,7 @@ export default function MemoryCardManager({
             ) : (
               <Button
                 type="button"
-                disabled={isCommittingPreview || disabled || selectedPreviewIds.length === 0}
+                disabled={onboardingDemoActive || isCommittingPreview || disabled || selectedPreviewIds.length === 0}
                 onClick={() => void commitPreview()}
               >
                 {isCommittingPreview ? (
@@ -1637,7 +1790,7 @@ export default function MemoryCardManager({
         open={isExtractionCloseConfirmOpen}
         onOpenChange={setIsExtractionCloseConfirmOpen}
       >
-        <AlertDialogContent>
+        <AlertDialogContent inert={onboardingDemoActive}>
           <AlertDialogHeader>
             <AlertDialogTitle>{isPromotionMode ? "关闭项目记忆提升" : "关闭新增记忆"}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -1659,7 +1812,10 @@ export default function MemoryCardManager({
       </AlertDialog>
 
       <Dialog open={isEditorOpen} onOpenChange={setIsEditorOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent
+          className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"
+          inert={onboardingDemoActive}
+        >
           <DialogHeader>
             <DialogTitle>{editingId ? "编辑记忆" : "新增记忆"}</DialogTitle>
           </DialogHeader>
@@ -1746,7 +1902,7 @@ export default function MemoryCardManager({
       </Dialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent inert={onboardingDemoActive}>
           <AlertDialogHeader>
             <AlertDialogTitle>永久删除记忆</AlertDialogTitle>
             <AlertDialogDescription>

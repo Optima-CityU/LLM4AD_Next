@@ -41,6 +41,7 @@ export default function MemoryConfigEditor({
   description,
   enabled = true,
   disabledReason,
+  readOnly = false,
   onLoaded,
   onSaved,
 }: {
@@ -50,6 +51,7 @@ export default function MemoryConfigEditor({
   description: string
   enabled?: boolean
   disabledReason?: string
+  readOnly?: boolean
   onLoaded?: (config: MemoryConfig) => void
   onSaved?: (config: MemoryConfig) => void
 }) {
@@ -83,10 +85,12 @@ export default function MemoryConfigEditor({
   }, [loadConfig])
 
   const update = (patch: Partial<MemoryConfig>) => {
+    if (readOnly) return
     setConfig((current) => (current ? { ...current, ...patch } : current))
   }
 
   const save = async () => {
+    if (readOnly) return
     if (!config) return
     setIsSaving(true)
     try {
@@ -120,7 +124,7 @@ export default function MemoryConfigEditor({
 
   if (!enabled) {
     return (
-      <div className="rounded-lg border bg-muted/30 text-muted-foreground">
+      <div className="rounded-lg border bg-muted/30 text-muted-foreground" data-tour="memory-default-policy">
         <div className="space-y-2 border-b px-4 py-3">
           <div className="flex items-start gap-2">
             <LockKeyhole className="mt-0.5 size-4 shrink-0" />
@@ -179,7 +183,7 @@ export default function MemoryConfigEditor({
   }
 
   return (
-    <div className="rounded-lg border bg-card/60">
+    <div className="rounded-lg border bg-card/60" data-tour="memory-default-policy">
       <div className="space-y-2 border-b px-4 py-3">
         <div className="flex items-start gap-2">
           <ServerCog className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -246,6 +250,7 @@ export default function MemoryConfigEditor({
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <Checkbox
                     checked={config[enabledKey]}
+                    disabled={readOnly}
                     onCheckedChange={(checked) => update({ [enabledKey]: checked === true })}
                   />
                   {label}
@@ -261,6 +266,7 @@ export default function MemoryConfigEditor({
                   type="number"
                   min={0}
                   value={config[limitKey]}
+                  disabled={readOnly}
                   onChange={(event) =>
                     update({ [limitKey]: Number.parseInt(event.target.value || "0", 10) })
                   }
@@ -275,6 +281,7 @@ export default function MemoryConfigEditor({
             <Label>搜索策略</Label>
             <Select
               value={config.mindmemos_search_strategy}
+              disabled={readOnly}
               onValueChange={(value) => update({ mindmemos_search_strategy: value })}
             >
               <SelectTrigger>
@@ -297,7 +304,7 @@ export default function MemoryConfigEditor({
               max={1}
               step="0.01"
               value={config.mindmemos_score_threshold ?? ""}
-              disabled={!config.mindmemos_rerank}
+              disabled={readOnly || !config.mindmemos_rerank}
               onChange={(event) =>
                 update({
                   mindmemos_score_threshold:
@@ -314,6 +321,7 @@ export default function MemoryConfigEditor({
             <label className="flex items-center gap-2 text-sm font-medium">
               <Checkbox
                 checked={config.mindmemos_rerank}
+                disabled={readOnly}
                 onCheckedChange={(checked) =>
                   update({
                     mindmemos_rerank: checked === true,
@@ -331,6 +339,7 @@ export default function MemoryConfigEditor({
             <label className="flex items-center gap-2 text-sm font-medium">
               <Checkbox
                 checked={config.mindmemos_fail_open}
+                disabled={readOnly}
                 onCheckedChange={(checked) => update({ mindmemos_fail_open: checked === true })}
               />
               记忆服务异常时继续运行任务
@@ -351,7 +360,7 @@ export default function MemoryConfigEditor({
         </div>
       </div>
       <div className="flex justify-end border-t px-4 py-3">
-        <Button type="button" className="gap-1.5" disabled={isSaving} onClick={() => void save()}>
+        <Button type="button" className="gap-1.5" disabled={readOnly || isSaving} onClick={() => void save()}>
           {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
           保存配置
         </Button>

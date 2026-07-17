@@ -1570,6 +1570,24 @@
       "canvasContent": "This shows the whole evolution process. Click any node to see its code, score and parent/child links on the right; hold Ctrl/Cmd to multi-select and compare.",
       "actionsTitle": "Task actions",
       "actionsContent": "View task status and the version tree here. You can View params, Adjust params (copies a new version), and Run / Stop / Re-run the task."
+    },
+    "memory": {
+      "overviewTitle": "Understand the three memory scopes",
+      "overviewContent": "Global memory can be reused across projects; project memory stays in the current project; task memory records this task's process and conclusions. You can confirm and promote valuable task memories into project memory.",
+      "bindingTitle": "Bind long-term memory models",
+      "bindingContent": "The Chat model extracts memories and the Embedding model retrieves them. Long-term memory becomes available to projects and tasks after binding is complete.",
+      "addTitle": "Add and save a memory",
+      "addContent": "Use Add Memory for reusable experience. The system creates a preview first; it is written to long-term memory only after you confirm the selected items.",
+      "exampleTitle": "Manage a memory card",
+      "exampleContent": "This is a non-persistent example card. A disabled memory is not retrieved or injected into tasks; enable it again when needed. Real cards are saved, disabled, and enabled in this manager.",
+      "taskModeTitle": "Choose a task memory mode",
+      "taskModeContent": "No memory and temporary memory are always available. Long-term memory uses the bound service and lets this task reuse global, project, and task-scoped lessons.",
+      "retrievalTitle": "Choose how to obtain shared memory",
+      "retrievalContent": "Automatic retrieval recalls relevant global and project memories. Manual selection injects only the global or project cards you check. Pinned memory does not change task-memory injection.",
+      "taskInjectionTitle": "Configure task-memory injection",
+      "taskInjectionContent": "Memories produced while the task runs are injected according to this setting. Summarize and promote conclusions you want to reuse long term into project memory.",
+      "projectTitle": "Manage project memory",
+      "projectContent": "This holds knowledge that belongs only to the current project and can be reused by its tasks. Select, summarize, and save valuable task lessons here from task cards."
     }
   },
   "demo": {

@@ -16,6 +16,7 @@ import { authFetch } from "@/utils/auth"
 
 import MemoryCardManager from "./MemoryCardManager"
 import type { MemoryConfig } from "./types"
+import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 
 export default function ProjectMemoryDialog({
   projectId,
@@ -112,6 +113,18 @@ export default function ProjectMemoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
+      <OnboardingTour
+        tourId="project-memory"
+        enabled={open && !isConfigLoading && memoryReady}
+        steps={[
+          {
+            selector: '[data-tour="project-memory-manager"]',
+            title: t("tour.memory.projectTitle"),
+            content: t("tour.memory.projectContent"),
+            placement: "left",
+          },
+        ]}
+      />
       <DialogTrigger asChild>
         <Button
           type="button"
@@ -144,15 +157,17 @@ export default function ProjectMemoryDialog({
         </DialogHeader>
 
         <div className="max-h-[calc(90vh-96px)] min-h-[560px] overflow-y-auto p-4">
-          <MemoryCardManager
-            scope="project"
-            projectId={projectId}
-            title={t("memory.projectDialog.cardTitle")}
-            description={t("memory.projectDialog.cardDescription")}
-            disabled={memoryDisabled}
-            disabledReason={disabledReason}
-            loadEnabled={memoryReady}
-          />
+          <div data-tour="project-memory-manager">
+            <MemoryCardManager
+              scope="project"
+              projectId={projectId}
+              title={t("memory.projectDialog.cardTitle")}
+              description={t("memory.projectDialog.cardDescription")}
+              disabled={memoryDisabled}
+              disabledReason={disabledReason}
+              loadEnabled={memoryReady}
+            />
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -8,6 +8,7 @@ import {
   type MemoryCardResponse,
   type ProjectMemoryConfigResponse,
 } from "@/client"
+import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -266,6 +267,30 @@ export default function MemoryConfigStep({
 
   return (
     <div className="flex h-full flex-col">
+      <OnboardingTour
+        tourId="memory-task-config"
+        enabled={isLongTerm && runtimeAvailable}
+        steps={[
+          {
+            selector: '[data-tour="memory-mode-selector"]',
+            title: t("tour.memory.taskModeTitle"),
+            content: t("tour.memory.taskModeContent"),
+            placement: "bottom",
+          },
+          {
+            selector: '[data-tour="memory-retrieval"]',
+            title: t("tour.memory.retrievalTitle"),
+            content: t("tour.memory.retrievalContent"),
+            placement: "bottom",
+          },
+          {
+            selector: '[data-tour="memory-task-injection"]',
+            title: t("tour.memory.taskInjectionTitle"),
+            content: t("tour.memory.taskInjectionContent"),
+            placement: "top",
+          },
+        ]}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="space-y-5">
           {/* Header */}
@@ -296,7 +321,7 @@ export default function MemoryConfigStep({
             <Label className="text-sm font-medium">
               {t("evolution.memoryConfig.enable.label")}
             </Label>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-3" data-tour="memory-mode-selector">
               <EnableCard
                 title={t("evolution.memoryConfig.enable.none")}
                 hint={t("evolution.memoryConfig.enable.noneHint")}
@@ -338,7 +363,7 @@ export default function MemoryConfigStep({
           {isLongTerm && (
             <>
               {/* Step 2: retrieval mode */}
-              <div className="space-y-2">
+              <div className="space-y-2" data-tour="memory-retrieval">
                 <Label className="text-sm font-medium">
                   {t("evolution.memoryConfig.retrieval.label")}
                   <span className="ml-1 text-destructive">*</span>
@@ -431,7 +456,7 @@ export default function MemoryConfigStep({
               </div>
 
               {/* Step 3: task memory injection mode */}
-              <div className="space-y-2">
+              <div className="space-y-2" data-tour="memory-task-injection">
                 <Label className="text-sm font-medium">
                   {t("evolution.memoryConfig.injection.label")}
                   <span className="ml-1 text-destructive">*</span>

@@ -32,9 +32,11 @@ function providerModels(provider?: { model?: string }) {
 export default function MemoryProviderBindingEditor({
   binding: initialBinding,
   onSaved,
+  readOnly = false,
 }: {
   binding?: MemoryProviderBinding | null
   onSaved?: () => void
+  readOnly?: boolean
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const providersQuery = useProviders({ enabled: isEditing })
@@ -68,6 +70,7 @@ export default function MemoryProviderBindingEditor({
   }, [chatModel, models])
 
   const changeChatProvider = (providerId: string) => {
+    if (readOnly) return
     setChatProviderId(providerId)
     const provider = providers.find((item) => item.id === providerId)
     const nextModels = providerModels(provider)
@@ -75,6 +78,7 @@ export default function MemoryProviderBindingEditor({
   }
 
   const save = async () => {
+    if (readOnly) return
     if (!chatProviderId || !chatModel || !embeddingProviderId) {
       toast.error("请选择 Chat 模型和 Embedding 配置")
       return
@@ -111,7 +115,7 @@ export default function MemoryProviderBindingEditor({
   const hasProviderChoices = providers.length > 0 && embeddingProviders.length > 0
 
   return (
-    <div className="space-y-4 rounded-lg border bg-card/60 p-4">
+    <div className="space-y-4 rounded-lg border bg-card/60 p-4" data-tour="memory-provider-binding">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">记忆模型绑定</h3>
@@ -132,6 +136,7 @@ export default function MemoryProviderBindingEditor({
               size="sm"
               variant="ghost"
               className="gap-1.5"
+              disabled={readOnly}
               onClick={() => setIsEditing(false)}
             >
               <X className="size-4" />
@@ -143,6 +148,7 @@ export default function MemoryProviderBindingEditor({
               size="sm"
               variant={binding?.configured ? "outline" : "default"}
               className="gap-1.5"
+              disabled={readOnly}
               onClick={() => setIsEditing(true)}
             >
               <Pencil className="size-4" />
@@ -202,7 +208,7 @@ export default function MemoryProviderBindingEditor({
               <div className="grid gap-3">
                 <div className="grid gap-2">
                   <Label>Chat 供应商</Label>
-                  <Select value={chatProviderId} onValueChange={changeChatProvider}>
+                  <Select value={chatProviderId} onValueChange={changeChatProvider} disabled={readOnly}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择 Chat 供应商" />
                     </SelectTrigger>
@@ -219,7 +225,7 @@ export default function MemoryProviderBindingEditor({
                 <div className="grid gap-2">
                   <Label htmlFor="memory-chat-model">Chat 模型</Label>
                   {models.length > 0 ? (
-                    <Select value={chatModel} onValueChange={setChatModel} disabled={!chatProviderId}>
+                    <Select value={chatModel} onValueChange={setChatModel} disabled={readOnly || !chatProviderId}>
                       <SelectTrigger id="memory-chat-model">
                         <SelectValue placeholder="选择模型" />
                       </SelectTrigger>
@@ -237,7 +243,7 @@ export default function MemoryProviderBindingEditor({
                         id="memory-chat-model"
                         value={chatModel}
                         onChange={(event) => setChatModel(event.target.value)}
-                        disabled={!chatProviderId}
+                        disabled={readOnly || !chatProviderId}
                         placeholder="输入 Chat 模型名称"
                       />
                       {chatProviderId && (
@@ -251,7 +257,7 @@ export default function MemoryProviderBindingEditor({
 
                 <div className="grid gap-2">
                   <Label>Embedding 配置</Label>
-                  <Select value={embeddingProviderId} onValueChange={setEmbeddingProviderId}>
+                  <Select value={embeddingProviderId} onValueChange={setEmbeddingProviderId} disabled={readOnly}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择 Embedding 配置" />
                     </SelectTrigger>
@@ -274,7 +280,7 @@ export default function MemoryProviderBindingEditor({
               <Button
                 type="button"
                 className="gap-1.5"
-                disabled={isSaving}
+                disabled={readOnly || isSaving}
                 onClick={() => void save()}
               >
                 {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}

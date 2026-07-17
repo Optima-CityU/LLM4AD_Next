@@ -235,6 +235,148 @@ test("shows binding load failure separately from unbound model", async ({ page }
   await expect(page.getByText("记忆模型未绑定")).toBeHidden()
 })
 
+test("starts the global-memory spotlight tour even when the user already bound models", async ({ page }) => {
+  await page.route("**/api/v1/llm4ad/memory/health", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        message: "ready",
+        system_runtime_available: true,
+        system_enabled: true,
+        system_chat_configured: true,
+        system_embedding_configured: true,
+        system_api_key_configured: true,
+        system_rerank_enabled: false,
+        system_rerank_configured: false,
+        service_reachable: true,
+        auth_ok: true,
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/provider-binding", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        configured: true,
+        binding_id: "binding_1",
+        project_id: "llm4ad_user_1",
+        user_id: "user_1",
+        chat_provider_id: "chat_1",
+        chat_model: "gpt-test",
+        embedding_provider_id: "emb_1",
+        embedding_model: "text-embedding-test",
+        embedding_dim: 1536,
+        embedding_locked: true,
+        message: "configured",
+      }),
+    })
+  })
+  await page.route("**/api/v1/llm4ad/memory/user-config", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(memoryConfig) })
+  })
+
+  await page.goto("/memory")
+
+  await expect(page.getByText("认识三层记忆")).toBeVisible()
+  await expect(page.getByTestId("memory-page-content")).toHaveAttribute("inert", "")
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(page.getByText("绑定长期记忆模型")).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "用户默认记忆策略" })).toBeVisible()
+  await expect(page.getByText("记忆模型绑定")).toBeVisible()
+  await expect(page.getByRole("button", { name: "编辑绑定" })).toBeDisabled()
+
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(page.getByLabel("注入用户级记忆")).toBeDisabled()
+  await expect(page.getByRole("button", { name: "保存配置" })).toBeDisabled()
+})
+
+test("drives the memory tour through the real read-only extraction dialog without calling memory mutations", async ({ page }) => {
+  let extractionRequests = 0
+  let statusRequests = 0
+
+  await page.addInitScript(() => {
+    localStorage.removeItem("onboarding:tour:memory-setup")
+    localStorage.removeItem("onboarding:all_done")
+  })
+  await page.route("**/api/v1/llm4ad/memory/health", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      ok: true, message: "ready", system_runtime_available: true, system_enabled: true,
+      system_chat_configured: true, system_embedding_configured: true,
+      system_api_key_configured: true, system_rerank_enabled: false,
+      system_rerank_configured: false, service_reachable: true, auth_ok: true,
+    }) })
+  })
+  await page.route("**/api/v1/llm4ad/memory/provider-binding", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      configured: true, binding_id: "binding_1", project_id: "llm4ad_user_1", user_id: "user_1",
+      chat_provider_id: "chat_1", chat_model: "gpt-test", embedding_provider_id: "emb_1",
+      embedding_model: "text-embedding-test", embedding_dim: 1536, embedding_locked: true,
+      message: "configured",
+    }) })
+  })
+  await page.route("**/api/v1/llm4ad/memory/user-config", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(memoryConfig) })
+  })
+  await page.route("**/api/v1/llm4ad/memory/cards?**", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      items: [], page: 1, page_size: 20, total: 0, has_more: false,
+    }) })
+  })
+  await page.route("**/api/v1/llm4ad/memory/cards/extractions/**", async (route) => {
+    extractionRequests += 1
+    await route.abort()
+  })
+  await page.route("**/api/v1/llm4ad/memory/cards/*/status?**", async (route) => {
+    statusRequests += 1
+    await route.abort()
+  })
+
+  await page.goto("/memory")
+  await expect(page.getByText("认识三层记忆")).toBeVisible()
+
+  for (let index = 0; index < 3; index += 1) {
+    await page.getByRole("button", { name: "下一步" }).click()
+  }
+  await expect(page.getByRole("dialog", { name: "用户默认记忆策略" })).toBeHidden()
+  await expect(page.getByRole("button", { name: "新增记忆" })).toBeDisabled()
+
+  await page.getByRole("button", { name: "下一步" }).click()
+  const extractionDialog = page.getByRole("dialog", { name: "新增记忆" })
+  await expect(extractionDialog).toBeVisible()
+  await expect(extractionDialog.getByLabel("原始内容")).toBeDisabled()
+  await expect(extractionDialog.getByRole("button", { name: "生成预览" })).toBeDisabled()
+
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(extractionDialog.getByText("提取结果预览")).toBeVisible()
+  await expect(extractionDialog.getByRole("button", { name: "启用选中" })).toBeDisabled()
+
+  await page.getByRole("button", { name: "上一步" }).click()
+  await expect(extractionDialog.getByText("提取结果预览")).toBeHidden()
+  await expect(extractionDialog.getByLabel("原始内容")).toBeDisabled()
+
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(extractionDialog.getByText("提取结果预览")).toBeVisible()
+
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(extractionDialog).toBeHidden()
+  await expect(page.getByText("稳定性优先")).toBeVisible()
+  await expect(page.getByRole("button", { name: "禁用记忆" })).toBeDisabled()
+
+  await page.getByRole("button", { name: "上一步" }).click()
+  await expect(extractionDialog.getByText("提取结果预览")).toBeVisible()
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(extractionDialog).toBeHidden()
+
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(page.getByRole("button", { name: "启用记忆" })).toBeDisabled()
+  await page.getByRole("button", { name: "下一步" }).click()
+  await expect(page.getByRole("button", { name: "禁用记忆" })).toBeDisabled()
+
+  expect(extractionRequests).toBe(0)
+  expect(statusRequests).toBe(0)
+})
+
 test("allows manual chat model when selected provider has no model list", async ({ page }) => {
   let savedBinding: unknown = null
 
