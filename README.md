@@ -53,92 +53,67 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 
 ## Search Methods (Automatic Heuristic Design)
 
-LLM4AD_Next is progressively migrating the published Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD) platform. The table below tracks migration status against the reference papers.
+Migration status of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform.
 
-### ✅ Available
-
-| Method | Description | Reference |
-|--------|-------------|-----------|
-| **EoH** (Evolution of Heuristics) | Evolves heuristic *thoughts* in natural language and their code via five prompt operators (I1 / E1 / E2 / M1 / M2). | Liu et al., "Evolution of Heuristics: Towards Efficient Automatic Algorithm Design Using Large Language Model", ICML 2024 — [arXiv:2401.02051](https://arxiv.org/abs/2401.02051) |
-| **MEoH** (Multi-objective EoH) | Multi-objective variant that searches a non-dominated set of heuristics balancing multiple objectives (e.g. quality vs. efficiency). | Yao et al., "Multi-objective Evolution of Heuristic Using Large Language Model" — [arXiv:2409.16867](https://arxiv.org/abs/2409.16867) |
-| **ReEvo** (Reflective Evolution) | LLM hyper-heuristics with short- and long-term *reflection* providing verbal gradients to guide evolutionary search. | Ye et al., "Large Language Models as Hyper-Heuristics with Reflective Evolution", NeurIPS 2024 — [arXiv:2402.01145](https://arxiv.org/abs/2402.01145) |
-| **MCTS-AHD** (Monte Carlo Tree Search for AHD) | Organizes LLM-generated heuristics in a tree and uses UCT to balance exploration/exploitation, developing temporarily underperforming heuristics. | Zheng et al., "Monte Carlo Tree Search for Comprehensive Exploration in LLM-Based Automatic Heuristic Design" — [arXiv:2501.08603](https://arxiv.org/abs/2501.08603) |
-
-### ⏳ Pending migration
-
-| Method | Description | Reference |
-|--------|-------------|-----------|
-| **FunSearch** | Pairs a pretrained LLM with a systematic evaluator to search in function space. | Romera-Paredes et al., "Mathematical discoveries from program search with large language models", Nature 2024 — [nature.com](https://www.nature.com/articles/s41586-023-06924-6) |
-| **LLaMEA** | Large Language Model Evolutionary Algorithm for automatically generating metaheuristics. | van Stein & Bäck, "LLaMEA: A Large Language Model Evolutionary Algorithm for Automatically Generating Metaheuristics" — [arXiv:2405.20132](https://arxiv.org/abs/2405.20132) |
-| **HillClimb / RandSample** | (1+1) hill-climbing and random-sampling baselines for LLM-based evolutionary program search. | Zheng et al., "Understanding the Importance of Evolutionary Search in Automated Heuristic Design with Large Language Models" — [arXiv:2407.10873](https://arxiv.org/abs/2407.10873) |
-| **MOEA/D** (LLM variant) | Decomposition-based multi-objective evolutionary search applied to LLM-driven AHD. | Zhang & Li, "MOEA/D: A Multiobjective Evolutionary Algorithm Based on Decomposition", IEEE TEVC 2007 |
-| **NSGA-II** (LLM variant) | Fast non-dominated sorting genetic algorithm applied to LLM-driven AHD. | Deb et al., "A Fast and Elitist Multiobjective Genetic Algorithm: NSGA-II", IEEE TEVC 2002 |
+| Method | Status |
+|--------|--------|
+| **EoH** | ✅ Available |
+| **MEoH** | ✅ Available |
+| **ReEvo** | ✅ Available |
+| **MCTS-AHD** | ✅ Available |
+| **FunSearch** | ⏳ Pending |
+| **HillClimb** | ⏳ Pending |
+| **LHNS** | ⏳ Pending |
+| **LLaMEA** | ⏳ Pending |
+| **MLES** | ⏳ Pending |
+| **MOEA/D** | ⏳ Pending |
+| **NSGA-II** | ⏳ Pending |
+| **PartEvo** | ⏳ Pending |
+| **RandSample** | ⏳ Pending |
 
 ### Using the migrated methods
 
-Each method is selected in your `config.yaml` through the `evolution.type` (orchestrator), the `planner.type`, and the `planner.samplers` list. The three newly migrated methods wire up as follows. A complete, runnable reference is the `examples/applications/cvrp_construct_python` task.
+Each method is a standalone orchestrator selected by `evolution.type`; its `planner_type` is set automatically, so no explicit `samplers` list is needed. See `examples/applications/cvrp_construct_python/comparison` for full runnable configs, then run `llm4ad run <config.yaml>`.
 
-**EoH** — `island_ga` evolution + `llm_evolution` planner + the five EoH operators as samplers:
+**EoH** — single-objective Evolution of Heuristics (reuses the `meoh_evolution` planner and its I1/E1/E2/M1/M2 operator samplers):
 
 ```yaml
 planner:
-  type: "llm_evolution"
-  samplers:
-    - {name: "eoh_i1_sampler", config: {temperature: 0.7}}   # initialize
-    - {name: "eoh_e1_sampler", config: {temperature: 0.7, selection_num: 2}}   # crossover
-    - {name: "eoh_e2_sampler", config: {temperature: 0.8, selection_num: 2}}   # crossover
-    - {name: "eoh_m1_sampler", config: {temperature: 0.7}}   # mutation
-    - {name: "eoh_m2_sampler", config: {temperature: 0.9}}   # mutation
-
+  type: "meoh_evolution"
 evolution:
-  type: "island_ga"
-  max_generations: 8
-  num_islands: 1
-  island_population_size: 4
+  type: "eoh"
+  pop_size: 5
+  selection_num: 2
+  use_e2_operator: true
+  use_m1_operator: true
+  use_m2_operator: true
 ```
 
-**ReEvo** — `island_ga` evolution + the dedicated `reevo_evolution` planner (adds reflection) + ReEvo samplers:
+**ReEvo** — Reflective Evolution (short-term reflection guides crossover, long-term guides elite mutation):
 
 ```yaml
 planner:
   type: "reevo_evolution"
-  samplers:
-    - {name: "reevo_init_sampler", config: {temperature: 0.7}}
-    - {name: "reevo_crossover_sampler", config: {temperature: 0.7}}
-    - {name: "reevo_mutation_sampler", config: {temperature: 0.8}}
-
 evolution:
-  type: "island_ga"
-  max_generations: 8
-  num_islands: 1
-  island_population_size: 4
+  type: "reevo"
+  pop_size: 8
+  mutation_rate: 0.5
+  max_sample_nums: 100
 ```
 
-**MCTS-AHD** — the `mcts_ahd` orchestrator replaces the generational loop with a UCT-guided tree (single tree, so `num_islands: 1`); it reuses the `llm_evolution` planner with EoH-style samplers for node expansion:
+**MCTS-AHD** — Monte Carlo Tree Search with UCT selection and e1/e2/m1/m2/s1 operator expansion:
 
 ```yaml
 planner:
-  type: "llm_evolution"
-  samplers:
-    - {name: "eoh_i1_sampler", config: {temperature: 0.7}}
-    - {name: "eoh_e1_sampler", config: {temperature: 0.8, selection_num: 1}}
-    - {name: "eoh_m1_sampler", config: {temperature: 0.7}}
-
+  type: "mcts_ahd_evolution"
 evolution:
   type: "mcts_ahd"
-  num_islands: 1
-  island_population_size: 4
-  lambda0: 0.1          # UCT exploration constant
-  alpha: 0.5            # progressive widening (reserved)
-  max_depth: 10         # maximum tree depth
   init_size: 4          # initial children under the root
-  max_sample_nums: 32   # total evaluation budget (termination)
-```
-
-Then run any of them the same way:
-
-```bash
-llm4ad run path/to/your/config.yaml
+  pop_size: 10          # active algorithm pool size
+  max_sample_nums: 100  # evaluation budget
+  alpha: 0.5            # UCT progressive-widening
+  lambda_0: 0.1         # UCT exploration constant
+  max_depth: 10         # maximum tree depth
 ```
 
 ## Quick Start
