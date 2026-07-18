@@ -51,6 +51,65 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 * 💬 **Interactive Configuration (`llm4ad chat`)** — Your conversational AI consultant that generates the entire runnable app framework.
 * 🔍 **Evolve-Block Advisor & Recommender** — Point LLM4AD_Next at any repository, and it will scan, score, and recommend exactly *which* blocks of code are most promising to evolve to hit your goals.
 
+## Search Methods (Automatic Heuristic Design)
+
+Migration status of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform.
+
+| Method | Status |
+|--------|--------|
+| **EoH** | ✅ Available |
+| **MEoH** | ✅ Available |
+| **ReEvo** | ✅ Available |
+| **MCTS-AHD** | ✅ Available |
+| **FunSearch** | ⏳ Pending |
+| **HillClimb** | ⏳ Pending |
+| **LHNS** | ⏳ Pending |
+| **LLaMEA** | ⏳ Pending |
+| **MLES** | ⏳ Pending |
+| **MOEA/D** | ⏳ Pending |
+| **NSGA-II** | ⏳ Pending |
+| **PartEvo** | ⏳ Pending |
+| **RandSample** | ⏳ Pending |
+
+### Using the migrated methods
+
+Each method is a standalone orchestrator selected by `evolution.type`; its `planner_type` is set automatically, so no explicit `samplers` list is needed. See `examples/applications/cvrp_construct_python/comparison` for full runnable configs, then run `llm4ad run <config.yaml>`.
+
+**EoH** — single-objective Evolution of Heuristics (standalone orchestrator with rank-based survival; reuses the `meoh_evolution` planner and its I1/E1/E2/M1/M2 operator samplers):
+
+```yaml
+evolution:
+  type: "eoh"
+  pop_size: 5
+  selection_num: 2
+  use_e2_operator: true
+  use_m1_operator: true
+  use_m2_operator: true
+```
+
+**ReEvo** — Reflective Evolution (standalone orchestrator with short-term reflection guiding crossover, long-term reflection guiding elite mutation):
+
+```yaml
+evolution:
+  type: "reevo"
+  pop_size: 8
+  mutation_rate: 0.5
+  max_sample_nums: 100
+```
+
+**MCTS-AHD** — Monte Carlo Tree Search (standalone orchestrator with real UCT tree, i1 root init + e1 population init, weighted e2/m1/m2/s1 expansion operators, rank-based pool selection):
+
+```yaml
+evolution:
+  type: "mcts_ahd"
+  init_size: 4          # initial children under the root
+  pop_size: 10          # active algorithm pool size
+  max_sample_nums: 100  # evaluation budget
+  alpha: 0.5            # UCT progressive-widening
+  lambda_0: 0.1         # UCT exploration constant
+  max_depth: 10         # maximum tree depth
+```
+
 ## Quick Start
 
 <table>

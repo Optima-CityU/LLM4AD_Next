@@ -19,6 +19,7 @@ from llm4ad.orchestrator.base import (
     EvolutionState,
 )
 from llm4ad.orchestrator.dyca import DyCAConfig, DyCAOrchestrator
+from llm4ad.orchestrator.eoh import EoHOrchestrator, EoHPopulation
 from llm4ad.orchestrator.island_ga import (
     Island,
     IslandGAConfig,
@@ -29,6 +30,7 @@ from llm4ad.orchestrator.island_ga import (
 from llm4ad.orchestrator.mcts_ahd import MCTSAHDOrchestrator
 from llm4ad.orchestrator.meoh import MEoHOrchestrator
 from llm4ad.orchestrator.meoh_population import MEoHPopulation
+from llm4ad.orchestrator.reevo import ReEvoOrchestrator
 
 __all__ = [
     # Base
@@ -49,6 +51,11 @@ __all__ = [
     # MEoH
     "MEoHOrchestrator",
     "MEoHPopulation",
+    # EoH
+    "EoHOrchestrator",
+    "EoHPopulation",
+    # ReEvo
+    "ReEvoOrchestrator",
     # MCTS-AHD
     "MCTSAHDOrchestrator",
     # State tracking

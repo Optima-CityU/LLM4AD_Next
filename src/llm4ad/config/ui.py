@@ -17,6 +17,7 @@ def ui(
     desc_en: str = "",
     hidden: bool = False,
     user_required: bool = False,
+    is_path: bool = False,
     multiline: bool = False,
 ) -> dict[str, Any]:
     """Build UI metadata dict for ``Field(json_schema_extra=ui(...))``.
@@ -31,6 +32,9 @@ def ui(
         user_required: Whether the user must explicitly fill in this field
             (a field can have a schema default yet still need user
             attention, e.g. ``api_key``).
+        is_path: Whether the value is a filesystem path. The frontend can
+            use this flag to prepend a configurable base-path prefix or
+            show a file/directory picker.
         multiline: Whether the input should use a multiline textarea
             instead of a single-line text field.
 
@@ -45,6 +49,7 @@ def ui(
             "description": {"zh": desc_zh, "en": desc_en},
             "hidden": hidden,
             "user_required": user_required,
+            "is_path": is_path,
             "multiline": multiline,
         }
     }
