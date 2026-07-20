@@ -6,6 +6,13 @@
 </p>
 
 <p align="center">
+  <a href="#quick-start">Quickstart</a> ·
+  <a href="docs/en/index.md">Docs</a> ·
+  <a href="https://github.com/Optima-CityU/LLM4AD_Next/wiki">Wiki</a> ·
+  <a href="https://llm4ad-next.cn/">Online Demo</a>
+</p>
+
+<p align="center">
   <a href="https://pypi.org/project/llm4ad-next/">
     <img src="https://img.shields.io/pypi/v/llm4ad-next?color=blue" alt="PyPI Version">
   </a>
