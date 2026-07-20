@@ -9,7 +9,9 @@ from llm4ad.planner.base import (
     BasePlanner,
     InsightType,
 )
+from llm4ad.planner.eoh_evolution import EoHEvolutionPlanner
 from llm4ad.planner.llm_evolution import LLMEvolutionPlanner
+from llm4ad.planner.mcts_ahd_evolution import MCTSAHDEvolutionPlanner
 from llm4ad.planner.memory import (
     BaseMemory,
     BaseMemoryExtractor,
@@ -21,6 +23,7 @@ from llm4ad.planner.memory import (
     create_memory_extractor,
 )
 from llm4ad.planner.meoh_evolution import MEoHEvolutionPlanner
+from llm4ad.planner.reevo_evolution import ReEvoEvolutionPlanner
 from llm4ad.planner.selector import BaseSelector, SamplerSelector
 from llm4ad.planner.task_memory_selector import (
     BaseTaskMemorySelector,
@@ -37,6 +40,9 @@ __all__ = [
     "InsightType",
     "LLMEvolutionPlanner",
     "MEoHEvolutionPlanner",
+    "EoHEvolutionPlanner",
+    "ReEvoEvolutionPlanner",
+    "MCTSAHDEvolutionPlanner",
     "Memory",
     "BaseMemory",
     "BaseMemoryExtractor",

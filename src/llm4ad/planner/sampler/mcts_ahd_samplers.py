@@ -4,9 +4,9 @@ Migrated from the legacy LLM4AD ``method/mcts_ahd``. MCTS-AHD reuses the
 i1/e1/e2/m1/m2 operators and adds ``s1`` — a synthesis operator that creates
 a new algorithm inspired by all algorithms along a tree path.
 
-All samplers reuse ``_BaseMEoHSampler._generate_unified`` for the final
-thought+code generation; only the prompts differ from MEoH (they explicitly
-frame the objective and, for e1/s1, ask for diversity / synthesis).
+All samplers reuse ``BaseUnifiedSampler._generate_unified`` for the final
+thought+code generation; only the prompts differ (they explicitly frame the
+objective and, for e1/s1, ask for diversity / synthesis).
 """
 
 from __future__ import annotations
@@ -15,12 +15,12 @@ from typing import Any
 
 from llm4ad.planner.base import Algorithm, InsightType
 from llm4ad.planner.sampler.base import BaseSampler
-from llm4ad.planner.sampler.meoh_init_sampler import _BaseMEoHSampler
-from llm4ad.planner.sampler.meoh_prompt_templates import (
+from llm4ad.planner.sampler.unified_prompt_utils import (
     _UNIFIED_JSON_SUFFIX,
     format_block_context,
     format_parent_context,
 )
+from llm4ad.planner.sampler.unified_sampler_base import BaseUnifiedSampler
 
 
 def _base_header(background: str, block: Any) -> str:
@@ -124,8 +124,8 @@ def build_mcts_s1_prompt(background: str, block: Any, parents: list[Algorithm]) 
     )
 
 
-class _BaseMCTSSampler(_BaseMEoHSampler):
-    """Shared base for MCTS-AHD samplers (reuses MEoH unified generation)."""
+class _BaseMCTSSampler(BaseUnifiedSampler):
+    """Shared base for MCTS-AHD samplers (reuses unified generation)."""
 
 
 @BaseSampler.register("mcts_i1_sampler")
