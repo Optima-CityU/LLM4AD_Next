@@ -356,6 +356,36 @@ Extract one actionable lesson (2-5 sentences) about:
 2. What specific pitfalls future algorithm designs should AVOID
 """
 
+# Template for extracting a repair lesson when evaluation did not produce a score
+EXTRACT_EXECUTION_FAILURE_MEMORY = """\
+You are an expert algorithm analyst. Evaluation execution failed before a valid
+score was produced. Do not infer that the algorithm scored zero or performed
+poorly. Extract a concise, reusable lesson about preventing or repairing the
+concrete implementation or constraint failure shown by the error evidence.
+
+# Problem Background
+
+{background}
+
+# Algorithm
+
+Name: {algorithm_name}
+Score: {score}
+Generation: {generation}
+Description:
+{description}
+
+# Evaluation Error
+
+{evaluation_summary}
+
+# Task
+
+Extract one actionable lesson (2-5 sentences) about:
+1. The concrete implementation or constraint violation that caused execution to fail
+2. The validation, guard, or design change that future algorithms should apply to avoid it
+"""
+
 # Template for extracting a positive insight from a well-performing algorithm
 EXTRACT_GOOD_MEMORY = """\
 You are an expert algorithm analyst. This algorithm performed WELL. \
