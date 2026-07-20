@@ -267,6 +267,78 @@ class Settings(BaseSettings):
     CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0   # 等待容器 SSE 服务就绪的超时（秒）
     CHAT_TUNE_CONTAINER_NETWORK: bool = True           # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
 
+    # ---- MindMemOS 系统级记忆后端配置 ----
+    LLM4AD_MINDMEMOS_ENABLED: bool = False
+    LLM4AD_MINDMEMOS_BASE_URL: str = "http://mindmemos-api:8000"
+    LLM4AD_MINDMEMOS_API_KEY: str = ""
+    LLM4AD_MINDMEMOS_JWT_SECRET: str = "demo-jwt-secret-key"
+    LLM4AD_MINDMEMOS_JWT_ISSUER: str = "demo-jwt-gateway"
+    LLM4AD_MINDMEMOS_JWT_AUDIENCE: str = "demo-jwt-audience"
+    LLM4AD_MINDMEMOS_APP_ID: str = "llm4ad"
+    LLM4AD_MINDMEMOS_AGENT_ID: str = "planner"
+    LLM4AD_MINDMEMOS_FAIL_OPEN: bool = True
+    LLM4AD_MINDMEMOS_REQUEST_TIMEOUT: float = 10.0
+    LLM4AD_MINDMEMOS_ADD_TIMEOUT: float = 120.0
+    MINDMEMOS_CHAT_MODEL: str = ""
+    MINDMEMOS_CHAT_API_BASE: str = ""
+    MINDMEMOS_CHAT_API_KEY: str = ""
+    MINDMEMOS_CHAT_TIMEOUT: int = 1200
+    MINDMEMOS_CHAT_TEMPERATURE: float = 0.0
+    MINDMEMOS_EMBED_MODEL: str = ""
+    MINDMEMOS_EMBED_API_BASE: str = ""
+    MINDMEMOS_EMBED_API_KEY: str = ""
+    MINDMEMOS_EMBED_DIMENSIONS: int = 0
+    MINDMEMOS_EMBED_TIMEOUT: int = 600
+    MINDMEMOS_RERANK_ENABLED: bool = False
+    MINDMEMOS_RERANK_MODEL: str = ""
+    MINDMEMOS_RERANK_API_BASE: str = ""
+    MINDMEMOS_RERANK_API_KEY: str = ""
+    MINDMEMOS_RERANK_TIMEOUT: int = 600
+
+    @property
+    def mindmemos_chat_configured(self) -> bool:
+        """Whether MindMemOS has the fixed system chat model it needs."""
+        return bool(
+            self.MINDMEMOS_CHAT_MODEL.strip()
+            and self.MINDMEMOS_CHAT_API_BASE.strip()
+            and self.MINDMEMOS_CHAT_API_KEY.strip()
+        )
+
+    @property
+    def mindmemos_embedding_configured(self) -> bool:
+        """Whether MindMemOS has the fixed system embedding model it needs."""
+        return bool(
+            self.MINDMEMOS_EMBED_MODEL.strip()
+            and self.MINDMEMOS_EMBED_API_BASE.strip()
+            and self.MINDMEMOS_EMBED_API_KEY.strip()
+            and self.MINDMEMOS_EMBED_DIMENSIONS > 0
+        )
+
+    @property
+    def mindmemos_rerank_configured(self) -> bool:
+        """Whether optional MindMemOS rerank model settings are complete."""
+        return bool(
+            self.MINDMEMOS_RERANK_ENABLED
+            and self.MINDMEMOS_RERANK_MODEL.strip()
+            and self.MINDMEMOS_RERANK_API_BASE.strip()
+            and self.MINDMEMOS_RERANK_API_KEY.strip()
+        )
+
+    @property
+    def mindmemos_runtime_available(self) -> bool:
+        """Whether LLM4AD should route task memory to MindMemOS."""
+        return bool(
+            self.LLM4AD_MINDMEMOS_ENABLED
+            and self.LLM4AD_MINDMEMOS_BASE_URL.strip()
+            and self.LLM4AD_MINDMEMOS_JWT_SECRET.strip()
+        )
+
+    # ---- AI 构建 (beta)：AgentScope 单 agent 构建 ----
+    # 开启后前端显示 "AI 构建 (Beta)" 入口，beta 轮次走 AgentScope agent
+    # （混合：BuildOrchestrator 生成 + agent 用 run_python 验证/重试），
+    # 与现有 AI 构建并存。关闭时 beta 入口隐藏、beta 请求回退到旧 AI 构建。
+    ENABLE_AI_AGENT_BUILD: bool = True
+
     # ---- Celery 任务超时 ----
     # 单一来源：Celery 配置与 LLM 代理 token TTL 均由此派生，避免多处魔法数字漂移。
     TASK_TIME_LIMIT: int = 7 * 24 * 3600        # 任务硬超时（秒），默认 7 天
@@ -299,6 +371,19 @@ class Settings(BaseSettings):
 
     # ---- Gateway ----
     GATEWAY_SERVER_PORT: int = 9090
+
+    # ---- 首页资讯（GitHub Wiki 拉取） ----
+    # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。
+    NEWS_WIKI_URL_ZH: str = (
+        "https://raw.githubusercontent.com/wiki/Optima-CityU/LLM4AD_Next/"
+        "News%E2%80%90and%E2%80%90Articles%E2%80%90Index_zh.md"
+    )
+    NEWS_WIKI_URL_EN: str = (
+        "https://raw.githubusercontent.com/wiki/Optima-CityU/LLM4AD_Next/"
+        "News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en.md"
+    )
+    NEWS_REFRESH_INTERVAL_SECONDS: int = 30 * 60  # 后台刷新间隔，默认 30 分钟
+    NEWS_HTTP_TIMEOUT: float = 15.0  # 拉取 wiki 的 HTTP 超时（秒）
 
 
 settings = Settings()  # type: ignore

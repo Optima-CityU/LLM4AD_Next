@@ -9,7 +9,7 @@ This page documents the conventions LLM4AD enforces. The intent is to make code 
 | Tool | Config | What it enforces |
 |---|---|---|
 | **Ruff** | `[tool.ruff.lint]` in `pyproject.toml` | Lint: unused imports, undefined names, deprecated APIs, simple bug patterns |
-| **Black** | `line-length = 100`, `target-version = py310/311/312` | Formatting (whitespace, line breaks, string quotes) |
+| **Black** | `line-length = 100`, `target-version = py312` | Formatting (whitespace, line breaks, string quotes) |
 | **isort** | Black-compatible profile | Import ordering and grouping |
 | **mypy** | `[tool.mypy]` in `pyproject.toml` | Static type checking |
 
@@ -29,7 +29,7 @@ CI runs the same suite. A clean run is a precondition for merge.
 - Type-hint every public function and method (anything reachable from a module's `__init__.py`).
 - Type-hint internal functions whenever the call site cannot trivially infer the types.
 - Prefer `from __future__ import annotations` so annotations are strings (no runtime import cost).
-- Use `Annotated[X, ...]`, `TypeAlias`, and PEP 604 (`X | None`) freely — the floor is Python 3.10.
+- Use `Annotated[X, ...]`, `TypeAlias`, and PEP 604 (`X | None`) freely — the project requires Python 3.12.
 
 ```python
 from __future__ import annotations

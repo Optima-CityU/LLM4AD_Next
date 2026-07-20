@@ -458,7 +458,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 if e.status_code in (429, 502, 503, 529) and attempt < max_parse_retries - 1:
                     wait = 2 ** attempt
                     logger.warning(
-                        "API returned %d, retrying in %ds (attempt %d/%d): %s",
+                        "API returned {}, retrying in {}s (attempt {}/{}): {}",
                         e.status_code, wait, attempt + 1, max_parse_retries, e,
                     )
                     await asyncio.sleep(wait)

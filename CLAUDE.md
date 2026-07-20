@@ -42,14 +42,18 @@ All commands should be run from the repository root.
 - Show CLI help: `llm4ad --help`
 - List registered components: `llm4ad list`
 - Run design pipeline: `llm4ad run <config-file>`
-- Interactive configuration consultant: `llm4ad chat` (uses `--provider` to select provider from global settings)
+- Interactive AI builder: `llm4ad chat` (AI agent-based task package builder)
   - `--provider/-p <name>`: Use a named provider from `~/.llm4ad/settings.yaml` (default: first provider)
-  - `--resume <session_id>`: Resume a saved session
-  - `--output/-o <path>`: Output config path (default: `config.yaml`)
+  - `--prompt <text>`: Provide problem description directly (skips interactive gathering)
+  - `--output/-o <path>`: Output directory (default: `./`)
+  - `--max-iters <n>`: Maximum agent loop iterations (default: 40)
+  - Uses AgentScope ReAct agent for conversational requirements gathering and self-verifying build
+  - Requires Python >=3.12 and agentscope dependency
+- Legacy consultant (deprecated): `llm4ad chat-legacy` (will be removed in future versions)
 
 ### CI/CD
 - GitHub Actions workflow runs on PRs and pushes to main: `.github/workflows/ci.yml`
-- CI runs tests on Python 3.10, 3.11, 3.12 across Ubuntu and macOS
+- CI runs tests on Python 3.12 across Ubuntu, macOS, and Windows
 - CI includes: ruff linting, mypy type checking, unit tests with coverage reporting
 
 ### Git Conventions
@@ -75,7 +79,8 @@ LLM4AD is a modular platform for large language model based algorithm design, wi
    - `coder/`: Code generation components that convert design plans into runnable algorithm code
    - `evaluator/`: Benchmarking and evaluation system for testing generated algorithm performance, includes task definition framework
    - `orchestrator/`: Workflow orchestration layer that coordinates planner, coder, and evaluator components for end-to-end algorithm design pipelines
-   - `consultant/`: Interactive LLM-powered configuration wizard that guides users through pipeline setup via multi-turn conversation. Features dynamic stages based on template level (minimal/standard/complete), context gathering from user files, multiple-choice interaction style, and session save/resume
+   - `agent/`: AI agent-based task package builder using AgentScope ReAct agent. Replaces the consultant module as the primary interactive builder. Features conversational requirements gathering, automated code generation via builder engine, and self-verification through running generated tests
+   - `consultant/`: [DEPRECATED] Legacy interactive configuration wizard. Replaced by `agent/` module. Kept for backward compatibility only
    - `infra/`: Distributed computing infrastructure layer for scaling workloads using Ray
 
 2. **Key Patterns**:
@@ -106,4 +111,4 @@ LLM4AD is a modular platform for large language model based algorithm design, wi
 
 ## Requirements
 
-1. Run `uv run --python 3.10 ruff check src/` every time when finish coding jobs, and fix the errors it reports
+1. Run `uv run --python 3.12 ruff check src/` every time when finish coding jobs, and fix the errors it reports

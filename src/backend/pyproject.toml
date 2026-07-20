@@ -26,10 +26,15 @@ dependencies = [
     "flower>=2.0.1",
     "psycopg2>=2.9.11",
     "gevent>=26.4.0",
-    "llm4ad[all]",
+    "llm4ad-next[all]",
     "paramiko>=4.0.0",
     "nest-asyncio>=1.6.0",
     "qrcode[pil]>=8.0",
+    # AI build (beta): AgentScope core powers the single ReAct agent that runs
+    # inside the task-runner container. Core package only — never install
+    # agentscope-runtime, whose sandbox spins up its own Docker containers
+    # (container-in-container) since the agent already runs in an isolated container.
+    "agentscope>=2.0,<3.0",
 ]
 
 [tool.uv]
@@ -40,7 +45,7 @@ dependencies = [
 override-dependencies = ["nvidia-nccl-cu12; sys_platform == 'never'"]
 
 [tool.uv.sources]
-llm4ad = { path = "../..", editable = true }
+llm4ad-next = { path = "../..", editable = true }
 
 [build-system]
 requires = ["hatchling"]

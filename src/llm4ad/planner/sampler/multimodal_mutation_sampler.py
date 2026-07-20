@@ -189,6 +189,11 @@ class MultimodalMutationSampler(BaseSampler):
             generation_time_ms=generation_time_ms,
             tokens_used=response.prompt_tokens + response.completion_tokens,
             agent_name="MultimodalMutationSampler",
+            operation_params={
+                "parent_id": parent.id,
+                "parent_score": parent_score,
+                "parent_description": parent.description,
+            },
             change_description=algorithm.description,
             targeted_files=[block.file_path] if block else [],
         )

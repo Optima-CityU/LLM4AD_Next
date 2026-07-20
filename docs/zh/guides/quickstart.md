@@ -9,7 +9,7 @@
 
 ## 前提条件
 
-- ✅ Python 3.10 或更高版本
+- ✅ Python 3.12 或更高版本
 - ✅ 已安装 LLM4AD（参见[安装](installation.md)）
 - ✅ OpenAI / Anthropic 的 API 密钥，或任何 OpenAI 兼容端点
 

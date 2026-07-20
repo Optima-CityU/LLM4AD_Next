@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
-import { FeedbackSubmitDialog } from "@/components/Feedback/FeedbackSubmitDialog"
+import { GITHUB_ISSUES_URL } from "@/lib/siteMetadata"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
 import { cn } from "@/lib/utils"
 
@@ -57,7 +57,6 @@ function useDraggable(initial: { right: number; bottom: number }) {
 export function FeedbackFAB() {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const collapseTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -102,21 +101,20 @@ export function FeedbackFAB() {
           )}
         >
           <div className="flex flex-col gap-1.5 rounded-xl border border-border/60 bg-background/95 backdrop-blur-lg shadow-lg p-2 whitespace-nowrap">
-            <button
-              type="button"
+            <a
+              href={GITHUB_ISSUES_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm",
                 "text-foreground/80 hover:text-foreground hover:bg-accent",
                 "transition-colors duration-150",
               )}
-              onClick={() => {
-                setDialogOpen(true)
-                setExpanded(false)
-              }}
+              onClick={() => setExpanded(false)}
             >
               <MessageSquarePlus className="size-4 text-primary" />
               <span>{t("feedback.fab.submitFeedback")}</span>
-            </button>
+            </a>
             <button
               type="button"
               className={cn(
@@ -168,7 +166,6 @@ export function FeedbackFAB() {
         </button>
       </div>
 
-      <FeedbackSubmitDialog open={dialogOpen} onOpenChange={setDialogOpen} />
       <UserManualDialog open={manualOpen} onOpenChange={setManualOpen} />
       <ContactUsDialog open={contactOpen} onOpenChange={setContactOpen} />
     </>

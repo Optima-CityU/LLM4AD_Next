@@ -1,0 +1,52 @@
+name: Update star history chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Optional owner/repo to chart for this run"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  STAR_HISTORY_REPOSITORY: ${{ github.event.inputs.repository || vars.STAR_HISTORY_REPOSITORY || github.repository }}
+
+jobs:
+  update-star-history:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update star history chart
+        uses: narayann7/star-history-action@v1
+        with:
+          repos: ${{ env.STAR_HISTORY_REPOSITORY }}
+          output-dir: docs/assets/star-history
+          readme: README.md
+          type: Date
+          themes: light,dark
+          commit: false
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/update-star-history
+          base: main
+          title: "docs: update star history chart"
+          commit-message: "docs: update star history chart [skip ci]"
+          body: "Automatically updates the static star history chart image."
+          add-paths: |
+            README.md
+            docs/assets/star-history
+          delete-branch: true

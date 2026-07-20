@@ -195,6 +195,12 @@ def get_turn_stream_context(
 _DEFAULT_PAGE_LIMIT = 50
 _MAX_PAGE_LIMIT = 100
 
+# Proxy token TTL for an AI-agent build turn (seconds). One turn lives minutes;
+# 2h covers long multi-round debug builds with margin. Bounded and self-expiring
+# because the token is NOT explicitly revoked (it is task-scoped and an evolution
+# run for the same task issues its own token).
+_AGENT_BUILD_TOKEN_TTL = 2 * 3600
+
 
 def get_session_detail(
         db: Session,
@@ -378,31 +384,64 @@ def start_turn(
     )
 
     # ---- 判定本轮要执行的协程类型，记到 assistant_message 上 ----
-    # 优先级：前端显式指定 target_stage > 后端按状态机自动判断。
-    # 自动判断规则：
-    #   build_status == COMPLETED        → review
-    #   else if is_confirm_build         → ai_build
-    #   else                             → chat_tune（默认）
-    # 这里不再读 task.ai_build_started——该字段已被 session.build_status 取代。
-    is_confirm_build = (
-            locked_message is not None
-            and isinstance(locked_message.payload, dict)
-            and locked_message.payload.get("stage") == "confirm_build"
-            and isinstance(request.submission, dict)
-            and request.submission.get("value") == _CONFIRM_BUILD_VALUE
+    # 默认使用 AI Agent 构建路线（已替代旧的三阶段 consultant）。
+    # Agent 在一轮内承接对话+构建+验证，不依赖三阶段状态机。
+    #
+    # 如果用户明确指定 target_stage，则回退到旧的分阶段行为（向后兼容）。
+    # 如果回复的是 agent 生成的消息，继续走 agent 路径（保持一致性）。
+    replying_to_agent = (
+        locked_message is not None
+        and locked_message.generation_kind == ChatTuneGenerationKind.AI_AGENT.value
     )
-    if request.target_stage is ChatTuneActiveStage.REVIEW:
+
+    # 默认：使用 AI Agent（如果功能开关开启）
+    if settings.ENABLE_AI_AGENT_BUILD and not request.target_stage:
+        generation_kind = ChatTuneGenerationKind.AI_AGENT
+    # 兼容：如果用户手动指定阶段，使用旧的三阶段逻辑
+    elif request.target_stage is ChatTuneActiveStage.REVIEW:
         generation_kind = ChatTuneGenerationKind.REVIEW
     elif request.target_stage is ChatTuneActiveStage.BUILD:
         generation_kind = ChatTuneGenerationKind.AI_BUILD
     elif request.target_stage is ChatTuneActiveStage.GATHERING:
         generation_kind = ChatTuneGenerationKind.CHAT_TUNE
-    elif session.build_status == ChatTuneStageStatus.COMPLETED.value:
-        generation_kind = ChatTuneGenerationKind.REVIEW
-    elif is_confirm_build:
-        generation_kind = ChatTuneGenerationKind.AI_BUILD
+    # 回退：功能开关关闭时的旧逻辑
     else:
-        generation_kind = ChatTuneGenerationKind.CHAT_TUNE
+        is_confirm_build = (
+            locked_message is not None
+            and isinstance(locked_message.payload, dict)
+            and locked_message.payload.get("stage") == "confirm_build"
+            and isinstance(request.submission, dict)
+            and request.submission.get("value") == _CONFIRM_BUILD_VALUE
+        )
+        if session.build_status == ChatTuneStageStatus.COMPLETED.value:
+            generation_kind = ChatTuneGenerationKind.REVIEW
+        elif is_confirm_build:
+            generation_kind = ChatTuneGenerationKind.AI_BUILD
+        else:
+            generation_kind = ChatTuneGenerationKind.CHAT_TUNE
+
+    # 稳健路由：若本轮是在回复 agent 生成的消息，继续走 agent 路径
+    if replying_to_agent and settings.ENABLE_AI_AGENT_BUILD:
+        generation_kind = ChatTuneGenerationKind.AI_AGENT
+
+    # agent 的 build 阶段闸：进入 build 阶段（拥有 build/edit 工具）的条件——
+    #   (a) 用户在 confirm_build 卡片上点了“确认构建”，或
+    #   (b) 本会话已经构建过（build_status 完成 / 已有 blueprint_data），此时后续
+    #       轮次都应带 build/edit 工具，以便 agent 帮用户调 config、改代码、改评估器。
+    _already_built = (
+        session.build_status == ChatTuneStageStatus.COMPLETED.value
+        or bool((session.gathering_context or {}).get("blueprint_data"))
+    )
+    agent_allow_build = generation_kind is ChatTuneGenerationKind.AI_AGENT and (
+        (
+            replying_to_agent
+            and isinstance(locked_message.payload, dict)
+            and locked_message.payload.get("stage") == "confirm_build"
+            and isinstance(request.submission, dict)
+            and request.submission.get("value") == _CONFIRM_BUILD_VALUE
+        )
+        or _already_built
+    )
 
     # 取消上一轮：直接覆写 generation_id 让旧协程感知到
     if session.active_turn_id is not None:
@@ -497,6 +536,27 @@ def start_turn(
                     provider_config=provider_config,
                     gathering_context=_ctx_with_language(),
                     input_data_path=task.input_data_path,
+                )
+            )
+        elif generation_kind is ChatTuneGenerationKind.AI_AGENT:
+            asyncio.create_task(
+                _run_agent_build(
+                    session_id=session.id,
+                    turn_id=turn_id,
+                    assistant_message_id=assistant_message.id,
+                    generation_id=generation_id,
+                    task_id=task.id,
+                    user_id=current_user.id,
+                    provider_config=provider_config,
+                    user_content=llm_user_content,
+                    gathering_context=_ctx_with_language(),
+                    input_data_path=task.input_data_path,
+                    allow_build=agent_allow_build,
+                    proposed=(
+                        (session.gathering_context or {}).get("proposed")
+                        if agent_allow_build
+                        else None
+                    ),
                 )
             )
         else:
@@ -740,6 +800,21 @@ def retry_turn(
                     input_data_path=task.input_data_path,
                 )
             )
+        elif kind == ChatTuneGenerationKind.AI_AGENT.value:
+            asyncio.create_task(
+                _run_agent_build(
+                    session_id=session.id,
+                    turn_id=turn_id,
+                    assistant_message_id=assistant_msg.id,
+                    generation_id=generation_id,
+                    task_id=task.id,
+                    user_id=current_user.id,
+                    provider_config=provider_config,
+                    user_content=user_msg.content,
+                    gathering_context=gathering_ctx,
+                    input_data_path=task.input_data_path,
+                )
+            )
         else:
             asyncio.create_task(
                 _run_chat_tune_generation(
@@ -962,11 +1037,21 @@ async def _run_ai_build(
                         )
                     elif etype == "build_result":
                         blueprint_data = event.get("blueprint_data")
+                        # Mark BUILD stage as completed
                         await asyncio.to_thread(
                             _update_session_stage,
                             session_id,
                             ChatTuneActiveStage.BUILD,
                             ChatTuneStageStatus.COMPLETED,
+                            turn_id=turn_id,
+                        )
+                        # Activate REVIEW stage now that build is complete
+                        await asyncio.to_thread(
+                            _update_session_stage,
+                            session_id,
+                            ChatTuneActiveStage.REVIEW,
+                            ChatTuneStageStatus.RUNNING,
+                            activate=True,
                             turn_id=turn_id,
                         )
                     elif etype == "error":
@@ -1063,6 +1148,386 @@ async def _run_ai_build(
         push_chat_tune_chunk(session_id, turn_id, {"type": "error", "error": error_msg})
 
     finally:
+        if client is not None:
+            await client.aclose()
+        if container_id is not None:
+            await asyncio.to_thread(
+                container_service.cleanup_chat_tune_container, container_id
+            )
+        if docker_workdir is not None:
+            await asyncio.to_thread(
+                container_service.cleanup_chat_tune_workdir, docker_workdir
+            )
+
+
+def _maybe_proxy_provider_config(
+    provider_config: dict[str, Any],
+    user_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> dict[str, Any]:
+    """Return a provider config safe to send into the agent container.
+
+    When the LLM proxy is enabled, swap the real credentials for a one-time
+    ``credential_broker`` token and point ``base_url`` at the in-cluster proxy,
+    so the real api_key never enters the container running agent-driven code
+    (which can execute generated code). When the proxy is disabled, return the
+    config unchanged (matches the existing chat-tune behavior).
+
+    Args:
+        provider_config: The resolved provider config (contains the real key).
+        user_id: Owner, for token auditing.
+        task_id: Task the token is scoped to.
+
+    Returns:
+        A new provider config dict to send to the container.
+    """
+    if not settings.LLM_PROXY_ENABLE:
+        return provider_config
+    if provider_config.get("type") == "mock":
+        return provider_config
+    if not settings.LLM_PROXY_BASE_URL:
+        raise RuntimeError(
+            "LLM_PROXY_ENABLE is on but LLM_PROXY_BASE_URL is unset; refusing to "
+            "send plaintext credentials into the agent container."
+        )
+    from app.services import credential_broker
+
+    proxied = dict(provider_config)
+    # Short bounded TTL: one build turn lives minutes, not the 7-day task TTL.
+    # We deliberately do NOT revoke on completion (tokens are task-scoped and an
+    # evolution run for the same task issues its own), so the TTL is the bound.
+    token = credential_broker.issue_token(
+        user_id=user_id,
+        task_id=task_id,
+        ttl=_AGENT_BUILD_TOKEN_TTL,
+        provider_type=provider_config.get("type", "openai_compatible"),
+        base_url=provider_config.get("base_url") or "",
+        api_key=provider_config.get("api_key") or "",
+        auth_token=provider_config.get("auth_token") or "",
+        model=provider_config.get("model", ""),
+        timeout=provider_config.get("timeout") or 60.0,
+    )
+    proxied["api_key"] = token
+    proxied["auth_token"] = ""
+    proxied["base_url"] = settings.LLM_PROXY_BASE_URL.rstrip("/")
+    return proxied
+
+
+async def _run_agent_build(
+        session_id: uuid.UUID,
+        turn_id: uuid.UUID,
+        assistant_message_id: uuid.UUID,
+        generation_id: str,
+        task_id: uuid.UUID,
+        user_id: uuid.UUID,
+        provider_config: dict[str, Any],
+        user_content: str = "",
+        gathering_context: dict[str, Any] | None = None,
+        input_data_path: str | None = None,
+        allow_build: bool = False,
+        proposed: dict[str, Any] | None = None,
+) -> None:
+    """Background coroutine: AI build (beta) via the AgentScope agent container.
+
+    Two-phase (gather / build) with cross-turn memory:
+
+    - GATHER (``allow_build=False``): the agent asks step-by-step; if it proposes a
+      plan, a ``payload`` confirm card is emitted (persisted onto the message) and
+      the proposal is stored in ``gathering_context`` for the build turn.
+    - BUILD (``allow_build=True``): the agent builds from the confirmed proposal;
+      artifacts are uploaded and ``input_args`` back-filled (as in ``_run_ai_build``).
+
+    Conversation memory is carried across turns via ``gathering_context['agent_state']``
+    (an ``agent_state`` event from the container, not forwarded to the frontend).
+    Credentials are routed through the LLM proxy when enabled.
+    """
+    from app.services import container_service
+
+    language = (gathering_context or {}).get("language") or "zh"
+    content_buffer = ""
+    blueprint_data: dict[str, Any] | None = None
+    final_payload: dict[str, Any] | None = None
+    new_proposed: dict[str, Any] | None = None
+    new_agent_state: dict[str, Any] | None = None
+    cancelled = False
+    container_id: str | None = None
+    docker_workdir: str | None = None
+    client = None
+
+    def _is_cancelled() -> bool:
+        return get_chat_tune_generation_id(session_id, turn_id) != generation_id
+
+    # The beta agent does both gathering and building in one coroutine, so the
+    # left-panel stage must reflect the current phase: gather turns drive the
+    # GATHERING stage, build turns drive the BUILD stage.
+    phase_stage = (
+        ChatTuneActiveStage.BUILD if allow_build else ChatTuneActiveStage.GATHERING
+    )
+
+    try:
+        await asyncio.to_thread(
+            _update_session_stage,
+            session_id, phase_stage, ChatTuneStageStatus.RUNNING,
+            activate=True,
+            turn_id=turn_id,
+        )
+
+        import httpx
+        from httpx_sse import aconnect_sse
+
+        container_provider_config = await asyncio.to_thread(
+            _maybe_proxy_provider_config, provider_config, user_id, task_id
+        )
+
+        docker_workdir, host_workdir = await asyncio.to_thread(
+            container_service.prepare_chat_tune_workdir,
+            input_data_path, str(session_id), str(turn_id),
+        )
+
+        container_id = await asyncio.to_thread(
+            container_service.start_chat_tune_container,
+            str(session_id), host_workdir,
+        )
+
+        host = container_service.chat_tune_container_host(str(session_id))
+        base_url = f"http://{host}:{settings.CHAT_TUNE_CONTAINER_PORT}"
+
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        )
+
+        if not await _wait_chat_tune_ready(
+            client, base_url, settings.CHAT_TUNE_CONTAINER_READY_TIMEOUT
+        ):
+            raise RuntimeError(_t(
+                language, "构建容器启动超时，请重试",
+                "Build container timed out while starting. Please retry.",
+            ))
+
+        body = {
+            "provider_config": container_provider_config,
+            "gathering_context": gathering_context,
+            "user_content": user_content,
+            "allow_build": allow_build,
+            "agent_state": (gathering_context or {}).get("agent_state"),
+            "proposed": proposed,
+        }
+
+        stream_done = False
+        try:
+            async with aconnect_sse(
+                client, "POST", f"{base_url}/agent", json=body
+            ) as event_source:
+                async for sse in event_source.aiter_sse():
+                    if _is_cancelled():
+                        cancelled = True
+                        await asyncio.to_thread(
+                            _persist_assistant_message, assistant_message_id,
+                            ChatTuneTurnStatus.CANCELLED, content_buffer or None, None,
+                        )
+                        await asyncio.to_thread(_maybe_clear_active_turn, session_id, turn_id)
+                        return
+
+                    try:
+                        event = json.loads(sse.data)
+                    except (ValueError, TypeError):
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+
+                    etype = event.get("type")
+                    if etype == "chunk":
+                        chunk = event.get("content", "")
+                        content_buffer += chunk
+                        push_chat_tune_chunk(
+                            session_id, turn_id, {"type": "chunk", "content": chunk}
+                        )
+                    elif etype == "payload":
+                        # Interactive card from the gather phase — either a
+                        # run_needs_gathering question card (ask_choice) or a
+                        # confirm_build card. Forward to the frontend and remember
+                        # it to persist onto the message; proposed is set only on
+                        # the confirm card.
+                        final_payload = event.get("data")
+                        new_proposed = event.get("proposed")
+                        if final_payload is not None:
+                            push_chat_tune_chunk(
+                                session_id, turn_id,
+                                {"type": "payload", "data": final_payload},
+                            )
+                    elif etype == "agent_state":
+                        # Conversation memory snapshot — persisted to
+                        # gathering_context, NOT forwarded to the frontend.
+                        new_agent_state = event.get("state")
+                    elif etype == "build_result":
+                        blueprint_data = event.get("blueprint_data")
+                        # Mark BUILD stage as completed
+                        await asyncio.to_thread(
+                            _update_session_stage,
+                            session_id,
+                            ChatTuneActiveStage.BUILD,
+                            ChatTuneStageStatus.COMPLETED,
+                            turn_id=turn_id,
+                        )
+                        # Activate REVIEW stage now that build is complete
+                        await asyncio.to_thread(
+                            _update_session_stage,
+                            session_id,
+                            ChatTuneActiveStage.REVIEW,
+                            ChatTuneStageStatus.RUNNING,
+                            activate=True,
+                            turn_id=turn_id,
+                        )
+                    elif etype == "error":
+                        raise RuntimeError(event.get("error") or _t(
+                            language, "构建容器执行失败",
+                            "Build container execution failed",
+                        ))
+                    elif etype == "done":
+                        stream_done = True
+                        break
+        except httpx.RemoteProtocolError:
+            if not stream_done:
+                raise
+
+        # Sync produced files: the agent wrote the package under
+        # {project_name}/ in the mounted dir. Upload only that subdir and clear
+        # all prior objects under input_data_path, matching _run_ai_build.
+        logger.info(
+            f"Upload check: input_data_path={bool(input_data_path)}, "
+            f"docker_workdir={docker_workdir}, "
+            f"blueprint_data type={type(blueprint_data).__name__}, "
+            f"built={blueprint_data.get('built') if isinstance(blueprint_data, dict) else 'N/A'}, "
+            f"project_name={blueprint_data.get('project_name') if isinstance(blueprint_data, dict) else 'N/A'}"
+        )
+        if (
+            input_data_path
+            and docker_workdir
+            and isinstance(blueprint_data, dict)
+            and blueprint_data.get("built")
+        ):
+            project_name = blueprint_data.get("project_name")
+            if project_name:
+                from pathlib import Path
+
+                from app.core.storage import storage
+
+                data_path = Path(docker_workdir)
+                product_root = data_path / project_name
+                logger.info(f"Checking product_root: {product_root} (exists={product_root.exists()})")
+                if product_root.is_dir():
+                    existing_keys = await asyncio.to_thread(
+                        storage.list_objects, input_data_path.rstrip("/") + "/"
+                    )
+                    if existing_keys:
+                        await asyncio.to_thread(storage.delete_many, existing_keys)
+
+                    for file_path in product_root.rglob("*"):
+                        if not file_path.is_file():
+                            continue
+                        rel = file_path.relative_to(data_path)
+                        key = f"{input_data_path}/{rel.as_posix()}"
+                        await asyncio.to_thread(storage.upload, key, file_path.read_bytes())
+
+                    new_input_args = await asyncio.to_thread(
+                        _extract_input_args_from_product, product_root
+                    )
+                    await asyncio.to_thread(
+                        _persist_task_input_args, task_id, new_input_args
+                    )
+                    logger.info(
+                        f"Agent build uploaded successfully: {project_name} -> {input_data_path}"
+                    )
+                else:
+                    logger.warning(
+                        f"Agent build product_root does not exist: {product_root}"
+                    )
+            else:
+                logger.warning(
+                    "Agent build missing project_name in blueprint_data"
+                )
+
+        # Persist gathering_context updates: conversation memory (agent_state),
+        # the confirmed/pending proposal, and the build blueprint when present.
+        updated_ctx = dict(gathering_context or {})
+        ctx_changed = False
+        if new_agent_state is not None:
+            updated_ctx["agent_state"] = new_agent_state
+            ctx_changed = True
+        if new_proposed is not None:
+            updated_ctx["proposed"] = new_proposed
+            ctx_changed = True
+        if blueprint_data is not None:
+            updated_ctx["blueprint_data"] = blueprint_data
+            ctx_changed = True
+        if ctx_changed:
+            await asyncio.to_thread(
+                _persist_session_gathering_context, session_id, updated_ctx
+            )
+
+        # Left-panel stage on a clean turn end. A gather turn that proposes the
+        # plan (confirm_build card) marks GATHERING complete — requirements are
+        # settled, awaiting the user's confirm. A gather turn that only asked a
+        # question stays RUNNING (still gathering). Build-turn completion is
+        # already marked via the build_result event above.
+        if not allow_build:
+            proposing = (
+                isinstance(final_payload, dict)
+                and final_payload.get("stage") == "confirm_build"
+            )
+            await asyncio.to_thread(
+                _update_session_stage,
+                session_id,
+                ChatTuneActiveStage.GATHERING,
+                ChatTuneStageStatus.COMPLETED if proposing else ChatTuneStageStatus.RUNNING,
+                turn_id=turn_id,
+            )
+
+        # Persist the confirm-build card onto the assistant message so it survives
+        # a refresh / replay (matches how chat_tune persists its payload).
+        await asyncio.to_thread(
+            _persist_assistant_message, assistant_message_id,
+            status=ChatTuneTurnStatus.COMPLETED, content=content_buffer,
+            payload=final_payload,
+        )
+        await asyncio.to_thread(_maybe_clear_active_turn, session_id, turn_id)
+        push_chat_tune_chunk(session_id, turn_id, {"type": "done"})
+
+    except Exception as exc:
+        if cancelled:
+            return
+        if _is_cancelled():
+            cancelled = True
+            await asyncio.to_thread(
+                _persist_assistant_message, assistant_message_id,
+                ChatTuneTurnStatus.CANCELLED, content_buffer or None, None,
+            )
+            await asyncio.to_thread(_maybe_clear_active_turn, session_id, turn_id)
+            return
+
+        error_msg = _safe_error_message(exc)
+        logger.exception("AI agent build failed: session_id=%s, turn_id=%s", session_id, turn_id)
+
+        await asyncio.to_thread(
+            _update_session_stage,
+            session_id, phase_stage, ChatTuneStageStatus.FAILED,
+            turn_id=turn_id,
+        )
+
+        await asyncio.to_thread(
+            _persist_assistant_message, assistant_message_id,
+            status=ChatTuneTurnStatus.FAILED, content=content_buffer or None,
+            payload=None, error=error_msg,
+        )
+        await asyncio.to_thread(_maybe_clear_active_turn, session_id, turn_id)
+        push_chat_tune_chunk(session_id, turn_id, {"type": "error", "error": error_msg})
+
+    finally:
+        # NOTE: do NOT call revoke_task_tokens(task_id) here — proxy tokens are
+        # keyed by task_id and an evolution run for the SAME task issues its own
+        # token; a broad revoke would nuke it. The agent-build token is issued
+        # with a short bounded TTL (_AGENT_BUILD_TOKEN_TTL) and self-expires,
+        # matching how _run_ai_build relies on TTL rather than explicit revoke.
         if client is not None:
             await client.aclose()
         if container_id is not None:

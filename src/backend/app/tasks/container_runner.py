@@ -18,8 +18,12 @@ import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
-# 与 container_runner.py 同目录，容器内以脚本方式启动时 sys.path[0] 即本目录
-import task_config_crypto  # noqa: E402
+# 与 container_runner.py 同目录，容器内以脚本方式启动时 sys.path[0] 即本目录。
+# 测试中按 app.tasks.container_runner 包导入时使用 package fallback。
+try:
+    import task_config_crypto  # noqa: E402
+except ModuleNotFoundError:  # pragma: no cover - only used outside script mode
+    from app.tasks import task_config_crypto  # type: ignore[no-redef]
 from llm4ad import LLM4AD
 from llm4ad.config import AppConfig
 from loguru import logger
@@ -56,6 +60,15 @@ class EventsSink:
     def __call__(self, message) -> None:
         """loguru sink：把日志记录转为 log 事件。"""
         record = message.record
+        extra = record.get("extra") or {}
+        event_type = extra.get("event_type")
+        if event_type:
+            self.emit({
+                "type": event_type,
+                "timestamp": record["time"].isoformat(),
+                **{key: value for key, value in extra.items() if key != "event_type"},
+            })
+            return
         self.emit({
             "type": "log",
             "timestamp": record["time"].isoformat(),

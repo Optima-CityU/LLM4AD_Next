@@ -264,6 +264,65 @@ class TaskLogsResponse(BaseModel):
     has_more: bool = Field(default=False, description="是否还有更早的日志")
 
 
+class MemoryInjectionSummary(BaseModel):
+    """单次 MindMemOS 注入事件摘要。"""
+
+    sampler: str = "unknown"
+    strategy: str = ""
+    scope_hits: dict[str, int] = Field(default_factory=dict)
+    deduped_hits: int = 0
+    injected_chars: int = 0
+    elapsed_ms: int = 0
+    timestamp: datetime | None = None
+
+
+class MemoryContributionScopeSummary(BaseModel):
+    """单个 scope 的记忆贡献度估算。"""
+
+    calls: int = 0
+    positive_results: int = 0
+    best_delta: float | None = None
+    average_delta: float | None = None
+
+
+def _default_memory_contribution_scopes() -> dict[str, MemoryContributionScopeSummary]:
+    return {
+        "task": MemoryContributionScopeSummary(),
+        "project": MemoryContributionScopeSummary(),
+        "user": MemoryContributionScopeSummary(),
+    }
+
+
+class MemoryContributionSummary(BaseModel):
+    """MindMemOS 注入后候选算法评分变化的聚合估算。"""
+
+    associated_generations: int = 0
+    scored_generations: int = 0
+    positive_results: int = 0
+    best_delta: float | None = None
+    average_delta: float | None = None
+    by_scope: dict[str, MemoryContributionScopeSummary] = Field(
+        default_factory=_default_memory_contribution_scopes
+    )
+
+
+class TaskMemoryObservabilityResponse(BaseModel):
+    """任务级 MindMemOS 记忆使用统计。"""
+
+    task_id: uuid.UUID
+    enabled: bool
+    injection_calls: int = 0
+    scope_hits_total: dict[str, int] = Field(default_factory=lambda: {"task": 0, "project": 0, "user": 0})
+    deduped_hits_total: int = 0
+    injected_chars_total: int = 0
+    elapsed_ms_total: int = 0
+    elapsed_ms_avg: int = 0
+    sampler_counts: dict[str, int] = Field(default_factory=dict)
+    created_task_memory_count: int = 0
+    latest_injection: MemoryInjectionSummary | None = None
+    contribution: MemoryContributionSummary = Field(default_factory=MemoryContributionSummary)
+
+
 # ---- 辅助函数 ----
 
 

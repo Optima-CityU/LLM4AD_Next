@@ -592,3 +592,75 @@ class DyCAConfig(EvolutionConfig):
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class MCTSAHDConfig(IslandGAConfig):
+    """Configuration for the MCTS-AHD orchestrator.
+
+    Migrated from legacy LLM4AD MCTS-AHD. Inherits IslandGAConfig so the shared
+    IslandGA individual-generation pipeline keeps its fields (num_islands,
+    max_llm_concurrency, etc.), and adds MCTS tree-search parameters. Note the
+    MCTS-AHD orchestrator runs a single tree (num_islands is effectively 1).
+    """
+
+    type: Literal["mcts_ahd"] = Field(  # type: ignore[assignment]
+        default="mcts_ahd",
+        json_schema_extra=ui(
+            label_zh="进化类型", label_en="Evolution Type",
+            desc_zh="蒙特卡洛树搜索启发式设计，用 UCT 平衡探索与利用",
+            desc_en="Monte Carlo Tree Search for heuristic design; balances exploration/exploitation with UCT",
+            hidden=True,
+        ),
+    )
+
+    planner_type: str = Field(
+        default="llm_evolution",
+        json_schema_extra=ui(
+            label_zh="规划器类型", label_en="Planner Type",
+            desc_zh="MCTS-AHD 使用的规划器类型",
+            desc_en="Planner type used by MCTS-AHD",
+            hidden=True,
+        ),
+    )
+    lambda0: float = Field(
+        default=0.1, ge=0.0,
+        json_schema_extra=ui(
+            label_zh="探索常数 λ₀", label_en="Exploration Constant λ₀",
+            desc_zh="UCT 探索项的基础系数，越大越偏向探索",
+            desc_en="Base coefficient of the UCT exploration term; larger favors exploration",
+        ),
+    )
+    alpha: float = Field(
+        default=0.5, ge=0.0,
+        json_schema_extra=ui(
+            label_zh="渐进扩展参数 α", label_en="Progressive Widening α",
+            desc_zh="控制节点扩展节奏的参数（预留）",
+            desc_en="Parameter controlling node expansion cadence (reserved)",
+        ),
+    )
+    max_depth: int = Field(
+        default=10, ge=1,
+        json_schema_extra=ui(
+            label_zh="最大树深度", label_en="Max Tree Depth",
+            desc_zh="MCTS 树的最大深度，限制搜索路径长度",
+            desc_en="Maximum depth of the MCTS tree, bounding search path length",
+        ),
+    )
+    init_size: int = Field(
+        default=4, ge=1,
+        json_schema_extra=ui(
+            label_zh="初始子节点数", label_en="Initial Children",
+            desc_zh="根节点下初始生成的子节点（初始种群）数量",
+            desc_en="Number of first-level children generated under the root (initial population)",
+        ),
+    )
+    max_sample_nums: int = Field(
+        default=100, ge=1,
+        json_schema_extra=ui(
+            label_zh="最大采样数", label_en="Max Sample Numbers",
+            desc_zh="整个搜索过程中允许的最大评估次数（终止条件）",
+            desc_en="Maximum number of evaluations allowed across the search (termination condition)",
+        ),
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)

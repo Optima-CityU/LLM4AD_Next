@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { FlaskConical, GitBranch, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { type Control, type Resolver, useForm } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
@@ -32,6 +32,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
@@ -52,6 +53,9 @@ import {
 import { handleError } from "@/utils"
 
 const JINA_DEFAULT_MODEL = "jina-embeddings-v4"
+const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+const OPENAI_DEFAULT_MODEL = "text-embedding-3-small"
+const OPENAI_DEFAULT_DIM = 1536
 type TaskType = "text" | "code"
 type SecretField =
   | "api_key"
@@ -200,6 +204,22 @@ const providerTypes = [
   { value: "mock", label: "Mock" },
 ] as const
 
+function taskProviderType(type: FormData["type"]) {
+  return type === "local" ? "openai_compatible" : type
+}
+
+function taskConfigsMatch(provider: EmbeddingProviderResponse) {
+  return (
+    provider.mode === "split" &&
+    provider.text_type === provider.code_type &&
+    (provider.text_base_url ?? "") === (provider.code_base_url ?? "") &&
+    provider.text_model === provider.code_model &&
+    provider.text_task === provider.code_task &&
+    Boolean(provider.text_api_key) === Boolean(provider.code_api_key) &&
+    Boolean(provider.text_auth_token) === Boolean(provider.code_auth_token)
+  )
+}
+
 function providerToFormData(provider: EmbeddingProviderResponse): FormData {
   return {
     name: provider.name,
@@ -297,6 +317,7 @@ export default function EmbeddingProviderSettings() {
   const [editingProvider, setEditingProvider] = useState<EmbeddingProviderResponse | null>(null)
   const [clearedSecrets, setClearedSecrets] = useState<Set<SecretField>>(new Set())
   const [testingKey, setTestingKey] = useState<string | null>(null)
+  const [shareTaskConfig, setShareTaskConfig] = useState(false)
   const existingSecrets = useMemo(
     () => ({
       shared: Boolean(
@@ -324,10 +345,35 @@ export default function EmbeddingProviderSettings() {
   })
 
   const type = form.watch("type")
+  const textBaseUrl = form.watch("text_base_url")
+  const textApiKey = form.watch("text_api_key")
+  const textAuthToken = form.watch("text_auth_token")
+  const textModel = form.watch("text_model")
+  const textTask = form.watch("text_task")
   const isJina = type === "jina"
   const isMock = type === "mock"
   const usesSeparateTaskConfigs = !isJina && !isMock
   const isEditing = Boolean(editingProvider)
+
+  useEffect(() => {
+    if (!shareTaskConfig || !usesSeparateTaskConfigs) return
+    form.setValue("code_type", taskProviderType(type))
+    form.setValue("code_base_url", textBaseUrl ?? "")
+    form.setValue("code_api_key", textApiKey ?? "")
+    form.setValue("code_auth_token", textAuthToken ?? "")
+    form.setValue("code_model", textModel ?? "")
+    form.setValue("code_task", textTask ?? "")
+  }, [
+    form,
+    shareTaskConfig,
+    textApiKey,
+    textAuthToken,
+    textBaseUrl,
+    textModel,
+    textTask,
+    type,
+    usesSeparateTaskConfigs,
+  ])
 
   const createMutation = useMutation({
     mutationFn: (requestBody: EmbeddingProviderCreate) =>
@@ -410,6 +456,7 @@ export default function EmbeddingProviderSettings() {
   function resetForm() {
     setEditingProvider(null)
     setClearedSecrets(new Set())
+    setShareTaskConfig(false)
     form.reset(defaultValues)
   }
 
@@ -417,12 +464,28 @@ export default function EmbeddingProviderSettings() {
     if (provider.is_builtin) return
     setEditingProvider(provider)
     setClearedSecrets(new Set())
+    setShareTaskConfig(taskConfigsMatch(provider))
     form.reset(providerToFormData(provider))
+  }
+
+  function syncCodeFromText() {
+    form.setValue("code_type", taskProviderType(form.getValues("type")))
+    form.setValue("code_base_url", form.getValues("text_base_url") ?? "")
+    form.setValue("code_api_key", form.getValues("text_api_key") ?? "")
+    form.setValue("code_auth_token", form.getValues("text_auth_token") ?? "")
+    form.setValue("code_model", form.getValues("text_model") ?? "")
+    form.setValue("code_task", form.getValues("text_task") ?? "")
+  }
+
+  function setSharedTaskConfig(checked: boolean) {
+    setShareTaskConfig(checked)
+    if (checked) syncCodeFromText()
   }
 
   function setProviderType(value: FormData["type"]) {
     form.setValue("type", value)
     if (value === "jina") {
+      setShareTaskConfig(false)
       form.setValue("mode", "shared")
       form.setValue("dim", 2048)
       form.setValue("model", JINA_DEFAULT_MODEL)
@@ -431,15 +494,37 @@ export default function EmbeddingProviderSettings() {
       form.setValue("text_task", "text-matching")
       form.setValue("code_task", "code.passage")
     } else if (value === "mock") {
+      setShareTaskConfig(false)
       form.setValue("mode", "shared")
       form.setValue("model", "mock")
       form.setValue("text_type", "mock")
       form.setValue("code_type", "mock")
-    } else {
+    } else if (value === "openai") {
+      setShareTaskConfig(true)
       form.setValue("mode", "split")
-      const taskProviderType = value === "local" ? "openai_compatible" : value
-      form.setValue("text_type", taskProviderType)
-      form.setValue("code_type", taskProviderType)
+      form.setValue("model", "")
+      form.setValue("api_key", "")
+      form.setValue("auth_token", "")
+      form.setValue("base_url", "")
+      form.setValue("dim", OPENAI_DEFAULT_DIM)
+      form.setValue("text_type", "openai")
+      form.setValue("code_type", "openai")
+      form.setValue("text_base_url", OPENAI_DEFAULT_BASE_URL)
+      form.setValue("code_base_url", OPENAI_DEFAULT_BASE_URL)
+      form.setValue("text_model", OPENAI_DEFAULT_MODEL)
+      form.setValue("code_model", OPENAI_DEFAULT_MODEL)
+      form.setValue("text_task", "")
+      form.setValue("code_task", "")
+      const currentName = form.getValues("name").trim()
+      if (!currentName || currentName === defaultValues.name) {
+        form.setValue("name", "OpenAI Embedding")
+      }
+    } else {
+      setShareTaskConfig(false)
+      form.setValue("mode", "split")
+      const providerType = taskProviderType(value)
+      form.setValue("text_type", providerType)
+      form.setValue("code_type", providerType)
     }
   }
 
@@ -448,6 +533,14 @@ export default function EmbeddingProviderSettings() {
       const next = new Set(current)
       if (next.has(field)) next.delete(field)
       else next.add(field)
+      if (shareTaskConfig && field === "text_api_key") {
+        if (next.has(field)) next.add("code_api_key")
+        else next.delete("code_api_key")
+      }
+      if (shareTaskConfig && field === "text_auth_token") {
+        if (next.has(field)) next.add("code_auth_token")
+        else next.delete("code_auth_token")
+      }
       return next
     })
   }
@@ -689,41 +782,80 @@ export default function EmbeddingProviderSettings() {
                   )}
 
                   {usesSeparateTaskConfigs && (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <TaskConfigFields
-                        control={form.control}
-                        title={t("llmProvider.embedding.textConfig")}
-                        baseUrlName="text_base_url"
-                        apiKeyName="text_api_key"
-                        modelName="text_model"
-                        taskName="text_task"
-                        modelLabel={t("llmProvider.embedding.textModel")}
-                        taskLabel={t("llmProvider.embedding.textTask")}
-                        modelPlaceholder="bge-text"
-                        baseUrlPlaceholder="http://localhost:8000/v1"
-                        taskPlaceholder="text-matching"
-                        provider={editingProvider}
-                        clearedSecrets={clearedSecrets}
-                        onToggleClear={toggleClearSecret}
-                        t={t}
-                      />
-                      <TaskConfigFields
-                        control={form.control}
-                        title={t("llmProvider.embedding.codeConfig")}
-                        baseUrlName="code_base_url"
-                        apiKeyName="code_api_key"
-                        modelName="code_model"
-                        taskName="code_task"
-                        modelLabel={t("llmProvider.embedding.codeModel")}
-                        taskLabel={t("llmProvider.embedding.codeTask")}
-                        modelPlaceholder="bge-code"
-                        baseUrlPlaceholder="http://localhost:8001/v1"
-                        taskPlaceholder="code.passage"
-                        provider={editingProvider}
-                        clearedSecrets={clearedSecrets}
-                        onToggleClear={toggleClearSecret}
-                        t={t}
-                      />
+                    <div className="space-y-3">
+                      <label className="flex items-start gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                        <Checkbox
+                          className="mt-0.5"
+                          checked={shareTaskConfig}
+                          onCheckedChange={(checked) => setSharedTaskConfig(checked === true)}
+                        />
+                        <span className="grid gap-1">
+                          <span className="font-medium">
+                            {t("llmProvider.embedding.shareTaskConfig")}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {t("llmProvider.embedding.shareTaskConfigHint")}
+                          </span>
+                        </span>
+                      </label>
+                      <div
+                        className={
+                          shareTaskConfig
+                            ? "grid grid-cols-1 gap-4"
+                            : "grid grid-cols-1 gap-4 sm:grid-cols-2"
+                        }
+                      >
+                        <TaskConfigFields
+                          control={form.control}
+                          title={
+                            shareTaskConfig
+                              ? t("llmProvider.embedding.sharedTaskConfig")
+                              : t("llmProvider.embedding.textConfig")
+                          }
+                          baseUrlName="text_base_url"
+                          apiKeyName="text_api_key"
+                          modelName="text_model"
+                          taskName="text_task"
+                          modelLabel={
+                            shareTaskConfig
+                              ? t("llmProvider.modelName")
+                              : t("llmProvider.embedding.textModel")
+                          }
+                          taskLabel={t("llmProvider.embedding.textTask")}
+                          modelPlaceholder={type === "openai" ? OPENAI_DEFAULT_MODEL : "bge-text"}
+                          baseUrlPlaceholder={
+                            type === "openai" ? OPENAI_DEFAULT_BASE_URL : "http://localhost:8000/v1"
+                          }
+                          taskPlaceholder={type === "openai" ? "" : "text-matching"}
+                          provider={editingProvider}
+                          clearedSecrets={clearedSecrets}
+                          onToggleClear={toggleClearSecret}
+                          t={t}
+                        />
+                        {!shareTaskConfig && (
+                          <TaskConfigFields
+                            control={form.control}
+                            title={t("llmProvider.embedding.codeConfig")}
+                            baseUrlName="code_base_url"
+                            apiKeyName="code_api_key"
+                            modelName="code_model"
+                            taskName="code_task"
+                            modelLabel={t("llmProvider.embedding.codeModel")}
+                            taskLabel={t("llmProvider.embedding.codeTask")}
+                            modelPlaceholder={type === "openai" ? OPENAI_DEFAULT_MODEL : "bge-code"}
+                            baseUrlPlaceholder={
+                              type === "openai"
+                                ? OPENAI_DEFAULT_BASE_URL
+                                : "http://localhost:8001/v1"
+                            }
+                            taskPlaceholder={type === "openai" ? "" : "code.passage"}
+                            provider={editingProvider}
+                            clearedSecrets={clearedSecrets}
+                            onToggleClear={toggleClearSecret}
+                            t={t}
+                          />
+                        )}
+                      </div>
                     </div>
                   )}
 

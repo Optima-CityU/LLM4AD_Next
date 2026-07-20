@@ -1,9 +1,12 @@
+import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import {
   ArrowRight,
+  ArrowUpRight,
   BookOpen,
   Box,
   Brain,
+  CalendarDays,
   Combine,
   Cpu,
   Crown,
@@ -19,6 +22,7 @@ import {
   Menu,
   MessageSquareText,
   Network,
+  Newspaper,
   Play,
   Sigma,
   Trophy,
@@ -28,11 +32,12 @@ import {
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { NewsService } from "@/client"
 import IslandBackground from "@/components/Common/IslandBackground"
 import LanguageToggle from "@/components/Common/LanguageToggle"
+import { FooterMetadataLinks } from "@/components/Common/Footer"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
-import { FeedbackSubmitDialog } from "@/components/Feedback/FeedbackSubmitDialog"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
@@ -63,10 +68,16 @@ function useScrollY() {
 }
 
 function useReveal<T extends HTMLElement>(threshold = 0.15) {
-  const ref = useRef<T | null>(null)
+  // Use a state-backed callback ref instead of `useRef` so this hook keeps
+  // working when the observed element mounts *later* than the hook itself —
+  // e.g. a section that returns `null` while data loads, then renders content
+  // after a query resolves. With `useRef` the effect only runs once on mount
+  // (deps `[threshold]`), sees a null ref, and never re-attaches; with the
+  // callback ref, `el` transitions null → element, which re-triggers the
+  // effect and attaches the IntersectionObserver at the right moment.
+  const [el, setEl] = useState<T | null>(null)
   const [visible, setVisible] = useState(false)
   useEffect(() => {
-    const el = ref.current
     if (!el) return
     const obs = new IntersectionObserver(
       ([entry]) => {
@@ -79,7 +90,11 @@ function useReveal<T extends HTMLElement>(threshold = 0.15) {
     )
     obs.observe(el)
     return () => obs.disconnect()
-  }, [threshold])
+  }, [el, threshold])
+  // Wrap setEl in an arrow so JSX sees a plain callback ref instead of a
+  // state setter — the setter's `SetStateAction` overload confuses React's
+  // ref type inference.
+  const ref = (node: T | null) => setEl(node)
   return { ref, visible }
 }
 
@@ -288,6 +303,7 @@ function Navbar() {
     { label: t("landing.nav.features"), href: "#features" },
     { label: t("landing.nav.domains"), href: "#domains" },
     { label: t("landing.nav.achievements"), href: "#achievements" },
+    { label: t("landing.nav.news"), href: "#news" },
   ]
 
   return (
@@ -531,7 +547,9 @@ function DemoSection() {
   const { resolvedTheme } = useTheme()
   const { ref, visible } = useReveal<HTMLDivElement>()
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const variant = i18n.language?.startsWith("zh") ? DEMO_VIDEO.zh : DEMO_VIDEO.en
+  const variant = i18n.language?.startsWith("zh")
+    ? DEMO_VIDEO.zh
+    : DEMO_VIDEO.en
   const videoSrc = variant.src
   // Swap to the light-mode cover so the poster matches the active theme.
   const posterSrc =
@@ -877,10 +895,171 @@ function AchievementsSection() {
   )
 }
 
+/**
+ * Format a wiki publish-date string for display.
+ *
+ * Wiki dates come through as raw strings — anything from `"2026年7月6日"` to
+ * `"Jul 6, 2026"` to `"2026-07-06"`. If `Date` can parse it, pretty-print in
+ * the active locale; otherwise fall through and show the wiki's original text.
+ * Empty input renders as empty (caller hides the meta cell).
+ */
+function formatNewsDate(raw: string | null | undefined, language: string) {
+  if (!raw) return ""
+  const locale = language.startsWith("zh") ? "zh-CN" : "en-US"
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return raw
+  return parsed.toLocaleDateString(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })
+}
+
+// Landing shows a teaser only — cap items and link the "see more" affordance to
+// the wiki index page, which is the canonical archive. One URL per UI language.
+const MAX_NEWS_ITEMS = 4
+const NEWS_INDEX_URL: Record<"zh" | "en", string> = {
+  zh: "https://github.com/Optima-CityU/LLM4AD_Next/wiki/News%E2%80%90and%E2%80%90Articles%E2%80%90Index_zh",
+  en: "https://github.com/Optima-CityU/LLM4AD_Next/wiki/News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en",
+}
+
+function NewsSection() {
+  const { t, i18n } = useTranslation()
+  const { ref, visible } = useReveal<HTMLDivElement>()
+  const lang: "zh" | "en" = i18n.language?.startsWith("zh") ? "zh" : "en"
+
+  // Fetch the live feed for the current UI language. Query key includes `lang`
+  // so a language switch re-fetches from the correct wiki source. Cached data
+  // is treated as fresh for 5 min to keep the section snappy.
+  const { data } = useQuery({
+    queryKey: ["landing-news", lang],
+    queryFn: () => NewsService.listNews({ lang }),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+
+  const allItems = data?.items ?? []
+  // Backend order is preserved (newest first per wiki convention); the landing
+  // shows only the first MAX_NEWS_ITEMS and links to the wiki index for the rest.
+  const items = allItems.slice(0, MAX_NEWS_ITEMS)
+  const hasMore = allItems.length > MAX_NEWS_ITEMS
+
+  // Hide the section entirely when the backend returns nothing (language not
+  // configured / wiki unreachable / empty wiki) — avoids a lone heading.
+  if (items.length === 0) return null
+
+  return (
+    <section
+      id="news"
+      ref={ref}
+      className="relative z-10 py-24 px-4 sm:px-6 lg:px-8 scroll-mt-20"
+    >
+      <div className="max-w-6xl mx-auto">
+        <div
+          className={`text-center mb-16 landing-reveal ${visible ? "is-visible" : ""}`}
+        >
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-foreground">
+            {t("landing.news.title")}
+          </h2>
+          <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
+            {t("landing.news.subtitle")}
+          </p>
+        </div>
+
+        {/* 2-column card grid matching the Achievements section, so the two
+            adjacent sections read as one visual system. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {items.map((article, i) => {
+            const date = formatNewsDate(
+              article.published_at,
+              i18n.language ?? "en",
+            )
+            // Top meta row: tag badge + source (both are article-category info,
+            // grouped together). Date + "read more" live in the bottom row so
+            // the card foot reads as a single publication footer. Hide either
+            // row entirely when it has no content to render.
+            const hasTopMeta = Boolean(article.tag || article.source)
+            return (
+              <a
+                key={article.url}
+                href={article.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`group landing-card-shimmer flex flex-col rounded-2xl p-6 border border-primary/15 bg-gradient-to-br from-primary/5 via-primary/[0.03] to-transparent hover:border-primary/30 hover:-translate-y-1 transition-all duration-500 landing-reveal ${visible ? "is-visible" : ""}`}
+                style={{ transitionDelay: `${0.15 + i * 0.1}s` }}
+              >
+                {hasTopMeta && (
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mb-3">
+                    {article.tag && (
+                      <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 font-medium bg-primary/10 text-primary border-primary/20">
+                        {article.tag}
+                      </span>
+                    )}
+                    {article.source && (
+                      <span className="inline-flex items-center gap-1 min-w-0 truncate">
+                        <Newspaper className="size-3.5 shrink-0" />
+                        <span className="truncate">{article.source}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <h3 className="text-lg font-semibold text-foreground leading-snug group-hover:text-primary transition-colors line-clamp-2">
+                  {article.title}
+                </h3>
+
+                {article.summary && (
+                  <p className="mt-3 text-sm text-muted-foreground leading-relaxed line-clamp-3">
+                    {article.summary}
+                  </p>
+                )}
+
+                {/* Bottom row: "Read full article" on the left, date (if
+                    provided) on the right. `mt-auto` pins it to the card
+                    footer regardless of summary length so cards align. */}
+                <div className="mt-auto pt-4 flex items-center justify-between gap-3">
+                  <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+                    {t("landing.news.readMore")}
+                    <ExternalLink className="size-3.5" />
+                  </span>
+                  {date && (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <CalendarDays className="size-3.5" />
+                      {date}
+                    </span>
+                  )}
+                </div>
+              </a>
+            )
+          })}
+        </div>
+
+        {/* "See more" CTA — only when the backend has more than we chose to
+            show. Sends users to the wiki index page for the archive. */}
+        {hasMore && (
+          <div
+            className={`mt-10 flex justify-center landing-reveal ${visible ? "is-visible" : ""}`}
+            style={{ transitionDelay: `${0.15 + items.length * 0.1}s` }}
+          >
+            <a
+              href={NEWS_INDEX_URL[lang]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/5 px-5 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 hover:-translate-y-0.5 transition-all"
+            >
+              {t("landing.news.viewMore")}
+              <ArrowUpRight className="size-4" />
+            </a>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function LandingFooter() {
   const { t } = useTranslation()
   const [manualOpen, setManualOpen] = useState(false)
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
 
   return (
@@ -900,14 +1079,6 @@ function LandingFooter() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors whitespace-nowrap"
-              onClick={() => setFeedbackOpen(true)}
-            >
-              <MessageSquareText className="size-3.5" />
-              {t("sidebar.feedback")}
-            </button>
             <button
               type="button"
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors whitespace-nowrap"
@@ -932,17 +1103,16 @@ function LandingFooter() {
             &copy; {new Date().getFullYear()} LLM4AD_Next Team. All rights
             reserved.
           </p>
-          {t("landing.footer.team") && (
-            <p className="text-xs text-muted-foreground/50">
-              {t("landing.footer.team")}
-            </p>
-          )}
+          <div className="flex flex-col items-center gap-1 sm:items-end">
+            <FooterMetadataLinks />
+            {t("landing.footer.team") && (
+              <p className="text-xs text-muted-foreground/50">
+                {t("landing.footer.team")}
+              </p>
+            )}
+          </div>
         </div>
       </div>
-      <FeedbackSubmitDialog
-        open={feedbackOpen}
-        onOpenChange={setFeedbackOpen}
-      />
       <UserManualDialog open={manualOpen} onOpenChange={setManualOpen} />
       <ContactUsDialog open={contactOpen} onOpenChange={setContactOpen} />
     </footer>
@@ -963,6 +1133,7 @@ function LandingPage() {
       <NetworkDivider />
       <DomainsSection />
       <AchievementsSection />
+      <NewsSection />
       <LandingFooter />
     </div>
   )

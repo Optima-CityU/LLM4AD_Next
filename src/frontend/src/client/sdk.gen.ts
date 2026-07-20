@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AdminAnalyticsGetAdminAnalyticsOverviewData, AdminAnalyticsGetAdminAnalyticsOverviewResponse, AdminAnalyticsGetAdminOperationsSummaryResponse, AdminAnalyticsGetAdminOperationsTasksResponse, AdminAnalyticsGetAdminOperationsFeedbackResponse, AdminAnalyticsGetAdminOperationsLitellmResponse, AdminAnalyticsGetAdminVisitorsPlausibleData, AdminAnalyticsGetAdminVisitorsPlausibleResponse, AdminAnalyticsGetAdminVisitorsGithubResponse, FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdLlmproxyProxyLlmData, Llm4AdLlmproxyProxyLlmResponse, Llm4AdLlmproxyProxyLlm1Data, Llm4AdLlmproxyProxyLlm1Response, Llm4AdLlmproxyProxyLlm2Data, Llm4AdLlmproxyProxyLlm2Response, Llm4AdLlmproxyProxyLlm3Data, Llm4AdLlmproxyProxyLlm3Response, Llm4AdLlmproxyProxyLlm4Data, Llm4AdLlmproxyProxyLlm4Response, Llm4AdLlmproxyProxyLlm5Data, Llm4AdLlmproxyProxyLlm5Response, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetBuiltinProviderQuotaResponse, Llm4AdProvidersGetLitellmUserQuotasResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+import type { AdminAnalyticsGetAdminAnalyticsOverviewData, AdminAnalyticsGetAdminAnalyticsOverviewResponse, AdminAnalyticsGetAdminOperationsSummaryResponse, AdminAnalyticsGetAdminOperationsTasksResponse, AdminAnalyticsGetAdminOperationsFeedbackResponse, AdminAnalyticsGetAdminOperationsLitellmResponse, AdminAnalyticsGetAdminVisitorsPlausibleData, AdminAnalyticsGetAdminVisitorsPlausibleResponse, AdminAnalyticsGetAdminVisitorsGithubResponse, FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryCommitMemoryCardExtractionData, Llm4AdMemoryCommitMemoryCardExtractionResponse, Llm4AdMemoryDiscardMemoryCardExtractionData, Llm4AdMemoryDiscardMemoryCardExtractionResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetBuiltinProviderQuotaResponse, Llm4AdProvidersGetLitellmUserQuotasResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, OidcGithubAuthorizeData, OidcGithubAuthorizeResponse, OidcGithubCallbackData, OidcGithubCallbackResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, StarRewardReadStarRewardStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
 
 export class AdminAnalyticsService {
     /**
@@ -113,7 +113,7 @@ export class AdminAnalyticsService {
         });
     }
 }
-import type { Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse } from './types.gen';
+
 export class FeedbackService {
     /**
      * 提交意见反馈
@@ -1054,29 +1054,20 @@ export class Llm4AdEmbeddingProvidersService {
     }
 }
 
-export class Llm4AdLlmproxyService {
+export class Llm4AdMemoryService {
     /**
-     * Proxy Llm
-     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
-     *
-     * Args:
-     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
-     * request: 原始入站请求。
-     *
-     * Returns:
-     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * 测试记忆后端连通性
      * @param data The data for the request.
-     * @param data.path
-     * @returns unknown Successful Response
+     * @param data.requestBody
+     * @returns MemoryTestResponse Successful Response
      * @throws ApiError
      */
-    public static proxyLlm(data: Llm4AdLlmproxyProxyLlmData): CancelablePromise<Llm4AdLlmproxyProxyLlmResponse> {
+    public static testMemoryBackend(data: Llm4AdMemoryTestMemoryBackendData): CancelablePromise<Llm4AdMemoryTestMemoryBackendResponse> {
         return __request(OpenAPI, {
-            method: 'PUT',
-            url: '/api/v1/llm4ad/llmproxy/{path}',
-            path: {
-                path: data.path
-            },
+            method: 'POST',
+            url: '/api/v1/llm4ad/memory/test',
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
@@ -1084,83 +1075,42 @@ export class Llm4AdLlmproxyService {
     }
 
     /**
-     * Proxy Llm
-     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
-     *
-     * Args:
-     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
-     * request: 原始入站请求。
-     *
-     * Returns:
-     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
-     * @param data The data for the request.
-     * @param data.path
-     * @returns unknown Successful Response
+     * 检测系统 MindMemOS 记忆服务状态
+     * @returns MemoryHealthResponse Successful Response
      * @throws ApiError
      */
-    public static proxyLlm1(data: Llm4AdLlmproxyProxyLlm1Data): CancelablePromise<Llm4AdLlmproxyProxyLlm1Response> {
+    public static getMemoryHealth(): CancelablePromise<Llm4AdMemoryGetMemoryHealthResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/v1/llm4ad/llmproxy/{path}',
-            path: {
-                path: data.path
-            },
-            errors: {
-                422: 'Validation Error'
-            }
+            url: '/api/v1/llm4ad/memory/health'
         });
     }
 
     /**
-     * Proxy Llm
-     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
-     *
-     * Args:
-     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
-     * request: 原始入站请求。
-     *
-     * Returns:
-     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
-     * @param data The data for the request.
-     * @param data.path
-     * @returns unknown Successful Response
+     * 获取当前用户 MindMemOS 供应商绑定状态
+     * @returns MemoryProviderBindingResponse Successful Response
      * @throws ApiError
      */
-    public static proxyLlm2(data: Llm4AdLlmproxyProxyLlm2Data): CancelablePromise<Llm4AdLlmproxyProxyLlm2Response> {
+    public static getMemoryProviderBinding(): CancelablePromise<Llm4AdMemoryGetMemoryProviderBindingResponse> {
         return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/v1/llm4ad/llmproxy/{path}',
-            path: {
-                path: data.path
-            },
-            errors: {
-                422: 'Validation Error'
-            }
+            method: 'GET',
+            url: '/api/v1/llm4ad/memory/provider-binding'
         });
     }
 
     /**
-     * Proxy Llm
-     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
-     *
-     * Args:
-     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
-     * request: 原始入站请求。
-     *
-     * Returns:
-     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * 绑定当前用户 MindMemOS Chat 和 Embedding 供应商
      * @param data The data for the request.
-     * @param data.path
-     * @returns unknown Successful Response
+     * @param data.requestBody
+     * @returns MemoryProviderBindingResponse Successful Response
      * @throws ApiError
      */
-    public static proxyLlm3(data: Llm4AdLlmproxyProxyLlm3Data): CancelablePromise<Llm4AdLlmproxyProxyLlm3Response> {
+    public static upsertMemoryProviderBinding(data: Llm4AdMemoryUpsertMemoryProviderBindingData): CancelablePromise<Llm4AdMemoryUpsertMemoryProviderBindingResponse> {
         return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/v1/llm4ad/llmproxy/{path}',
-            path: {
-                path: data.path
-            },
+            method: 'PUT',
+            url: '/api/v1/llm4ad/memory/provider-binding',
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
@@ -1168,55 +1118,353 @@ export class Llm4AdLlmproxyService {
     }
 
     /**
-     * Proxy Llm
-     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
-     *
-     * Args:
-     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
-     * request: 原始入站请求。
-     *
-     * Returns:
-     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
-     * @param data The data for the request.
-     * @param data.path
-     * @returns unknown Successful Response
+     * 获取当前用户记忆默认配置
+     * @returns UserMemoryConfigResponse Successful Response
      * @throws ApiError
      */
-    public static proxyLlm4(data: Llm4AdLlmproxyProxyLlm4Data): CancelablePromise<Llm4AdLlmproxyProxyLlm4Response> {
+    public static getUserMemoryConfig(): CancelablePromise<Llm4AdMemoryGetUserMemoryConfigResponse> {
         return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/v1/llm4ad/llmproxy/{path}',
-            path: {
-                path: data.path
-            },
-            errors: {
-                422: 'Validation Error'
-            }
+            method: 'GET',
+            url: '/api/v1/llm4ad/memory/user-config'
         });
     }
 
     /**
-     * Proxy Llm
-     * 透明反向代理：校验代理 token 后用真实凭据转发到上游大模型。
-     *
-     * Args:
-     * path: 上游 API 子路径（如 ``chat/completions`` 或 ``v1/messages``）。
-     * request: 原始入站请求。
-     *
-     * Returns:
-     * 透传上游响应的 ``StreamingResponse``，或鉴权失败时的错误响应。
+     * 更新当前用户记忆默认配置
      * @param data The data for the request.
-     * @param data.path
-     * @returns unknown Successful Response
+     * @param data.requestBody
+     * @returns UserMemoryConfigResponse Successful Response
      * @throws ApiError
      */
-    public static proxyLlm5(data: Llm4AdLlmproxyProxyLlm5Data): CancelablePromise<Llm4AdLlmproxyProxyLlm5Response> {
+    public static updateUserMemoryConfig(data: Llm4AdMemoryUpdateUserMemoryConfigData): CancelablePromise<Llm4AdMemoryUpdateUserMemoryConfigResponse> {
         return __request(OpenAPI, {
             method: 'PATCH',
-            url: '/api/v1/llm4ad/llmproxy/{path}',
+            url: '/api/v1/llm4ad/memory/user-config',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 获取项目记忆默认配置
+     * @param data The data for the request.
+     * @param data.projectId
+     * @returns ProjectMemoryConfigResponse Successful Response
+     * @throws ApiError
+     */
+    public static getProjectMemoryConfig(data: Llm4AdMemoryGetProjectMemoryConfigData): CancelablePromise<Llm4AdMemoryGetProjectMemoryConfigResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/memory/projects/{project_id}/config',
             path: {
-                path: data.path
+                project_id: data.projectId
             },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 更新项目记忆默认配置
+     * @param data The data for the request.
+     * @param data.projectId
+     * @param data.requestBody
+     * @returns ProjectMemoryConfigResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateProjectMemoryConfig(data: Llm4AdMemoryUpdateProjectMemoryConfigData): CancelablePromise<Llm4AdMemoryUpdateProjectMemoryConfigResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/memory/projects/{project_id}/config',
+            path: {
+                project_id: data.projectId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 按 scope 获取记忆卡片
+     * @param data The data for the request.
+     * @param data.scope
+     * @param data.projectId
+     * @param data.taskId
+     * @param data.page
+     * @param data.pageSize
+     * @returns MemoryCardPageResponse Successful Response
+     * @throws ApiError
+     */
+    public static listMemoryCards(data: Llm4AdMemoryListMemoryCardsData): CancelablePromise<Llm4AdMemoryListMemoryCardsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/memory/cards',
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId,
+                page: data.page,
+                page_size: data.pageSize
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 按 scope 新增记忆卡片
+     * @param data The data for the request.
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns MemoryCardResponse Successful Response
+     * @throws ApiError
+     */
+    public static createMemoryCard(data: Llm4AdMemoryCreateMemoryCardData): CancelablePromise<Llm4AdMemoryCreateMemoryCardResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/memory/cards',
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 从原始描述提取记忆预览
+     * @param data The data for the request.
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns MemoryCardExtractionResponse Successful Response
+     * @throws ApiError
+     */
+    public static extractMemoryCards(data: Llm4AdMemoryExtractMemoryCardsData): CancelablePromise<Llm4AdMemoryExtractMemoryCardsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/memory/cards/extractions',
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 从原始描述流式提取记忆预览
+     * @param data The data for the request.
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static streamExtractMemoryCards(data: Llm4AdMemoryStreamExtractMemoryCardsData): CancelablePromise<Llm4AdMemoryStreamExtractMemoryCardsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/memory/cards/extractions/stream',
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 将任务记忆流式提升为项目记忆预览
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static streamPromoteTaskMemoryCards(data: Llm4AdMemoryStreamPromoteTaskMemoryCardsData): CancelablePromise<Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/memory/cards/promotions/stream',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 确认保存记忆预览
+     * @param data The data for the request.
+     * @param data.previewId
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns MemoryCardExtractionResponse Successful Response
+     * @throws ApiError
+     */
+    public static commitMemoryCardExtraction(data: Llm4AdMemoryCommitMemoryCardExtractionData): CancelablePromise<Llm4AdMemoryCommitMemoryCardExtractionResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/memory/cards/extractions/{preview_id}/commit',
+            path: {
+                preview_id: data.previewId
+            },
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 丢弃记忆预览
+     * @param data The data for the request.
+     * @param data.previewId
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static discardMemoryCardExtraction(data: Llm4AdMemoryDiscardMemoryCardExtractionData): CancelablePromise<Llm4AdMemoryDiscardMemoryCardExtractionResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/memory/cards/extractions/{preview_id}',
+            path: {
+                preview_id: data.previewId
+            },
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 按 scope 更新记忆卡片
+     * @param data The data for the request.
+     * @param data.memoryId
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns MemoryCardResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateMemoryCard(data: Llm4AdMemoryUpdateMemoryCardData): CancelablePromise<Llm4AdMemoryUpdateMemoryCardResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/memory/cards/{memory_id}',
+            path: {
+                memory_id: data.memoryId
+            },
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 按 scope 删除记忆卡片
+     * @param data The data for the request.
+     * @param data.memoryId
+     * @param data.scope
+     * @param data.projectId
+     * @param data.taskId
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteMemoryCard(data: Llm4AdMemoryDeleteMemoryCardData): CancelablePromise<Llm4AdMemoryDeleteMemoryCardResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/memory/cards/{memory_id}',
+            path: {
+                memory_id: data.memoryId
+            },
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 按 scope 启用或禁用记忆卡片
+     * @param data The data for the request.
+     * @param data.memoryId
+     * @param data.scope
+     * @param data.requestBody
+     * @param data.projectId
+     * @param data.taskId
+     * @returns MemoryCardResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateMemoryCardStatus(data: Llm4AdMemoryUpdateMemoryCardStatusData): CancelablePromise<Llm4AdMemoryUpdateMemoryCardStatusResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/memory/cards/{memory_id}/status',
+            path: {
+                memory_id: data.memoryId
+            },
+            query: {
+                scope: data.scope,
+                project_id: data.projectId,
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: 'Validation Error'
             }
@@ -2149,6 +2397,172 @@ export class Llm4AdTasksService {
     }
 
     /**
+     * 获取任务记忆卡片
+     * 获取 MindMemOS 中的任务级记忆。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @param data.page
+     * @param data.pageSize
+     * @returns MemoryCardPageResponse Successful Response
+     * @throws ApiError
+     */
+    public static listTaskMemory(data: Llm4AdTasksListTaskMemoryData): CancelablePromise<Llm4AdTasksListTaskMemoryResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory',
+            path: {
+                task_id: data.taskId
+            },
+            query: {
+                page: data.page,
+                page_size: data.pageSize
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 新增或更新任务记忆卡片
+     * 新增或更新 MindMemOS 中的任务级记忆。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @param data.requestBody
+     * @returns MemoryCardResponse Successful Response
+     * @throws ApiError
+     */
+    public static upsertTaskMemory(data: Llm4AdTasksUpsertTaskMemoryData): CancelablePromise<Llm4AdTasksUpsertTaskMemoryResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory',
+            path: {
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 获取任务记忆使用统计
+     * 聚合任务日志中的 MindMemOS 注入事件，返回任务级记忆使用统计。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @returns TaskMemoryObservabilityResponse Successful Response
+     * @throws ApiError
+     */
+    public static getTaskMemoryObservability(data: Llm4AdTasksGetTaskMemoryObservabilityData): CancelablePromise<Llm4AdTasksGetTaskMemoryObservabilityResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory/observability',
+            path: {
+                task_id: data.taskId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 获取任务固定注入的共享记忆
+     * 读取手动模式下任务固定注入的全局/项目记忆 id 列表。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @returns PinnedMemoryResponse Successful Response
+     * @throws ApiError
+     */
+    public static getTaskPinnedMemory(data: Llm4AdTasksGetTaskPinnedMemoryData): CancelablePromise<Llm4AdTasksGetTaskPinnedMemoryResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory/pinned',
+            path: {
+                task_id: data.taskId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 更新任务固定注入的共享记忆
+     * 替换任务固定注入的记忆 id 集合；运行中的任务下一轮注入即生效。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @param data.requestBody
+     * @returns PinnedMemoryResponse Successful Response
+     * @throws ApiError
+     */
+    public static setTaskPinnedMemory(data: Llm4AdTasksSetTaskPinnedMemoryData): CancelablePromise<Llm4AdTasksSetTaskPinnedMemoryResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory/pinned',
+            path: {
+                task_id: data.taskId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 更新任务记忆卡片
+     * 按 ID 更新 MindMemOS 中的任务级记忆。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @param data.memoryId
+     * @param data.requestBody
+     * @returns MemoryCardResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateTaskMemory(data: Llm4AdTasksUpdateTaskMemoryData): CancelablePromise<Llm4AdTasksUpdateTaskMemoryResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory/{memory_id}',
+            path: {
+                task_id: data.taskId,
+                memory_id: data.memoryId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 删除任务记忆卡片
+     * 删除 MindMemOS 中的任务级记忆。
+     * @param data The data for the request.
+     * @param data.taskId
+     * @param data.memoryId
+     * @returns Message Successful Response
+     * @throws ApiError
+     */
+    public static deleteTaskMemory(data: Llm4AdTasksDeleteTaskMemoryData): CancelablePromise<Llm4AdTasksDeleteTaskMemoryResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/tasks/{task_id}/memory/{memory_id}',
+            path: {
+                task_id: data.taskId,
+                memory_id: data.memoryId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
      * 运行任务（提交到Celery）
      * 运行指定任务，提交到 Celery 异步执行。
      * @param data The data for the request.
@@ -2548,7 +2962,7 @@ export class Llm4AdTasksService {
      * @param data.taskId
      * @param data.cursor 分页游标，首次请求不传，后续传上一次返回的 next_cursor
      * @param data.limit 每页条数，0 表示不分页返回全部
-     * @param data.logType 按日志类型过滤
+     * @param data.logType 按日志类型过滤，多个用英文逗号分隔
      * @param data.level 按日志级别过滤，支持多选
      * @param data.q 全文搜索日志内容
      * @returns TaskLogsResponse Successful Response
@@ -2586,6 +3000,7 @@ export class Llm4AdTasksService {
      * - timeout: 30 分钟无数据安全兜底
      * @param data The data for the request.
      * @param data.taskId
+     * @param data.lastId
      * @returns unknown Successful Response
      * @throws ApiError
      */
@@ -2595,6 +3010,9 @@ export class Llm4AdTasksService {
             url: '/api/v1/llm4ad/tasks/{task_id}/logs/stream',
             path: {
                 task_id: data.taskId
+            },
+            query: {
+                last_id: data.lastId
             },
             errors: {
                 422: 'Validation Error'
@@ -2801,6 +3219,79 @@ export class LoginService {
     }
 }
 
+export class NewsService {
+    /**
+     * 首页资讯列表（公开）
+     * 按语种返回资讯列表。
+     *
+     * 正常路径：命中 Redis 缓存直接返回；后台循环负责周期性刷新。
+     * 冷启动兜底：缓存不存在时同步拉一次；网络失败仅记录日志，返回空列表。
+     * 未配置：该语种若未配置 wiki URL，直接返回空列表 —— 由前端兜底展示 mock。
+     * @param data The data for the request.
+     * @param data.lang 语种：zh 或 en
+     * @returns NewsList Successful Response
+     * @throws ApiError
+     */
+    public static listNews(data: NewsListNewsData = {}): CancelablePromise<NewsListNewsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/news',
+            query: {
+                lang: data.lang
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class OidcService {
+    /**
+     * Github Authorize
+     * Redirect the browser to GitHub's OAuth authorization page.
+     * @param data The data for the request.
+     * @param data.redirect
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static githubAuthorize(data: OidcGithubAuthorizeData = {}): CancelablePromise<OidcGithubAuthorizeResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/oidc/github/authorize',
+            query: {
+                redirect: data.redirect
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Github Callback
+     * Handle GitHub OAuth callback, create/login user, and redirect to frontend.
+     * @param data The data for the request.
+     * @param data.code
+     * @param data.state
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static githubCallback(data: OidcGithubCallbackData): CancelablePromise<OidcGithubCallbackResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/oidc/github/callback',
+            query: {
+                code: data.code,
+                state: data.state
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
 export class PermissionService {
     /**
      * Create
@@ -2978,6 +3469,21 @@ export class PrivacyPolicyService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/privacy-policy/status'
+        });
+    }
+}
+
+export class StarRewardService {
+    /**
+     * Read Star Reward Status
+     * Return current user's star reward state and grant the reward when eligible.
+     * @returns StarRewardStatusPublic Successful Response
+     * @throws ApiError
+     */
+    public static readStarRewardStatus(): CancelablePromise<StarRewardReadStarRewardStatusResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/star-reward/status'
         });
     }
 }
@@ -3397,6 +3903,25 @@ export class UtilsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/utils/health-check/'
+        });
+    }
+
+    /**
+     * Feature Flags
+     * 返回前端可见的特性开关。
+     *
+     * 前端据此决定是否展示可选 UI（如 "AI 构建 (Beta)" 入口）。无需鉴权——
+     * 仅暴露布尔开关，不含任何敏感信息。
+     *
+     * Returns:
+     * FeatureFlags: 当前生效的特性开关集合。
+     * @returns FeatureFlags Successful Response
+     * @throws ApiError
+     */
+    public static featureFlags(): CancelablePromise<UtilsFeatureFlagsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/utils/features/'
         });
     }
 }

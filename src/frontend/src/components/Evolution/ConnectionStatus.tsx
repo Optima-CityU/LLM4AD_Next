@@ -21,7 +21,12 @@ export default function ConnectionStatus() {
 
   let color: string
   let label: string
-  if (logError) {
+  if (logError && logLoading) {
+    color = "#f59e0b"
+    label = t("evolution.connection.reconnecting", {
+      defaultValue: "连接断开，正在重连…",
+    })
+  } else if (logError) {
     color = "#ef4444"
     label = t("evolution.connection.disconnected", {
       defaultValue: "连接断开",

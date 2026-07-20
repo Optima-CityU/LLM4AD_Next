@@ -36,7 +36,7 @@ Reproducible issues are triaged faster. If your issue depends on a private LLM e
 5. **Open a PR** — small description with motivation, summary of changes, and any verification steps. Link the relevant issue if applicable.
 6. **Address review** — push fixups; maintainers squash-merge.
 
-CI runs on Python 3.10, 3.11, 3.12 across Ubuntu and macOS (`.github/workflows/ci.yml`). A passing CI is required before merge.
+CI runs on Python 3.12 across Ubuntu and macOS (`.github/workflows/ci.yml`). A passing CI is required before merge.
 
 ## Commit message format
 

@@ -251,7 +251,7 @@ This will:
    ```
 9. **Lint check:**
     ```bash
-    uv run --python 3.10 ruff check examples/applications/my_task_python_multimodal/
+    uv run --python 3.12 ruff check examples/applications/my_task_python_multimodal/
     ```
 
 ## Existing Multimodal Task Reference

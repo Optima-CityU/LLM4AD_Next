@@ -1,25 +1,36 @@
 [project]
-name = "llm4ad"
-version = "0.1.0"
-description = "LLM for Algorithm Design - A platform using LLMs with evolutionary algorithms"
+name = "llm4ad-next"
+version = "1.0.0"
+description = "Interactive LLM-driven automated algorithm design with evolutionary optimization"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
 authors = [
     {name = "LLM4AD Contributors"}
 ]
-requires-python = ">=3.10"
+maintainers = [
+    {name = "LLM4AD Contributors"}
+]
+requires-python = ">=3.12"
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Code Generators",
 ]
-keywords = ["llm", "algorithm", "evolution", "optimization", "ai"]
+keywords = [
+    "llm",
+    "algorithm-design",
+    "automated-algorithm-design",
+    "evolutionary-optimization",
+    "code-generation",
+    "ai",
+]
 
 dependencies = [
     "pydantic>=2.0.0",
@@ -41,6 +52,10 @@ dependencies = [
     "pandas>=2.3.3",
     "scikit-learn>=1.3.0",
     "xgboost>=3.2.0",
+    # AI build agent (chatv2). A base dependency so a plain `uv sync` installs it and
+    # chatv2 runs out of the box. agentscope requires Python >=3.11, which is always
+    # satisfied since the project requires >=3.12.
+    "agentscope>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -78,6 +93,12 @@ meoh = [
     "scikit-learn>=1.3.0",
     "tree-sitter-python==0.21.0",
 ]
+mindmemos = [
+    "mindmemos-sdk>=0.1.0; python_version >= '3.11' and python_version < '3.14'",
+    "textual>=1.0.0,<2",
+    "httpx>=0.27.0,<1",
+    "pyyaml>=6.0,<7",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -96,8 +117,14 @@ docs = [
     "mkdocs-minify-plugin>=0.8.0",
     "mkdocstrings[python]>=0.24.0",
 ]
+# AI build (beta) agent. agentscope is already a base dependency (see above), so this
+# extra is redundant and kept only for backward compatibility with `pip install
+# llm4ad[agent]`. Used by `llm4ad chatv2` and the backend /agent path.
+agent = [
+    "agentscope>=2.0,<3.0",
+]
 all = [
-    "llm4ad[infra,providers,eval,dev,docs,tsp,lunarlander,dyca,meoh]"
+    "llm4ad-next[infra,providers,eval,dev,docs,tsp,lunarlander,dyca,meoh]"
 ]
 
 [project.scripts]
@@ -108,6 +135,7 @@ Homepage = "https://github.com/Optima-CityU/LLM4AD_Next"
 Documentation = "https://llm4ad.readthedocs.io"
 Repository = "https://github.com/Optima-CityU/LLM4AD_Next"
 Issues = "https://github.com/Optima-CityU/LLM4AD_Next/issues"
+Changelog = "https://github.com/Optima-CityU/LLM4AD_Next/releases"
 
 [build-system]
 requires = ["hatchling"]
@@ -116,9 +144,19 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/llm4ad"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/llm4ad",
+    "/README.md",
+    "/LICENSE",
+    "/docs",
+    "/examples",
+    "/pyproject.toml",
+]
+
 [tool.black]
 line-length = 100
-target-version = ['py310', 'py311', 'py312']
+target-version = ['py312']
 include = '\.pyi?$'
 
 [tool.isort]
@@ -127,7 +165,7 @@ line_length = 100
 multi_line_output = 3
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -190,7 +228,7 @@ ignore_errors = true
 
 [tool.ruff]
 line-length = 130
-target-version = "py310"
+target-version = "py312"
 select = [
     "E",   # pycodestyle errors
     "F",   # Pyflakes
@@ -203,7 +241,13 @@ select = [
     "C4",  # flake8-comprehensions
     "SIM", # flake8-simplify
 ]
-ignore = ["D100", "D104"]  # Missing docstring in public module/package
+ignore = [
+    "D100", "D104",  # Missing docstring in public module/package
+    # py312 modernizations surfaced by target-version = "py312"; deferred so the
+    # 3.12 requirement bump stays focused and does not become a code refactor:
+    "UP042",  # (str, Enum) -> StrEnum: behaviourally subtle (changes str()/f-string output)
+    "UP046",  # Generic[T] subclass -> PEP 695 `class C[T]`: separate refactor
+]
 
 [tool.ruff.per-file-ignores]
 "src/llm4ad/planner/sampler/init_sampler.py" = ["E501"]  # Sample code with long lines
@@ -239,4 +283,3 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
-

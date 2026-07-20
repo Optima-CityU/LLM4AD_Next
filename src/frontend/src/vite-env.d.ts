@@ -1,10 +1,5 @@
 /// <reference types="vite/client" />
 
-declare module "*.md?raw" {
-  const content: string
-  export default content
-}
-
 interface ImportMetaEnv {
   readonly VITE_API_URL: string
   readonly VITE_PLAUSIBLE_ENABLED?: string
@@ -18,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_PLAUSIBLE_CAPTURE_ON_LOCALHOST?: string
   readonly VITE_PLAUSIBLE_LOGGING?: string
   readonly VITE_PLAUSIBLE_BIND_TO_WINDOW?: string
+  readonly VITE_APP_VERSION?: string
+  readonly VITE_FOOTER_BEIAN?: string
 }
 
 interface ImportMeta {

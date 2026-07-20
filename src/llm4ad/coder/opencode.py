@@ -158,7 +158,7 @@ class OpenCode(BaseCoder):
                         process.communicate(),
                         timeout=self.timeout,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     process.kill()
                     await process.communicate()
                     return GenerateResult(

@@ -17,10 +17,34 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import { useCopyBeforeRun } from "@/hooks/useCopyBeforeRun"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useEvolution } from "@/hooks/useEvolution"
+import { setTaskStatusInCache } from "@/lib/task-queries"
 import { handleError } from "@/utils"
 
+const MINDMEMOS_RUNTIME_KEYS = [
+  "mindmemos_base_url",
+  "mindmemos_api_key",
+  "mindmemos_user_id",
+  "mindmemos_app_id",
+  "mindmemos_agent_id",
+  "mindmemos_session_id",
+  "mindmemos_project_id",
+]
+
+function sanitizeConfigForYaml(obj: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...obj }
+  const memory = next.memory
+  if (memory && typeof memory === "object" && !Array.isArray(memory)) {
+    const cleanMemory = { ...(memory as Record<string, unknown>) }
+    for (const key of MINDMEMOS_RUNTIME_KEYS) {
+      delete cleanMemory[key]
+    }
+    next.memory = cleanMemory
+  }
+  return next
+}
+
 function dumpYaml(obj: Record<string, unknown>): string {
-  return yaml.dump(obj, { indent: 2, lineWidth: -1, noRefs: true })
+  return yaml.dump(sanitizeConfigForYaml(obj), { indent: 2, lineWidth: -1, noRefs: true })
 }
 
 interface ConfirmStepProps {
@@ -43,7 +67,7 @@ export default function ConfirmStep({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
-  const { setActiveTab, resetTaskData, setIsConfiguring, setIsViewingParams } =
+  const { projectId, setActiveTab, resetTaskData, setIsConfiguring, setIsViewingParams, updateTaskStatus } =
     useEvolution()
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme !== "light"
@@ -81,7 +105,7 @@ export default function ConfirmStep({
     try {
       const parsed = yaml.load(text)
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const obj = parsed as Record<string, unknown>
+        const obj = sanitizeConfigForYaml(parsed as Record<string, unknown>)
         lastParsedRef.current = obj
         onChange(obj)
         setParseError(null)
@@ -95,12 +119,15 @@ export default function ConfirmStep({
   const mutation = useMutation({
     mutationFn: async () => {
       await withCopyIfNeeded(async (effectiveId) => {
+        const sanitizedConfig = sanitizeConfigForYaml(configValues)
         await Llm4AdTasksService.updateTask({
           taskId: effectiveId,
-          requestBody: { input_args: configValues },
+          requestBody: { input_args: sanitizedConfig },
         })
-        await Llm4AdTasksService.runTask({ taskId: effectiveId })
-        queryClient.invalidateQueries({ queryKey: ["getTask", effectiveId] })
+        const result = await Llm4AdTasksService.runTask({ taskId: effectiveId })
+        const nextStatus = result.status ?? "pending"
+        setTaskStatusInCache(queryClient, effectiveId, nextStatus, projectId)
+        updateTaskStatus(nextStatus)
       })
     },
     onSuccess: () => {
@@ -136,7 +163,7 @@ export default function ConfirmStep({
       try {
         const parsed = yaml.load(text)
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const obj = parsed as Record<string, unknown>
+          const obj = sanitizeConfigForYaml(parsed as Record<string, unknown>)
           lastParsedRef.current = obj
           setEditorText(dumpYaml(obj))
           setParseError(null)

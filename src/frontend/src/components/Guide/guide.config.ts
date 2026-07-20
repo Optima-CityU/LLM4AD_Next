@@ -47,6 +47,11 @@ export const guideNav: GuideNavItem[] = [
         labelEn: "Configuration",
         icon: Settings2,
       },
+      {
+        key: "guides/memory",
+        labelZh: "长期记忆",
+        labelEn: "Long-term Memory",
+      },
     ],
   },
   {

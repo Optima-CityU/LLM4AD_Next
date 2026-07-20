@@ -6,11 +6,11 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/llm4ad/">
-    <img src="https://img.shields.io/pypi/v/llm4ad?color=blue" alt="PyPI Version">
+  <a href="https://pypi.org/project/llm4ad-next/">
+    <img src="https://img.shields.io/pypi/v/llm4ad-next?color=blue" alt="PyPI Version">
   </a>
-  <a href="https://pypi.org/project/llm4ad/">
-    <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python Versions">
+  <a href="https://pypi.org/project/llm4ad-next/">
+    <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python Versions">
   </a>
   <a href="https://github.com/Optima-CityU/LLM4AD_Next/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue" alt="License">
@@ -21,6 +21,12 @@
 </p>
 
 ---
+
+## 🔥 News
+
+- 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [https://llm4ad-next.cn/](https://llm4ad-next.cn/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
+- ✨ [2026.07][New Feature]: Introducing an **interactive problem-to-project workflow** that turns natural-language problem descriptions into runnable evolutionary algorithm search projects.
+- 🐳 [2026.07][New Feature]: Versioned **Docker Hub deployment images** are now aligned with GitHub Release tags for reproducible local deployment.
 
 ## 🚀 Why LLM4AD_Next?
 
@@ -72,7 +78,7 @@ Our built-in AI-powered consultant will interview you, instantly understand your
   </tr>
   <tr>
     <td align="center" width="33%">
-      <a href="http://8.163.71.37/">
+      <a href="https://llm4ad-next.cn/">
         <img src="https://img.shields.io/badge/Launch%20Online%20Demo-Open%20Now-2ea44f?style=for-the-badge"
              alt="Launch Online Demo">
       </a>
@@ -109,13 +115,13 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 ### Option A: Online Demo (No Installation Required)
 
 Use the online demo from [Quick Start](#quick-start), or open it directly:
-[Launch Online Demo](http://8.163.71.37/).
+[Launch Online Demo](https://llm4ad-next.cn/).
 
 No setup, no API key needed — just open the link and start designing algorithms.
 
 ### Option B: Local Installation
 
-Requires Python 3.10+ and [uv](https://github.com/astral-sh/uv) (recommended) or pip.
+Requires **Python 3.12+** (pinned in `.python-version`) and [uv](https://github.com/astral-sh/uv) (recommended) or pip. A plain `uv sync` sets up everything, including the `chatv2` AI build agent, out of the box.
 
 ```bash
 # Clone the repository
@@ -236,4 +242,9 @@ Scan the QR code with WeChat to join the LLM4AD_Next community group.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Optima-CityU/LLM4AD_Next&type=Date)](https://www.star-history.com/#Optima-CityU/LLM4AD_Next&Date)
+<!-- star-history:start -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/star-history/star-history-dark.svg">
+  <img alt="Star history" src="docs/assets/star-history/star-history-light.svg">
+</picture>
+<!-- star-history:end -->

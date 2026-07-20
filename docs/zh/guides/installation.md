@@ -4,7 +4,7 @@
 
 ## 系统要求
 
-- **Python**: 3.10、3.11 或 3.12
+- **Python**：3.12 或更高版本（必需；已在 `.python-version` 中固定）。
 - **操作系统**: Linux、macOS 或 Windows
 - **包管理器**: [uv](https://github.com/astral-sh/uv)（推荐）或 pip
 
@@ -48,10 +48,19 @@ uv sync
 pip install -e ".[all]"
 ```
 
-### 方法 2：从 PyPI 安装（即将推出）
+### 方法 2：从 PyPI 安装
+
+如果你只需要已发布的 Python 包和 CLI，而不需要修改源码，请使用此方法。
 
 ```bash
-pip install llm4ad
+pip install llm4ad-next
+```
+
+按需安装可选依赖组：
+
+```bash
+pip install "llm4ad-next[providers,eval]"
+pip install "llm4ad-next[all]"
 ```
 
 ## 可选依赖
@@ -205,7 +214,7 @@ mypy src/
 
 ### Python 版本问题
 
-**错误**: `需要 Python 3.10 或更高版本`
+**错误**: `需要 Python 3.12 或更高版本`
 
 **解决方案**:
 ```bash
@@ -214,8 +223,8 @@ python --version
 
 # 如有需要，安装较新版本
 # 使用 pyenv（推荐）
-pyenv install 3.11
-pyenv global 3.11
+pyenv install 3.12
+pyenv global 3.12
 ```
 
 ### uv 安装问题

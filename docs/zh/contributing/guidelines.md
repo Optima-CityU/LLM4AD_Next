@@ -36,7 +36,7 @@ LLM4AD 以 BSD 3-Clause 开源协议发布，欢迎各种贡献 — bug 报告�
 5. **提 PR** — 简短描述，写明动机、改动概要、验证步骤。如果对应 issue 请附链接。
 6. **响应 review** — 用 fixup commit 跟进；维护者 squash-merge。
 
-CI 在 Ubuntu / macOS × Python 3.10/3.11/3.12 矩阵下运行（`.github/workflows/ci.yml`）。合并前 CI 必须通过。
+CI 在 Ubuntu / macOS × Python 3.12 下运行（`.github/workflows/ci.yml`）。合并前 CI 必须通过。
 
 ## Commit 信息格式
 

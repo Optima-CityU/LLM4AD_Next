@@ -61,6 +61,8 @@ Copy-Item .env.develop.local.example .env
 
 其余变量（端口、镜像名、SMTP、APT/PyPI 镜像源等）可沿用示例文件中的默认值，完整说明见 `.env.develop.local.example`。
 
+页脚备案信息可通过 `VITE_FOOTER_BEIAN` 配置；留空时不会显示。前端镜像的页脚版本在构建时固定读取仓库根目录的 `VERSION` 文件。
+
 ## 本地开发
 
 首次本地开发推荐只启动基础设施：
@@ -126,11 +128,10 @@ Windows PowerShell：
 
 ```bash
 VERSION=latest
-CN_REGISTRY=registry.cn-hangzhou.aliyuncs.com/noah2012
 DOCKER_REGISTRY=docker.io/noah2012
 ```
 
-未显式传入 `TAG` 时使用 `VERSION`；未显式传入 `--mirrors` 或 `SWR_REGISTRY` 时使用 `DOCKER_REGISTRY`。`CN_REGISTRY` 作为国内镜像源地址，可通过 `--mirrors` 显式使用。
+未显式传入 `TAG` 时使用 `VERSION`；未显式传入 `--mirrors` 或 `SWR_REGISTRY` 时使用 `DOCKER_REGISTRY`。默认镜像仓库为 Docker Hub。
 
 - 启动指定版本（示例：`v1.0.0`）
 ```shell
@@ -146,7 +147,6 @@ TAG=v1.0.0 ./start.sh start
 
 - 使用指定镜像仓库或加速地址
 ```shell
-./start.sh start --mirrors registry.cn-hangzhou.aliyuncs.com/noah2012
 ./start.sh start --mirrors docker.io/noah2012
 ./start.sh start --mirrors docker.1ms.run/noah2012
 ```

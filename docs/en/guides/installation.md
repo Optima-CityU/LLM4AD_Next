@@ -4,7 +4,7 @@ This guide covers installing LLM4AD on your system.
 
 ## System Requirements
 
-- **Python**: 3.10, 3.11, or 3.12
+- **Python**: 3.12 or higher (required; pinned in `.python-version`).
 - **Operating System**: Linux, macOS, or Windows
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
@@ -48,10 +48,20 @@ uv sync
 pip install -e ".[all]"
 ```
 
-### Method 2: Install from PyPI (Coming Soon)
+### Method 2: Install from PyPI
+
+Use this method when you want the published Python package and CLI without
+modifying the source tree.
 
 ```bash
-pip install llm4ad
+pip install llm4ad-next
+```
+
+Install optional dependency groups as needed:
+
+```bash
+pip install "llm4ad-next[providers,eval]"
+pip install "llm4ad-next[all]"
 ```
 
 ## Optional Dependencies
@@ -205,7 +215,7 @@ mypy src/
 
 ### Python Version Issues
 
-**Error**: `Python version 3.10 or higher required`
+**Error**: `Python version 3.12 or higher required`
 
 **Solution**:
 ```bash
@@ -214,8 +224,8 @@ python --version
 
 # Install a newer version if needed
 # Using pyenv (recommended)
-pyenv install 3.11
-pyenv global 3.11
+pyenv install 3.12
+pyenv global 3.12
 ```
 
 ### uv Installation Issues

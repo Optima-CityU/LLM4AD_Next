@@ -175,6 +175,7 @@
     "research": "Research",
     "globalConfig": "Configuration",
     "llmProvider": "LLM Providers",
+    "memory": "Memory",
     "helpAndInfo": "Help & Info",
     "userManual": "User Manual",
     "admin": "Admin",
@@ -184,6 +185,85 @@
     "feedback": "Feedback",
     "liveCode": "Group QR",
     "litellmQuotas": "LiteLLM Quotas"
+  },
+  "memory": {
+    "cardManager": {
+      "extraction": {
+        "title": "Add Memory",
+        "close": "Close Add Memory",
+        "guideTitle": "Enter something you want the system to remember",
+        "guideDescription": "MindMemOS can extract facts, lessons, constraints, error reflections, and domain knowledge from natural language. Tags are inferred automatically when possible and can be edited after saving. Avoid context-free fragments, temporary chat, or sensitive secrets.",
+        "contentLabel": "Raw Content",
+        "placeholder": "Include the scenario, conclusion, reason or evidence, and reusable guidance. Example: in this project, algorithms should prioritize stability and interpretability; an overly large mutation rate caused population degradation, so future runs should start with a smaller range.",
+        "languageLabel": "Extraction Language",
+        "examplesTitle": "Clickable Examples",
+        "languages": {
+          "auto": "Auto",
+          "ZH": "中文",
+          "EN": "English"
+        },
+        "examples": {
+          "default": {
+            "algorithm": {
+              "label": "Algorithm Lesson",
+              "content": "For small and medium TSP instances, 2-opt local search works well as a post-processing operator and often improves nearest-neighbor initial solutions. For larger instances, limit the candidate neighborhood to avoid excessive evaluation time per round."
+            },
+            "reflection": {
+              "label": "Error Reflection",
+              "content": "In the previous evolutionary search, setting mutation rate above 0.2 quickly reduced population diversity, damaged strong individuals, and worsened convergence. For similar tasks, start by testing the 0.01 to 0.05 range."
+            },
+            "domain": {
+              "label": "Domain Knowledge",
+              "content": "This task values algorithm stability, interpretability, and reproducible results. Only consider complex black-box strategies when the gain is clear, and compare variance, failure rate, and average performance first."
+            },
+            "general": {
+              "label": "General Practice",
+              "content": "When a heuristic has several tightly coupled parameters, fix the operator combination first, tune parameters group by group, and record each ablation's benefit and side effects so changes remain attributable."
+            }
+          },
+          "project": {
+            "constraints": {
+              "label": "Project Constraints",
+              "content": "This project prioritizes stability, interpretability, and reproducible experiments. Introduce complex black-box strategies or expensive search operators only when the gain is clear and the failure rate remains controlled."
+            },
+            "evaluation": {
+              "label": "Evaluation Preference",
+              "content": "When comparing algorithms in this project, prioritize average performance, variance, failure rate, and runtime. A single best run is only supporting evidence and should not replace conclusions from repeated stability checks."
+            },
+            "algorithm": {
+              "label": "Reusable Algorithm Pattern",
+              "content": "For TSP-like tasks in this project, a nearest-neighbor initial solution followed by 2-opt over a restricted candidate neighborhood has been stable. As instance size grows, limit the neighborhood size to keep evaluation cost under control."
+            },
+            "reflection": {
+              "label": "Project Error Lesson",
+              "content": "An overly high mutation rate in this project previously damaged strong individuals and worsened convergence. For similar tasks, first run ablations in the 0.01 to 0.05 range before expanding the search."
+            }
+          }
+        }
+      }
+    },
+    "projectDialog": {
+      "trigger": "Project Memory",
+      "title": "Project Memory",
+      "description": "Manage project-scoped memories for the current project. These memories stay within this project and are not mixed into global memory.",
+      "descriptionWithProject": "Manage project-scoped memories for \"{{projectName}}\". These memories stay within this project and are not mixed into global memory.",
+      "cardTitle": "Project Memory",
+      "cardDescription": "Reusable cross-task lessons for this project, suited for domain knowledge and high-value algorithm patterns.",
+      "badges": {
+        "scope": "scope: project",
+        "checking": "Checking",
+        "serviceReady": "Service ready",
+        "serviceUnavailable": "Service unavailable",
+        "modelBound": "Models bound",
+        "modelUnbound": "Models unbound"
+      },
+      "disabled": {
+        "checking": "Checking project memory status. The project memory list will load when the check finishes.",
+        "checkFailed": "Failed to check project memory status. Try again later.",
+        "serviceUnavailable": "MindMemOS is not ready, so project memory cannot be managed right now.",
+        "modelUnbound": "Memory models are not bound for the current user. Bind Chat and Embedding models in global memory settings first."
+      }
+    }
   },
   "projects": {
     "pageTitle": "Projects - LLM4AD_Next",
@@ -423,6 +503,9 @@
       "modeSplit": "Text / Code split",
       "textConfig": "Text Embedding Config",
       "codeConfig": "Code Embedding Config",
+      "sharedTaskConfig": "Shared Text / Code Config",
+      "shareTaskConfig": "Use the same config for Text and Code",
+      "shareTaskConfigHint": "When enabled, code embedding reuses the Base URL, API key, model, and task mode from the text config.",
       "textModel": "Text model",
       "codeModel": "Code model",
       "textTask": "Text task",
@@ -443,7 +526,7 @@
     "secretWillBeCleared": "Will be cleared on save",
     "viewProvider": "View Provider",
     "builtin": "Built-in",
-    "builtinHint": "Ready-to-use built-in model — no API key needed, with a one-time 1M-token free quota. Great for a quick trial.",
+    "builtinHint": "Ready-to-use built-in model — no API key needed, with a one-time $10 credit. Great for a quick trial.",
     "builtinReadonlyDescription": "Built-in provider configuration (read-only).",
     "builtinReadonlyHint": "Built-in provider — ready to use with no API key required, plus a one-time 1M-token free quota for a quick trial. Its configuration is read-only (cannot be edited or deleted); only connectivity testing is available. Remaining quota is shown on the provider list page.",
     "updateSuccess": "Provider updated successfully",
@@ -668,6 +751,7 @@
       "overview": "Simulation",
       "render": "Rendering",
       "insights": "Insights",
+      "memory": "Memory",
       "ide": "Open IDE"
     },
     "renderPlaceholder": "Rendering - Coming soon...",
@@ -688,6 +772,110 @@
       "trajectory.title": "Evolutionary Strategy Embedding"
     },
     "insightsPlaceholder": "Insights - Coming soon...",
+    "memory": {
+      "title": "Task Memory",
+      "description": "Manage task-scoped memories injected into later evolution prompts",
+      "loadFailed": "Failed to load task memory",
+      "saveFailed": "Failed to save memory card",
+      "deleteFailed": "Failed to delete memory card",
+      "required": "Title and content are required",
+      "saved": "Memory card saved",
+      "deleted": "Memory card deleted",
+      "new": "New",
+      "add": "Add",
+      "loading": "Loading memory...",
+      "empty": "No task memory yet",
+      "emptyHint": "Add reusable lessons, domain facts, or algorithm insights for this task.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "fields": {
+        "title": "Title",
+        "type": "Type",
+        "content": "Content",
+        "tags": "Tags",
+        "enabled": "Enabled"
+      },
+      "placeholders": {
+        "title": "Short memory title",
+        "content": "What should be reused in future evolution?",
+        "tags": "Comma separated tags"
+      },
+      "types": {
+        "good_algorithm": "Good Algorithm",
+        "error_reflection": "Error Reflection",
+        "domain_knowledge": "Domain Knowledge",
+        "general_insight": "General Insight"
+      }
+    },
+    "pinnedMemory": {
+      "title": "Pinned Memory",
+      "hint": "Global/project memories pinned for injection in manual retrieval mode. Edits take effect on the next injection without restarting the task.",
+      "totalSelected": "{{count}} selected",
+      "dialogHint": "Browse memory cards page by page and check the ones to pin; click \"Confirm\" to save after closing.",
+      "loading": "Loading memory cards...",
+      "loadFailed": "Failed to load memory cards. Please retry.",
+      "empty": "No memory cards available in this scope.",
+      "page": "Page {{page}}",
+      "prev": "Previous",
+      "next": "Next",
+      "confirm": "Confirm",
+      "reset": "Reset",
+      "saved": "Saved — applies on next injection",
+      "unsaved": "Unsaved changes",
+      "saveFailed": "Save failed, please retry",
+      "upToDate": "Up to date"
+    },
+    "taskMemory": {
+      "title": "Task Memory",
+      "description": "View and manage task-scoped memories captured by MindMemOS during this task run.",
+      "ready": "Ready",
+      "count": "{{count}} items",
+      "newCount": "{{count}} new",
+      "injectedTitle": "Latest Memory Injection",
+      "injectedSummary": "Task {{task}} / Project {{project}} / Global {{user}}, {{chars}} characters injected",
+      "injectedEmpty": "No injection record yet",
+      "injectedHint": "Task, project, and global memories may all be injected into prompts. The list below only manages memories generated by this task.",
+      "observability": {
+        "title": "Memory Usage",
+        "summary": "{{calls}} injections / {{hits}} memory calls",
+        "loadFailed": "Failed to load memory usage.",
+        "empty": "No memory injection record yet.",
+        "calls": "Memory Injections",
+        "hits": "Total Memory Calls",
+        "taskCalls": "Task Memory Calls",
+        "projectCalls": "Project Memory Calls",
+        "userCalls": "Global Memory Calls",
+        "avgLatency": "Avg Latency",
+        "created": "Generated Task Memories",
+        "contributionTitle": "Memory Contribution",
+        "contributionSummary": "{{associated}} candidates linked / {{positive}} positive",
+        "contributionEmpty": "No contribution data",
+        "associated": "Linked Candidates",
+        "scored": "Scored Candidates",
+        "positive": "Positive Candidates",
+        "bestDelta": "Best Delta",
+        "averageDelta": "Avg Delta",
+        "taskContribution": "Task",
+        "projectContribution": "Project",
+        "userContribution": "Global",
+        "scopeContributionValue": "{{calls}} calls / {{positive}} positive",
+        "contributionHint": "Estimated from candidate score changes after memory injection. This is not strict causal attribution.",
+        "noContribution": "No linked candidate score changes yet.",
+        "scopes": "Scopes",
+        "scopeCounts": "Task {{task}} / Project {{project}} / Global {{user}}",
+        "ms": "{{value}} ms"
+      },
+      "storedTitle": "Task Captures",
+      "storedHint": "Only memories generated by this task are shown.",
+      "unavailable": {
+        "short": "Unavailable",
+        "featureDisabled": "MindMemOS task memory is not enabled. This task will keep using the legacy memory implementation.",
+        "checking": "Checking task memory configuration...",
+        "checkFailed": "Failed to load task memory configuration. Try again later.",
+        "serviceUnavailable": "MindMemOS system service is not ready. Check the system environment configuration first.",
+        "modelUnbound": "No MindMemOS model is bound for this user. Bind models in the global memory page first."
+      }
+    },
     "insights": {
       "tech_change": "Overall Summary",
       "node_comparison": "Node Comparison",
@@ -758,6 +946,7 @@
     "connection": {
       "live": "Live sync",
       "connecting": "Connecting…",
+      "reconnecting": "Disconnected, reconnecting…",
       "disconnected": "Disconnected"
     },
     "panel": {
@@ -786,6 +975,7 @@
       "evaluator": "Evaluator",
       "evolutionAlgorithm": "Evolution Algorithm",
       "codeGeneration": "Code Generation",
+      "memoryModule": "Memory Configuration",
       "advancedComponents": "Advanced Settings",
       "parameterConfirmation": "Confirmation"
     },
@@ -796,6 +986,7 @@
       "evaluator": "Configure fitness evaluation methods, specify evaluation functions and timeout parameters",
       "evolution": "Select evolution algorithm type and adjust hyperparameters: population size, iterations, selection strategy, etc.",
       "coder": "Configure code generation strategy, set prompt templates and code generation parameters",
+      "memory": "Configure how this task uses memory: disabled, temporary, or long-term, along with retrieval and injection strategy",
       "advanced": "Configure memory management, logging, workspace paths, version control, and other advanced parameters. Default values are usually sufficient"
     },
     "stepGuide": {
@@ -811,12 +1002,103 @@
       "evolutionSuccess": "Evolution algorithm configured. Click next to set up the code generator.",
       "coder": "Configure code generation strategy, set prompt templates and code generation parameters.",
       "coderSuccess": "Code generator configured. Click next to review advanced settings.",
+      "memory": "Configure how this task uses memory: disabled, temporary, or long-term.",
+      "memorySuccess": "Task memory configured. Click next to review advanced settings.",
       "advanced": "Configure memory management, logging, workspace paths, version control, and other advanced parameters. Default values are usually sufficient.",
       "advancedSuccess": "Advanced settings complete. Click next to review and submit.",
       "confirmation": "Review all parameter configurations and submit the task."
     },
     "loadingConfigTemplate": "Loading config template...",
     "schemaNotFound": "Config key \"{{key}}\" not found in schema",
+    "memoryConfig": {
+      "title": "Memory Configuration",
+      "description": "Configure how this task uses memory and its retrieval/injection strategy. Connection and auth details are injected by the backend at runtime and are not written to YAML.",
+      "configLoadFailed": "Failed to load memory configuration. Long-term memory is unavailable for now.",
+      "unavailable": "Long-term memory service is not ready or the current user has not completed memory model binding. You can use temporary memory or choose not to use memory.",
+      "runtimeManaged": "Connection, auth, and scope runtime fields are injected by the backend and will not appear in the confirmation YAML.",
+      "enable": {
+        "label": "Memory Mode",
+        "none": "No Memory",
+        "noneHint": "This task uses no memory at all.",
+        "temporary": "Temporary Memory",
+        "temporaryHint": "Keeps task memory only within this run; nothing is persisted long-term.",
+        "longterm": "Long-term Memory",
+        "longtermHint": "Persists and retrieves memory across tasks, with global and project memory injection.",
+        "longtermUnavailable": "Long-term memory service is unavailable and cannot be selected."
+      },
+      "retrieval": {
+        "label": "Retrieval Mode",
+        "auto": "Automatic Retrieval",
+        "autoHint": "The system automatically retrieves and injects global and project memory.",
+        "manual": "Manual Selection",
+        "manualHint": "You manually select fixed memories to inject; shared memory is not auto-retrieved at runtime."
+      },
+      "injectionCount": {
+        "help": "The injection count controls how many global/project memories are injected per prompt. Higher values give richer context but use more prompt space."
+      },
+      "manualPicker": {
+        "help": "Open the global and project memory pickers separately and check the cards to pin; the pinned memories are always injected at runtime.",
+        "empty": "No memory cards available in this scope.",
+        "optional": "Each scope can be selected independently, or leave both empty to inject no shared memory.",
+        "dialogHint": "Browse memory cards page by page and check the ones to pin; click \"Confirm\" to save this selection.",
+        "totalSelected": "{{count}} selected",
+        "loading": "Loading memory cards...",
+        "loadFailed": "Failed to load memory cards. Please retry.",
+        "pageOf": "Page {{page}} of {{total}}",
+        "page": "Page {{page}}",
+        "prev": "Previous",
+        "next": "Next",
+        "confirm": "Confirm",
+        "cancel": "Cancel"
+      },
+      "injection": {
+        "label": "Task Memory Injection Mode",
+        "help": "Task memory is produced during a run. It is always retrieved first, then injected according to the mode below.",
+        "topk": "TopK Mode",
+        "topkHelp": "Order by retrieval relevance and inject the top N most relevant.",
+        "weight": "Weight Mode",
+        "weightHelp": "Order by the per-memory weight you set in memory management.",
+        "random": "Random Mode",
+        "randomHelp": "Randomly inject from the retrieved candidates for more diversity.",
+        "taskLimitHelp": "Maximum number of task memories injected per prompt.",
+        "lambdaLabel": "Similarity Weight (λ)",
+        "lambdaHelp": "Injection weight = λ×similarity + (1-λ)×recency. Higher λ favors relevance, lower favors freshness."
+      },
+      "advanced": {
+        "label": "Extra Settings (Advanced)"
+      },
+      "searchStrategy": "Search Strategy",
+      "searchStrategyHelp": "fast is suitable for normal retrieval. agentic plans retrieval more actively and may take longer.",
+      "scoreThreshold": "Score Threshold",
+      "scoreThresholdPlaceholder": "Default",
+      "scoreThresholdHelp": "Only effective when rerank is enabled; filters low-relevance reranked memories.",
+      "requestTimeout": "Request Timeout (seconds)",
+      "requestTimeoutHelp": "Maximum wait time for one search request. Leave empty or enter 0 to wait indefinitely. After timeout, Fail-open decides whether to continue or fail.",
+      "addTimeout": "Write Timeout (seconds)",
+      "addTimeoutHelp": "Maximum wait time for one extraction/write request. Task memory creation is usually slower than search, default 120 seconds. Leave empty or enter 0 to wait indefinitely.",
+      "extractionLanguage": "Memory Extraction Language",
+      "extractionLanguageHelp": "Controls the extraction language for task runtime writes and new memory creation. Auto uses the default.",
+      "extractionLanguages": {
+        "auto": "Auto",
+        "ZH": "中文",
+        "EN": "English"
+      },
+      "rerank": "Enable Rerank",
+      "rerankHelp": "Rerank recalled memories to improve relevance before injection.",
+      "rerankUnavailable": "System-level rerank is not enabled, so this task cannot enable reranking.",
+      "failOpen": "Fail-open",
+      "failOpenHelp": "Continue running the task when long-term memory is temporarily unavailable, skipping remote memory to avoid interruption.",
+      "status": {
+        "checking": "Checking",
+        "ready": "Long-term memory ready",
+        "unavailable": "Long-term memory unavailable"
+      },
+      "scopes": {
+        "user": "Global Memory",
+        "project": "Project Memory",
+        "task": "Task Memory"
+      }
+    },
     "evolveAnnotation": {
       "tabs": {
         "summary": "Summary",
@@ -1090,6 +1372,7 @@
       "timeout": "Log stream connection timeout",
       "taskError": "Task error",
       "taskEnd": "Task completed",
+      "reconnecting": "Log stream disconnected, reconnecting",
       "connectionFailed": "Log stream connection failed"
     },
     "reportStream": {
@@ -1245,6 +1528,10 @@
         "review": "Review",
         "reviewDesc": "Review or revise the built artifacts"
       },
+      "betaBuild": {
+        "label": "Agent Build (Beta)",
+        "desc": "Have an AI agent autonomously build and self-verify the task package (experimental)"
+      },
       "stages": {
         "scenario": "Scenario",
         "data": "Data",
@@ -1253,7 +1540,9 @@
         "evolution": "Algorithm",
         "coder": "Code Generation",
         "advanced": "Advanced",
-        "confirm": "Confirm & Submit"
+        "confirm": "Confirm & Submit",
+        "run_needs_gathering": "Requirements",
+        "confirm_build": "Confirm Build"
       }
     }
   },
@@ -1264,6 +1553,7 @@
       "features": "Features",
       "domains": "Domains",
       "achievements": "Research Achievements",
+      "news": "News",
       "login": "Login",
       "signup": "Sign Up"
     },
@@ -1349,6 +1639,12 @@
         "link": "https://github.com/FeiLiu36/LLM4AlgorithmDesign"
       }
     },
+    "news": {
+      "title": "Latest News",
+      "subtitle": "Updates, research notes, and tutorials from our WeChat Official Account, refreshed regularly.",
+      "readMore": "Read full article",
+      "viewMore": "View all news"
+    },
     "footer": {
       "copyright": "LLM4AD_Next - Algorithm Design with Large Language Models",
       "team": "",
@@ -1394,6 +1690,37 @@
       "canvasContent": "This shows the whole evolution process. Click any node to see its code, score and parent/child links on the right; hold Ctrl/Cmd to multi-select and compare.",
       "actionsTitle": "Task actions",
       "actionsContent": "View task status and the version tree here. You can View params, Adjust params (copies a new version), and Run / Stop / Re-run the task."
+    },
+    "memory": {
+      "overviewTitle": "Understand the three memory scopes",
+      "overviewContent": "Global memory can be reused across projects; project memory stays in the current project; task memory records this task's process and conclusions. You can confirm and promote valuable task memories into project memory.",
+      "bindingTitle": "Bind long-term memory models",
+      "bindingContent": "The Chat model extracts memories and the Embedding model retrieves them. Long-term memory becomes available to projects and tasks after binding is complete.",
+      "addTitle": "Add and save a memory",
+      "addContent": "Use Add Memory for reusable experience. The system creates a preview first; it is written to long-term memory only after you confirm the selected items.",
+      "exampleTitle": "Manage a memory card",
+      "exampleContent": "This is a non-persistent example card. A disabled memory is not retrieved or injected into tasks; enable it again when needed. Real cards are saved, disabled, and enabled in this manager.",
+      "taskModeTitle": "Choose a task memory mode",
+      "taskModeContent": "No memory and temporary memory are always available. Long-term memory uses the bound service and lets this task reuse global, project, and task-scoped lessons.",
+      "retrievalTitle": "Choose how to obtain shared memory",
+      "retrievalContent": "Automatic retrieval recalls relevant global and project memories. Manual selection injects only the global or project cards you check. Pinned memory does not change task-memory injection.",
+      "autoRetrievalTitle": "Automatic retrieval: recall by relevance",
+      "autoRetrievalContent": "The system recalls relevant enabled global and project memories. Choose each scope independently and set how many cards each scope may inject.",
+      "manualRetrievalTitle": "Manual pinning: inject selected cards only",
+      "manualRetrievalContent": "Manual mode does not automatically search shared memory. Select pinned cards from global and project scopes separately; this is independent of task-memory injection.",
+      "taskInjectionTitle": "Configure task-memory injection",
+      "taskInjectionContent": "Memories produced while the task runs are injected according to this setting. Summarize and promote conclusions you want to reuse long term into project memory.",
+      "taskPromotionTitle": "Promote task lessons into project memory",
+      "taskPromotionContent": "Select one or more task-memory cards first, then use this action to generate a project-memory preview. After confirmation, the summary enters the current project and the original task memories remain unchanged.",
+      "advancedConfigTitle": "Advanced retrieval and reliability settings",
+      "advancedConfigContent": "Adjust search strategy, reranking and its score threshold, plus timeouts, extraction language, and fail-open behavior. Defaults suit most tasks; change them only when needed.",
+      "longTermUnavailableContent": "Long-term memory or its model binding is unavailable. You can still choose no memory or temporary memory; finish binding models in global memory to unlock long-term memory and its full retrieval settings.",
+      "projectScopeTitle": "Project memory: reusable in this project only",
+      "projectScopeContent": "Project memory sits between global and task memory: it never enters other projects, while later tasks in this project can retrieve and use it.",
+      "projectTitle": "Manage project memory",
+      "projectContent": "This holds knowledge that belongs only to the current project and can be reused by its tasks. Additions are previewed first and written only after confirmation; disabled cards are not retrieved or injected into later tasks.",
+      "projectPromotionTitle": "Promote task lessons into the project",
+      "projectPromotionContent": "Select several task-memory cards in the task side panel, then use Promote to project memory to generate a summary preview. After you confirm it, the result appears here as project memory."
     }
   },
   "demo": {
@@ -1591,10 +1918,39 @@
       "anthropicAuthToken": "Anthropic Auth Token"
     },
     "memory": {
+      "enabled": "Use memory injection (turn off to compare without memory)",
+      "type": "Backend Type (system managed)",
+      "module": "Custom Module",
       "embeddingDimension": "Embedding Dimension",
       "maxEntries": "Max Entries",
       "similarityThreshold": "Similarity Threshold",
-      "decayFactor": "Decay Factor"
+      "decayFactor": "Decay Factor",
+      "mindmemosBaseUrl": "MindMemOS Base URL",
+      "mindmemosApiKey": "MindMemOS API Key",
+      "mindmemosUserId": "MindMemOS User ID",
+      "mindmemosAppId": "MindMemOS App ID",
+      "mindmemosAgentId": "MindMemOS Agent ID",
+      "mindmemosSessionId": "MindMemOS Session ID",
+      "mindmemosProjectId": "MindMemOS Project ID",
+      "mindmemosSearchStrategy": "MindMemOS Search Strategy",
+      "mindmemosRerank": "MindMemOS Rerank",
+      "mindmemosScoreThreshold": "MindMemOS Score Threshold",
+      "mindmemosFailOpen": "MindMemOS Fail Open",
+      "mindmemosRequestTimeout": "MindMemOS Request Timeout (seconds)",
+      "mindmemosAddTimeout": "MindMemOS Write Timeout (seconds)",
+      "mindmemosExtractionPromptLanguage": "MindMemOS Extraction Language",
+      "extractionLanguages": {
+        "auto": "Auto",
+        "ZH": "中文",
+        "EN": "English"
+      },
+      "mindmemosSyncStaticCards": "Sync Static Cards",
+      "includeUserMemory": "Include User Memory",
+      "includeProjectMemory": "Include Project Memory",
+      "includeTaskMemory": "Include Task Memory",
+      "userMemoryLimit": "User Memory Injection Limit",
+      "projectMemoryLimit": "Project Memory Injection Limit",
+      "taskMemoryLimit": "Task Memory Injection Limit"
     },
     "logging": {
       "level": "Level",

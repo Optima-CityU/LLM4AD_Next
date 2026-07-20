@@ -10,9 +10,6 @@
 
 from sqlmodel import SQLModel  # noqa: F401
 
-# 基础模型
-from app.models.base import Message, NewPassword, TimeMixin, Token  # noqa: F401
-
 # 第三方认证与奖励模型
 from app.models.auth import (  # noqa: F401
     StarRewardStatus,
@@ -20,6 +17,9 @@ from app.models.auth import (  # noqa: F401
     UserOidcAccount,
     UserStarReward,
 )
+
+# 基础模型
+from app.models.base import Message, NewPassword, TimeMixin, Token  # noqa: F401
 
 # Chat 调参模型
 from app.models.chat_tune import (  # noqa: F401
@@ -75,8 +75,10 @@ from app.models.llm4ad import (  # noqa: F401
     EmbeddingProviderType,
     LLMProvider,
     LLMProviderBase,
+    MemoryConfigBase,
     Project,
     ProjectBase,
+    ProjectMemoryConfig,
     ProviderType,
     Task,
     TaskBase,
@@ -84,6 +86,7 @@ from app.models.llm4ad import (  # noqa: F401
     TaskStatus,
     UserDefaultModel,
     UserDefaultModelBase,
+    UserMemoryConfig,
 )
 
 # RBAC 权限模型（定义关联表，需在 User 之前导入）

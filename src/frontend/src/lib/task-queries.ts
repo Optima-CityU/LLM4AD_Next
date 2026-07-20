@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query"
+import type { TaskResponse, TaskStatus } from "@/client"
 
 export const taskKeys = {
   allTasks: ["listTasks"] as const,
@@ -31,6 +32,22 @@ export function resetTaskCaches(
   projectId?: string,
 ) {
   queryClient.removeQueries({ queryKey: taskKeys.logs(taskId) })
+  queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) })
+  queryClient.invalidateQueries({ queryKey: taskKeys.allTasks })
+  if (projectId) {
+    queryClient.invalidateQueries({ queryKey: taskKeys.tasks(projectId) })
+  }
+}
+
+export function setTaskStatusInCache(
+  queryClient: QueryClient,
+  taskId: string,
+  status: TaskStatus,
+  projectId?: string,
+) {
+  queryClient.setQueryData<TaskResponse>(taskKeys.detail(taskId), (task) =>
+    task ? { ...task, status, active_status: status } : task,
+  )
   queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) })
   queryClient.invalidateQueries({ queryKey: taskKeys.allTasks })
   if (projectId) {

@@ -97,10 +97,38 @@ export const coderConfigSchema = z.discriminatedUnion("type", [
 
 // --- Memory ---
 export const memoryConfigSchema = z.object({
+  type: z.string().default("local_yaml"),
+  module: z.string().nullable().optional(),
+  enabled: z.boolean().default(true),
   embedding_dim: z.coerce.number().int().min(1).default(768),
   max_entries: z.coerce.number().int().min(1).default(10000),
   similarity_threshold: z.coerce.number().min(0).max(1).default(0.8),
   decay_factor: z.coerce.number().min(0).max(1).default(0.99),
+  mindmemos_base_url: z.string().default(""),
+  mindmemos_api_key: z.string().default(""),
+  mindmemos_user_id: z.string().default(""),
+  mindmemos_app_id: z.string().default("llm4ad"),
+  mindmemos_agent_id: z.string().default("planner"),
+  mindmemos_session_id: z.string().default(""),
+  mindmemos_project_id: z.string().default(""),
+  mindmemos_search_strategy: z.string().default("fast"),
+  mindmemos_rerank: z.boolean().default(false),
+  mindmemos_score_threshold: z.coerce.number().min(0).max(1).nullable().default(0.65),
+  mindmemos_fail_open: z.boolean().default(true),
+  mindmemos_request_timeout: z.coerce.number().min(0).default(60),
+  mindmemos_add_timeout: z.coerce.number().min(0).default(120),
+  mindmemos_extraction_prompt_language: z.enum(["auto", "ZH", "EN"]).default("auto"),
+  mindmemos_sync_static_cards: z.boolean().default(false),
+  include_user_memory: z.boolean().default(false),
+  include_project_memory: z.boolean().default(false),
+  include_task_memory: z.boolean().default(true),
+  user_memory_limit: z.coerce.number().int().min(0).default(0),
+  project_memory_limit: z.coerce.number().int().min(0).default(0),
+  task_memory_limit: z.coerce.number().int().min(0).default(5),
+  retrieval_mode: z.enum(["auto", "manual"]).default("auto"),
+  pinned_card_ids: z.array(z.string()).default([]),
+  task_injection_mode: z.enum(["topk", "weight", "random"]).default("topk"),
+  task_injection_lambda: z.coerce.number().min(0).max(1).default(0.5),
 })
 
 // --- Logging ---

@@ -5,13 +5,26 @@
 """
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from pydantic.networks import EmailStr
 
 from app.api.deps import get_current_active_superuser
+from app.core.config import settings
 from app.models import Message
 from app.utils.email import generate_test_email, send_email
 
 router = APIRouter(prefix="/utils", tags=["utils"])
+
+
+class FeatureFlags(BaseModel):
+    """Public feature flags the frontend uses to show/hide optional UI."""
+
+    enable_ai_agent_build: bool
+    mindmemos_memory_enabled: bool
+    mindmemos_runtime_available: bool
+    mindmemos_embedding_configured: bool
+    mindmemos_rerank_enabled: bool
+    mindmemos_rerank_configured: bool
 
 
 @router.post(
@@ -49,3 +62,23 @@ async def health_check() -> bool:
         bool: 始终为 ``True``。
     """
     return True
+
+
+@router.get("/features/")
+async def feature_flags() -> FeatureFlags:
+    """返回前端可见的特性开关。
+
+    前端据此决定是否展示可选 UI（如 "AI 构建 (Beta)" 入口）。无需鉴权——
+    仅暴露布尔开关，不含任何敏感信息。
+
+    Returns:
+        FeatureFlags: 当前生效的特性开关集合。
+    """
+    return FeatureFlags(
+        enable_ai_agent_build=settings.ENABLE_AI_AGENT_BUILD,
+        mindmemos_memory_enabled=settings.LLM4AD_MINDMEMOS_ENABLED,
+        mindmemos_runtime_available=settings.mindmemos_runtime_available,
+        mindmemos_embedding_configured=settings.mindmemos_embedding_configured,
+        mindmemos_rerank_enabled=settings.MINDMEMOS_RERANK_ENABLED,
+        mindmemos_rerank_configured=settings.mindmemos_rerank_configured,
+    )

@@ -105,7 +105,10 @@ class InitSampler(BaseSampler):
         background: str = kwargs.get("background", "")
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={"sampler": "init"},
+        ) if self.memory else ""
 
         # Build the prompt
         prompt = self.prompt_template.format(

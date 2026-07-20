@@ -70,12 +70,25 @@ class AnthropicProvider(BaseProvider):
         """
         super().__init__(config)
 
-        # Initialize async Anthropic client
-        client_kwargs = {
-            "api_key": self.api_key,
+        # Initialize async Anthropic client.
+        # Support both auth styles: ``api_key`` -> ``x-api-key`` header (official
+        # API) and ``auth_token`` -> ``Authorization: Bearer`` header (used by some
+        # Anthropic-compatible gateways, e.g. DeepSeek's /anthropic endpoint). Pass
+        # each only when set so the SDK can resolve a single method without the
+        # "Could not resolve authentication method" error.
+        auth_token = config.get("auth_token") or ""
+        client_kwargs: dict[str, Any] = {
             "timeout": self.timeout,
             "max_retries": self.max_retries,
         }
+        if self.api_key:
+            client_kwargs["api_key"] = self.api_key
+        if auth_token:
+            client_kwargs["auth_token"] = auth_token
+        if not self.api_key and not auth_token:
+            # Preserve prior behavior (SDK falls back to ANTHROPIC_API_KEY env)
+            # rather than silently sending no credential.
+            client_kwargs["api_key"] = self.api_key
         if self.base_url is not None:
             client_kwargs["base_url"] = self.base_url
 

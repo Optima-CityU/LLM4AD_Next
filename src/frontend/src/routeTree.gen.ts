@@ -23,6 +23,7 @@ import { Route as Layout_evolutionEvolutionRouteImport } from './routes/_layout_
 import { Route as Layout_demoDemoRouteImport } from './routes/_layout_demo/demo'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
+import { Route as LayoutMemoryRouteImport } from './routes/_layout/memory'
 import { Route as LayoutLlm_roviderRouteImport } from './routes/_layout/llm_rovider'
 import { Route as LayoutLiveCodesRouteImport } from './routes/_layout/live-codes'
 import { Route as LayoutLitellmQuotasRouteImport } from './routes/_layout/litellm-quotas'
@@ -101,6 +102,11 @@ const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutMemoryRoute = LayoutMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutLlm_roviderRoute = LayoutLlm_roviderRouteImport.update({
   id: '/llm_rovider',
   path: '/llm_rovider',
@@ -164,6 +170,7 @@ export interface FileRoutesByFullPath {
   '/litellm-quotas': typeof LayoutLitellmQuotasRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
+  '/memory': typeof LayoutMemoryRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/demo': typeof Layout_demoDemoRoute
@@ -186,6 +193,7 @@ export interface FileRoutesByTo {
   '/litellm-quotas': typeof LayoutLitellmQuotasRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
+  '/memory': typeof LayoutMemoryRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/demo': typeof Layout_demoDemoRoute
@@ -212,6 +220,7 @@ export interface FileRoutesById {
   '/_layout/litellm-quotas': typeof LayoutLitellmQuotasRoute
   '/_layout/live-codes': typeof LayoutLiveCodesRoute
   '/_layout/llm_rovider': typeof LayoutLlm_roviderRoute
+  '/_layout/memory': typeof LayoutMemoryRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout_demo/demo': typeof Layout_demoDemoRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
     | '/litellm-quotas'
     | '/live-codes'
     | '/llm_rovider'
+    | '/memory'
     | '/projects'
     | '/settings'
     | '/demo'
@@ -258,6 +268,7 @@ export interface FileRouteTypes {
     | '/litellm-quotas'
     | '/live-codes'
     | '/llm_rovider'
+    | '/memory'
     | '/projects'
     | '/settings'
     | '/demo'
@@ -283,6 +294,7 @@ export interface FileRouteTypes {
     | '/_layout/litellm-quotas'
     | '/_layout/live-codes'
     | '/_layout/llm_rovider'
+    | '/_layout/memory'
     | '/_layout/projects'
     | '/_layout/settings'
     | '/_layout_demo/demo'
@@ -402,6 +414,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProjectsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/memory': {
+      id: '/_layout/memory'
+      path: '/memory'
+      fullPath: '/memory'
+      preLoaderRoute: typeof LayoutMemoryRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/llm_rovider': {
       id: '/_layout/llm_rovider'
       path: '/llm_rovider'
@@ -478,6 +497,7 @@ interface LayoutRouteChildren {
   LayoutLitellmQuotasRoute: typeof LayoutLitellmQuotasRoute
   LayoutLiveCodesRoute: typeof LayoutLiveCodesRoute
   LayoutLlm_roviderRoute: typeof LayoutLlm_roviderRoute
+  LayoutMemoryRoute: typeof LayoutMemoryRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
 }
@@ -492,6 +512,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutLitellmQuotasRoute: LayoutLitellmQuotasRoute,
   LayoutLiveCodesRoute: LayoutLiveCodesRoute,
   LayoutLlm_roviderRoute: LayoutLlm_roviderRoute,
+  LayoutMemoryRoute: LayoutMemoryRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
 }

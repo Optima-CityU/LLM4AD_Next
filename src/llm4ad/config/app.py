@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from llm4ad.config.coder import ClaudeCodeConfig, CustomCoderConfig, OpenCodeConfig
 from llm4ad.config.evaluator import CustomEvaluatorConfig, ExecutableEvaluatorConfig
-from llm4ad.config.evolution import DyCAConfig, IslandGAConfig, MEoHConfig
+from llm4ad.config.evolution import DyCAConfig, IslandGAConfig, MCTSAHDConfig, MEoHConfig
 from llm4ad.config.memory import MemoryConfig
 from llm4ad.config.planner import PlannerConfig
 from llm4ad.config.ui import ui
@@ -442,7 +442,7 @@ class AppConfig(BaseModel):
             desc_en="Configure how algorithms are evaluated; supports custom or executable evaluators",
         ),
     )
-    evolution: IslandGAConfig | DyCAConfig | MEoHConfig = Field(
+    evolution: IslandGAConfig | DyCAConfig | MEoHConfig | MCTSAHDConfig = Field(
         default_factory=DyCAConfig,
         discriminator="type",
         json_schema_extra=ui(

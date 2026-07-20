@@ -8,9 +8,13 @@ Provides persistent, card-based memory that supports:
 """
 
 import hashlib
+import importlib
+import importlib.util
 import re
+import sys
 import time
 import uuid
+from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -19,6 +23,8 @@ from typing import Any, Literal
 import yaml
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
+from llm4ad.utils.registry import Registrable
 
 
 class MemoryType(Enum):
@@ -65,6 +71,7 @@ class MemoryCard(BaseModel):
     type: MemoryType
     title: str  # Short human-readable title
     content: str  # Main textual content
+    enabled: bool = True  # Whether this card can be injected into prompts
     source: Literal["static", "auto"] = "static"
 
     # Optional structured fields
@@ -90,6 +97,7 @@ class MemoryCard(BaseModel):
             metadata={
                 "title": self.title,
                 "source": self.source,
+                "enabled": self.enabled,
                 "tags": self.tags,
                 "algorithm_id": self.algorithm_id,
                 **self.metadata,
@@ -110,10 +118,11 @@ class MemoryCard(BaseModel):
         title = entry.metadata.get("title", entry.content[:60].strip())
         tags = entry.metadata.get("tags", [])
         algorithm_id = entry.metadata.get("algorithm_id")
+        enabled = entry.metadata.get("enabled", True)
         # Remove keys that are stored as top-level fields
         extra_metadata = {
             k: v for k, v in entry.metadata.items()
-            if k not in ("title", "source", "tags", "algorithm_id")
+            if k not in ("title", "source", "enabled", "tags", "algorithm_id")
         }
 
         return cls(
@@ -122,6 +131,7 @@ class MemoryCard(BaseModel):
             title=title,
             content=entry.content,
             source=source,
+            enabled=bool(enabled),
             score=entry.score,
             generation=entry.generation,
             algorithm_id=algorithm_id,
@@ -175,7 +185,141 @@ class MemoryCard(BaseModel):
         return filepath
 
 
-class MemoryExtractor:
+class BaseMemoryExtractor(ABC, Registrable):
+    """Abstract interface for memory card extraction modules."""
+
+    def __init__(self, provider: Any, config: Any):
+        """Initialize extractor.
+
+        Args:
+            provider: LLM provider or extraction backend dependency.
+            config: Extractor configuration object.
+        """
+        self.provider = provider
+        self.config = config
+
+    @abstractmethod
+    def reset_generation(self) -> None:
+        """Reset any per-generation extractor state."""
+        ...
+
+    @abstractmethod
+    async def extract_from_good(
+        self,
+        algorithm: Any,
+        population: list[Any],
+        generation: int,
+        background: str = "",
+    ) -> MemoryCard | None:
+        """Extract a memory card from a well-performing algorithm."""
+        ...
+
+    @abstractmethod
+    async def extract_from_bad(
+        self,
+        algorithm: Any,
+        population: list[Any],
+        generation: int,
+        background: str = "",
+    ) -> MemoryCard | None:
+        """Extract a memory card from a poorly-performing algorithm."""
+        ...
+
+    @abstractmethod
+    async def extract_from_failure(
+        self,
+        algorithm: Any,
+        error: str,
+        generation: int,
+        background: str = "",
+    ) -> MemoryCard | None:
+        """Extract a memory card from an evaluation failure."""
+        ...
+
+
+class BaseMemory(ABC, Registrable):
+    """Abstract interface for pluggable memory modules."""
+
+    def __init__(self, config: dict[str, Any]):
+        """Initialize memory module.
+
+        Args:
+            config: Memory configuration dictionary.
+        """
+        self.config = config
+        self.extractor: BaseMemoryExtractor | None = None
+
+    @abstractmethod
+    def set_memory_dir(self, memory_dir: Path) -> None:
+        """Set the persistence directory for memory data."""
+        ...
+
+    @abstractmethod
+    def load_static_cards(self, inline_cards: list[Any]) -> None:
+        """Load static memory cards from configuration."""
+        ...
+
+    @abstractmethod
+    async def add_card(self, card: MemoryCard, persist: bool | None = None) -> None:
+        """Add a memory card to the module."""
+        ...
+
+    @abstractmethod
+    def list_cards(self) -> list[MemoryCard]:
+        """Return memory cards managed by this module."""
+        ...
+
+    @abstractmethod
+    async def upsert_card(self, card: MemoryCard, persist: bool | None = None) -> MemoryCard:
+        """Create or update a memory card."""
+        ...
+
+    @abstractmethod
+    async def delete_card(self, card_id: str) -> None:
+        """Delete a memory card by id."""
+        ...
+
+    @abstractmethod
+    async def set_card_enabled(self, card_id: str, enabled: bool) -> MemoryCard:
+        """Enable or disable a memory card."""
+        ...
+
+    @abstractmethod
+    def get_prompt_context(self, query: str = "", max_cards: int | None = None) -> str:
+        """Build a prompt-ready memory context string."""
+        ...
+
+    async def aget_prompt_context(
+        self,
+        query: str = "",
+        max_cards: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Build prompt-ready memory context from async sampler paths.
+
+        Local memory remains synchronous; remote implementations can override
+        this to perform async query planning before retrieval.
+        """
+        del context
+        return self.get_prompt_context(query=query, max_cards=max_cards)
+
+    def set_query_provider(self, provider: Any) -> None:
+        """Attach an optional LLM provider for remote query rewriting."""
+        del provider
+
+    @abstractmethod
+    def get_stats(self) -> dict[str, Any]:
+        """Return memory statistics."""
+        ...
+
+    @abstractmethod
+    def clear(self) -> None:
+        """Clear all runtime memory state."""
+        ...
+
+
+@BaseMemoryExtractor.register("llm_card_extractor")
+class MemoryExtractor(BaseMemoryExtractor):
     """LLM-based extraction of memory cards from evaluated algorithms.
 
     Extracts two types of insights:
@@ -190,8 +334,7 @@ class MemoryExtractor:
             provider: LLM provider for extraction calls.
             config: AutoExtractionConfig instance.
         """
-        self.provider = provider
-        self.config = config
+        super().__init__(provider, config)
         self._best_score: float = float("-inf")
         self._cards_this_gen: int = 0
 
@@ -518,7 +661,8 @@ class MemoryExtractor:
         self._cards_this_gen = 0
 
 
-class Memory:
+@BaseMemory.register("local_yaml")
+class Memory(BaseMemory):
     """Experience memory system for storing and retrieving insights.
 
     The memory system serves as the "long-term memory" of the evolution process,
@@ -540,7 +684,7 @@ class Memory:
         Args:
             config: Memory configuration dict.
         """
-        self.config = config
+        super().__init__(config)
         self.entries: dict[str, MemoryEntry] = {}  # id -> entry
         self._type_index: dict[MemoryType, set[str]] = {t: set() for t in MemoryType}
         self._generation_index: dict[int, set[str]] = {}
@@ -549,10 +693,9 @@ class Memory:
         self._cards: list[MemoryCard] = []
         self.memory_dir: Path | None = None
         self.max_prompt_cards: int = config.get("max_prompt_cards", 5)
+        self.include_task_memory: bool = bool(config.get("include_task_memory", True))
+        self.task_memory_limit: int = int(config.get("task_memory_limit", self.max_prompt_cards))
         self.persist_enabled: bool = config.get("persist", True)
-
-        # Extractor (set externally after initialization)
-        self.extractor: MemoryExtractor | None = None
 
     def set_memory_dir(self, memory_dir: Path) -> None:
         """Set the persistence directory and load any existing cards.
@@ -607,6 +750,7 @@ class Memory:
                     title=card_config.title,
                     content=card_config.content,
                     source="static",
+                    enabled=getattr(card_config, "enabled", True),
                     tags=card_config.tags,
                     score=card_config.score,
                     metadata=card_config.metadata,
@@ -712,6 +856,18 @@ class Memory:
             card: The memory card to add.
             persist: Whether to persist to disk. None uses self.persist_enabled.
         """
+        await self.upsert_card(card, persist=persist)
+
+    def list_cards(self) -> list[MemoryCard]:
+        """Return all memory cards in insertion order."""
+        return list(self._cards)
+
+    async def upsert_card(self, card: MemoryCard, persist: bool | None = None) -> MemoryCard:
+        """Create or replace a memory card and optionally persist it."""
+        existing_index = next((idx for idx, item in enumerate(self._cards) if item.id == card.id), None)
+        if existing_index is not None:
+            await self.delete_card(card.id)
+
         entry = card.to_entry()
         await self.add(entry)
         self._cards.append(card)
@@ -719,6 +875,30 @@ class Memory:
         should_persist = persist if persist is not None else self.persist_enabled
         if should_persist:
             await self.persist_card(card)
+        return card
+
+    async def delete_card(self, card_id: str) -> None:
+        """Delete a memory card from runtime indexes and disk."""
+        entry = self.entries.pop(card_id, None)
+        if entry is not None:
+            self._type_index[entry.memory_type].discard(card_id)
+            if entry.generation in self._generation_index:
+                self._generation_index[entry.generation].discard(card_id)
+                if not self._generation_index[entry.generation]:
+                    del self._generation_index[entry.generation]
+
+        self._cards = [card for card in self._cards if card.id != card_id]
+        if self.memory_dir:
+            for yaml_file in self.memory_dir.glob(f"*_{card_id}.yaml"):
+                yaml_file.unlink(missing_ok=True)
+
+    async def set_card_enabled(self, card_id: str, enabled: bool) -> MemoryCard:
+        """Enable or disable a memory card."""
+        for card in self._cards:
+            if card.id == card_id:
+                updated = card.model_copy(update={"enabled": enabled})
+                return await self.upsert_card(updated)
+        raise KeyError(card_id)
 
     async def persist_card(self, card: MemoryCard) -> Path | None:
         """Save a MemoryCard to the memory directory as YAML.
@@ -842,7 +1022,11 @@ class Memory:
         if not self._cards:
             return ""
 
+        if not self.include_task_memory:
+            return ""
+
         max_cards = max_cards if max_cards is not None else self.max_prompt_cards
+        max_cards = min(max_cards, self.task_memory_limit)
         if max_cards <= 0:
             return ""
 
@@ -852,6 +1036,8 @@ class Memory:
         domain_cards: list[MemoryCard] = []
 
         for card in self._cards:
+            if not card.enabled:
+                continue
             if card.type == MemoryType.GOOD_ALGORITHM or card.type == MemoryType.GENERAL_INSIGHT:
                 good_cards.append(card)
             elif card.type == MemoryType.ERROR_REFLECTION:
@@ -900,7 +1086,27 @@ class Memory:
         if not sections:
             return ""
 
-        return "\n\n".join(sections)
+        prompt_context = "\n\n".join(sections)
+        # ⏳ marks short-term (local) memory. Local memory only injects task-scope
+        # cards ranked by score, so the strategy is fixed to score-topk.
+        logger.info(
+            "⏳ [short-term memory] injection completed: task_injection=score-topk "
+            "good={} bad={} domain={} injected_chars={}",
+            len(good_cards[:n_good]),
+            len(bad_cards[:n_bad]),
+            len(domain_cards[:n_domain]),
+            len(prompt_context),
+        )
+        logger.bind(
+            event_type="local_memory_injected",
+            memory_kind="short_term",
+            task_injection_mode="score-topk",
+            good_cards=len(good_cards[:n_good]),
+            bad_cards=len(bad_cards[:n_bad]),
+            domain_cards=len(domain_cards[:n_domain]),
+            injected_chars=len(prompt_context),
+        ).info("⏳ short-term memory injection event")
+        return prompt_context
 
     async def summarize(self, max_tokens: int = 2000) -> str:
         """Summarize memory into a prompt for LLM.
@@ -1006,3 +1212,70 @@ class Memory:
         for card in other._cards:
             if card.id not in {c.id for c in self._cards}:
                 self._cards.append(card)
+
+
+def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    """Read a config key from either dict-like or attribute-based config."""
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
+def import_memory_module(module: str | None) -> None:
+    """Import an optional user module so it can register memory components.
+
+    Args:
+        module: Dotted module name or path to a Python file.
+
+    Raises:
+        ImportError: If the module cannot be imported.
+        ValueError: If a file module cannot be loaded.
+    """
+    if not module:
+        return
+
+    module_path = Path(module).expanduser()
+    if module.endswith(".py") or module_path.exists():
+        resolved_path = module_path.resolve()
+        module_name = f"llm4ad_user_memory_{resolved_path.stem}_{uuid.uuid4().hex[:8]}"
+        spec = importlib.util.spec_from_file_location(module_name, resolved_path)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"Unable to load memory module from '{module}'")
+        loaded_module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = loaded_module
+        spec.loader.exec_module(loaded_module)
+        return
+
+    importlib.import_module(module)
+
+
+def create_memory(config: Any) -> BaseMemory:
+    """Create a registered memory implementation from config.
+
+    Args:
+        config: MemoryConfig instance or plain dictionary.
+
+    Returns:
+        Registered memory implementation.
+    """
+    import_memory_module(_config_get(config, "module"))
+    memory_type = _config_get(config, "type", "local_yaml")
+    if memory_type == "mindmemos_cloud":
+        import_memory_module("llm4ad.planner.mindmemos_memory")
+    config_dict = config if isinstance(config, dict) else config.model_dump()
+    return BaseMemory.create(memory_type, config=config_dict)
+
+
+def create_memory_extractor(provider: Any, config: Any) -> BaseMemoryExtractor:
+    """Create a registered memory extractor implementation from config.
+
+    Args:
+        provider: Provider passed to the extractor.
+        config: AutoExtractionConfig instance or plain dictionary.
+
+    Returns:
+        Registered memory extractor implementation.
+    """
+    import_memory_module(_config_get(config, "module"))
+    extractor_type = _config_get(config, "type", "llm_card_extractor")
+    return BaseMemoryExtractor.create(extractor_type, provider=provider, config=config)

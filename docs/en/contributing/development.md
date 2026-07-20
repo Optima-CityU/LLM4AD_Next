@@ -4,7 +4,7 @@ This page walks through getting a working LLM4AD development environment, from a
 
 ## Prerequisites
 
-- **Python 3.10, 3.11, or 3.12** (CI matrix; 3.10 is the floor)
+- **Python 3.12** (required; CI runs 3.12)
 - **uv** — fast Python package manager. Install per the [official guide](https://docs.astral.sh/uv/).
 - **git** ≥ 2.5 (the version-control layer relies on `git worktree`)
 - For the Web UI: **bun** ≥ 1.0 (frontend), **Docker** (containerized dev)
@@ -78,7 +78,7 @@ uv run pre-commit install            # one-time
 uv run pre-commit run --all-files    # ad-hoc full pass
 ```
 
-The `CLAUDE.md` requirement is to run `uv run --python 3.10 ruff check src/` after any code change and fix what it reports.
+The `CLAUDE.md` requirement is to run `uv run --python 3.12 ruff check src/` after any code change and fix what it reports.
 
 ## Running the CLI against a real provider
 
