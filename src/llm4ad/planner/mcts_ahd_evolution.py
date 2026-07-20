@@ -1,8 +1,8 @@
-"""ReEvo-specific planner implementation.
+"""MCTS-AHD planner implementation.
 
-Dispatches the ReEvo operators (init / crossover / mutation) to their
-samplers and provides a helper for the long-term reflection LLM call that
-the orchestrator invokes between generations.
+Dispatches the MCTS-AHD operators (i1/e1/e2/m1/m2/s1) to their samplers. The
+orchestrator drives the tree search and selects the parents/paths for each
+operator; this planner only maps operator -> sampler and issues the LLM call.
 """
 
 from __future__ import annotations
@@ -21,22 +21,27 @@ from llm4ad.planner.base import Algorithm, BasePlanner
 from llm4ad.planner.llm_evolution import LLMEvolutionPlanner
 from llm4ad.planner.memory import Memory
 from llm4ad.planner.sampler.base import BaseSampler
-from llm4ad.planner.sampler.reevo_samplers import (  # noqa: F401
-    ReEvoCrossoverSampler,
-    ReEvoInitSampler,
-    ReEvoMutationSampler,
-    build_long_term_reflection_prompt,
+from llm4ad.planner.sampler.mcts_ahd_samplers import (  # noqa: F401
+    MCTSE1Sampler,
+    MCTSE2Sampler,
+    MCTSI1Sampler,
+    MCTSM1Sampler,
+    MCTSM2Sampler,
+    MCTSS1Sampler,
 )
 
 
-@BasePlanner.register("reevo_evolution")
-class ReEvoEvolutionPlanner(LLMEvolutionPlanner):
-    """Planner with explicit ReEvo operator dispatch and reflection support."""
+@BasePlanner.register("mcts_ahd_evolution")
+class MCTSAHDEvolutionPlanner(LLMEvolutionPlanner):
+    """Planner with explicit MCTS-AHD operator dispatch."""
 
     OPERATOR_TO_SAMPLER = {
-        "init": "reevo_init_sampler",
-        "crossover": "reevo_crossover_sampler",
-        "mutation": "reevo_mutation_sampler",
+        "i1": "mcts_i1_sampler",
+        "e1": "mcts_e1_sampler",
+        "e2": "mcts_e2_sampler",
+        "m1": "mcts_m1_sampler",
+        "m2": "mcts_m2_sampler",
+        "s1": "mcts_s1_sampler",
     }
 
     def __init__(
@@ -49,7 +54,7 @@ class ReEvoEvolutionPlanner(LLMEvolutionPlanner):
         version_control: BaseVersionControl,
         state_tracker: StateTracker,
     ) -> None:
-        """Initialize the ReEvo planner and its samplers."""
+        """Initialize the MCTS-AHD planner and its samplers."""
         BasePlanner.__init__(
             self,
             provider=provider,
@@ -80,13 +85,13 @@ class ReEvoEvolutionPlanner(LLMEvolutionPlanner):
         algorithm_id: str,
         **kwargs: Any,
     ):
-        """Create a ReEvo worktree."""
-        worktree_name = f"reevo_gen_{generation_id}_ind_{algorithm_id}"
-        logger.info(f"Creating worktree for ReEvo generation {generation_id} ({worktree_name}) ...")
+        """Create an MCTS-AHD worktree."""
+        worktree_name = f"mcts_gen_{generation_id}_ind_{algorithm_id}"
+        logger.info(f"Creating worktree for MCTS-AHD iteration {generation_id} ({worktree_name}) ...")
         version_control_result = self.version_control.create_worktree(name=worktree_name)
         if not version_control_result.success or not version_control_result.data:
             logger.warning(
-                "Failed to create worktree for ReEvo generation {} ({}): {}",
+                "Failed to create worktree for MCTS-AHD iteration {} ({}): {}",
                 generation_id,
                 worktree_name,
                 version_control_result.message,
@@ -94,7 +99,7 @@ class ReEvoEvolutionPlanner(LLMEvolutionPlanner):
             return None
         worktree = version_control_result.data.get("worktree")
         logger.info(
-            "Created worktree for ReEvo generation {} ({}): {}",
+            "Created worktree for MCTS-AHD iteration {} ({}): {}",
             generation_id,
             worktree_name,
             worktree.path,
@@ -102,10 +107,10 @@ class ReEvoEvolutionPlanner(LLMEvolutionPlanner):
         return worktree
 
     async def plan(self, population: list[Algorithm], generation: int, **kwargs: Any) -> Algorithm:
-        """Plan the next ReEvo algorithm with an explicit operator."""
-        operator = kwargs.get("operator", "init")
+        """Plan the next MCTS-AHD algorithm with an explicit operator."""
+        operator = kwargs.get("operator", "i1")
         if operator not in self.OPERATOR_TO_SAMPLER:
-            raise ValueError(f"Unsupported ReEvo operator: {operator}")
+            raise ValueError(f"Unsupported MCTS-AHD operator: {operator}")
 
         sampler = self.sampler_map[self.OPERATOR_TO_SAMPLER[operator]]
         parents = kwargs.get("parents", population)
@@ -116,34 +121,9 @@ class ReEvoEvolutionPlanner(LLMEvolutionPlanner):
             generation=generation,
             parents=parents,
             background=kwargs.get("background", ""),
-            long_term_reflection=kwargs.get("long_term_reflection", ""),
         )
         plan_time_ms = (time.time() - start_time) * 1000
         self.state_tracker.record_timing("planner.plan", plan_time_ms)
         if algorithm.timing.llm_planning_ms > 0:
             self.state_tracker.record_timing("provider.chat.planner", algorithm.timing.llm_planning_ms)
         return algorithm
-
-    async def reflect_long_term(
-        self,
-        background: str,
-        prior_long_term: str,
-        new_short_terms: list[str],
-    ) -> str:
-        """Distil accumulated short-term hints into a long-term reflection.
-
-        Args:
-            background: Task background description.
-            prior_long_term: The previous long-term reflection.
-            new_short_terms: Recently gathered short-term hints.
-
-        Returns:
-            The new long-term reflection text (empty string on failure).
-        """
-        prompt = build_long_term_reflection_prompt(background, prior_long_term, new_short_terms)
-        try:
-            response = await self.provider.generate(prompt, request_stage="planner")
-            return (response.text or "").strip()
-        except Exception as exc:
-            logger.warning(f"[ReEvo] Long-term reflection failed: {exc}")
-            return prior_long_term
