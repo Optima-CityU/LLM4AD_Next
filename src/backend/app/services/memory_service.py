@@ -10,7 +10,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -19,7 +19,6 @@ from sqlmodel import Session, select
 
 from app import models
 from app.core.config import settings
-from app.core.security import create_access_token
 from app.schemas.memory import (
     MemoryCardExtractionCommitRequest,
     MemoryCardExtractionRequest,
@@ -1533,7 +1532,7 @@ def upsert_memory_provider_binding(
     if config.mindmemos_embedding_dim and config.mindmemos_embedding_dim != embedding_identity["dimensions"]:
         raise HTTPException(status_code=409, detail="Embedding dimension is locked for this memory space")
 
-    routers = _memory_provider_routers(current_user, chat_provider, request.chat_model, embedding_provider)
+    routers = _memory_provider_routers(chat_provider, request.chat_model, embedding_provider)
     payload = _memory_provider_binding_payload(current_user, routers)
     project_id = _mindmemos_project_id(current_user)
     if config.mindmemos_binding_id:
@@ -1567,7 +1566,6 @@ def upsert_memory_provider_binding(
 
 
 def _memory_provider_routers(
-    current_user: models.User,
     chat_provider: models.LLMProvider,
     chat_model: str,
     embedding_provider: models.EmbeddingProvider,
@@ -1575,11 +1573,11 @@ def _memory_provider_routers(
     return {
         "chat_model_router": {
             "routing_strategy": "simple-shuffle",
-            "endpoints": [_chat_endpoint(current_user, chat_provider, chat_model)],
+            "endpoints": [_chat_endpoint(chat_provider, chat_model)],
         },
         "embed_model_router": {
             "routing_strategy": "simple-shuffle",
-            "endpoints": [_embedding_endpoint(current_user, embedding_provider)],
+            "endpoints": [_embedding_endpoint(embedding_provider)],
         },
     }
 
@@ -1634,7 +1632,7 @@ def _ensure_mindmemos_provider_binding(db: Session, current_user: models.User) -
         db.commit()
         raise HTTPException(status_code=400, detail="MindMemOS 绑定的模型配置不存在，请重新绑定")
 
-    routers = _memory_provider_routers(current_user, chat_provider, config.mindmemos_chat_model, embedding_provider)
+    routers = _memory_provider_routers(chat_provider, config.mindmemos_chat_model, embedding_provider)
     if existing is not None:
         if _provider_routers_need_refresh(existing.get("routers") or {}, routers):
             _mindmemos_patch(
@@ -1692,15 +1690,16 @@ def _mindmemos_model_name(provider_type: str, model: str) -> str:
     return model
 
 
-def _memory_gateway_access_token(current_user: models.User) -> str:
-    """Issue a user-scoped access token for MindMemOS calls through the gateway."""
-    return create_access_token(
-        subject=current_user.id,
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-    )
+def _memory_gateway_base_url(base_url: str | None) -> str | None:
+    """Convert a built-in user-token route into a stable MindMemOS gateway route."""
+
+    from app.services.provider_service import resolve_builtin_base_url
+
+    resolved = resolve_builtin_base_url(base_url, "{userId}")
+    return resolved.replace("/litellm_proxy/", "/litellm_memory_proxy/") if resolved else None
 
 
-def _chat_endpoint(current_user: models.User, provider: models.LLMProvider, model: str) -> dict[str, Any]:
+def _chat_endpoint(provider: models.LLMProvider, model: str) -> dict[str, Any]:
     endpoint: dict[str, Any] = {
         "model": _mindmemos_model_name(str(provider.type.value), model),
         "api_key": provider.api_key or provider.auth_token,
@@ -1710,9 +1709,7 @@ def _chat_endpoint(current_user: models.User, provider: models.LLMProvider, mode
     }
     base_url = provider.base_url
     if provider.is_builtin:
-        from app.services.provider_service import resolve_builtin_base_url
-
-        base_url = resolve_builtin_base_url(base_url, _memory_gateway_access_token(current_user))
+        base_url = _memory_gateway_base_url(base_url)
     if base_url:
         endpoint["api_base"] = base_url.rstrip("/")
     return endpoint
@@ -1732,7 +1729,7 @@ def _embedding_identity(provider: models.EmbeddingProvider) -> dict[str, Any]:
     }
 
 
-def _embedding_endpoint(current_user: models.User, provider: models.EmbeddingProvider) -> dict[str, Any]:
+def _embedding_endpoint(provider: models.EmbeddingProvider) -> dict[str, Any]:
     identity = _embedding_identity(provider)
     if provider.mode == models.EmbeddingMode.SPLIT:
         api_key = provider.text_api_key or provider.text_auth_token
@@ -1743,9 +1740,7 @@ def _embedding_endpoint(current_user: models.User, provider: models.EmbeddingPro
         base_url = provider.base_url
         timeout = provider.timeout
     if provider.is_builtin:
-        from app.services.provider_service import resolve_builtin_base_url
-
-        base_url = resolve_builtin_base_url(base_url, _memory_gateway_access_token(current_user))
+        base_url = _memory_gateway_base_url(base_url)
     endpoint: dict[str, Any] = {
         "model": identity["model"],
         "api_key": api_key,

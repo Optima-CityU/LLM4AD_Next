@@ -23,6 +23,7 @@ from app.api.base_routes import (
     users,
     utils,
 )
+from app.api.internal import gateway_users
 from app.api.llm4ad import chat_tune as llm4ad_chat_tune
 from app.api.llm4ad import embedding_providers as llm4ad_embedding_providers
 from app.api.llm4ad import llm_proxy as llm4ad_llm_proxy
@@ -50,6 +51,7 @@ api_router.include_router(feedback.router)
 api_router.include_router(live_codes.router)
 api_router.include_router(live_qr.router)
 api_router.include_router(news.router)
+api_router.include_router(gateway_users.router)
 
 # ---- LLM4AD 业务路由 ----
 api_router.include_router(llm4ad_projects.router, prefix="/llm4ad")

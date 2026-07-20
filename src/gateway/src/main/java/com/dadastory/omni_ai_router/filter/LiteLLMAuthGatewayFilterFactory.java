@@ -88,7 +88,7 @@ public class LiteLLMAuthGatewayFilterFactory extends AbstractGatewayFilterFactor
             }
 
             return authUserManager.getCurrentUser(accessToken)
-                    .flatMap(user -> getValidApiKey(user, teamId)
+                    .flatMap(user -> resolveLiteLlmApiKey(user, teamId)
                             .flatMap(apiKey -> {
                                 ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
@@ -117,13 +117,14 @@ public class LiteLLMAuthGatewayFilterFactory extends AbstractGatewayFilterFactor
         }, -10);
     }
 
-    private Mono<String> getValidApiKey(AuthUser user, String teamId) {
+    /** Resolve the cached or provisioned LiteLLM key for one active user and team. */
+    public Mono<String> resolveLiteLlmApiKey(AuthUser user, String teamId) {
         String userId = user.getId();
         return getCachedValidApiKey(userId, teamId)
                 .switchIfEmpty(Mono.defer(() -> fetchAndSaveApiKeyWithLock(user, teamId)));
     }
 
-    private Mono<Void> writeInsufficientQuotaResponse(ServerWebExchange exchange) {
+    Mono<Void> writeInsufficientQuotaResponse(ServerWebExchange exchange) {
         String body = """
                 {"error":"builtin_provider_quota_exhausted","message":"内置模型免费额度已用尽，请联系管理员增加额度或切换其他供应商。"}
                 """;
@@ -288,7 +289,7 @@ public class LiteLLMAuthGatewayFilterFactory extends AbstractGatewayFilterFactor
         return result != null && result.getCode() == 200;
     }
 
-    private static class InsufficientQuotaException extends RuntimeException {
+    static class InsufficientQuotaException extends RuntimeException {
         InsufficientQuotaException(String message) {
             super(message);
         }

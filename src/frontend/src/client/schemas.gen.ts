@@ -2899,6 +2899,28 @@ export const FolderRenameRequestSchema = {
     description: '文件夹重命名请求。'
 } as const;
 
+export const GatewayUserSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        email: {
+            type: 'string',
+            format: 'email',
+            title: 'Email'
+        },
+        is_active: {
+            type: 'boolean',
+            title: 'Is Active'
+        }
+    },
+    type: 'object',
+    required: ['id', 'email', 'is_active'],
+    title: 'GatewayUser',
+    description: 'Minimal active-user profile required to provision a LiteLLM key.'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {

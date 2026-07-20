@@ -26,3 +26,6 @@ litellm:
   base-url: ${LITELLM_BASE_URL}
 gateway:
   user-me-url: ${GATEWAY_USER_ME_URL}
+  user-by-id-url: ${GATEWAY_USER_BY_ID_URL:http://backend:8000/api/v1/internal/gateway/users}
+  backend-service-token: ${GATEWAY_BACKEND_SERVICE_TOKEN:}
+  memory-service-token: ${MINDMEMOS_GATEWAY_SERVICE_TOKEN:}

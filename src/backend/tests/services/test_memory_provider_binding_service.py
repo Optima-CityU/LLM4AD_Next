@@ -67,9 +67,8 @@ def _create_embedding_provider(
     return provider
 
 
-def test_memory_provider_routers_resolve_builtin_gateway_urls(monkeypatch: pytest.MonkeyPatch):
-    """MindMemOS must receive concrete, user-scoped URLs for built-in providers."""
-    current_user = models.User(id=uuid.uuid4(), email="memory-gateway@example.com", hashed_password="unused")
+def test_memory_provider_routers_use_stable_builtin_gateway_urls():
+    """MindMemOS bindings must not persist an expiring user access token."""
     chat_provider = models.LLMProvider(
         name="builtin-chat",
         type=models.ProviderType.OPENAI_COMPATIBLE,
@@ -95,16 +94,15 @@ def test_memory_provider_routers_resolve_builtin_gateway_urls(monkeypatch: pytes
         is_builtin=True,
         visible_to_all=True,
     )
-    monkeypatch.setattr(memory_service, "_memory_gateway_access_token", lambda user: "user-gateway-token")
-
-    routers = memory_service._memory_provider_routers(current_user, chat_provider, "qwen-plus", embedding_provider)
+    routers = memory_service._memory_provider_routers(chat_provider, "qwen-plus", embedding_provider)
 
     assert routers["chat_model_router"]["endpoints"][0]["api_base"] == (
-        "http://gateway:9090/litellm_proxy/team-1/user-gateway-token/v1"
+        "http://gateway:9090/litellm_memory_proxy/team-1/{userId}/v1"
     )
     assert routers["embed_model_router"]["endpoints"][0]["api_base"] == (
-        "http://gateway:9090/litellm_proxy/team-1/user-gateway-token/v1"
+        "http://gateway:9090/litellm_memory_proxy/team-1/{userId}/v1"
     )
+    assert "accessToken" not in str(routers)
 
 
 def test_upsert_memory_provider_binding_stores_embedding_identity(db: Session, monkeypatch: pytest.MonkeyPatch):
@@ -259,7 +257,7 @@ def test_ensure_memory_provider_binding_refreshes_changed_api_key(
     patches: list[dict] = []
 
     def fake_get(current_user, path, *, scopes):
-        expected = memory_service._memory_provider_routers(user, chat_provider, "qwen-plus", embedding_provider)  # noqa: SLF001
+        expected = memory_service._memory_provider_routers(chat_provider, "qwen-plus", embedding_provider)  # noqa: SLF001
         stale = {
             router_name: {
                 "endpoints": [

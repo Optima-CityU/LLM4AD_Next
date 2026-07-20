@@ -1068,6 +1068,15 @@ export type FolderRenameRequest = {
     new_path: string;
 };
 
+/**
+ * Minimal active-user profile required to provision a LiteLLM key.
+ */
+export type GatewayUser = {
+    id: string;
+    email: string;
+    is_active: boolean;
+};
+
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
 };
@@ -2682,6 +2691,13 @@ export type FeedbackDeleteFeedbackData = {
 };
 
 export type FeedbackDeleteFeedbackResponse = (Message);
+
+export type InternalGetGatewayUserData = {
+    userId: string;
+    xGatewayServiceToken?: (string | null);
+};
+
+export type InternalGetGatewayUserResponse = (GatewayUser);
 
 export type LiveCodesCreateLiveCodeData = {
     requestBody: LiveCodeCreate;

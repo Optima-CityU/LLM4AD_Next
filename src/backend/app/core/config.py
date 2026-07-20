@@ -228,6 +228,7 @@ class Settings(BaseSettings):
     BUILTIN_PROVIDER_MAX_TOKENS: int = 16384
     BUILTIN_PROVIDER_DEFAULT_MODEL: str = "" # 为空则取 MODELS 中的第一个
     LITELLM_GATEWAY_BASE_URL: str = "http://gateway:9090"
+    GATEWAY_BACKEND_SERVICE_TOKEN: str = ""
 
     # ---- 管理员统计大屏 ----
     ADMIN_ANALYTICS_CACHE_TTL_SECONDS: int = 300
