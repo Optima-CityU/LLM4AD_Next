@@ -386,6 +386,15 @@ class MemoryExtractor(BaseMemoryExtractor):
         """Check if per-generation extraction budget is available."""
         return self._cards_this_gen < self.config.max_cards_per_generation
 
+    def _is_new_global_best(self, score: float, population_scores: list[float]) -> bool:
+        """Return whether score is a strictly improved population-best score."""
+        if not population_scores or score != max(population_scores):
+            return False
+        if score <= self._best_score:
+            return False
+        self._best_score = score
+        return True
+
     async def extract_from_good(
         self,
         algorithm: Any,
@@ -415,6 +424,8 @@ class MemoryExtractor(BaseMemoryExtractor):
             a.score for a in population if a.is_evaluated() and a.score is not None
         ]
         if not self._is_good(algorithm.score, population_scores):
+            return None
+        if not self._is_new_global_best(algorithm.score, population_scores):
             return None
 
         from llm4ad.planner.sampler.prompt_templates import EXTRACT_GOOD_MEMORY
@@ -599,14 +610,14 @@ class MemoryExtractor(BaseMemoryExtractor):
         if not self._budget_available():
             return None
 
-        from llm4ad.planner.sampler.prompt_templates import EXTRACT_BAD_MEMORY
+        from llm4ad.planner.sampler.prompt_templates import EXTRACT_EXECUTION_FAILURE_MEMORY
 
         evaluation_summary = f"FAILED\nError: {error}"
 
-        prompt = EXTRACT_BAD_MEMORY.format(
+        prompt = EXTRACT_EXECUTION_FAILURE_MEMORY.format(
             background=background,
             algorithm_name=algorithm.name,
-            score="N/A (failed)",
+            score="N/A (evaluation failed before scoring)",
             generation=generation,
             description=algorithm.description,
             evaluation_summary=evaluation_summary,

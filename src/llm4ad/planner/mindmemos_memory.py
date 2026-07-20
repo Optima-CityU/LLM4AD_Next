@@ -227,12 +227,22 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
     def __init__(self, provider: Any, config: Any):
         super().__init__(provider, config)
         self._cards_this_gen = 0
+        self._best_score = float("-inf")
 
     def reset_generation(self) -> None:
         self._cards_this_gen = 0
 
     def _budget_available(self) -> bool:
         return self._cards_this_gen < int(_cfg_get(self.config, "max_cards_per_generation", 3))
+
+    def _is_new_global_best(self, score: float, population_scores: list[float]) -> bool:
+        """Return whether score is a strictly improved population-best score."""
+        if not population_scores or score != max(population_scores):
+            return False
+        if score <= self._best_score:
+            return False
+        self._best_score = score
+        return True
 
     def _is_good(self, score: float, population_scores: list[float]) -> bool:
         threshold = _cfg_get(self.config, "good_score_threshold")
@@ -271,6 +281,8 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         ]
         if not self._is_good(float(algorithm.score), population_scores):
             return None
+        if not self._is_new_global_best(float(algorithm.score), population_scores):
+            return None
         return self._raw_card("good_algorithm", algorithm, generation, background)
 
     async def extract_from_bad(
@@ -302,7 +314,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
             return None
         if not self._budget_available():
             return None
-        return self._raw_card("error_reflection", algorithm, generation, background, error=error)
+        return self._raw_card("execution_failure", algorithm, generation, background, error=error)
 
     def _raw_card(
         self,
@@ -313,7 +325,18 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         *,
         error: str = "",
     ) -> MemoryCard:
-        score = getattr(algorithm, "score", None)
+        is_execution_failure = event == "execution_failure"
+        score = None if is_execution_failure else getattr(algorithm, "score", None)
+        score_text = (
+            "N/A (evaluation failed before scoring)"
+            if is_execution_failure
+            else str(score) if score is not None else "N/A"
+        )
+        evaluation_outcome = (
+            "Evaluation outcome: failed before a valid score was produced\n"
+            if is_execution_failure
+            else ""
+        )
         evaluation = getattr(algorithm, "evaluation", None)
         metrics = getattr(evaluation, "metrics", None) or {}
         metrics_text = ", ".join(f"{key}: {value}" for key, value in metrics.items()) or "N/A"
@@ -333,6 +356,21 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
             extraction_rule = (
                 "Create good_algorithm and optional tags only. Do not create "
                 "error_reflection, domain_knowledge, or general_insight from this observation."
+            )
+        elif is_execution_failure:
+            observation_intent = (
+                "You are an expert algorithm analyst. Evaluation execution failed before a valid "
+                "score was produced. Do not infer that this algorithm scored zero or performed poorly. "
+                "Extract a concise lesson about preventing or repairing the concrete failure."
+            )
+            task_intent = (
+                "Extract one actionable lesson (2-5 sentences) about:\n"
+                "1. what implementation or constraint violation caused execution to fail\n"
+                "2. what validation, guard, or design change future algorithms should apply to avoid it"
+            )
+            extraction_rule = (
+                "Create error_reflection and optional tags only. Do not claim a score or comparative "
+                "performance from this observation."
             )
         else:
             observation_intent = (
@@ -356,7 +394,8 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
             f"Problem background:\n{background or 'N/A'}\n\n"
             f"Algorithm name: {getattr(algorithm, 'name', '')}\n"
             f"Algorithm description:\n{getattr(algorithm, 'description', '')}\n\n"
-            f"Score: {score if score is not None else 'N/A'}\n"
+            f"Score: {score_text}\n"
+            f"{evaluation_outcome}"
             f"Metrics: {metrics_text}\n"
             f"Error: {error_text or 'N/A'}\n\n"
             f"Generation evidence:\n{generation_evidence}\n\n"
@@ -372,11 +411,11 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         self._cards_this_gen += 1
         logger.info(
             "📝 [long-term memory] extracted candidate: type={} generation={} "
-            "algorithm={} score={:.4f} (#{} this generation)",
+            "algorithm={} score={} (#{} this generation)",
             _memory_event_label(event),
             generation,
             getattr(algorithm, "id", None),
-            score,
+            f"{score:.4f}" if score is not None else "N/A",
             self._cards_this_gen,
         )
         return MemoryCard(
