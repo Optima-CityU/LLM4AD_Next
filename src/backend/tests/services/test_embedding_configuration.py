@@ -492,6 +492,25 @@ def test_embedding_default_model_rejects_missing_provider(db: Session):
     assert "embedding" in exc_info.value.detail
 
 
+def test_deleting_bound_embedding_provider_clears_default_configuration(db: Session):
+    user = create_random_user(db)
+    provider = _embedding_provider(db, user.id)
+    user_default_model_service.update_user_default_model(
+        db,
+        user.id,
+        {
+            "embedding_enabled": True,
+            "embedding_provider_id": provider.id,
+        },
+    )
+
+    embedding_provider_service.delete_embedding_provider(db, provider.id, user)
+
+    defaults = user_default_model_service.get_user_default_model(db, user.id)
+    assert defaults.embedding_enabled is False
+    assert defaults.embedding_provider_id is None
+
+
 def test_embedding_provider_rejects_incomplete_split_configuration(db: Session):
     user = create_random_user(db)
 

@@ -301,6 +301,16 @@ def delete_embedding_provider(
     current_user: models.User,
 ) -> models.Message:
     provider = get_embedding_provider_with_auth(db, provider_id, current_user)
+    default_models = db.exec(
+        select(models.UserDefaultModel).where(
+            models.UserDefaultModel.embedding_provider_id == provider_id,
+        ),
+    ).all()
+    for default_model in default_models:
+        default_model.embedding_provider_id = None
+        default_model.embedding_enabled = False
+        default_model.updated_time = datetime.now(UTC)
+        db.add(default_model)
     db.delete(provider)
     db.commit()
     return models.Message(message="embedding 供应商配置已删除")
