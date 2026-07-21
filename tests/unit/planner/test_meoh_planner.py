@@ -112,7 +112,7 @@ async def test_meoh_planner_routes_operator(analyzed_repository):
     algorithm = await planner.plan(population=[], generation=0, operator="i1", parents=[], background="task")
 
     assert algorithm.name == "Init"
-    assert algorithm.custom_metadata["meoh_operator"] == "i1"
+    assert algorithm.custom_metadata["operator"] == "i1"
 
 
 @pytest.mark.asyncio

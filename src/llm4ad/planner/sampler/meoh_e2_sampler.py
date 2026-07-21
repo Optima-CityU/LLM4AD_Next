@@ -7,12 +7,12 @@ from llm4ad.infra.repo_analyzer.base import AnalyzedRepository
 from llm4ad.planner.base import Algorithm, InsightType
 from llm4ad.planner.memory import Memory
 from llm4ad.planner.sampler.base import BaseSampler
-from llm4ad.planner.sampler.meoh_init_sampler import _BaseMEoHSampler
 from llm4ad.planner.sampler.meoh_prompt_templates import build_e2_unified_prompt
+from llm4ad.planner.sampler.unified_sampler_base import BaseUnifiedSampler
 
 
 @BaseSampler.register("meoh_e2_sampler")
-class MEoHE2Sampler(_BaseMEoHSampler):
+class MEoHE2Sampler(BaseUnifiedSampler):
     """Generate a backbone-inspired algorithm from multiple parents."""
 
     def __init__(

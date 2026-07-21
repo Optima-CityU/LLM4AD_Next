@@ -619,11 +619,11 @@ class EoHConfig(EvolutionConfig):
     )  # type: ignore[assignment]
 
     planner_type: str = Field(
-        default="meoh_evolution",
+        default="eoh_evolution",
         json_schema_extra=ui(
             label_zh="规划器类型", label_en="Planner Type",
-            desc_zh="EoH 复用 MEoH 规划器进行算子分发，通常无需修改",
-            desc_en="EoH reuses the MEoH planner for operator dispatch; typically unchanged",
+            desc_zh="EoH 专用规划器，负责算子分发，通常无需修改",
+            desc_en="EoH's dedicated planner for operator dispatch; typically unchanged",
             hidden=True,
         ),
     )
