@@ -121,6 +121,7 @@ export default function AdvancedStep({
 }
 
 function MemoryConnectionTest({ value }: { value: Record<string, unknown> }) {
+  const { t } = useTranslation()
   const [isTesting, setIsTesting] = useState(false)
   const memory = value.memory as Record<string, unknown> | undefined
   if (!memory || memory.type !== "mindmemos_cloud") {
@@ -139,15 +140,15 @@ function MemoryConnectionTest({ value }: { value: Record<string, unknown> }) {
         },
       )
       if (response.data?.ok) {
-        toast.success(response.data.message || "MindMemOS 连接检测通过")
+        toast.success(response.data.message || t("evolution.advancedStep.memoryConnection.testPassed"))
       } else {
-        toast.error(response.data?.message || "MindMemOS 连接检测失败")
+        toast.error(response.data?.message || t("evolution.advancedStep.memoryConnection.testFailed"))
       }
     } catch (error) {
       const message =
         axios.isAxiosError(error) && error.response?.data?.detail
           ? String(error.response.data.detail)
-          : "MindMemOS 连接检测失败"
+          : t("evolution.advancedStep.memoryConnection.testFailed")
       toast.error(message)
     } finally {
       setIsTesting(false)
@@ -163,7 +164,9 @@ function MemoryConnectionTest({ value }: { value: Record<string, unknown> }) {
         </p>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={handleTest} disabled={isTesting}>
-        {isTesting ? "检测中..." : "检测连接"}
+        {isTesting
+          ? t("evolution.advancedStep.memoryConnection.testing")
+          : t("evolution.advancedStep.memoryConnection.test")}
       </Button>
     </div>
   )

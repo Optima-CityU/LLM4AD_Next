@@ -1,5 +1,6 @@
 import { AlertTriangle, Loader2, LockKeyhole, Save, ServerCog } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -21,9 +22,9 @@ import { authFetch } from "@/utils/auth"
 import type { MemoryConfig } from "./types"
 
 const CONFIG_FIELDS = [
-  ["include_user_memory", "注入用户级记忆", "user_memory_limit", "用户级注入条数"],
-  ["include_project_memory", "注入项目级记忆", "project_memory_limit", "项目级注入条数"],
-  ["include_task_memory", "注入任务级记忆", "task_memory_limit", "任务级注入条数"],
+  ["include_user_memory", "user", "user_memory_limit"],
+  ["include_project_memory", "project", "project_memory_limit"],
+  ["include_task_memory", "task", "task_memory_limit"],
 ] as const
 
 function endpointFor(kind: "user" | "project", projectId?: string) {
@@ -55,6 +56,7 @@ export default function MemoryConfigEditor({
   onLoaded?: (config: MemoryConfig) => void
   onSaved?: (config: MemoryConfig) => void
 }) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<MemoryConfig | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -69,16 +71,16 @@ export default function MemoryConfigEditor({
     setIsLoading(true)
     try {
       const response = await authFetch(endpoint)
-      if (!response.ok) throw new Error("加载记忆配置失败")
+      if (!response.ok) throw new Error(t("memory.config.loadFailed"))
       const loaded = await response.json()
       setConfig(loaded)
       onLoaded?.(loaded)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载记忆配置失败")
+      toast.error(error instanceof Error ? error.message : t("memory.config.loadFailed"))
     } finally {
       setIsLoading(false)
     }
-  }, [enabled, endpoint, onLoaded])
+  }, [enabled, endpoint, onLoaded, t])
 
   useEffect(() => {
     void loadConfig()
@@ -110,13 +112,13 @@ export default function MemoryConfigEditor({
           mindmemos_fail_open: config.mindmemos_fail_open,
         }),
       })
-      if (!response.ok) throw new Error("保存记忆配置失败")
+      if (!response.ok) throw new Error(t("memory.config.saveFailed"))
       const saved = await response.json()
       setConfig(saved)
       onSaved?.(saved)
-      toast.success("记忆配置已保存")
+      toast.success(t("memory.config.saved"))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存记忆配置失败")
+      toast.error(error instanceof Error ? error.message : t("memory.config.saveFailed"))
     } finally {
       setIsSaving(false)
     }
@@ -134,44 +136,44 @@ export default function MemoryConfigEditor({
             </div>
           </div>
           <div className="pl-6 text-xs">
-            {disabledReason || "记忆服务未就绪，暂不能配置默认注入策略。"}
+            {disabledReason || t("memory.config.disabledReason")}
           </div>
         </div>
 
         <div className="pointer-events-none select-none space-y-4 p-4 opacity-60">
           <div className="rounded-md border bg-background/50 px-3 py-2 text-xs">
-            绑定 Chat 与 Embedding 模型后，才能配置后续任务默认注入哪些范围的记忆。
+            {t("memory.config.disabledHint")}
           </div>
-          {CONFIG_FIELDS.map(([, label, , limitLabel]) => (
-            <div key={label} className="grid gap-3 rounded-md border bg-background/50 p-3 sm:grid-cols-[1fr_132px]">
+          {CONFIG_FIELDS.map(([, scope]) => (
+            <div key={scope} className="grid gap-3 rounded-md border bg-background/50 p-3 sm:grid-cols-[1fr_132px]">
               <div className="space-y-2">
-                <div className="text-sm font-medium">{label}</div>
+                <div className="text-sm font-medium">{t(`memory.config.scopes.${scope}.label`)}</div>
                 <div className="text-xs">
-                  模型绑定完成前，不会读取或保存该范围的默认注入数量。
+                  {t("memory.config.disabledScopeHint")}
                 </div>
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs">{limitLabel}</Label>
-                <Input value="" placeholder="未启用" disabled />
+                <Label className="text-xs">{t(`memory.config.scopes.${scope}.limitLabel`)}</Label>
+                <Input value="" placeholder={t("memory.config.notEnabled")} disabled />
               </div>
             </div>
           ))}
           <div className="space-y-4 rounded-md border bg-background/50 p-3">
             <div className="grid gap-2">
-              <Label>搜索策略</Label>
-              <Input value="" placeholder="未启用" disabled />
-              <p className="text-xs">绑定模型后可选择 fast 或 agentic。</p>
+              <Label>{t("memory.config.searchStrategy")}</Label>
+              <Input value="" placeholder={t("memory.config.notEnabled")} disabled />
+              <p className="text-xs">{t("memory.config.disabledSearchStrategyHint")}</p>
             </div>
             <div className="grid gap-2">
-              <Label>搜索阈值</Label>
-              <Input value="" placeholder="未启用" disabled />
+              <Label>{t("memory.config.searchThreshold")}</Label>
+              <Input value="" placeholder={t("memory.config.notEnabled")} disabled />
             </div>
           </div>
         </div>
         <div className="flex justify-end border-t px-4 py-3">
           <Button type="button" className="gap-1.5" disabled>
             <Save className="size-4" />
-            保存配置
+            {t("memory.config.save")}
           </Button>
         </div>
       </div>
@@ -197,33 +199,33 @@ export default function MemoryConfigEditor({
             className="shrink-0 whitespace-nowrap"
             variant={config.system_enabled ? "default" : "secondary"}
           >
-            {config.system_enabled ? "系统已启用" : "系统未启用"}
+            {config.system_enabled ? t("memory.config.badges.systemEnabled") : t("memory.config.badges.systemDisabled")}
           </Badge>
           <Badge
             className="shrink-0 whitespace-nowrap"
             variant={config.system_runtime_available ? "default" : "secondary"}
           >
-            {config.system_runtime_available ? "记忆可用" : "沿用旧记忆"}
+            {config.system_runtime_available ? t("memory.config.badges.runtimeAvailable") : t("memory.config.badges.legacyFallback")}
           </Badge>
           <Badge
             className="shrink-0 whitespace-nowrap"
             variant={config.system_api_key_configured ? "outline" : "destructive"}
           >
-            {config.system_api_key_configured ? "网关认证已配置" : "网关认证未配置"}
+            {config.system_api_key_configured ? t("memory.config.badges.gatewayConfigured") : t("memory.config.badges.gatewayMissing")}
           </Badge>
           <Badge
             className="shrink-0 whitespace-nowrap"
             variant={config.mindmemos_binding_id ? "outline" : "destructive"}
           >
-            {config.mindmemos_binding_id ? "模型已绑定" : "模型未绑定"}
+            {config.mindmemos_binding_id ? t("memory.config.badges.modelsBound") : t("memory.config.badges.modelsUnbound")}
           </Badge>
           <Badge
             className="shrink-0 whitespace-nowrap"
             variant={config.system_rerank_configured ? "outline" : "secondary"}
           >
             {config.system_rerank_enabled
-              ? config.system_rerank_configured ? "Rerank 已配置" : "Rerank 未配置"
-              : "Rerank 未启用"}
+              ? config.system_rerank_configured ? t("memory.config.badges.rerankConfigured") : t("memory.config.badges.rerankMissing")
+              : t("memory.config.badges.rerankDisabled")}
           </Badge>
         </div>
       </div>
@@ -232,19 +234,18 @@ export default function MemoryConfigEditor({
         <div className="space-y-4">
           {!config.system_runtime_available && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              MindMemOS 服务或网关认证未就绪；当前任务会沿用旧记忆模块。
+              {t("memory.config.runtimeUnavailable")}
             </div>
           )}
           {config.system_runtime_available && !config.mindmemos_binding_id && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              当前用户尚未绑定记忆抽取和检索模型。绑定后，新任务才会默认使用 MindMemOS。
+              {t("memory.config.modelsUnboundHint")}
             </div>
           )}
           <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            这里控制后续任务提示词中最多注入哪些范围的记忆。MindMemOS 连接地址和网关认证由环境变量托管；
-            Chat 与 Embedding 模型在记忆设置中绑定。
+            {t("memory.config.overview")}
           </div>
-          {CONFIG_FIELDS.map(([enabledKey, label, limitKey, limitLabel]) => (
+          {CONFIG_FIELDS.map(([enabledKey, scope, limitKey]) => (
             <div key={enabledKey} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_132px]">
               <div className="space-y-1">
                 <label className="flex items-center gap-2 text-sm font-medium">
@@ -253,14 +254,14 @@ export default function MemoryConfigEditor({
                     disabled={readOnly}
                     onCheckedChange={(checked) => update({ [enabledKey]: checked === true })}
                   />
-                  {label}
+                  {t(`memory.config.scopes.${scope}.label`)}
                 </label>
                 <p className="text-xs text-muted-foreground">
-                  每次生成提示词时，最多从该范围取右侧数量的相关记忆注入上下文。
+                  {t("memory.config.scopeHint")}
                 </p>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor={`${kind}-${limitKey}`} className="text-xs">{limitLabel}</Label>
+                <Label htmlFor={`${kind}-${limitKey}`} className="text-xs">{t(`memory.config.scopes.${scope}.limitLabel`)}</Label>
                 <Input
                   id={`${kind}-${limitKey}`}
                   type="number"
@@ -278,7 +279,7 @@ export default function MemoryConfigEditor({
 
         <div className="space-y-4 rounded-md border p-3">
           <div className="grid gap-2">
-            <Label>搜索策略</Label>
+            <Label>{t("memory.config.searchStrategy")}</Label>
             <Select
               value={config.mindmemos_search_strategy}
               disabled={readOnly}
@@ -293,11 +294,11 @@ export default function MemoryConfigEditor({
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              fast 延迟低，适合日常任务；agentic 会做更深入的检索，可能更准，但更慢且成本更高。
+              {t("memory.config.searchStrategyHint")}
             </p>
           </div>
           <div className="grid gap-2">
-            <Label>搜索阈值</Label>
+            <Label>{t("memory.config.searchThreshold")}</Label>
             <Input
               type="number"
               min={0}
@@ -311,10 +312,10 @@ export default function MemoryConfigEditor({
                     event.target.value === "" ? null : Number.parseFloat(event.target.value),
                 })
               }
-              placeholder="可留空"
+              placeholder={t("memory.config.optional")}
             />
             <p className="text-xs text-muted-foreground">
-              仅在启用重排时生效。值越高越严格，注入更少但更精准；留空表示不过滤。
+              {t("memory.config.searchThresholdHint")}
             </p>
           </div>
           <div className="space-y-1">
@@ -329,10 +330,10 @@ export default function MemoryConfigEditor({
                   })
                 }
               />
-              启用重排
+              {t("memory.config.enableRerank")}
             </label>
             <p className="text-xs text-muted-foreground">
-              对初步检索结果二次排序，提高相关性，但会增加延迟和模型调用成本。
+              {t("memory.config.rerankHint")}
             </p>
           </div>
           <div className="space-y-2">
@@ -342,17 +343,17 @@ export default function MemoryConfigEditor({
                 disabled={readOnly}
                 onCheckedChange={(checked) => update({ mindmemos_fail_open: checked === true })}
               />
-              记忆服务异常时继续运行任务
+              {t("memory.config.failOpen")}
             </label>
             <p className="text-xs text-muted-foreground">
-              关闭时，MindMemOS 异常会让任务失败，适合严格验证记忆效果的场景。
+              {t("memory.config.failOpenHint")}
             </p>
             {config.mindmemos_fail_open && (
               <Alert className="border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
                 <AlertTriangle className="size-4" />
-                <AlertTitle>已开启异常放行</AlertTitle>
+                <AlertTitle>{t("memory.config.failOpenAlertTitle")}</AlertTitle>
                 <AlertDescription className="text-amber-900 dark:text-amber-100">
-                  任务不会因 MindMemOS 异常中断，但会跳过远端记忆，可能导致本次演化缺少历史经验。
+                  {t("memory.config.failOpenAlertDescription")}
                 </AlertDescription>
               </Alert>
             )}
@@ -362,7 +363,7 @@ export default function MemoryConfigEditor({
       <div className="flex justify-end border-t px-4 py-3">
         <Button type="button" className="gap-1.5" disabled={readOnly || isSaving} onClick={() => void save()}>
           {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-          保存配置
+          {t("memory.config.save")}
         </Button>
       </div>
     </div>
@@ -370,6 +371,7 @@ export default function MemoryConfigEditor({
 }
 
 function MemoryConfigSkeleton({ title, description }: { title: string; description: string }) {
+  const { t } = useTranslation()
   return (
     <div data-testid="memory-settings-skeleton" className="rounded-lg border bg-card/60">
       <div className="space-y-2 border-b px-4 py-3">
@@ -392,17 +394,17 @@ function MemoryConfigSkeleton({ title, description }: { title: string; descripti
           <div className="rounded-md border bg-muted/20 px-3 py-2">
             <Skeleton className="h-4 w-full max-w-[440px]" />
           </div>
-          {CONFIG_FIELDS.map(([, label, , limitLabel]) => (
-            <div key={label} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_132px]">
+          {CONFIG_FIELDS.map(([, scope]) => (
+            <div key={scope} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_132px]">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Skeleton className="size-4 rounded-sm" />
-                  <span className="text-sm font-medium text-muted-foreground">{label}</span>
+                  <span className="text-sm font-medium text-muted-foreground">{t(`memory.config.scopes.${scope}.label`)}</span>
                 </div>
                 <Skeleton className="h-3 w-full max-w-[320px]" />
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs text-muted-foreground">{limitLabel}</Label>
+                <Label className="text-xs text-muted-foreground">{t(`memory.config.scopes.${scope}.limitLabel`)}</Label>
                 <Skeleton className="h-9 w-full rounded-md" />
               </div>
             </div>
@@ -411,12 +413,12 @@ function MemoryConfigSkeleton({ title, description }: { title: string; descripti
 
         <div className="space-y-4 rounded-md border p-3">
           <div className="grid gap-2">
-            <Label className="text-muted-foreground">搜索策略</Label>
+            <Label className="text-muted-foreground">{t("memory.config.searchStrategy")}</Label>
             <Skeleton className="h-9 w-full rounded-md" />
             <Skeleton className="h-3 w-full max-w-[420px]" />
           </div>
           <div className="grid gap-2">
-            <Label className="text-muted-foreground">搜索阈值</Label>
+            <Label className="text-muted-foreground">{t("memory.config.searchThreshold")}</Label>
             <Skeleton className="h-9 w-full rounded-md" />
             <Skeleton className="h-3 w-full max-w-[420px]" />
           </div>

@@ -1,5 +1,6 @@
 import { Loader2, LockKeyhole, Pencil, Save, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -38,6 +39,7 @@ export default function MemoryProviderBindingEditor({
   onSaved?: () => void
   readOnly?: boolean
 }) {
+  const { t } = useTranslation()
   const [isEditing, setIsEditing] = useState(false)
   const providersQuery = useProviders({ enabled: isEditing })
   const embeddingProvidersQuery = useEmbeddingProviders({ enabled: isEditing })
@@ -80,7 +82,7 @@ export default function MemoryProviderBindingEditor({
   const save = async () => {
     if (readOnly) return
     if (!chatProviderId || !chatModel || !embeddingProviderId) {
-      toast.error("请选择 Chat 模型和 Embedding 配置")
+      toast.error(t("memory.providerBinding.validation"))
       return
     }
     setIsSaving(true)
@@ -96,15 +98,15 @@ export default function MemoryProviderBindingEditor({
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => null)
-        throw new Error(payload?.detail || "保存记忆模型绑定失败")
+        throw new Error(payload?.detail || t("memory.providerBinding.saveFailed"))
       }
       const payload = (await response.json()) as MemoryProviderBinding
       setBinding(payload)
       setIsEditing(false)
-      toast.success("记忆模型绑定已保存")
+      toast.success(t("memory.providerBinding.saved"))
       onSaved?.()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存记忆模型绑定失败")
+      toast.error(error instanceof Error ? error.message : t("memory.providerBinding.saveFailed"))
     } finally {
       setIsSaving(false)
     }
@@ -118,16 +120,16 @@ export default function MemoryProviderBindingEditor({
     <div className="space-y-4 rounded-lg border bg-card/60 p-4" data-tour="memory-provider-binding">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold">记忆模型绑定</h3>
+          <h3 className="text-sm font-semibold">{t("memory.providerBinding.title")}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Chat 用于记忆抽取，Embedding 用于检索。Embedding 首次绑定后模型和维度会锁定。
+            {t("memory.providerBinding.description")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {binding?.embedding_locked && (
             <Badge variant="secondary" className="gap-1.5 whitespace-nowrap">
               <LockKeyhole className="size-3" />
-              已锁定 {binding.embedding_dim} 维
+              {t("memory.providerBinding.lockedDimensions", { dimensions: binding.embedding_dim })}
             </Badge>
           )}
           {isEditing ? (
@@ -140,7 +142,7 @@ export default function MemoryProviderBindingEditor({
               onClick={() => setIsEditing(false)}
             >
               <X className="size-4" />
-              取消
+              {t("memory.common.cancel")}
             </Button>
           ) : (
             <Button
@@ -152,7 +154,7 @@ export default function MemoryProviderBindingEditor({
               onClick={() => setIsEditing(true)}
             >
               <Pencil className="size-4" />
-              {binding?.configured ? "编辑绑定" : "绑定模型"}
+              {binding?.configured ? t("memory.providerBinding.edit") : t("memory.providerBinding.bind")}
             </Button>
           )}
         </div>
@@ -163,20 +165,20 @@ export default function MemoryProviderBindingEditor({
           {binding?.configured ? (
             <>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Chat 模型</span>
-                <span className="truncate font-medium">{binding.chat_model || "未记录"}</span>
+                <span className="text-muted-foreground">{t("memory.providerBinding.chatModel")}</span>
+                <span className="truncate font-medium">{binding.chat_model || t("memory.common.notRecorded")}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Embedding</span>
                 <span className="truncate font-medium">
-                  {binding.embedding_model || "未记录"}
-                  {binding.embedding_dim ? ` · ${binding.embedding_dim} 维` : ""}
+                  {binding.embedding_model || t("memory.common.notRecorded")}
+                  {binding.embedding_dim ? ` · ${t("memory.providerBinding.dimensions", { dimensions: binding.embedding_dim })}` : ""}
                 </span>
               </div>
             </>
           ) : (
             <div className="text-muted-foreground">
-              当前用户尚未绑定记忆模型。未绑定时不会加载供应商列表，也不会读取默认注入策略。
+              {t("memory.providerBinding.unboundHint")}
             </div>
           )}
         </div>
@@ -187,19 +189,19 @@ export default function MemoryProviderBindingEditor({
           {isProviderLoading && (
             <div className="flex min-h-[160px] items-center justify-center rounded-md border bg-muted/20 text-sm text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              正在加载可绑定模型...
+              {t("memory.providerBinding.loading")}
             </div>
           )}
 
           {!isProviderLoading && providerLoadFailed && (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              加载模型供应商失败，请先检查模型配置服务是否正常。
+              {t("memory.providerBinding.loadFailed")}
             </div>
           )}
 
           {!isProviderLoading && !providerLoadFailed && !hasProviderChoices && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-              还没有可用的 Chat 或 Embedding 配置。请先在模型供应商页面配置后再绑定记忆模型。
+              {t("memory.providerBinding.noProviders")}
             </div>
           )}
 
@@ -207,10 +209,10 @@ export default function MemoryProviderBindingEditor({
             <>
               <div className="grid gap-3">
                 <div className="grid gap-2">
-                  <Label>Chat 供应商</Label>
+                  <Label>{t("memory.providerBinding.chatProvider")}</Label>
                   <Select value={chatProviderId} onValueChange={changeChatProvider} disabled={readOnly}>
                     <SelectTrigger>
-                      <SelectValue placeholder="选择 Chat 供应商" />
+                      <SelectValue placeholder={t("memory.providerBinding.selectChatProvider")} />
                     </SelectTrigger>
                     <SelectContent>
                       {providers.map((provider) => (
@@ -223,11 +225,11 @@ export default function MemoryProviderBindingEditor({
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="memory-chat-model">Chat 模型</Label>
+                  <Label htmlFor="memory-chat-model">{t("memory.providerBinding.chatModel")}</Label>
                   {models.length > 0 ? (
                     <Select value={chatModel} onValueChange={setChatModel} disabled={readOnly || !chatProviderId}>
                       <SelectTrigger id="memory-chat-model">
-                        <SelectValue placeholder="选择模型" />
+                        <SelectValue placeholder={t("memory.providerBinding.selectModel")} />
                       </SelectTrigger>
                       <SelectContent>
                         {models.map((model) => (
@@ -244,11 +246,11 @@ export default function MemoryProviderBindingEditor({
                         value={chatModel}
                         onChange={(event) => setChatModel(event.target.value)}
                         disabled={readOnly || !chatProviderId}
-                        placeholder="输入 Chat 模型名称"
+                        placeholder={t("memory.providerBinding.chatModelPlaceholder")}
                       />
                       {chatProviderId && (
                         <p className="text-xs text-muted-foreground">
-                          当前供应商没有配置模型列表，请手动输入 MindMemOS 调用的 Chat 模型名称。
+                          {t("memory.providerBinding.manualChatModelHint")}
                         </p>
                       )}
                     </>
@@ -256,22 +258,25 @@ export default function MemoryProviderBindingEditor({
                 </div>
 
                 <div className="grid gap-2">
-                  <Label>Embedding 配置</Label>
+                  <Label>{t("memory.providerBinding.embeddingProvider")}</Label>
                   <Select value={embeddingProviderId} onValueChange={setEmbeddingProviderId} disabled={readOnly}>
                     <SelectTrigger>
-                      <SelectValue placeholder="选择 Embedding 配置" />
+                      <SelectValue placeholder={t("memory.providerBinding.selectEmbeddingProvider")} />
                     </SelectTrigger>
                     <SelectContent>
                       {embeddingProviders.map((provider) => (
                         <SelectItem key={provider.id} value={provider.id}>
-                          {provider.name} · {provider.dim} 维
+                          {provider.name} · {t("memory.providerBinding.dimensions", { dimensions: provider.dim })}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   {selectedEmbeddingProvider && binding?.embedding_locked && (
                     <p className="text-xs text-muted-foreground">
-                      当前记忆空间锁定为 {binding.embedding_model} / {binding.embedding_dim} 维；保存时只能更新同一模型和维度的凭据。
+                      {t("memory.providerBinding.lockedHint", {
+                        model: binding.embedding_model,
+                        dimensions: binding.embedding_dim,
+                      })}
                     </p>
                   )}
                 </div>
@@ -284,7 +289,7 @@ export default function MemoryProviderBindingEditor({
                 onClick={() => void save()}
               >
                 {isSaving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                保存绑定
+                {t("memory.providerBinding.save")}
               </Button>
             </>
           )}

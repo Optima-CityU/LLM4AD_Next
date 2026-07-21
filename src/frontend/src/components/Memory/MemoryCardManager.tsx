@@ -53,6 +53,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import appI18n from "@/i18n"
 import { authFetch } from "@/utils/auth"
 
 import {
@@ -89,45 +90,7 @@ type ExtractionStreamEvent = {
   items?: MemoryCard[]
 }
 
-const EXTRACTION_STAGE_LABELS: Record<"zh" | "en", Record<string, string>> = {
-  zh: {
-    accepted: "正在连接 MindMemOS",
-    buffering: "正在接收输入",
-    chunking: "正在分析内容边界",
-    llm_extracting: "正在提取结构化记忆",
-    search_fielding: "正在生成检索线索",
-    memory_planning: "正在整理记忆结构",
-    embedding: "正在生成记忆向量",
-    relationship_building: "正在建立记忆关系",
-    ready_to_persist: "准备写入记忆",
-    persisting: "正在写入记忆",
-    finalizing: "正在整理记忆预览",
-    completed: "记忆提取完成",
-  },
-  en: {
-    accepted: "Connecting to MindMemOS",
-    buffering: "Buffering input",
-    chunking: "Analyzing content boundaries",
-    llm_extracting: "Extracting structured memory",
-    search_fielding: "Generating search hints",
-    memory_planning: "Planning memory structure",
-    embedding: "Generating memory vectors",
-    relationship_building: "Building memory relationships",
-    ready_to_persist: "Preparing to persist memory",
-    persisting: "Persisting memory",
-    finalizing: "Preparing memory preview",
-    completed: "Memory extraction completed",
-  },
-}
-
-const EXTRACTION_PROMPT_LANGUAGES: Array<{
-  value: ExtractionPromptLanguage
-  label: string
-}> = [
-  { value: "auto", label: "自动" },
-  { value: "ZH", label: "中文" },
-  { value: "EN", label: "English" },
-]
+const EXTRACTION_PROMPT_LANGUAGES: ExtractionPromptLanguage[] = ["auto", "ZH", "EN"]
 
 const DEFAULT_EXTRACTION_EXAMPLE_KEYS = [
   "algorithm",
@@ -143,17 +106,7 @@ const PROJECT_EXTRACTION_EXAMPLE_KEYS = [
   "reflection",
 ] as const
 
-const ONBOARDING_DEMO_CARD: MemoryCard = {
-  id: "__onboarding_demo_stability_first__",
-  type: "general_insight",
-  title: "稳定性优先",
-  content: "评估算法时优先比较稳定性、方差与失败率；单次最优结果不能替代重复实验结论。",
-  enabled: true,
-  source: "onboarding_demo",
-  tags: ["稳定性", "评估"],
-}
 const ONBOARDING_DEMO_PREVIEW_ID = "__onboarding_demo_preview__"
-const ONBOARDING_DEMO_CONTENT = "评估算法时优先比较稳定性、方差与失败率；单次最优结果不能替代重复实验结论。"
 
 function toDraft(card: MemoryCard): MemoryCardDraft {
   return {
@@ -168,29 +121,25 @@ function toDraft(card: MemoryCard): MemoryCardDraft {
   }
 }
 
-function memoryTypeLabel(type: string) {
-  const labels: Record<string, string> = {
-    good_algorithm: "优秀算法经验",
-    error_reflection: "错误反思",
-    domain_knowledge: "领域知识",
-    general_insight: "通用经验",
-  }
-  return labels[type] ?? type
+function memoryTypeLabel(type: string, t: (key: string) => string) {
+  const key = `memory.cardManager.types.${type}`
+  const label = t(key)
+  return label === key ? type : label
 }
 
-function readOnlyRows(card: MemoryCard | null): Array<[string, string]> {
+function readOnlyRows(card: MemoryCard | null, t: (key: string) => string): Array<[string, string]> {
   if (!card) return []
   const info = card.readonly
   const rows: Array<[string, string]> = [
-    ["记忆 ID", card.id],
-    ["来源", info?.source || card.source],
-    ["状态", info?.status || (card.enabled ? "active" : "archived")],
-    ["实体", info?.entity_name || ""],
-    ["属性", info?.property_name || ""],
-    ["属性时间", info?.property_time || ""],
-    ["更新时间", info?.last_update_at || ""],
-    ["事件时间", info?.event_time || ""],
-    ["来源时间", info?.source_timestamp || ""],
+    [t("memory.cardManager.readonly.id"), card.id],
+    [t("memory.cardManager.readonly.source"), info?.source || card.source],
+    [t("memory.cardManager.readonly.status"), info?.status || (card.enabled ? "active" : "archived")],
+    [t("memory.cardManager.readonly.entity"), info?.entity_name || ""],
+    [t("memory.cardManager.readonly.property"), info?.property_name || ""],
+    [t("memory.cardManager.readonly.propertyTime"), info?.property_time || ""],
+    [t("memory.cardManager.readonly.updatedAt"), info?.last_update_at || ""],
+    [t("memory.cardManager.readonly.eventTime"), info?.event_time || ""],
+    [t("memory.cardManager.readonly.sourceTime"), info?.source_timestamp || ""],
   ]
   return rows.filter(([, value]) => value.trim())
 }
@@ -232,16 +181,16 @@ async function responseError(response: Response, fallback: string) {
         // Use detail below.
       }
       if (detail.includes("No embed model endpoint configured")) {
-        return "MindMemOS 未配置系统级 Embedding，无法保存更新后的记忆。"
+        return appI18n.t("memory.cardManager.errors.embeddingMissing")
       }
       if (detail.includes("auth.invalid_api_key")) {
-        return "MindMemOS 网关认证无效，请检查系统环境配置。"
+        return appI18n.t("memory.cardManager.errors.gatewayAuthInvalid")
       }
       if (
         detail.includes("Vector dimension error") ||
         detail.includes("expected dim")
       ) {
-        return "MindMemOS 向量维度与当前绑定的 Embedding 模型不一致。请确认首次绑定的模型和维度，必要时重建本地 MindMemOS 向量数据。"
+        return appI18n.t("memory.cardManager.errors.dimensionMismatch")
       }
       return detail
     }
@@ -252,20 +201,20 @@ async function responseError(response: Response, fallback: string) {
     // Use raw response below.
   }
   if (text.includes("No embed model endpoint configured")) {
-    return "MindMemOS 未配置系统级 Embedding，无法保存更新后的记忆。"
+    return appI18n.t("memory.cardManager.errors.embeddingMissing")
   }
   if (text.includes("Vector dimension error") || text.includes("expected dim")) {
-    return "MindMemOS 向量维度与当前绑定的 Embedding 模型不一致。请确认首次绑定的模型和维度，必要时重建本地 MindMemOS 向量数据。"
+    return appI18n.t("memory.cardManager.errors.dimensionMismatch")
   }
   return text.slice(0, 240) || fallback
 }
 
 function requestErrorMessage(error: unknown, fallback: string) {
   if (error instanceof DOMException && error.name === "AbortError") {
-    return "已取消新增记忆，本次不会继续生成预览。"
+    return appI18n.t("memory.cardManager.messages.cancelledWithoutPreview")
   }
   if (error instanceof TypeError && /fetch|networkerror|network/i.test(error.message)) {
-    return "请求连接被中断，MindMemOS 可能仍在后台写入；请稍后刷新列表或重试。"
+    return appI18n.t("memory.cardManager.errors.connectionInterrupted")
   }
   return error instanceof Error ? error.message : fallback
 }
@@ -275,7 +224,7 @@ async function readSseStream(
   onEvent: (event: ExtractionStreamEvent) => void,
 ) {
   const reader = response.body?.getReader()
-  if (!reader) throw new Error("当前浏览器不支持流式响应")
+  if (!reader) throw new Error(appI18n.t("memory.cardManager.errors.streamingUnsupported"))
   const decoder = new TextDecoder()
   let buffer = ""
   let currentEvent = "message"
@@ -413,12 +362,27 @@ export default function MemoryCardManager({
   const extractionPromptLanguages = useMemo(
     () => (
       EXTRACTION_PROMPT_LANGUAGES.map((item) => ({
-        ...item,
-        label: t(`memory.cardManager.extraction.languages.${item.value}`),
+        value: item,
+        label: t(`memory.cardManager.extraction.languages.${item}`),
       }))
     ),
     [i18n.language, t],
   )
+  const onboardingDemoCard = useMemo<MemoryCard>(() => ({
+    id: "__onboarding_demo_stability_first__",
+    type: "general_insight",
+    title: t("memory.cardManager.onboarding.title"),
+    content: t("memory.cardManager.onboarding.content"),
+    enabled: true,
+    source: "onboarding_demo",
+    tags: [t("memory.cardManager.onboarding.tags.stability"), t("memory.cardManager.onboarding.tags.evaluation")],
+  }), [i18n.language, t])
+  const extractionStageLabel = (stage?: string) => {
+    const normalized = stage || "accepted"
+    const key = `memory.cardManager.stages.${normalized}`
+    const label = t(key)
+    return label === key ? normalized : label
+  }
 
   const extractionExamples = useMemo(() => {
     const group = scope === "project" ? "project" : "default"
@@ -443,7 +407,7 @@ export default function MemoryCardManager({
     setIsLoading(true)
     try {
       const response = await authFetch(endpoint)
-      if (!response.ok) throw new Error(await responseError(response, "加载记忆失败"))
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.loadFailed")))
       const payload = (await response.json()) as MemoryCardPage
       const items = payload.items ?? []
       setCards(items)
@@ -451,11 +415,11 @@ export default function MemoryCardManager({
       onCountChange?.(payload.total ?? items.length)
       setHasMore(items.length > 0 && payload.has_more)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载记忆失败")
+      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.loadFailed"))
     } finally {
       setIsLoading(false)
     }
-  }, [endpoint, loadEnabled, onCountChange])
+  }, [endpoint, loadEnabled, onCountChange, t])
 
   const refreshFirstPage = useCallback(() => {
     setSearchText("")
@@ -525,17 +489,13 @@ export default function MemoryCardManager({
   const isExtractionBusy = isGeneratingPreview || isCommittingPreview
   const isPersistingPreview = extractionProgress?.stage === "persisting"
   const isExtractionCompleted = extractionProgress?.stage === "completed"
-  const extractionStageLabel = (stage: string | undefined) => {
-    if (!stage) return EXTRACTION_STAGE_LABELS[uiLang].accepted
-    return EXTRACTION_STAGE_LABELS[uiLang][stage] ?? stage
-  }
   const extractionEventMessage = (event: ExtractionStreamEvent) => {
     const stage = event.stage || event.event || "progress"
     return (
       event.message_i18n?.[uiLang] ||
-      EXTRACTION_STAGE_LABELS[uiLang][stage] ||
+      extractionStageLabel(stage) ||
       event.message ||
-      EXTRACTION_STAGE_LABELS[uiLang].accepted
+      extractionStageLabel("accepted")
     )
   }
 
@@ -624,7 +584,7 @@ export default function MemoryCardManager({
   const openPromotion = () => {
     if (interactionLocked || !canPromoteTaskCards || !promotionProjectId || !taskId) return
     if (selectedPromotionIds.length === 0) {
-      toast.error("请先选择至少一条任务记忆")
+      toast.error(t("memory.cardManager.messages.selectTaskMemory"))
       return
     }
     const selectedIds = selectedPromotionIds
@@ -672,10 +632,10 @@ export default function MemoryCardManager({
           body: JSON.stringify({ memory_ids: ids }),
         },
       )
-      if (!response.ok) throw new Error(await responseError(response, "删除本次生成记忆失败"))
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.deleteGeneratedFailed")))
       if (previewTargetScope !== "project") removeCards(ids)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除本次生成记忆失败")
+      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.deleteGeneratedFailed"))
     } finally {
       resetExtraction()
       setIsExtractionOpen(false)
@@ -689,6 +649,7 @@ export default function MemoryCardManager({
     query,
     removeCards,
     resetExtraction,
+    t,
   ])
 
   const closeExtractionImmediately = useCallback(() => {
@@ -703,17 +664,17 @@ export default function MemoryCardManager({
   const requestCloseExtraction = useCallback(() => {
     if (isGeneratingPreview) {
       if (isPersistingPreview) {
-        toast.info("记忆正在写入，当前阶段暂不可取消。")
+        toast.info(t("memory.cardManager.messages.cannotCancelPersisting"))
         return
       }
       setIsCancellingPreview(true)
       extractionAbortRef.current?.abort()
-      toast.info("已取消新增记忆")
+      toast.info(t("memory.cardManager.messages.addCancelled"))
       closeExtractionImmediately()
       return
     }
     if (isCommittingPreview) {
-      toast.info("记忆正在保存，请等待当前操作完成。")
+      toast.info(t("memory.cardManager.messages.savingInProgress"))
       return
     }
     if (previewId && previewItems.length > 0) {
@@ -728,6 +689,7 @@ export default function MemoryCardManager({
     isPersistingPreview,
     previewId,
     previewItems.length,
+    t,
   ])
 
   const handleExtractionOpenChange = (open: boolean) => {
@@ -743,20 +705,20 @@ export default function MemoryCardManager({
   const generatePreview = async () => {
     const content = extractionContent.trim()
     if (!isPromotionMode && !content) {
-      toast.error("请先输入内容")
+      toast.error(t("memory.cardManager.messages.enterContent"))
       return
     }
     if (isPromotionMode && (!promotionProjectId || selectedPromotionIds.length === 0)) {
-      toast.error("请先选择至少一条任务记忆")
+      toast.error(t("memory.cardManager.messages.selectTaskMemory"))
       return
     }
     if (disabled) {
-      toast.error(disabledReason || "当前记忆管理不可用")
+      toast.error(disabledReason || t("memory.cardManager.messages.unavailable"))
       return
     }
     setIsGeneratingPreview(true)
     setIsCancellingPreview(false)
-    const initialMessage = EXTRACTION_STAGE_LABELS[uiLang].accepted
+    const initialMessage = extractionStageLabel("accepted")
     setExtractionProgress({ stage: "accepted", message: initialMessage, percent: 1 })
     setExtractionLogs([initialMessage])
     const abortController = new AbortController()
@@ -783,7 +745,7 @@ export default function MemoryCardManager({
         body: JSON.stringify(requestBody),
         signal: abortController.signal,
       })
-      if (!response.ok) throw new Error(await responseError(response, "生成记忆预览失败"))
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.previewFailed")))
       let completed = false
       await readSseStream(response, (event) => {
         const stage = event.stage || event.event || "progress"
@@ -802,12 +764,12 @@ export default function MemoryCardManager({
           return
         }
         if (event.event === "cancelled") {
-          setExtractionProgress({ stage, message: message || "已取消" })
-          setExtractionLogs((current) => [...current.slice(-5), message || "已取消"])
+          setExtractionProgress({ stage, message: message || t("memory.cardManager.messages.cancelled") })
+          setExtractionLogs((current) => [...current.slice(-5), message || t("memory.cardManager.messages.cancelled")])
           return
         }
         if (event.event === "error") {
-          throw new Error(message || "生成记忆预览失败")
+          throw new Error(message || t("memory.cardManager.messages.previewFailed"))
         }
         if (event.event === "completed") {
           completed = true
@@ -825,19 +787,19 @@ export default function MemoryCardManager({
           setExtractionProgress({ stage: "completed", message, percent: event.percent ?? 100 })
           setExtractionLogs((current) => [...current.slice(-5), message])
           if (items.length === 0) {
-            toast.info(event.message || "MindMemOS 没有提取出可保存的记忆")
+            toast.info(event.message || t("memory.cardManager.messages.noExtractedMemory"))
           }
         }
       })
       if (!completed && !abortController.signal.aborted) {
-        throw new Error("MindMemOS 流式响应提前结束")
+        throw new Error(t("memory.cardManager.messages.streamEnded"))
       }
     } catch (error) {
       if (abortController.signal.aborted) {
-        toast.info("已取消新增记忆，本次没有生成预览")
+        toast.info(t("memory.cardManager.messages.cancelledWithoutPreview"))
       } else {
         console.error(error)
-        toast.error(requestErrorMessage(error, "生成记忆预览失败"))
+        toast.error(requestErrorMessage(error, t("memory.cardManager.messages.previewFailed")))
       }
     } finally {
       setIsGeneratingPreview(false)
@@ -849,7 +811,7 @@ export default function MemoryCardManager({
   const commitPreview = async () => {
     if (!previewId) return
     if (selectedPreviewIds.length === 0) {
-      toast.error("请至少选择一条要保存的记忆")
+      toast.error(t("memory.cardManager.messages.selectPreview"))
       return
     }
     setIsCommittingPreview(true)
@@ -865,9 +827,9 @@ export default function MemoryCardManager({
         }),
         },
       )
-      if (!response.ok) throw new Error(await responseError(response, "启用选中记忆失败"))
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.enableSelectedFailed")))
       const payload = (await response.json()) as MemoryCardExtractionResponse
-      toast.success("选中记忆已启用")
+      toast.success(t("memory.cardManager.messages.selectedEnabled"))
       skipNextPreviewDiscard.current = true
       setIsExtractionOpen(false)
       resetExtraction()
@@ -876,7 +838,7 @@ export default function MemoryCardManager({
         refreshFirstPage()
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "启用选中记忆失败")
+      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.enableSelectedFailed"))
     } finally {
       setIsCommittingPreview(false)
     }
@@ -884,11 +846,11 @@ export default function MemoryCardManager({
 
   const saveDraft = async () => {
     if (!draft.title.trim() || !draft.content.trim()) {
-      toast.error("标题和内容不能为空")
+      toast.error(t("memory.cardManager.messages.titleAndContentRequired"))
       return
     }
     if (disabled) {
-      toast.error(disabledReason || "当前记忆管理不可用")
+      toast.error(disabledReason || t("memory.cardManager.messages.unavailable"))
       return
     }
     setIsSaving(true)
@@ -907,13 +869,13 @@ export default function MemoryCardManager({
           }),
         },
       )
-      if (!response.ok) throw new Error(await responseError(response, "保存记忆失败"))
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.saveFailed")))
       const updatedCard = (await response.json()) as MemoryCard
-      toast.success("记忆已保存")
+      toast.success(t("memory.cardManager.messages.saved"))
       closeEditor()
       replaceCard(updatedCard)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存记忆失败")
+      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.saveFailed"))
     } finally {
       setIsSaving(false)
     }
@@ -922,7 +884,7 @@ export default function MemoryCardManager({
   const deleteCard = async () => {
     if (!deleteTarget) return
     if (disabled) {
-      toast.error(disabledReason || "当前记忆管理不可用")
+      toast.error(disabledReason || t("memory.cardManager.messages.unavailable"))
       return
     }
     try {
@@ -930,19 +892,19 @@ export default function MemoryCardManager({
         `${mutationEndpoint}/${deleteTarget.id}?${query}`,
         { method: "DELETE" },
       )
-      if (!response.ok) throw new Error(await responseError(response, "删除记忆失败"))
-      toast.success("记忆已删除")
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.deleteFailed")))
+      toast.success(t("memory.cardManager.messages.deleted"))
       removeCard(deleteTarget.id)
       setDeleteTarget(null)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除记忆失败")
+      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.deleteFailed"))
     }
   }
 
   const toggleCard = async (card: MemoryCard) => {
     if (interactionLocked) return
     if (disabled) {
-      toast.error(disabledReason || "当前记忆管理不可用")
+      toast.error(disabledReason || t("memory.cardManager.messages.unavailable"))
       return
     }
     if (togglingIdsRef.current.has(card.id)) {
@@ -958,12 +920,12 @@ export default function MemoryCardManager({
           body: JSON.stringify({ enabled: !card.enabled }),
         },
       )
-      if (!response.ok) throw new Error(await responseError(response, "保存记忆失败"))
+      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.saveFailed")))
       const updatedCard = (await response.json()) as MemoryCard
-      toast.success(card.enabled ? "已禁用记忆" : "已启用记忆")
+      toast.success(card.enabled ? t("memory.cardManager.messages.disabled") : t("memory.cardManager.messages.enabled"))
       replaceCard(updatedCard)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存记忆失败")
+      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.saveFailed"))
     } finally {
       setCardToggling(card.id, false)
     }
@@ -977,32 +939,32 @@ export default function MemoryCardManager({
       }
     }
     const showPreview = () => {
-      setExtractionContent(ONBOARDING_DEMO_CONTENT)
+      setExtractionContent(onboardingDemoCard.content)
       setExtractionPromptLanguage("ZH")
       setIsPromotionMode(false)
       setIsExtractionOpen(true)
       setPreviewId(ONBOARDING_DEMO_PREVIEW_ID)
-      setPreviewItems([ONBOARDING_DEMO_CARD])
-      setSelectedPreviewIds([ONBOARDING_DEMO_CARD.id])
+      setPreviewItems([onboardingDemoCard])
+      setSelectedPreviewIds([onboardingDemoCard.id])
       setPreviewTargetScope(scope)
       setIsGeneratingPreview(false)
       setIsCommittingPreview(false)
-      setExtractionProgress({ stage: "completed", message: "记忆提取完成", percent: 100 })
-      setExtractionLogs(["正在分析内容边界", "正在提取结构化记忆", "记忆提取完成"])
+      setExtractionProgress({ stage: "completed", message: extractionStageLabel("completed"), percent: 100 })
+      setExtractionLogs([extractionStageLabel("chunking"), extractionStageLabel("llm_extracting"), extractionStageLabel("completed")])
     }
 
     clearTimer()
     if (onboardingDemoPhase === null) {
-      removeCard(ONBOARDING_DEMO_CARD.id)
+      removeCard(onboardingDemoCard.id)
       resetExtraction()
       setIsExtractionOpen(false)
       return clearTimer
     }
 
     if (onboardingDemoPhase === "input") {
-      removeCard(ONBOARDING_DEMO_CARD.id)
+      removeCard(onboardingDemoCard.id)
       resetExtraction()
-      setExtractionContent(ONBOARDING_DEMO_CONTENT)
+      setExtractionContent(onboardingDemoCard.content)
       setExtractionPromptLanguage("ZH")
       setIsExtractionOpen(true)
       return clearTimer
@@ -1011,14 +973,14 @@ export default function MemoryCardManager({
     if (onboardingDemoPhase === "generating") {
       setIsPromotionMode(false)
       setIsExtractionOpen(true)
-      setExtractionContent(ONBOARDING_DEMO_CONTENT)
+      setExtractionContent(onboardingDemoCard.content)
       setExtractionPromptLanguage("ZH")
       setPreviewId(null)
       setPreviewItems([])
       setSelectedPreviewIds([])
       setIsGeneratingPreview(true)
-      setExtractionProgress({ stage: "llm_extracting", message: "正在提取结构化记忆", percent: 58 })
-      setExtractionLogs(["正在分析内容边界", "正在提取结构化记忆"])
+      setExtractionProgress({ stage: "llm_extracting", message: extractionStageLabel("llm_extracting"), percent: 58 })
+      setExtractionLogs([extractionStageLabel("chunking"), extractionStageLabel("llm_extracting")])
       onboardingDemoTimerRef.current = window.setTimeout(() => {
         onboardingDemoTimerRef.current = null
         showPreview()
@@ -1037,7 +999,7 @@ export default function MemoryCardManager({
       setIsCommittingPreview(true)
       onboardingDemoTimerRef.current = window.setTimeout(() => {
         onboardingDemoTimerRef.current = null
-        mergeCards([ONBOARDING_DEMO_CARD])
+        mergeCards([onboardingDemoCard])
         resetExtraction()
         setIsExtractionOpen(false)
         onOnboardingDemoComplete?.("saved")
@@ -1046,12 +1008,12 @@ export default function MemoryCardManager({
     }
 
     if (onboardingDemoPhase === "saved") {
-      mergeCards([ONBOARDING_DEMO_CARD])
+      mergeCards([onboardingDemoCard])
       setIsExtractionOpen(false)
       return clearTimer
     }
 
-    replaceCard({ ...ONBOARDING_DEMO_CARD, enabled: onboardingDemoPhase === "enabled" })
+    replaceCard({ ...onboardingDemoCard, enabled: onboardingDemoPhase === "enabled" })
     setIsExtractionOpen(false)
     return clearTimer
   }, [
@@ -1062,6 +1024,7 @@ export default function MemoryCardManager({
     replaceCard,
     resetExtraction,
     scope,
+    onboardingDemoCard,
   ])
 
   useEffect(() => {
@@ -1084,15 +1047,15 @@ export default function MemoryCardManager({
   const renderActions = (card: MemoryCard) => {
     const isToggling = togglingIds.has(card.id)
     const toggleLabel = card.enabled
-      ? "禁用：后续任务不会注入这条记忆"
-      : "启用：后续任务可检索并注入这条记忆"
+      ? t("memory.cardManager.actions.disableHint")
+      : t("memory.cardManager.actions.enableHint")
     const toggleAriaLabel = isToggling
       ? card.enabled
-        ? "正在禁用记忆"
-        : "正在启用记忆"
+        ? t("memory.cardManager.actions.disabling")
+        : t("memory.cardManager.actions.enabling")
       : card.enabled
-        ? "禁用记忆"
-        : "启用记忆"
+        ? t("memory.cardManager.actions.disable")
+        : t("memory.cardManager.actions.enable")
 
     return (
       <div className="flex shrink-0 items-center gap-1">
@@ -1105,7 +1068,7 @@ export default function MemoryCardManager({
             disabled={disabled || isToggling || onboardingDemoActive}
             aria-label={toggleAriaLabel}
             className="transition-opacity"
-            data-tour={card.id === ONBOARDING_DEMO_CARD.id ? "memory-onboarding-toggle" : undefined}
+            data-tour={card.id === onboardingDemoCard.id ? "memory-onboarding-toggle" : undefined}
             onClick={() => void toggleCard(card)}
           >
             {isToggling ? (
@@ -1118,26 +1081,26 @@ export default function MemoryCardManager({
           </Button>,
         )}
         {iconAction(
-          "编辑记忆",
+          t("memory.cardManager.actions.edit"),
           <Button
             type="button"
             size="icon"
             variant="ghost"
             disabled={disabled || onboardingDemoActive}
-            aria-label="编辑记忆"
+            aria-label={t("memory.cardManager.actions.edit")}
             onClick={() => openEdit(card)}
           >
             <Pencil className="size-4" />
           </Button>,
         )}
         {iconAction(
-          "删除记忆",
+          t("memory.cardManager.actions.delete"),
           <Button
             type="button"
             size="icon"
             variant="ghost"
             disabled={disabled || onboardingDemoActive}
-            aria-label="删除记忆"
+            aria-label={t("memory.cardManager.actions.delete")}
             className="text-destructive hover:text-destructive"
             onClick={() => setDeleteTarget(card)}
           >
@@ -1164,13 +1127,13 @@ export default function MemoryCardManager({
             <p className="text-xs text-muted-foreground">{description}</p>
           </div>
           {iconAction(
-            "刷新记忆列表",
+            t("memory.cardManager.actions.refresh"),
             <Button
               type="button"
               size="icon"
               variant="ghost"
               disabled={!loadEnabled}
-              aria-label="刷新记忆列表"
+              aria-label={t("memory.cardManager.actions.refresh")}
               onClick={() => void loadCards()}
             >
               <RefreshCw className="size-4" />
@@ -1185,7 +1148,7 @@ export default function MemoryCardManager({
             data-tour="memory-add-button"
           >
             <Sparkles className="size-3.5" />
-            新增记忆
+            {t("memory.cardManager.actions.add")}
           </Button>
         </div>
       )}
@@ -1204,18 +1167,18 @@ export default function MemoryCardManager({
                 data-tour="task-memory-promotion"
               >
                 <Sparkles className="size-3.5" />
-                提升到项目记忆{selectedPromotionIds.length > 0 ? ` (${selectedPromotionIds.length})` : ""}
+                {t("memory.cardManager.actions.promote")}{selectedPromotionIds.length > 0 ? ` (${selectedPromotionIds.length})` : ""}
               </Button>
             )}
             {iconAction(
-              "刷新记忆列表",
+              t("memory.cardManager.actions.refresh"),
               <Button
                 type="button"
                 size="icon"
                 variant="ghost"
                 className="size-8"
                 disabled={!loadEnabled}
-                aria-label="刷新记忆列表"
+                aria-label={t("memory.cardManager.actions.refresh")}
                 onClick={() => void loadCards()}
               >
                 <RefreshCw className="size-3.5" />
@@ -1229,13 +1192,13 @@ export default function MemoryCardManager({
               onClick={openCreate}
             >
               <Sparkles className="size-3.5" />
-              新增记忆
+              {t("memory.cardManager.actions.add")}
             </Button>
           </div>
         )}
         {disabled && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-            {disabledReason || "当前记忆管理不可用"}
+            {disabledReason || t("memory.cardManager.messages.unavailable")}
           </div>
         )}
         <div
@@ -1260,7 +1223,7 @@ export default function MemoryCardManager({
                 setSearchText(event.target.value)
               }}
               className={cn(embedded ? "h-8 pl-8 text-xs" : "pl-9")}
-              placeholder="搜索标题、内容或标签"
+              placeholder={t("memory.cardManager.filters.searchPlaceholder")}
             />
           </div>
           <Select
@@ -1274,10 +1237,10 @@ export default function MemoryCardManager({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部类型</SelectItem>
+              <SelectItem value="all">{t("memory.cardManager.filters.allTypes")}</SelectItem>
               {MEMORY_TYPES.map((type) => (
                 <SelectItem key={type} value={type}>
-                  {memoryTypeLabel(type)}
+                  {memoryTypeLabel(type, t)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1293,19 +1256,19 @@ export default function MemoryCardManager({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="enabled">可注入</SelectItem>
-              <SelectItem value="disabled">已禁用</SelectItem>
+              <SelectItem value="all">{t("memory.cardManager.filters.allStatuses")}</SelectItem>
+              <SelectItem value="enabled">{t("memory.cardManager.status.injectable")}</SelectItem>
+              <SelectItem value="disabled">{t("memory.cardManager.status.disabled")}</SelectItem>
             </SelectContent>
           </Select>
           <div className={cn("flex rounded-md border", embedded ? "h-8 p-0.5" : "p-1")}>
             {iconAction(
-              "卡片视图",
+              t("memory.cardManager.view.cards"),
               <Button
                 type="button"
                 size="sm"
                 variant={viewMode === "cards" ? "secondary" : "ghost"}
-                aria-label="卡片视图"
+                aria-label={t("memory.cardManager.view.cards")}
                 className={cn(embedded && "h-7 px-2")}
                 onClick={() => setViewMode("cards")}
               >
@@ -1313,12 +1276,12 @@ export default function MemoryCardManager({
               </Button>,
             )}
             {iconAction(
-              "列表视图",
+              t("memory.cardManager.view.list"),
               <Button
                 type="button"
                 size="sm"
                 variant={viewMode === "list" ? "secondary" : "ghost"}
-                aria-label="列表视图"
+                aria-label={t("memory.cardManager.view.list")}
                 className={cn(embedded && "h-7 px-2")}
                 onClick={() => setViewMode("list")}
               >
@@ -1335,11 +1298,12 @@ export default function MemoryCardManager({
           )}
         >
           <span className={cn(embedded && "text-[11px]")}>
-            第 {page} 页{total !== null ? `，共 ${total} 条` : ""}
-            {hasLocalFilters ? `，本页匹配 ${visibleCards.length} 条` : ""}
+            {t("memory.cardManager.pagination.page", { page })}
+            {total !== null ? t("memory.cardManager.pagination.total", { total }) : ""}
+            {hasLocalFilters ? t("memory.cardManager.pagination.matches", { count: visibleCards.length }) : ""}
           </span>
           <div className={cn("flex items-center gap-2", embedded && "flex-wrap")}>
-            <span className={cn("text-xs text-muted-foreground", embedded && "text-[11px]")}>每页</span>
+            <span className={cn("text-xs text-muted-foreground", embedded && "text-[11px]")}>{t("memory.cardManager.pagination.perPage")}</span>
             <Select
               value={String(pageSize)}
               onValueChange={(value) => {
@@ -1366,7 +1330,7 @@ export default function MemoryCardManager({
               disabled={page <= 1 || isLoading}
               onClick={() => setPage((current) => Math.max(1, current - 1))}
             >
-              上一页
+              {t("memory.cardManager.pagination.previous")}
             </Button>
             <Button
               type="button"
@@ -1376,7 +1340,7 @@ export default function MemoryCardManager({
               disabled={!hasMore || isLoading}
               onClick={() => setPage((current) => current + 1)}
             >
-              下一页
+              {t("memory.cardManager.pagination.next")}
             </Button>
           </div>
         </div>
@@ -1384,14 +1348,14 @@ export default function MemoryCardManager({
         {isLoading ? (
           <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
             <Loader2 className="mr-2 size-4 animate-spin" />
-            正在加载记忆...
+            {t("memory.cardManager.loading")}
           </div>
         ) : visibleCards.length === 0 ? (
           <div className="flex h-40 flex-col items-center justify-center rounded-md border border-dashed text-center">
             <Database className="mb-2 size-5 text-muted-foreground" />
-            <p className="text-sm font-medium">{hasLocalFilters ? "暂无匹配记忆" : "暂无记忆"}</p>
+            <p className="text-sm font-medium">{hasLocalFilters ? t("memory.cardManager.empty.filteredTitle") : t("memory.cardManager.empty.title")}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {hasLocalFilters ? "调整搜索或筛选条件后继续查看" : "新增记忆后继续查看"}
+              {hasLocalFilters ? t("memory.cardManager.empty.filteredDescription") : t("memory.cardManager.empty.description")}
             </p>
           </div>
         ) : viewMode === "list" ? (
@@ -1403,16 +1367,16 @@ export default function MemoryCardManager({
                 embedded && "gap-2 px-2 py-1.5 text-[11px]",
               )}
             >
-              <span>{canPromoteTaskCards ? "选择与标题" : "标题"}</span>
-              <span>类型</span>
-              <span>状态</span>
-              {!embedded && <span>标签</span>}
-              <span className="text-right">操作</span>
+              <span>{canPromoteTaskCards ? t("memory.cardManager.columns.selectionAndTitle") : t("memory.cardManager.columns.title")}</span>
+              <span>{t("memory.cardManager.columns.type")}</span>
+              <span>{t("memory.cardManager.columns.status")}</span>
+              {!embedded && <span>{t("memory.cardManager.columns.tags")}</span>}
+              <span className="text-right">{t("memory.cardManager.columns.actions")}</span>
             </div>
             {visibleCards.map((card) => (
               <div
                 key={card.id}
-                data-tour={card.id === ONBOARDING_DEMO_CARD.id ? "memory-onboarding-card" : undefined}
+                data-tour={card.id === onboardingDemoCard.id ? "memory-onboarding-card" : undefined}
                 className={cn(
                   "grid items-center gap-3 border-b px-3 py-2 last:border-b-0",
                   listGridColumns,
@@ -1425,7 +1389,7 @@ export default function MemoryCardManager({
                   {canPromoteTaskCards && (
                     <Checkbox
                       checked={selectedPromotionIds.includes(card.id)}
-                      aria-label={`选择记忆：${card.title}`}
+                      aria-label={t("memory.cardManager.actions.select", { title: card.title })}
                       disabled={disabled}
                       onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
                     />
@@ -1439,9 +1403,9 @@ export default function MemoryCardManager({
                     <div className="truncate text-xs text-muted-foreground">{card.content}</div>
                   </button>
                 </div>
-                <Badge variant="outline" className="w-fit">{memoryTypeLabel(card.type)}</Badge>
+                <Badge variant="outline" className="w-fit">{memoryTypeLabel(card.type, t)}</Badge>
                 <Badge variant={card.enabled ? "secondary" : "outline"} className="w-fit">
-                  {card.enabled ? "可注入" : "已禁用"}
+                  {card.enabled ? t("memory.cardManager.status.injectable") : t("memory.cardManager.status.disabled")}
                 </Badge>
                 {!embedded && (
                   <div className="flex min-w-0 flex-wrap gap-1">
@@ -1465,7 +1429,7 @@ export default function MemoryCardManager({
             {visibleCards.map((card) => (
               <div
                 key={card.id}
-                data-tour={card.id === ONBOARDING_DEMO_CARD.id ? "memory-onboarding-card" : undefined}
+                data-tour={card.id === onboardingDemoCard.id ? "memory-onboarding-card" : undefined}
                 className={cn(
                   "flex flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
                   embedded ? "min-h-32" : "min-h-48",
@@ -1478,7 +1442,7 @@ export default function MemoryCardManager({
                   {canPromoteTaskCards && (
                     <Checkbox
                       checked={selectedPromotionIds.includes(card.id)}
-                      aria-label={`选择记忆：${card.title}`}
+                      aria-label={t("memory.cardManager.actions.select", { title: card.title })}
                       disabled={disabled}
                       onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
                     />
@@ -1486,8 +1450,8 @@ export default function MemoryCardManager({
                   <div className="min-w-0 flex-1">
                     <h3 className="truncate text-sm font-semibold">{card.title}</h3>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      <Badge variant="outline">{memoryTypeLabel(card.type)}</Badge>
-                      {!card.enabled && <Badge variant="secondary">已禁用</Badge>}
+                      <Badge variant="outline">{memoryTypeLabel(card.type, t)}</Badge>
+                      {!card.enabled && <Badge variant="secondary">{t("memory.cardManager.status.disabled")}</Badge>}
                     </div>
                   </div>
                   {renderActions(card)}
@@ -1539,7 +1503,7 @@ export default function MemoryCardManager({
           </button>
           <DialogHeader>
             <DialogTitle>
-              {isPromotionMode ? "提升到项目记忆" : t("memory.cardManager.extraction.title")}
+              {isPromotionMode ? t("memory.cardManager.preview.promoteTitle") : t("memory.cardManager.extraction.title")}
             </DialogTitle>
           </DialogHeader>
 
@@ -1549,11 +1513,11 @@ export default function MemoryCardManager({
                 <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
                 <div className="space-y-1 text-sm">
                   <p className="font-medium">
-                    {isPromotionMode ? "将已选任务经验归纳为项目记忆" : t("memory.cardManager.extraction.guideTitle")}
+                    {isPromotionMode ? t("memory.cardManager.preview.promoteGuideTitle") : t("memory.cardManager.extraction.guideTitle")}
                   </p>
                   <p className="text-xs leading-5 text-muted-foreground">
                     {isPromotionMode
-                      ? `将使用 ${selectedPromotionIds.length} 条已选任务记忆生成项目记忆预览。原始卡片不会被修改。`
+                      ? t("memory.cardManager.preview.promoteGuideDescription", { count: selectedPromotionIds.length })
                       : t("memory.cardManager.extraction.guideDescription")}
                   </p>
                 </div>
@@ -1638,10 +1602,10 @@ export default function MemoryCardManager({
                     )}
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">
-                        {extractionProgress?.message || "正在调用 MindMemOS 提取"}
+                        {extractionProgress?.message || t("memory.cardManager.stages.accepted")}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        阶段：{extractionStageLabel(extractionProgress?.stage)}
+                        {t("memory.cardManager.preview.stage", { stage: extractionStageLabel(extractionProgress?.stage) })}
                       </p>
                     </div>
                   </div>
@@ -1657,7 +1621,7 @@ export default function MemoryCardManager({
                 </div>
                 {extractionLogs.length > 0 && (
                   <div className="grid gap-1 text-xs text-muted-foreground">
-                    <div className="font-medium text-foreground/80">处理记录</div>
+                    <div className="font-medium text-foreground/80">{t("memory.cardManager.preview.logs")}</div>
                     {extractionLogs.slice(-3).map((log, index) => (
                       <div key={`${log}-${index}`} className="truncate">
                         {log}
@@ -1667,7 +1631,7 @@ export default function MemoryCardManager({
                 )}
                 {isPersistingPreview && (
                   <p className="text-xs text-muted-foreground">
-                    正在写入记忆，当前阶段暂不可取消。
+                    {t("memory.cardManager.messages.cannotCancelPersisting")}
                   </p>
                 )}
               </div>
@@ -1675,9 +1639,9 @@ export default function MemoryCardManager({
 
             {isExtractionCompleted && previewItems.length === 0 && (
               <div className="rounded-md border border-dashed bg-muted/30 px-4 py-5">
-                <p className="text-sm font-medium">本次没有生成可保存的记忆</p>
+                <p className="text-sm font-medium">{t("memory.cardManager.preview.emptyTitle")}</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  MindMemOS 已完成处理，但输入内容没有匹配到 LLM4AD 的记忆卡片结构。可以尝试补充更具体的算法经验、错误反思或领域知识。
+                  {t("memory.cardManager.preview.emptyDescription")}
                 </p>
               </div>
             )}
@@ -1687,15 +1651,15 @@ export default function MemoryCardManager({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">
-                      {isPromotionMode ? "项目记忆预览" : "提取结果预览"}
+                      {isPromotionMode ? t("memory.cardManager.preview.projectTitle") : t("memory.cardManager.preview.title")}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {isPromotionMode
-                        ? "生成后已默认保存为已禁用项目记忆，启用后会在项目范围参与注入。"
-                        : "生成后已默认保存为已禁用记忆，启用后才会参与注入。"}
+                        ? t("memory.cardManager.preview.projectDescription")
+                        : t("memory.cardManager.preview.description")}
                     </p>
                   </div>
-                  <Badge variant="secondary">{selectedPreviewIds.length}/{previewItems.length} 已选择</Badge>
+                  <Badge variant="secondary">{t("memory.cardManager.preview.selected", { selected: selectedPreviewIds.length, total: previewItems.length })}</Badge>
                 </div>
                 <div className="grid gap-2">
                   {previewItems.map((item) => {
@@ -1722,7 +1686,7 @@ export default function MemoryCardManager({
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="min-w-0 truncate text-sm font-semibold">{item.title}</p>
-                            <Badge variant="outline">{memoryTypeLabel(item.type)}</Badge>
+                            <Badge variant="outline">{memoryTypeLabel(item.type, t)}</Badge>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
                             {item.content}
@@ -1759,11 +1723,11 @@ export default function MemoryCardManager({
               )}
               {isGeneratingPreview
                 ? isCancellingPreview
-                  ? "取消中"
-                  : "取消生成"
+                  ? t("memory.cardManager.actions.cancelling")
+                  : t("memory.cardManager.actions.cancelGeneration")
                 : isCommittingPreview
-                  ? "保存中"
-                  : "取消"}
+                  ? t("memory.cardManager.actions.saving")
+                  : t("memory.common.cancel")}
             </Button>
             {previewItems.length === 0 ? (
               <Button
@@ -1772,7 +1736,7 @@ export default function MemoryCardManager({
                 onClick={() => void generatePreview()}
               >
                 {isGeneratingPreview && <Loader2 className="mr-1 size-4 animate-spin" />}
-                {isPromotionMode ? "生成项目预览" : "生成预览"}
+                {isPromotionMode ? t("memory.cardManager.actions.generateProjectPreview") : t("memory.cardManager.actions.generatePreview")}
               </Button>
             ) : (
               <Button
@@ -1785,7 +1749,7 @@ export default function MemoryCardManager({
                 ) : (
                   <Check className="mr-1 size-4" />
                 )}
-                启用选中
+                {t("memory.cardManager.actions.enableSelected")}
               </Button>
             )}
           </DialogFooter>
@@ -1798,20 +1762,20 @@ export default function MemoryCardManager({
       >
         <AlertDialogContent inert={onboardingDemoActive}>
           <AlertDialogHeader>
-            <AlertDialogTitle>{isPromotionMode ? "关闭项目记忆提升" : "关闭新增记忆"}</AlertDialogTitle>
+            <AlertDialogTitle>{isPromotionMode ? t("memory.cardManager.close.promoteTitle") : t("memory.cardManager.close.title")}</AlertDialogTitle>
             <AlertDialogDescription>
               {isPromotionMode
-                ? "本次生成的项目记忆已经保存为已禁用状态。可以保留它们继续在项目记忆中管理，也可以删除本次生成的记忆。"
-                : "本次生成的记忆已经保存为已禁用状态。可以保留它们继续在列表中管理，也可以删除本次生成的记忆。"}
+                ? t("memory.cardManager.close.promoteDescription")
+                : t("memory.cardManager.close.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>继续编辑</AlertDialogCancel>
+            <AlertDialogCancel>{t("memory.cardManager.close.continueEditing")}</AlertDialogCancel>
             <Button type="button" variant="outline" onClick={keepGeneratedCardsAndClose}>
-              保留为已禁用
+              {t("memory.cardManager.close.keepDisabled")}
             </Button>
             <AlertDialogAction onClick={() => void discardPreview()}>
-              删除本次生成
+              {t("memory.cardManager.close.deleteGenerated")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1823,21 +1787,21 @@ export default function MemoryCardManager({
           inert={onboardingDemoActive}
         >
           <DialogHeader>
-            <DialogTitle>{editingId ? "编辑记忆" : "新增记忆"}</DialogTitle>
+            <DialogTitle>{editingId ? t("memory.cardManager.editor.editTitle") : t("memory.cardManager.editor.addTitle")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-title`}>标题</Label>
+              <Label htmlFor={`${scope}-memory-title`}>{t("memory.cardManager.editor.title")}</Label>
               <Input
                 id={`${scope}-memory-title`}
                 value={draft.title}
                 onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                placeholder="简短、可扫描的记忆标题"
+                placeholder={t("memory.cardManager.editor.titlePlaceholder")}
               />
             </div>
             <div className="grid gap-2 sm:grid-cols-[220px_1fr]">
               <div className="grid gap-2">
-                <Label htmlFor={`${scope}-memory-type`}>类型</Label>
+                <Label htmlFor={`${scope}-memory-type`}>{t("memory.cardManager.editor.type")}</Label>
                 <Select
                   value={draft.type}
                   onValueChange={(value) => setDraft((current) => ({ ...current, type: value }))}
@@ -1848,24 +1812,24 @@ export default function MemoryCardManager({
                   <SelectContent>
                     {MEMORY_TYPES.map((type) => (
                       <SelectItem key={type} value={type}>
-                        {memoryTypeLabel(type)}
+                        {memoryTypeLabel(type, t)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor={`${scope}-memory-tags`}>标签</Label>
+                <Label htmlFor={`${scope}-memory-tags`}>{t("memory.cardManager.editor.tags")}</Label>
                 <TagInput
                   id={`${scope}-memory-tags`}
                   value={draft.tags}
                   onChange={(tags) => setDraft((current) => ({ ...current, tags }))}
-                  placeholder="输入标签后回车，如 TSP、参数调优"
+                  placeholder={t("memory.cardManager.editor.tagsPlaceholder")}
                 />
               </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-content`}>内容</Label>
+              <Label htmlFor={`${scope}-memory-content`}>{t("memory.cardManager.editor.content")}</Label>
               <Textarea
                 id={`${scope}-memory-content`}
                 className="min-h-64 resize-y leading-6"
@@ -1873,19 +1837,19 @@ export default function MemoryCardManager({
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, content: event.target.value }))
                 }
-                placeholder="写入可复用的经验、约束、反思或领域知识。建议使用清晰的短段落，方便后续检查和修改。"
+                placeholder={t("memory.cardManager.editor.contentPlaceholder")}
               />
             </div>
-            {editingCard && readOnlyRows(editingCard).length > 0 && (
+            {editingCard && readOnlyRows(editingCard, t).length > 0 && (
               <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
                 <div>
-                  <p className="text-sm font-medium">系统信息</p>
+                  <p className="text-sm font-medium">{t("memory.cardManager.editor.systemInfo")}</p>
                   <p className="text-xs text-muted-foreground">
-                    这些字段由 MindMemOS 管理，仅用于检查来源和时间，不会随编辑保存。
+                    {t("memory.cardManager.editor.systemInfoDescription")}
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {readOnlyRows(editingCard).map(([label, value]) => (
+                  {readOnlyRows(editingCard, t).map(([label, value]) => (
                     <div key={label} className="grid gap-1.5">
                       <Label className="text-xs text-muted-foreground">{label}</Label>
                       <Input value={value} readOnly className="h-8 bg-background/70 text-xs" />
@@ -1897,11 +1861,11 @@ export default function MemoryCardManager({
           </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={closeEditor}>
-              取消
+              {t("memory.common.cancel")}
             </Button>
             <Button type="button" disabled={isSaving || disabled} onClick={() => void saveDraft()}>
               {isSaving && <Loader2 className="mr-1 size-4 animate-spin" />}
-              {editingId ? "保存修改" : "添加记忆"}
+              {editingId ? t("memory.cardManager.editor.saveChanges") : t("memory.cardManager.editor.add")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1910,14 +1874,14 @@ export default function MemoryCardManager({
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent inert={onboardingDemoActive}>
           <AlertDialogHeader>
-            <AlertDialogTitle>永久删除记忆</AlertDialogTitle>
+            <AlertDialogTitle>{t("memory.cardManager.delete.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              这会从 MindMemOS 中真正删除该记忆，删除后不会出现在管理页，也不能重新启用。
+              {t("memory.cardManager.delete.description")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteCard()}>永久删除</AlertDialogAction>
+            <AlertDialogCancel>{t("memory.common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteCard()}>{t("memory.cardManager.delete.confirm")}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -139,7 +139,7 @@ function MemoryPage() {
       const response = await authFetch(`${baseUrl}/api/v1/llm4ad/memory/health`)
       const payload = await response.json().catch(() => null)
       if (!response.ok) {
-        throw new Error(payload?.detail || "检测 MindMemOS 状态失败")
+        throw new Error(payload?.detail || t("memory.page.healthCheckFailed"))
       }
       setHealth(payload)
       if (payload?.ok) {
@@ -147,7 +147,7 @@ function MemoryPage() {
         const bindingPayload = await bindingResponse.json().catch(() => null)
         if (!bindingResponse.ok) {
           setBinding(null)
-          setBindingError(bindingPayload?.detail || "绑定状态加载失败")
+          setBindingError(bindingPayload?.detail || t("memory.page.bindingLoadFailed"))
         } else {
           setBinding(bindingPayload)
           setBindingError(null)
@@ -157,7 +157,7 @@ function MemoryPage() {
         setBindingError(null)
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "检测 MindMemOS 状态失败"
+      const message = error instanceof Error ? error.message : t("memory.page.healthCheckFailed")
       setHealth({
         ok: false,
         message,
@@ -178,7 +178,7 @@ function MemoryPage() {
     } finally {
       setIsCheckingHealth(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     void loadHealth()
@@ -193,7 +193,7 @@ function MemoryPage() {
       return (
         <Badge variant="secondary" className="gap-1.5">
           <Loader2 className="size-3 animate-spin" />
-          正在检测
+          {t("memory.page.checking")}
         </Badge>
       )
     }
@@ -201,7 +201,7 @@ function MemoryPage() {
       return (
         <Badge className="gap-1.5">
           <CheckCircle2 className="size-3" />
-          记忆服务正常
+          {t("memory.page.serviceHealthy")}
         </Badge>
       )
     }
@@ -210,21 +210,21 @@ function MemoryPage() {
         return (
           <Badge variant="destructive" className="gap-1.5">
             <AlertCircle className="size-3" />
-            绑定状态异常
+            {t("memory.page.bindingError")}
           </Badge>
         )
       }
       return (
         <Badge variant="secondary" className="gap-1.5">
           <AlertCircle className="size-3" />
-          模型未绑定
+          {t("memory.page.modelsUnbound")}
         </Badge>
       )
     }
     return (
       <Badge variant="destructive" className="gap-1.5">
         <AlertCircle className="size-3" />
-        记忆服务异常
+        {t("memory.page.serviceUnhealthy")}
       </Badge>
     )
   }
@@ -257,8 +257,8 @@ function MemoryPage() {
           },
           {
             selector: '[data-tour="memory-default-policy"]',
-            title: "默认注入策略",
-            content: "这里决定后续新项目和新任务默认从全局、项目和任务范围注入多少记忆。",
+            title: t("tour.memory.defaultPolicyTitle"),
+            content: t("tour.memory.defaultPolicyContent"),
             placement: "left",
           },
           {
@@ -270,47 +270,47 @@ function MemoryPage() {
           },
           {
             selector: '[data-tour="memory-extraction-content"]',
-            title: "新增记忆示例",
-            content: "这是原有新增记忆窗口的只读模拟内容；继续后会自动生成预览。",
+            title: t("tour.memory.addExampleTitle"),
+            content: t("tour.memory.addExampleContent"),
             placement: "top",
           },
           {
             selector: '[data-tour="memory-extraction-progress"]',
-            title: "生成记忆预览",
-            content: "正在模拟真实提取流程；不会调用长期记忆服务。",
+            title: t("tour.memory.previewGenerationTitle"),
+            content: t("tour.memory.previewGenerationContent"),
             placement: "top",
           },
           {
             selector: '[data-tour="memory-extraction-preview"]',
-            title: "保存预览",
-            content: "预览确认后，引导会自动模拟“启用选中”，并使用真实卡片样式展示结果。",
+            title: t("tour.memory.savePreviewTitle"),
+            content: t("tour.memory.savePreviewContent"),
             placement: "top",
           },
           {
             selector: '[data-tour="memory-onboarding-card"]',
-            title: "已保存的示例记忆",
-            content: "这张卡片使用真实列表组件渲染，但仅存在于本次引导中。",
+            title: t("tour.memory.savedExampleTitle"),
+            content: t("tour.memory.savedExampleContent"),
             placement: "top",
           },
           {
             selector: '[data-tour="memory-onboarding-toggle"]',
-            title: "禁用记忆",
-            content: "禁用后，任务不会检索或注入这条记忆。",
+            title: t("tour.memory.disableTitle"),
+            content: t("tour.memory.disableContent"),
             placement: "left",
           },
           {
             selector: '[data-tour="memory-onboarding-toggle"]',
-            title: "重新启用记忆",
-            content: "启用后，它会重新参与检索和注入。",
+            title: t("tour.memory.reenableTitle"),
+            content: t("tour.memory.reenableContent"),
             placement: "left",
           },
         ]}
       />
       <div className="flex flex-wrap items-center gap-3 border-b pb-4">
         <div className="min-w-0 flex-1" data-tour="memory-overview">
-          <h1 className="text-2xl font-bold tracking-tight">全局记忆</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("memory.page.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            管理跨项目复用的长期经验。默认注入策略可在右侧设置中调整。
+            {t("memory.page.description")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -321,7 +321,7 @@ function MemoryPage() {
                 type="button"
                 size="icon"
                 variant="outline"
-                aria-label="重新检测记忆服务"
+                aria-label={t("memory.page.recheck")}
                 disabled={isCheckingHealth}
                 onClick={() => void loadHealth()}
               >
@@ -332,7 +332,7 @@ function MemoryPage() {
                 )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>重新检测记忆服务</TooltipContent>
+            <TooltipContent>{t("memory.page.recheck")}</TooltipContent>
           </Tooltip>
           <Sheet
             open={isSettingsOpen}
@@ -344,7 +344,7 @@ function MemoryPage() {
             <SheetTrigger asChild>
               <Button type="button" variant="outline" className="gap-1.5">
                 <Settings2 className="size-4" />
-                默认策略
+                {t("memory.page.defaultPolicy")}
               </Button>
             </SheetTrigger>
             <SheetContent
@@ -359,9 +359,9 @@ function MemoryPage() {
               className="h-dvh max-h-dvh !w-[min(100vw,36rem)] min-w-0 !max-w-none transform-gpu gap-0 overflow-hidden p-0 will-change-transform data-[state=closed]:duration-200 data-[state=open]:duration-300 sm:!max-w-none"
             >
               <SheetHeader className="shrink-0 border-b pr-10">
-                <SheetTitle>用户默认记忆策略</SheetTitle>
+                <SheetTitle>{t("memory.page.settingsTitle")}</SheetTitle>
                 <SheetDescription>
-                  控制新项目和新任务默认使用的记忆注入范围、数量和检索策略。
+                  {t("memory.page.settingsDescription")}
                 </SheetDescription>
               </SheetHeader>
               <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] px-4 py-4">
@@ -377,23 +377,23 @@ function MemoryPage() {
                     {bindingError && (
                       <Alert className="mt-4 border-destructive/40 bg-destructive/5 text-destructive">
                         <AlertCircle className="size-4" />
-                        <AlertTitle>绑定状态加载失败</AlertTitle>
+                        <AlertTitle>{t("memory.page.bindingLoadFailed")}</AlertTitle>
                         <AlertDescription>{bindingError}</AlertDescription>
                       </Alert>
                     )}
                     <div className="h-4" />
                     <MemoryConfigEditor
                       kind="user"
-                      title="默认注入策略"
-                      description="这些设置会影响后续创建的新项目和新任务。"
+                      title={t("memory.page.defaultPolicy")}
+                      description={t("memory.page.defaultPolicyDescription")}
                       enabled={memoryReady}
                       readOnly={isMemoryTourActive && (memoryTourStep === 1 || memoryTourStep === 2)}
                       disabledReason={
                         bindingError
-                          ? "记忆模型绑定状态加载失败，请重新检测服务状态后再配置默认注入策略。"
+                          ? t("memory.page.bindingLoadDisabledReason")
                           : health?.ok
-                            ? "当前用户尚未绑定记忆模型。请先在上方绑定 Chat 与 Embedding 模型，再配置默认注入策略。"
-                            : health?.message || "MindMemOS 当前不可用，无法配置默认注入策略。"
+                            ? t("memory.page.modelsUnboundDisabledReason")
+                            : health?.message || t("memory.page.serviceUnavailableDisabledReason")
                       }
                       onSaved={refreshMemoryStatus}
                     />
@@ -409,22 +409,22 @@ function MemoryPage() {
         <Alert className="border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <AlertCircle className="size-4" />
           <AlertTitle>
-            {bindingError ? "绑定状态加载失败" : health?.ok ? "记忆模型未绑定" : "MindMemOS 当前不可用"}
+            {bindingError ? t("memory.page.bindingLoadFailed") : health?.ok ? t("memory.page.modelsUnbound") : t("memory.page.serviceUnavailable")}
           </AlertTitle>
           <AlertDescription className="text-amber-900 dark:text-amber-100">
             {bindingError
               ? bindingError
               : health?.ok
-                ? "请在右上角默认策略中绑定 Chat 与 Embedding 模型后再管理记忆。"
-                : health?.message || "请检查系统环境配置或稍后重新检测。"}
+                ? t("memory.page.modelsUnboundAlertDescription")
+                : health?.message || t("memory.page.serviceUnavailableAlertDescription")}
           </AlertDescription>
         </Alert>
       )}
 
       <MemoryCardManager
         scope="user"
-        title="用户全局记忆"
-        description="跨项目复用的长期经验，适合通用算法经验、偏好和稳定约束。"
+        title={t("memory.page.managerTitle")}
+        description={t("memory.page.managerDescription")}
         disabled={!memoryReady}
         loadEnabled={memoryReady}
         onboardingDemoActive={isMemoryTourActive}
@@ -432,12 +432,12 @@ function MemoryPage() {
         onOnboardingDemoComplete={handleOnboardingDemoComplete}
         disabledReason={
           isCheckingHealth
-            ? "正在检测 MindMemOS 服务状态。"
+            ? t("memory.page.checkingDisabledReason")
             : bindingError
-              ? "记忆模型绑定状态加载失败，请重新检测服务状态。"
+              ? t("memory.page.bindingLoadManagerDisabledReason")
               : health?.ok
-                ? "当前用户尚未绑定记忆模型，请先在默认策略中绑定 Chat 与 Embedding。"
-                : health?.message || "MindMemOS 当前不可用，无法管理远端记忆。"
+                ? t("memory.page.modelsUnboundManagerDisabledReason")
+                : health?.message || t("memory.page.serviceUnavailableManagerDisabledReason")
         }
       />
     </div>
