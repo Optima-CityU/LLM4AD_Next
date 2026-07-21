@@ -607,7 +607,8 @@ async def test_stored_provider_connectivity(
         db: Database session.
         provider_id: ID of the stored provider to test.
         current_user: Current user, used for access control.
-        model: Model name to test (must belong to the provider's model list).
+        model: Model name to test. For builtin providers, it must belong to the
+            provider's registered model list.
         prompt: Prompt sent to the provider.
         access_token: Current login token, used to substitute the ``{accessToken}``
             placeholder in a builtin provider's base_url.
@@ -618,15 +619,14 @@ async def test_stored_provider_connectivity(
         ProviderTestResponse with success status, message, and LLM response data.
     """
     provider = get_provider_with_auth(db, provider_id, current_user)
-    available_models = [m.strip() for m in provider.model.split(";") if m.strip()]
     if provider.is_builtin:
         available_models = fetch_builtin_provider_models(
             provider,
             access_token,
             user_id=str(current_user.id),
         )
-    if model not in available_models:
-        raise HTTPException(status_code=400, detail="所选模型不属于该供应商")
+        if model not in available_models:
+            raise HTTPException(status_code=400, detail="所选模型不属于该供应商")
 
     # 凭据默认取库中解密后的真实值（ORM 读取自动解密）
     api_key = provider.api_key

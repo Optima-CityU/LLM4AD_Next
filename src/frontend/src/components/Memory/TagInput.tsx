@@ -1,5 +1,6 @@
 import { X } from "lucide-react"
 import { type KeyboardEvent, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,6 +33,7 @@ export default function TagInput({
   disabled?: boolean
   className?: string
 }) {
+  const { t } = useTranslation()
   const [inputValue, setInputValue] = useState("")
 
   const commitInput = () => {
@@ -70,7 +72,7 @@ export default function TagInput({
             size="icon"
             variant="ghost"
             disabled={disabled}
-            aria-label={`删除标签 ${tag}`}
+            aria-label={t("memory.tagInput.remove", { tag })}
             className="size-4 rounded-sm p-0 hover:bg-background/80"
             onClick={() => onChange(value.filter((item) => item !== tag))}
           >
