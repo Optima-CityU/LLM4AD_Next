@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
@@ -1525,6 +1526,7 @@ def upsert_memory_provider_binding(
         raise HTTPException(status_code=404, detail="Embedding provider does not exist")
     if not (current_user.is_superuser or embedding_provider.user_id == current_user.id):
         raise HTTPException(status_code=403, detail="No access to selected embedding provider")
+    _validate_mindmemos_embedding_provider(embedding_provider)
 
     embedding_identity = _embedding_identity(embedding_provider)
     if config.mindmemos_embedding_model and config.mindmemos_embedding_model != embedding_identity["model"]:
@@ -1596,6 +1598,35 @@ def _ensure_mindmemos_provider_binding(db: Session, current_user: models.User) -
     if config is None or not config.mindmemos_binding_id:
         raise HTTPException(status_code=400, detail="请先在记忆设置中绑定 Chat 与 Embedding 模型")
 
+    if not (config.mindmemos_chat_provider_id and config.mindmemos_chat_model and config.mindmemos_embedding_provider_id):
+        project_id = _mindmemos_project_id(current_user)
+        data = _mindmemos_get(
+            current_user,
+            f"/internal/v1/projects/{project_id}/provider-bindings",
+            scopes=["provider:read"],
+        )
+        items = (data.get("data") or {}).get("items") or []
+        if any(
+            isinstance(item, dict) and str(item.get("binding_id") or "") == config.mindmemos_binding_id
+            for item in items
+        ):
+            return
+        config.mindmemos_binding_id = ""
+        config.updated_time = datetime.now(UTC)
+        db.add(config)
+        db.commit()
+        raise HTTPException(status_code=400, detail="MindMemOS 模型绑定已失效，请重新绑定 Chat 与 Embedding 模型")
+
+    chat_provider = db.get(models.LLMProvider, config.mindmemos_chat_provider_id)
+    embedding_provider = db.get(models.EmbeddingProvider, config.mindmemos_embedding_provider_id)
+    if chat_provider is None or embedding_provider is None:
+        config.mindmemos_binding_id = ""
+        config.updated_time = datetime.now(UTC)
+        db.add(config)
+        db.commit()
+        raise HTTPException(status_code=400, detail="MindMemOS 绑定的模型配置不存在，请重新绑定")
+    _validate_mindmemos_embedding_provider(embedding_provider)
+
     project_id = _mindmemos_project_id(current_user)
     data = _mindmemos_get(
         current_user,
@@ -1611,26 +1642,6 @@ def _ensure_mindmemos_provider_binding(db: Session, current_user: models.User) -
         ),
         None,
     )
-    if existing is not None and not (
-        config.mindmemos_chat_provider_id and config.mindmemos_chat_model and config.mindmemos_embedding_provider_id
-    ):
-        return
-
-    if not (config.mindmemos_chat_provider_id and config.mindmemos_chat_model and config.mindmemos_embedding_provider_id):
-        config.mindmemos_binding_id = ""
-        config.updated_time = datetime.now(UTC)
-        db.add(config)
-        db.commit()
-        raise HTTPException(status_code=400, detail="MindMemOS 模型绑定已失效，请重新绑定 Chat 与 Embedding 模型")
-
-    chat_provider = db.get(models.LLMProvider, config.mindmemos_chat_provider_id)
-    embedding_provider = db.get(models.EmbeddingProvider, config.mindmemos_embedding_provider_id)
-    if chat_provider is None or embedding_provider is None:
-        config.mindmemos_binding_id = ""
-        config.updated_time = datetime.now(UTC)
-        db.add(config)
-        db.commit()
-        raise HTTPException(status_code=400, detail="MindMemOS 绑定的模型配置不存在，请重新绑定")
 
     routers = _memory_provider_routers(chat_provider, config.mindmemos_chat_model, embedding_provider)
     if existing is not None:
@@ -1737,6 +1748,46 @@ def _embedding_endpoint(provider: models.EmbeddingProvider) -> dict[str, Any]:
     if base_url:
         endpoint["api_base"] = base_url.rstrip("/")
     return endpoint
+
+
+def _validate_mindmemos_embedding_provider(provider: models.EmbeddingProvider) -> None:
+    """Reject persisted embedding settings that cannot be routed by MindMemOS.
+
+    This only validates local fields. It intentionally does not probe the provider
+    so task startup and memory retrieval never spend an extra model request.
+    """
+    model = provider.text_model if provider.mode == models.EmbeddingMode.SPLIT else provider.model
+    if not str(model or "").strip():
+        raise HTTPException(status_code=400, detail="Embedding 配置无效：未配置模型名称")
+    if not provider.dim or provider.dim <= 0:
+        raise HTTPException(status_code=400, detail="Embedding 配置无效：向量维度必须大于 0")
+
+    endpoint = _embedding_endpoint(provider)
+    parsed = urlparse(str(endpoint.get("api_base") or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Embedding 配置无效：API 地址必须是有效的 HTTP(S) URL")
+    if not str(endpoint.get("api_key") or "").strip():
+        raise HTTPException(status_code=400, detail="Embedding 配置无效：缺少 API Key 或 Auth Token")
+
+
+def get_mindmemos_provider_binding_error(db: Session, current_user: models.User) -> str | None:
+    """Return a local validation error for an existing user provider binding."""
+    config = db.exec(select(models.UserMemoryConfig).where(models.UserMemoryConfig.user_id == current_user.id)).first()
+    if config is None or not config.mindmemos_binding_id:
+        return None
+    provider_id = config.mindmemos_embedding_provider_id
+    if provider_id is None:
+        # Bindings created before local provider metadata was introduced remain
+        # usable through their already-stored remote router configuration.
+        return None
+    provider = db.get(models.EmbeddingProvider, provider_id)
+    if provider is None:
+        return "Embedding 供应商配置不存在"
+    try:
+        _validate_mindmemos_embedding_provider(provider)
+    except HTTPException as exc:
+        return str(exc.detail)
+    return None
 
 
 def _mindmemos_provider_timeout(timeout: float | int | None) -> int:

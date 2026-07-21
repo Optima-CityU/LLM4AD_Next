@@ -3,6 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from fastapi import HTTPException
 from llm4ad.config.app import EmbeddingConfig, TaskSpecificConfig
@@ -20,6 +21,12 @@ JINA_DEFAULT_DIM = 2048
 
 def _enum_value(value: Any) -> Any:
     return getattr(value, "value", value)
+
+
+def _require_http_url(value: Any, *, field_label: str) -> None:
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail=f"{field_label}必须是有效的 HTTP(S) API 地址")
 
 
 def _normalize_provider_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +50,9 @@ def _normalize_provider_data(data: dict[str, Any]) -> dict[str, Any]:
         data["base_url"] = data.get("base_url") or JINA_DEFAULT_BASE_URL
         data["model"] = data.get("model") or JINA_DEFAULT_MODEL
         data["dim"] = data.get("dim") or JINA_DEFAULT_DIM
+        _require_http_url(data["base_url"], field_label="Embedding API 地址")
+        if not (data.get("api_key") or data.get("auth_token")):
+            raise HTTPException(status_code=400, detail="Jina embedding 必须配置 API Key 或 Auth Token")
         data["text_type"] = models.EmbeddingProviderType.JINA
         data["code_type"] = models.EmbeddingProviderType.JINA
         data["text_task"] = data.get("text_task") or "text-matching"

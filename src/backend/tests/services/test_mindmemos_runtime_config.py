@@ -1,13 +1,50 @@
 """Tests for system-level MindMemOS runtime configuration."""
 
 import uuid
+from types import SimpleNamespace
 
 from app.core.config import settings
-from app.services.task_service import execution
+from app.services import memory_service
+from app.services.task_service import crud, execution
 
 
 class _User:
     id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+def test_apply_memory_defaults_falls_back_from_invalid_provider_binding(monkeypatch):
+    """Do not inject MindMemOS settings when a persisted embedding binding is invalid."""
+    project_defaults = SimpleNamespace(
+        mindmemos_binding_id="binding-invalid",
+        include_user_memory=True,
+        include_project_memory=True,
+        include_task_memory=True,
+        user_memory_limit=2,
+        project_memory_limit=2,
+        task_memory_limit=2,
+        mindmemos_search_strategy="fast",
+        mindmemos_rerank=False,
+        mindmemos_score_threshold=None,
+        mindmemos_fail_open=True,
+    )
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_ENABLED", True)
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_BASE_URL", "http://mindmemos-api:8000")
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_JWT_SECRET", "jwt-test-secret")
+    monkeypatch.setattr(memory_service, "get_project_memory_config", lambda *_args: project_defaults)
+    monkeypatch.setattr(
+        memory_service,
+        "get_mindmemos_provider_binding_error",
+        lambda *_args: "Embedding 配置无效：API 地址必须是有效的 HTTP(S) URL",
+    )
+
+    input_args = crud._apply_memory_defaults(
+        None,
+        {},
+        current_user=_User(),
+        project_id=uuid.uuid4(),
+    )
+
+    assert input_args["memory"]["type"] == "local_yaml"
 
 
 def test_apply_mindmemos_runtime_config_overrides_task_memory_when_enabled(
