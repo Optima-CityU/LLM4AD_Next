@@ -184,6 +184,29 @@ def test_fetch_plausible_summary_requires_site_id(monkeypatch):
     assert "site_id is not configured" in summary["message"]
 
 
+def test_merge_plausible_trend_includes_today_and_backfills_missing_days():
+    historical = {
+        "meta": {"time_labels": ["2026-07-18", "2026-07-19"]},
+        "results": [{"dimensions": ["2026-07-19"], "metrics": [3, 5]}],
+    }
+    today = {
+        "meta": {"time_labels": ["2026-07-20"]},
+        "results": [{"dimensions": ["2026-07-20"], "metrics": [2, 4]}],
+    }
+
+    trend = admin_analytics_service._merge_plausible_trend(  # noqa: SLF001
+        historical,
+        today,
+        days=3,
+    )
+
+    assert trend == [
+        {"date": "2026-07-18", "visitors": 0, "pageviews": 0},
+        {"date": "2026-07-19", "visitors": 3, "pageviews": 5},
+        {"date": "2026-07-20", "visitors": 2, "pageviews": 4},
+    ]
+
+
 def test_fetch_plausible_summary_uses_official_api_configuration(monkeypatch):
     calls: list[tuple[str, dict, dict]] = []
 

@@ -419,9 +419,22 @@ def fetch_plausible_summary(date_range: str) -> dict[str, Any]:
             "metrics": ["visitors", "pageviews"],
             "date_range": normalized_range,
             "dimensions": ["time:day"],
+            "include": {"time_labels": True},
         },
         errors,
         "trend",
+    )
+    current_day_timeseries = _safe_plausible_query(
+        api_base_url,
+        {
+            "site_id": site_id,
+            "metrics": ["visitors", "pageviews"],
+            "date_range": "day",
+            "dimensions": ["time:day"],
+            "include": {"time_labels": True},
+        },
+        errors,
+        "trend_today",
     )
     pages = _plausible_breakdown(api_base_url, site_id, normalized_range, ["event:page"], errors, "top_pages")
     sources = _plausible_breakdown(api_base_url, site_id, normalized_range, ["visit:source"], errors, "top_sources")
@@ -449,7 +462,18 @@ def fetch_plausible_summary(date_range: str) -> dict[str, Any]:
         api_base_url, site_id, normalized_range, ["visit:os"], errors, "operating_systems"
     )
 
-    has_data = bool(aggregate or timeseries or pages or sources or countries or cities or devices or browsers or operating_systems)
+    has_data = bool(
+        aggregate
+        or timeseries
+        or current_day_timeseries
+        or pages
+        or sources
+        or countries
+        or cities
+        or devices
+        or browsers
+        or operating_systems
+    )
 
     summary = {
         "available": has_data,
@@ -460,7 +484,11 @@ def fetch_plausible_summary(date_range: str) -> dict[str, Any]:
             aggregate or {},
             ["visitors", "visits", "pageviews", "views_per_visit", "bounce_rate", "visit_duration"],
         ),
-        "trend": _extract_plausible_series(timeseries or {}),
+        "trend": _merge_plausible_trend(
+            timeseries or {},
+            current_day_timeseries or {},
+            days=_plausible_range_days(normalized_range),
+        ),
         "top_pages": pages,
         "top_sources": sources,
         "countries": countries,
@@ -583,18 +611,50 @@ def _extract_plausible_metrics(payload: dict[str, Any], metric_names: list[str])
 
 def _extract_plausible_series(payload: dict[str, Any]) -> list[dict[str, Any]]:
     results = payload.get("results") if isinstance(payload, dict) else []
-    series = []
+    by_date: dict[str, dict[str, Any]] = {}
     for row in results or []:
         dimensions = row.get("dimensions") or []
         metrics = row.get("metrics") or []
-        series.append(
-            {
-                "date": dimensions[0] if dimensions else "",
-                "visitors": metrics[0] if len(metrics) > 0 else 0,
-                "pageviews": metrics[1] if len(metrics) > 1 else 0,
-            }
-        )
-    return series
+        date = str(dimensions[0]) if dimensions else ""
+        if not date:
+            continue
+        by_date[date] = {
+            "date": date,
+            "visitors": metrics[0] if len(metrics) > 0 else 0,
+            "pageviews": metrics[1] if len(metrics) > 1 else 0,
+        }
+
+    metadata = payload.get("meta") if isinstance(payload, dict) else None
+    time_labels = metadata.get("time_labels") if isinstance(metadata, dict) else None
+    if isinstance(time_labels, list):
+        return [
+            by_date.get(str(label), {"date": str(label), "visitors": 0, "pageviews": 0})
+            for label in time_labels
+            if str(label)
+        ]
+    return list(by_date.values())
+
+
+def _merge_plausible_trend(
+    historical: dict[str, Any],
+    current_day: dict[str, Any],
+    *,
+    days: int,
+) -> list[dict[str, Any]]:
+    """Merge the current day into a complete-day trend and retain its configured length."""
+    merged = {
+        item["date"]: item
+        for item in [*_extract_plausible_series(historical), *_extract_plausible_series(current_day)]
+    }
+    trend = [merged[date] for date in sorted(merged)]
+    return trend[-days:] if days > 0 else trend
+
+
+def _plausible_range_days(date_range: str) -> int:
+    """Return the number of daily buckets represented by a relative day range."""
+    if date_range.endswith("d") and date_range[:-1].isdigit():
+        return int(date_range[:-1])
+    return 0
 
 
 def _rows_to_count_map(rows: list[Any]) -> dict[str, int]:
