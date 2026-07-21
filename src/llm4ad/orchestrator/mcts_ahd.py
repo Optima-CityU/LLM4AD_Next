@@ -505,24 +505,28 @@ class MCTSAHDOrchestrator(BaseOrchestrator):
             self._eval_failures += 1
             return
         result: EvaluationResult = results[0]
+
+        if not result.success:
+            # Leave the algorithm unevaluated so no placeholder score is
+            # written; it is excluded from selection via is_evaluated().
+            self._eval_failures += 1
+            logger.warning(
+                f"[MCTS-AHD] Evaluation failed for {algorithm.id}: {result.error_message}"
+            )
+            return
+
         algorithm.set_evaluation_result(
             score=result.score,
             metrics=dict(result.metrics),
-            error=result.error_message if not result.success else None,
+            error=None,
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(evaluation_total_ms=result.duration_ms),
         )
         algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
-        if algorithm.is_evaluated():
-            self._eval_successes += 1
-            if self.state_tracker.generated_dir:
-                algorithm.write(
-                    self.state_tracker.generated_dir, "evaluation", island_id=None, generation=algorithm.generation
-                )
-        else:
-            self._eval_failures += 1
-            logger.warning(
-                f"[MCTS-AHD] Evaluation failed for {algorithm.id}: {result.error_message} (score={result.score})"
+        self._eval_successes += 1
+        if self.state_tracker.generated_dir:
+            algorithm.write(
+                self.state_tracker.generated_dir, "evaluation", island_id=None, generation=algorithm.generation
             )
 
     # ------------------------------------------------------------------ #

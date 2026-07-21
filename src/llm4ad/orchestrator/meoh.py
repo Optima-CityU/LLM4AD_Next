@@ -572,18 +572,23 @@ class MEoHOrchestrator(BaseOrchestrator):
             raise RuntimeError("MEoH evaluation failed with no results")
         result: EvaluationResult = results[0]
 
-        if result.success:
-            # Only synthesize candidate_runtime_ms for successful evaluations.
-            metrics = dict(result.metrics)
-            if "candidate_runtime_ms" not in metrics:
-                metrics["candidate_runtime_ms"] = metrics.get("execution_time_ms", result.duration_ms)
-        else:
-            metrics = dict(result.metrics)
+        if not result.success:
+            # Leave the algorithm unevaluated so no placeholder score is
+            # written; it is excluded from selection via is_evaluated().
+            logger.warning(
+                f"Evaluation failed for algorithm {algorithm.id}: {result.error_message}"
+            )
+            return algorithm
+
+        # Only synthesize candidate_runtime_ms for successful evaluations.
+        metrics = dict(result.metrics)
+        if "candidate_runtime_ms" not in metrics:
+            metrics["candidate_runtime_ms"] = metrics.get("execution_time_ms", result.duration_ms)
 
         algorithm.set_evaluation_result(
             score=result.score,
             metrics=metrics,
-            error=result.error_message if not result.success else None,
+            error=None,
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(
                 evaluation_total_ms=result.duration_ms,
@@ -591,26 +596,35 @@ class MEoHOrchestrator(BaseOrchestrator):
             ),
         )
         algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
-        if not result.success:
-            logger.warning(
-                f"Evaluation for algorithm {algorithm.id} partially failed: "
-                f"{result.error_message} (score={result.score})"
-            )
         return algorithm
 
     def _apply_eval_result(self, algorithm: Algorithm, result: EvaluationResult) -> None:
-        """Apply an evaluation result to an algorithm and update counters."""
-        if result.success:
-            metrics = dict(result.metrics)
-            if "candidate_runtime_ms" not in metrics:
-                metrics["candidate_runtime_ms"] = metrics.get("execution_time_ms", result.duration_ms)
-        else:
-            metrics = dict(result.metrics)
+        """Apply an evaluation result to an algorithm and update counters.
+
+        On failure the algorithm is left unevaluated (``evaluation`` stays
+        ``None``) instead of recording a placeholder ``0.0`` score, matching
+        the IslandGA behaviour. Failed candidates are excluded from selection
+        and Pareto ranking via ``is_evaluated()``.
+
+        Args:
+            algorithm: Algorithm to update.
+            result: Dispatcher evaluation result.
+        """
+        if not result.success:
+            self._eval_failures += 1
+            logger.warning(
+                f"Evaluation failed for algorithm {algorithm.id}: {result.error_message}"
+            )
+            return
+
+        metrics = dict(result.metrics)
+        if "candidate_runtime_ms" not in metrics:
+            metrics["candidate_runtime_ms"] = metrics.get("execution_time_ms", result.duration_ms)
 
         algorithm.set_evaluation_result(
             score=result.score,
             metrics=metrics,
-            error=result.error_message if not result.success else None,
+            error=None,
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(
                 evaluation_total_ms=result.duration_ms,
@@ -618,18 +632,8 @@ class MEoHOrchestrator(BaseOrchestrator):
             ),
         )
         algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
-
-        if algorithm.is_evaluated():
-            self._eval_successes += 1
-            self._update_per_objective_best(algorithm)
-        else:
-            self._eval_failures += 1
-
-        if not result.success:
-            logger.warning(
-                f"Evaluation for algorithm {algorithm.id} partially failed: "
-                f"{result.error_message} (score={result.score})"
-            )
+        self._eval_successes += 1
+        self._update_per_objective_best(algorithm)
 
     async def _batch_evaluate(self, algorithms: list[Algorithm]) -> list[Algorithm]:
         """Batch-evaluate algorithms via a single dispatch_batch() call.
@@ -652,7 +656,7 @@ class MEoHOrchestrator(BaseOrchestrator):
 
         for alg, result in zip(to_evaluate, results, strict=True):
             self._apply_eval_result(alg, result)
-            if self.state_tracker.generated_dir:
+            if result.success and self.state_tracker.generated_dir:
                 alg.write(self.state_tracker.generated_dir, "evaluation", island_id=None, generation=alg.generation)
 
         logger.info(
