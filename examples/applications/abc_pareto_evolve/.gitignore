@@ -1,0 +1,15 @@
+# ABC binary (166MB, exceeds GitHub's 100MB limit — provide it locally, see README.md).
+abc/abc
+
+# Run artifacts — never commit.
+runs_pareto/
+synthesis_pareto/abc_pareto_tmp/
+abc_pareto_cache/
+*.log
+*.history
+__pycache__/
+*.pyc
+
+# Per-run generated worktrees / temp
+**/temp/
+**/generated/
