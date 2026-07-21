@@ -41,7 +41,7 @@ from llm4ad.orchestrator.base import BaseOrchestrator, EvolutionCheckpoint, Evol
 from llm4ad.orchestrator.embedding_client import EmbeddingClient
 from llm4ad.orchestrator.embedding_utils import save_algorithm_embeddings
 from llm4ad.planner.base import Algorithm, BasePlanner
-from llm4ad.planner.meoh_evolution import MEoHEvolutionPlanner
+from llm4ad.planner.eoh_evolution import EoHEvolutionPlanner
 
 
 class EoHPopulation:
@@ -203,7 +203,7 @@ class EoHOrchestrator(BaseOrchestrator):
         """Initialize the EoH orchestrator.
 
         Args:
-            planner: Must be a ``MEoHEvolutionPlanner`` (operator dispatch).
+            planner: Must be an ``EoHEvolutionPlanner`` (operator dispatch).
             coder: Coder used by the planner's ``implement``.
             dispatcher: Evaluation dispatcher.
             monitor: Progress monitor.
@@ -214,9 +214,9 @@ class EoHOrchestrator(BaseOrchestrator):
             embedding_client: Optional embedding client for insight vectors.
         """
         super().__init__(planner, coder, dispatcher, monitor, config, state_tracker, background, embedding_client)
-        if not isinstance(planner, MEoHEvolutionPlanner):
-            raise TypeError("EoHOrchestrator requires a MEoHEvolutionPlanner (operator dispatch)")
-        self.planner: MEoHEvolutionPlanner = planner
+        if not isinstance(planner, EoHEvolutionPlanner):
+            raise TypeError("EoHOrchestrator requires an EoHEvolutionPlanner (operator dispatch)")
+        self.planner: EoHEvolutionPlanner = planner
         self.config: EoHConfig = config
         self.version_control = version_control
         self.eoh_population = EoHPopulation(pop_size=config.pop_size)

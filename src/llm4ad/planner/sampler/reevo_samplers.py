@@ -9,7 +9,7 @@ search with LLM reflection:
   (plus the prior long-term reflection) into constructive guidance that
   drives elite mutation.
 
-These samplers reuse ``_BaseMEoHSampler._generate_unified`` for the final
+These samplers reuse ``BaseUnifiedSampler._generate_unified`` for the final
 thought+code generation, and add an extra reflection LLM call where needed.
 The orchestrator threads the reflection state through ``kwargs``.
 """
@@ -23,12 +23,12 @@ from llm4ad.infra.repo_analyzer.base import AnalyzedRepository
 from llm4ad.planner.base import Algorithm, InsightType
 from llm4ad.planner.memory import Memory
 from llm4ad.planner.sampler.base import BaseSampler
-from llm4ad.planner.sampler.meoh_init_sampler import _BaseMEoHSampler
-from llm4ad.planner.sampler.meoh_prompt_templates import (
+from llm4ad.planner.sampler.unified_prompt_utils import (
     _UNIFIED_JSON_SUFFIX,
     format_block_context,
     format_parent_context,
 )
+from llm4ad.planner.sampler.unified_sampler_base import BaseUnifiedSampler
 
 _SYSTEM_HINT = (
     "You are an expert in the domain of optimization heuristics. "
@@ -163,7 +163,7 @@ def build_reevo_mutation_prompt(
     )
 
 
-class _BaseReEvoSampler(_BaseMEoHSampler):
+class _BaseReEvoSampler(BaseUnifiedSampler):
     """Shared helper: adds a plain-text reflection LLM call."""
 
     async def _reflect(self, prompt: str) -> str:

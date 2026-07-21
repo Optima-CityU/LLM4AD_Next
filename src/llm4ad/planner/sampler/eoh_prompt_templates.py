@@ -1,8 +1,13 @@
-"""Prompt templates for the MEoH planner samplers.
+"""Prompt templates for the EoH planner samplers.
 
-MEoH owns its I1/E1/E2/M1/M2 unified (thought + code) prompts plus the
-direct-code prompt used by ``MEoHEvolutionPlanner.generate_direct_code``.
-Neutral formatting helpers are imported from ``unified_prompt_utils``.
+EoH owns its own copy of the I1/E1/E2/M1/M2 unified (thought + code) prompts.
+The text starts out equivalent to MEoH's but is independent so the two
+methods can evolve separately. Neutral formatting helpers are imported from
+``unified_prompt_utils``.
+
+Reference:
+    Fei Liu et al. "Evolution of Heuristics: Towards Efficient Automatic
+    Algorithm Design Using Large Language Model." ICML 2024.
 """
 
 from __future__ import annotations
@@ -14,26 +19,6 @@ from llm4ad.planner.sampler.unified_prompt_utils import (
     format_block_context,
     format_parent_context,
 )
-
-
-def build_direct_code_prompt(background: str, block: EvolveBlock | None, algorithm: Algorithm) -> str:
-    """Build a prompt for direct EVOLVE block code generation."""
-    block_context = format_block_context(block)
-    language = block.language if block is not None else "python"
-    return (
-        "You are implementing an evolved algorithm directly inside an EVOLVE block.\n"
-        f"Task background:\n{background}\n\n"
-        f"Repository context:\n{block_context}\n\n"
-        f"Algorithm name: {algorithm.name}\n"
-        f"Algorithm description:\n{algorithm.description}\n\n"
-        "Return only the replacement code that should appear between EVOLVE START and EVOLVE END. "
-        f"Do not include markdown fences. The language is {language}."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Unified prompt builders — produce thought + code in one LLM call
-# ---------------------------------------------------------------------------
 
 
 def build_i1_unified_prompt(background: str, block: EvolveBlock | None) -> str:

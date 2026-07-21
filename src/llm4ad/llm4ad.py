@@ -351,9 +351,10 @@ class LLM4AD:
         # Use planner_type from evolution config if available (e.g. MEoH),
         # otherwise fall back to planner config's type.
         planner_type = getattr(self.config.evolution, "planner_type", None) or self.config.planner.type
-        # MEoH planner expects a plain dict config; keep PlannerConfig for others.
+        # The operator-dispatch planners (MEoH/EoH/ReEvo/MCTS-AHD) expect a
+        # plain dict config; the default LLMEvolutionPlanner keeps PlannerConfig.
         planner_config: Any = self.config.planner
-        if planner_type == "meoh_evolution":
+        if planner_type in ("meoh_evolution", "eoh_evolution", "reevo_evolution", "mcts_ahd_evolution"):
             planner_config = self.config.planner.model_dump()
         else:
             # Inject multimodal config into each sampler for MLES support
