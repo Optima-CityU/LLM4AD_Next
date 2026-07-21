@@ -1,15 +1,15 @@
 # Long-term Memory
 
-Long-term memory is optional. When creating a task, you can choose no memory, temporary memory, or long-term memory after the service is ready.
+LLM4AD uses MindMemOS to provide searchable long-term memory. It is optional: when creating a task, choose no memory, temporary memory, or long-term memory after the service and models are ready.
 
-## Before You Start: Bind Memory Models
+## Configure and Bind Memory Models
 
-Open **Global Memory**, then bind the following in **Default Strategy**:
+In the Web UI, open **Global Memory** → **Default Strategy**, then select and bind:
 
-1. A Chat model, which extracts structured memories from content and task activity.
-2. An Embedding model, which converts memories into searchable vectors.
+1. A **Chat model** to extract structured memories from task activity and manually entered content.
+2. An **Embedding model** to convert memories into vectors for retrieval.
 
-The first Embedding binding locks its model and dimension. If MindMemOS is unavailable, check the deployment environment first; model binding cannot work until the service is ready.
+Before binding, make sure MindMemOS is enabled in the deployment. The first Embedding binding locks the model and dimension. Contact the deployment administrator if that memory space needs to use a different embedding model.
 
 ## Three Memory Scopes
 
@@ -19,23 +19,26 @@ Global memory belongs to the current user and can be reused across projects. Use
 
 ### Project Memory
 
-Project memory belongs only to the current project and can be reused by its tasks. Use it for project context, domain knowledge, evaluation preferences, and validated conclusions.
+Project memory is available only within the current project and can be reused by its tasks. Use it for project context, domain knowledge, evaluation preferences, and validated conclusions.
 
 ### Task Memory
 
-Task memory serves the current task's process and results. Temporary memory exists only for the current run; with long-term memory enabled, task-scoped memory can participate in later injection according to task configuration.
+Task memory records the current task's process and results. Select valuable task cards, generate a summary preview, and confirm it to promote the result into project memory; promotion is never automatic.
 
-Valuable task conclusions are not automatically made project memory. Select task cards, generate a summary preview, and confirm it to promote the result into project memory.
-
-## Choose a Task Mode
+## Use Memory in a Task
 
 - **No memory**: no memory is injected into the task.
-- **Temporary memory**: the default mode; keeps only this run's task memory and does not persist it long term.
-- **Long-term memory**: can use global, project, and task memory scopes. It is available only after the service and model binding are ready.
+- **Temporary memory**: the default mode; it serves only the current run and is not stored as long-term memory.
+- **Long-term memory**: can use global, project, and task scopes after the service and model binding are ready.
 
-Long-term memory has two ways to obtain shared memory:
+Long-term memory supports two ways to obtain shared memory:
 
-- **Automatic retrieval** recalls relevant global and project memory according to the task configuration.
-- **Manual selection** injects only the global/project memory cards you check, without automatically retrieving shared memory.
+- **Automatic retrieval** recalls relevant global and project memory for the current task.
+- **Manual selection** injects only the global or project memory cards you select, without automatic retrieval.
 
-Pinned memory controls only global and project scopes. Task memory still follows its task injection strategy. Disabled memory cards never participate in injection or manual selection.
+## Notes
+
+- Model binding is per user. Each user must bind models before first use.
+- Manual selection controls only global and project memory; task memory still follows the task configuration.
+- Disabled memory cards are excluded from automatic retrieval, manual selection, and task injection.
+- If MindMemOS is unavailable or models are not bound, long-term memory cannot be used normally. Check the service status and binding configuration first.
