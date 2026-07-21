@@ -981,8 +981,8 @@ async def test_mindmemos_raw_extractor_keeps_old_thresholds_without_llm_extracti
 
 
 @pytest.mark.asyncio
-async def test_mindmemos_raw_extractor_keeps_old_bad_and_failure_prompt_semantics():
-    """Bad and failed observations should preserve old avoidance-lesson intent."""
+async def test_mindmemos_raw_extractor_preserves_bad_and_distinguishes_execution_failure_prompts():
+    """Execution failures must not be interpreted as low or zero scores."""
     config = SimpleNamespace(
         type="mindmemos_raw_extractor",
         module=None,
@@ -1033,9 +1033,12 @@ async def test_mindmemos_raw_extractor_keeps_old_bad_and_failure_prompt_semantic
     assert "what went wrong" in bad_card.content
     assert "pitfalls future algorithm designs should AVOID" in bad_card.content
     assert failure_card is not None
+    assert failure_card.metadata["extraction_event"] == "execution_failure"
     assert "IndexError: route index out of range" in failure_card.content
-    assert "performed POORLY or failed" in failure_card.content
-    assert "pitfalls future algorithm designs should AVOID" in failure_card.content
+    assert "Evaluation execution failed before a valid score was produced" in failure_card.content
+    assert "Do not infer that this algorithm scored zero or performed poorly" in failure_card.content
+    assert "Do not claim a score or comparative performance" in failure_card.content
+    assert "performed POORLY or failed" not in failure_card.content
 
 
 @pytest.mark.asyncio

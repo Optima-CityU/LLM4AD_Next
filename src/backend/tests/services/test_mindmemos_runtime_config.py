@@ -48,7 +48,7 @@ def test_apply_mindmemos_runtime_config_overrides_task_memory_when_enabled(
     assert memory["mindmemos_app_id"] == "llm4ad-test"
     assert memory["mindmemos_agent_id"] == "task"
     assert memory["mindmemos_fail_open"] is True
-    assert memory["mindmemos_request_timeout"] == 60.0
+    assert memory["mindmemos_request_timeout"] == 300.0
     assert memory["mindmemos_add_timeout"] == 120.0
     assert memory["mindmemos_extraction_prompt_language"] == "auto"
     assert memory["include_project_memory"] is False
