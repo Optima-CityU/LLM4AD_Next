@@ -563,15 +563,12 @@ class MindMemOSClient:
             scopes=["memory:write"],
         )
 
-    def delete_memory(self, *, memory_id: str, hard: bool = True) -> dict[str, Any]:
+    def delete_memory(self, *, memory_id: str) -> dict[str, Any]:
         """Delete memory.
 
         Matches backend's _remote_delete_card (memory_service.py:1319).
         """
-        payload = {
-            "memory_id": memory_id,
-            "hard": hard,
-        }
+        payload = {"memory_id": memory_id}
 
         return self._request(
             "POST",

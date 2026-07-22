@@ -98,7 +98,7 @@ def _fake_mindmemos(monkeypatch: pytest.MonkeyPatch):
             record["metadata"].update(payload.get("metadata_patch") or {})
             return {"code": "ok", "data": None}
         if path == "/v1/memory/delete":
-            assert payload["hard"] is True
+            assert payload == {"memory_id": payload["memory_id"]}
             store.pop(payload["memory_id"], None)
             return {"code": "ok", "data": None}
         raise AssertionError(f"unexpected path: {path}")
@@ -433,7 +433,7 @@ def test_project_memory_card_status_and_delete_are_project_scoped(
     )
 
     delete_payload = [payload for path, payload in calls if path == "/v1/memory/delete"][-1]
-    assert delete_payload == {"memory_id": card.id, "hard": True}
+    assert delete_payload == {"memory_id": card.id}
     assert card.id not in store
 
 
@@ -653,32 +653,11 @@ def test_memory_health_reports_missing_system_config(db: Session, monkeypatch):
     assert client.requests == []
 
 
-def test_memory_health_reports_invalid_api_key(db: Session, monkeypatch):
-    user = create_random_user(db)
+def test_memory_health_uses_liveness_probe_only(monkeypatch):
+    user = SimpleNamespace(id=uuid.uuid4())
     _enable_system_mindmemos(monkeypatch)
     monkeypatch.setattr(memory_service.settings, "LLM4AD_MINDMEMOS_BASE_URL", "http://mindmemos-api:8000")
-    client = _FakeHttpClient([
-        _response(200, {"status": "ok"}),
-        _response(401, {"code": "auth.invalid_api_key", "message": "invalid api key"}),
-    ])
-
-    result = memory_service.get_mindmemos_health(user, http_client_factory=lambda **_: client)
-
-    assert result.ok is False
-    assert result.service_reachable is True
-    assert result.auth_ok is False
-    assert result.error_code == "auth.invalid_api_key"
-    assert "invalid api key" in result.message
-
-
-def test_memory_health_reports_ready_service(db: Session, monkeypatch):
-    user = create_random_user(db)
-    _enable_system_mindmemos(monkeypatch)
-    monkeypatch.setattr(memory_service.settings, "LLM4AD_MINDMEMOS_BASE_URL", "http://mindmemos-api:8000")
-    client = _FakeHttpClient([
-        _response(200, {"status": "ok"}),
-        _response(200, {"code": "ok", "data": {"memories": []}}),
-    ])
+    client = _FakeHttpClient([_response(200, {"status": "ok"})])
 
     result = memory_service.get_mindmemos_health(user, http_client_factory=lambda **_: client)
 
@@ -686,4 +665,4 @@ def test_memory_health_reports_ready_service(db: Session, monkeypatch):
     assert result.service_reachable is True
     assert result.auth_ok is True
     assert result.message == "MindMemOS service is ready."
-    assert client.requests[1][2]["headers"]["Authorization"].startswith("Bearer ")
+    assert client.requests == [("GET", "http://mindmemos-api:8000/healthz", None)]

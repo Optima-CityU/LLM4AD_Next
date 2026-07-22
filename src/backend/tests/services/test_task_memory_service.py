@@ -155,7 +155,7 @@ def _fake_mindmemos(
             metadata_by_id.setdefault(payload["memory_id"], {}).update(payload.get("metadata_patch") or {})
             return {"code": "ok", "data": None}
         if path == "/v1/memory/delete":
-            assert payload["hard"] is True
+            assert payload == {"memory_id": payload["memory_id"]}
             store.pop(payload["memory_id"], None)
             statuses.pop(payload["memory_id"], None)
             metadata_by_id.pop(payload["memory_id"], None)
@@ -2180,8 +2180,8 @@ def test_memory_card_extraction_discard_hard_deletes_preview_memories(
 
     assert _store == {}
     assert [payload for path, payload in calls if path == "/v1/memory/delete"] == [
-        {"memory_id": "preview-card-a", "hard": True},
-        {"memory_id": "preview-card-b", "hard": True},
+        {"memory_id": "preview-card-a"},
+        {"memory_id": "preview-card-b"},
     ]
 
 

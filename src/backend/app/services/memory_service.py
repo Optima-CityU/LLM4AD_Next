@@ -255,7 +255,9 @@ def _raise_for_mindmemos_error(response: httpx.Response) -> None:
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        _code, detail = _parse_mindmemos_error_response(exc.response)
+        code, detail = _parse_mindmemos_error_response(exc.response)
+        if exc.response.status_code == 404 and code == "memory.not_found":
+            raise HTTPException(status_code=404, detail=detail) from exc
         raise HTTPException(status_code=502, detail=detail) from exc
 
 
@@ -462,17 +464,6 @@ def get_mindmemos_health(
         )
 
     base_url = settings.LLM4AD_MINDMEMOS_BASE_URL.rstrip("/")
-    probe_payload = {
-        "filters": {
-            "AND": [
-                {"user_id": str(current_user.id)},
-                {"app_id": settings.LLM4AD_MINDMEMOS_APP_ID},
-                {"agent_id": settings.LLM4AD_MINDMEMOS_AGENT_ID},
-                {"session_id": "global"},
-            ]
-        },
-        "top_k": 1,
-    }
     try:
         with http_client_factory(timeout=10.0) as client:
             health_response = client.get(f"{base_url}/healthz")
@@ -488,24 +479,6 @@ def get_mindmemos_health(
                     **system_fields,
                 )
 
-            auth_response = client.post(
-                f"{base_url}/v1/memory/get",
-                headers=_mindmemos_headers(current_user, scopes=["memory:read"]),
-                json=probe_payload,
-            )
-            if auth_response.status_code >= 400:
-                code, message = _parse_mindmemos_error_response(auth_response)
-                return MemoryHealthResponse(
-                    ok=False,
-                    message=message,
-                    service_reachable=True,
-                    auth_ok=False,
-                    error_code=code or "auth.failed",
-                    details={"status_code": auth_response.status_code},
-                    **system_fields,
-                )
-
-            data = auth_response.json()
     except Exception as exc:  # noqa: BLE001
         return MemoryHealthResponse(
             ok=False,
@@ -514,18 +487,6 @@ def get_mindmemos_health(
             auth_ok=False,
             error_code="health.unreachable",
             details={},
-            **system_fields,
-        )
-
-    if data.get("code") not in (None, "ok", "queued"):
-        message = str(data.get("message") or "MindMemOS request failed")
-        return MemoryHealthResponse(
-            ok=False,
-            message=message,
-            service_reachable=True,
-            auth_ok=True,
-            error_code=str(data.get("code") or "mindmemos.error"),
-            details={"response": data},
             **system_fields,
         )
 
@@ -1393,7 +1354,7 @@ def _remote_delete_card(current_user: models.User, memory_id: str) -> None:
     _mindmemos_post(
         current_user,
         "/v1/memory/delete",
-        {"memory_id": memory_id, "hard": True},
+        {"memory_id": memory_id},
         scopes=["memory:write"],
     )
 
