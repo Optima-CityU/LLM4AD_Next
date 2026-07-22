@@ -58,6 +58,7 @@ async def _call_llm_and_build_algorithm(
         provider: LLM provider.
         prompt: Formatted prompt string.
         temperature: Sampling temperature.
+        operation_params: Optional operator-specific metadata.
         max_tokens: Maximum tokens.
         insight_type: Insight type for the algorithm.
         operator_name: Name of the sampler operator.

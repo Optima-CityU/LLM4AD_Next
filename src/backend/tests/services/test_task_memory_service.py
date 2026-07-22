@@ -86,7 +86,7 @@ def _fake_mindmemos(
     initial_metadata: dict[str, dict] | None = None,
 ):
     store = dict(initial or {})
-    statuses = {memory_id: "active" for memory_id in store}
+    statuses = dict.fromkeys(store, "active")
     metadata_by_id: dict[str, dict] = {
         memory_id: dict((initial_metadata or {}).get(memory_id) or {})
         for memory_id in store
@@ -94,7 +94,7 @@ def _fake_mindmemos(
     calls: list[tuple[str, dict]] = []
     counter = 0
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         nonlocal counter
         calls.append((path, payload))
         if path == "/v1/memory/list":
@@ -346,7 +346,7 @@ def test_task_memory_scope_uses_root_task_for_child_versions(
     _mark_user_memory_bound(db, user.id)
     calls: list[dict] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         assert path == "/v1/memory/list"
         calls.append(payload)
         return {
@@ -613,7 +613,7 @@ def test_remote_list_merges_schema_tags_without_rendering_tag_rows(monkeypatch: 
     user = models.User(id=uuid.uuid4(), email="tags@example.com", hashed_password="x")
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         assert path == "/v1/memory/list"
         return {
@@ -693,7 +693,7 @@ async def test_stream_extract_memory_cards_emits_progress_and_completed_cards(
     user = create_random_user(db)
     progress_payloads: list[dict] = []
 
-    async def fake_stream(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    async def fake_stream(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         assert path == "/v1/memory/add/stream"
         assert payload["messages"][0]["content"] == "Use 2-opt after nearest-neighbor construction."
         progress_payloads.append(payload)
@@ -772,7 +772,7 @@ async def test_stream_extract_memory_cards_reports_empty_completion_message(
 ):
     user = create_random_user(db)
 
-    async def fake_stream(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    async def fake_stream(_current_user, path: str, _payload: dict, *, _scopes: list[str]):
         assert path == "/v1/memory/add/stream"
         yield {
             "event": "completed",
@@ -954,7 +954,7 @@ async def test_stream_promote_task_memory_cards_rejects_missing_task_scope_card(
 def test_remote_list_groups_llm4ad_schema_properties_into_lightweight_cards(monkeypatch: pytest.MonkeyPatch):
     user = models.User(id=uuid.uuid4(), email="schema-card@example.com", hashed_password="x")
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, _payload: dict, *, _scopes: list[str]):
         assert path == "/v1/memory/list"
         return {
             "code": "ok",
@@ -1027,7 +1027,7 @@ def test_remote_list_uses_renderable_card_count_when_raw_rows_do_not_form_cards(
 ):
     user = models.User(id=uuid.uuid4(), email="schema-empty@example.com", hashed_password="x")
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, _payload: dict, *, _scopes: list[str]):
         assert path == "/v1/memory/list"
         return {
             "code": "ok",
@@ -1067,7 +1067,7 @@ def test_remote_list_merges_schema_tags_by_entity_name_metadata(monkeypatch: pyt
     user = models.User(id=uuid.uuid4(), email="entity-name-tags@example.com", hashed_password="x")
     calls: list[dict] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append(payload)
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
@@ -1151,7 +1151,7 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
     user = models.User(id=uuid.uuid4(), email="tag-filter@example.com", hashed_password="x")
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
@@ -1237,7 +1237,7 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
 def test_remote_list_cards_uses_remote_total_when_available(monkeypatch: pytest.MonkeyPatch):
     user = models.User(id=uuid.uuid4(), email="page-total@example.com", hashed_password="x")
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
             return {
@@ -1296,7 +1296,7 @@ def test_remote_list_cards_merges_entity_name_tags_metadata(monkeypatch: pytest.
     user = models.User(id=uuid.uuid4(), email="tag-filter-entity-name@example.com", hashed_password="x")
     calls: list[dict] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append(payload)
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
@@ -1664,7 +1664,7 @@ def test_memory_card_extraction_uses_related_memory_ids_from_schema_events(
     _mark_user_memory_bound(db, user.id)
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/add":
             return {
@@ -1747,7 +1747,7 @@ def test_memory_card_extraction_merges_related_schema_tags(
     _enable_system_mindmemos(monkeypatch)
     _mark_user_memory_bound(db, user.id)
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         if path == "/v1/memory/add":
             return {
                 "code": "ok",
@@ -1825,7 +1825,7 @@ def test_memory_card_extraction_merges_related_schema_tags_by_entity_name(
     _enable_system_mindmemos(monkeypatch)
     _mark_user_memory_bound(db, user.id)
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         if path == "/v1/memory/add":
             return {
                 "code": "ok",
@@ -1909,7 +1909,7 @@ def test_memory_card_extraction_keeps_502_when_add_times_out(
     _mark_user_memory_bound(db, user.id)
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/add":
             raise HTTPException(status_code=502, detail="MindMemOS request failed: timed out")
@@ -1941,7 +1941,7 @@ def test_memory_card_extraction_keeps_502_when_timeout_recovery_misses(
     _enable_system_mindmemos(monkeypatch)
     _mark_user_memory_bound(db, user.id)
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         if path == "/v1/memory/add":
             raise HTTPException(status_code=502, detail="MindMemOS request failed: timed out")
         if path == "/v1/memory/list":
@@ -2035,7 +2035,7 @@ def test_memory_card_extraction_commit_can_activate_disabled_generated_cards(
     calls: list[tuple[str, dict]] = []
     preview_id = "generation-test"
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/list":
             _assert_task_scope_filters(payload["filters"], user, task, ["keep-card"])
@@ -2103,7 +2103,7 @@ def test_memory_card_extraction_commit_activates_scope_cards_without_preview_gat
     _mark_user_memory_bound(db, user.id)
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/list":
             return {

@@ -22,6 +22,7 @@ from ._helpers import _MAX_STORAGE_BYTES, DEFAULT_TOP_FOLDER_NAME, _create_top_l
 from .auth import get_task_with_auth
 from .templates import _apply_template
 
+
 def _apply_memory_defaults(
     db: Session,
     input_args: dict,

@@ -124,10 +124,10 @@ def test_ensure_memory_provider_binding_recreates_missing_remote_binding(
 
     posts: list[dict] = []
 
-    def fake_get(current_user, path, *, scopes):
+    def fake_get(_current_user, _path, *, _scopes):
         return {"code": "ok", "data": {"items": []}}
 
-    def fake_post(current_user, path, payload, *, scopes):
+    def fake_post(_current_user, path, payload, *, scopes):
         posts.append({"path": path, "payload": payload, "scopes": scopes})
         return {"code": "ok", "data": {"binding_id": "pb_recreated"}}
 
@@ -166,7 +166,7 @@ def test_ensure_memory_provider_binding_refreshes_stale_router(
 
     patches: list[dict] = []
 
-    def fake_get(current_user, path, *, scopes):
+    def fake_get(_current_user, _path, *, _scopes):
         return {
             "code": "ok",
             "data": {
@@ -182,7 +182,7 @@ def test_ensure_memory_provider_binding_refreshes_stale_router(
             },
         }
 
-    def fake_patch(current_user, path, payload, *, scopes):
+    def fake_patch(_current_user, path, payload, *, scopes):
         patches.append({"path": path, "payload": payload, "scopes": scopes})
         return {"code": "ok", "data": {"binding_id": "pb_stale"}}
 
@@ -218,7 +218,7 @@ def test_ensure_memory_provider_binding_refreshes_changed_api_key(
 
     patches: list[dict] = []
 
-    def fake_get(current_user, path, *, scopes):
+    def fake_get(_current_user, _path, *, _scopes):
         expected = memory_service._memory_provider_routers(chat_provider, "qwen-plus", embedding_provider)  # noqa: SLF001
         stale = {
             router_name: {
@@ -234,7 +234,7 @@ def test_ensure_memory_provider_binding_refreshes_changed_api_key(
         }
         return {"code": "ok", "data": {"items": [{"binding_id": "pb_api_key", "routers": stale}]}}
 
-    def fake_patch(current_user, path, payload, *, scopes):
+    def fake_patch(_current_user, path, payload, *, scopes):
         patches.append({"path": path, "payload": payload, "scopes": scopes})
         return {"code": "ok", "data": {"binding_id": "pb_api_key"}}
 
@@ -258,7 +258,7 @@ def test_upsert_memory_provider_binding_allows_manual_chat_model_when_provider_m
     _enable_mindmemos(monkeypatch)
     calls: list[dict] = []
 
-    def fake_post(current_user, path, payload, *, scopes):
+    def fake_post(_current_user, path, payload, *, scopes):
         calls.append({"path": path, "payload": payload, "scopes": scopes})
         return {"code": "ok", "data": {"binding_id": "pb_manual"}}
 

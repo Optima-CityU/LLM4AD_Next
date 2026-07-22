@@ -10,8 +10,8 @@ from sqlmodel import Session, select
 
 from app import models
 from app.core.db import engine
-from app.schemas.memory import MemoryCardUpsertRequest, MemoryConfigUpdate
 from app.schemas import task as task_schemas
+from app.schemas.memory import MemoryCardUpsertRequest, MemoryConfigUpdate
 from app.services import memory_service, task_service
 from app.services.task_service import crud as task_crud
 from tests.utils.user import create_random_user
@@ -44,7 +44,7 @@ def _fake_mindmemos(monkeypatch: pytest.MonkeyPatch):
                 return False
         return True
 
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/list":
             filters = payload.get("filters") or {}

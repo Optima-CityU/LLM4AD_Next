@@ -1,7 +1,7 @@
 """Memory backend service helpers."""
 
-import asyncio
 import ast
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -24,10 +24,10 @@ from app.schemas.memory import (
     MemoryCardExtractionCommitRequest,
     MemoryCardExtractionRequest,
     MemoryCardExtractionResponse,
-    MemoryCardResponse,
-    MemoryCardReadonlyInfo,
-    MemoryCardUpsertRequest,
     MemoryCardPageResponse,
+    MemoryCardReadonlyInfo,
+    MemoryCardResponse,
+    MemoryCardUpsertRequest,
     MemoryConfigUpdate,
     MemoryHealthResponse,
     MemoryProviderBindingResponse,
@@ -368,7 +368,7 @@ async def _mindmemos_stream_post(
                     queue.get(),
                     timeout=MEMORY_STREAM_HEARTBEAT_SECONDS,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield {
                     "event": "heartbeat",
                     "stage": "waiting",
@@ -446,7 +446,7 @@ def _mindmemos_patch(
 
 
 def get_mindmemos_health(
-    current_user: models.User,
+    _current_user: models.User,
     http_client_factory: Callable[..., Any] = httpx.Client,
 ) -> MemoryHealthResponse:
     """Check whether the configured MindMemOS runtime is ready for card management."""
@@ -827,7 +827,7 @@ def _remote_list_cards(
         )
         tag_items = [
             item
-            for item in ((_memory_page_data(tag_data).get("memories") or []))
+            for item in (_memory_page_data(tag_data).get("memories") or [])
             if isinstance(item, dict)
         ]
         tag_cards_by_entity = {

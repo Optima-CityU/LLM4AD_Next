@@ -21,7 +21,6 @@ from llm4ad.planner.task_memory_selector import (
     create_task_memory_selector,
 )
 
-
 LLM4AD_MEMORY_ENTITY_TYPE = "llm4ad_memory_card"
 LLM4AD_MEMORY_CARD_PROPERTY_FILTER = {
     "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
@@ -226,11 +225,13 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
     """Select old extraction candidates but let MindMemOS do the actual extraction."""
 
     def __init__(self, provider: Any, config: Any):
+        """Initialize the extractor and its per-generation state."""
         super().__init__(provider, config)
         self._cards_this_gen = 0
         self._best_score = float("-inf")
 
     def reset_generation(self) -> None:
+        """Clear extraction candidates accumulated for the current generation."""
         self._cards_this_gen = 0
 
     def _budget_available(self) -> bool:
@@ -273,6 +274,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         generation: int,
         background: str = "",
     ) -> MemoryCard | None:
+        """Collect a strictly improved result as a potential good-algorithm memory."""
         if not _cfg_get(self.config, "enabled", True) or not _cfg_get(self.config, "extract_good", True):
             return None
         if not self._budget_available() or not algorithm.is_evaluated():
@@ -293,6 +295,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         generation: int,
         background: str = "",
     ) -> MemoryCard | None:
+        """Collect low-score feedback as a potential reflection memory."""
         if not _cfg_get(self.config, "enabled", True) or not _cfg_get(self.config, "extract_bad", True):
             return None
         if not self._budget_available() or not algorithm.is_evaluated():
@@ -311,6 +314,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         generation: int,
         background: str = "",
     ) -> MemoryCard | None:
+        """Collect an execution failure as a potential reflection memory."""
         if not _cfg_get(self.config, "enabled", True) or not _cfg_get(self.config, "extract_on_failure", True):
             return None
         if not self._budget_available():
@@ -505,9 +509,9 @@ class MindMemOSMemory(BaseMemory):
             try:
                 from mindmemos_sdk import MindMemOSClient
             except ImportError:
-                MindMemOSClient = _HttpMindMemOSClient
-
-            client_factory = MindMemOSClient
+                client_factory = _HttpMindMemOSClient
+            else:
+                client_factory = MindMemOSClient
         self.client = _create_client_with_timeout(
             client_factory,
             {
@@ -866,7 +870,7 @@ class MindMemOSMemory(BaseMemory):
                 completed[index] = run_search(job)
 
         scope_hits: dict[str, int] = {}
-        for index, job in enumerate(search_jobs):
+        for index, _job in enumerate(search_jobs):
             outcome = completed[index]
             scope = str(outcome["scope"])
             session_id = str(outcome["session_id"])
@@ -1580,7 +1584,7 @@ def _memory_id_from_add_result(result: Any) -> str | None:
 class _HttpMindMemOSMemoryResource:
     """Minimal HTTP client for MindMemOS public memory APIs."""
 
-    def __init__(self, parent: "_HttpMindMemOSClient") -> None:
+    def __init__(self, parent: _HttpMindMemOSClient) -> None:
         self._parent = parent
 
     def add(self, **kwargs: Any) -> Any:
