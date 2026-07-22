@@ -86,7 +86,7 @@ In `meoh`:
 That is:
 
 - new individuals enter `next_gen_population` first
-- once `next_gen_population` accumulates `pop_size` items
+- once `next_gen_population` accumulates `population_size` items
 - a `survival()` is triggered
 - then `generation += 1`
 
@@ -136,7 +136,7 @@ Their meanings:
 1. Merge `population + next_gen_population`.
 2. Update the Pareto non-dominated front using `objective_metrics`.
 3. Trim the active population using a CodeBLEU similarity penalty plus dominance.
-4. Keep `max(1, int(pop_size * active_population_ratio))` active individuals.
+4. Keep `max(1, int(population_size * active_population_ratio))` active individuals.
 5. Clear `next_gen_population`.
 6. `generation += 1`.
 
@@ -274,7 +274,7 @@ evolution:
   type: "meoh"
   planner_type: "meoh_evolution"
   max_generations: 5
-  pop_size: 8
+  population_size: 8
   selection_num: 2
   max_sample_nums: 32
   objective_metrics:
@@ -297,7 +297,7 @@ coder:
 
 `MEoHConfig` is defined in `src/llm4ad/config/evolution.py`. The most relevant fields:
 
-### `pop_size`
+### `population_size`
 
 - Threshold of accumulated new candidates before a survival event.
 - `survival()` triggers when `next_gen_population` reaches this size.

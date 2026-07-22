@@ -64,7 +64,7 @@ evolution:
   early_stop_patience: 5
   early_stop_threshold: 1e-6
 
-  pop_size: 2
+  population_size: 2
   selection_num: 2
   num_samplers: 1
 

@@ -366,7 +366,7 @@ class MCTSAHDOrchestrator(BaseOrchestrator):
                 continue
             seen.add(key)
             unique.append(a)
-        self.pool = unique[: self.config.pop_size]
+        self.pool = unique[: self.config.population_size]
 
     def _is_duplicate(self, algorithm: Algorithm) -> bool:
         """Check whether an algorithm duplicates one already in the pool.
@@ -549,7 +549,7 @@ class MCTSAHDOrchestrator(BaseOrchestrator):
             population=self.pool,
             best_individual=self._best_in_pool(),
             history=self.history,
-            metadata={"total_samples": self.total_samples, "pool_size": self.config.pop_size},
+            metadata={"total_samples": self.total_samples, "pool_size": self.config.population_size},
         )
         checkpoint_dir = getattr(self.config, "checkpoint_dir", None) or "."
         checkpoint_path = Path(path or (Path(checkpoint_dir) / f"mcts_ahd_{self._iteration}.json"))

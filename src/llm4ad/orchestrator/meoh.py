@@ -59,7 +59,7 @@ class MEoHOrchestrator(BaseOrchestrator):
             if name not in metric_directions:
                 metric_directions[name] = MetricType.MINIMIZE
         self.meoh_population = MEoHPopulation(
-            pop_size=config.pop_size,
+            pop_size=config.population_size,
             num_operators=len(self._enabled_operators()),
             objective_metrics=config.objective_metrics,
             metric_directions=metric_directions,
@@ -757,7 +757,7 @@ class MEoHOrchestrator(BaseOrchestrator):
         raw = json.loads(Path(seed_path).read_text(encoding="utf-8"))
         payload = raw if isinstance(raw, list) else raw.get("algorithms", [])
         algorithms = [Algorithm.model_validate(item) for item in payload]
-        self.meoh_population.population = algorithms[: self.config.pop_size]
+        self.meoh_population.population = algorithms[: self.config.population_size]
         self.meoh_population.elitist_archive = list(algorithms)
 
     def _enabled_operators(self) -> list[str]:

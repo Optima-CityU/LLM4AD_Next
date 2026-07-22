@@ -75,7 +75,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
         self.planner: ReEvoEvolutionPlanner = planner
         self.config: ReEvoConfig = config
         self.version_control = version_control
-        self.reevo_population = EoHPopulation(pop_size=config.pop_size)
+        self.reevo_population = EoHPopulation(pop_size=config.population_size)
         self._background = background or getattr(config, "background", "")
         self.total_samples = 0
 
@@ -168,7 +168,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
                 self.best_individual = self.reevo_population.best()
                 return self.population
 
-        init_target = self.config.pop_size
+        init_target = self.config.population_size
         max_init_samples = min(self.config.max_sample_nums, 2 * init_target)
         init_start = time.time()
 
@@ -212,7 +212,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
         generation = self.current_generation
 
         # --- 1. Crossover batch (each does short-term reflection internally) ---
-        n_crossover = max(1, self.config.pop_size)
+        n_crossover = max(1, self.config.population_size)
         tasks_info = []
         for _ in range(n_crossover):
             if self.total_samples + len(tasks_info) >= self.config.max_sample_nums:
@@ -248,7 +248,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
             )
 
         # --- 3. Elite mutation batch guided by long-term reflection ---
-        n_mutation = max(1, int(self.config.mutation_rate * self.config.pop_size))
+        n_mutation = max(1, int(self.config.mutation_rate * self.config.population_size))
         results = []
         for mutation_idx in range(n_mutation):
             if self.total_samples + mutation_idx >= self.config.max_sample_nums:
@@ -491,7 +491,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
         raw = json.loads(Path(seed_path).read_text(encoding="utf-8"))
         payload = raw if isinstance(raw, list) else raw.get("algorithms", [])
         algorithms = [Algorithm.model_validate(item) for item in payload]
-        self.reevo_population.population = algorithms[: self.config.pop_size]
+        self.reevo_population.population = algorithms[: self.config.population_size]
 
     def _log_generation_stats(self) -> None:
         """Record and log statistics for the current generation."""
