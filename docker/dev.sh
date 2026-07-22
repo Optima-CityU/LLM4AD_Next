@@ -84,7 +84,7 @@ run() {
 }
 
 LOCAL_COMPOSE=(-f compose.yml -f compose.override.yml --profile debug)
-FULL_COMPOSE=(-f compose.yml -f compose.deploy.debug.yml --profile debug)
+FULL_COMPOSE=(-f compose.yml -f compose.mindmemos.yml -f compose.mindmemos.debug.yml -f compose.deploy.debug.yml --profile debug)
 INFRA_SERVICES=(db redis rustfs adminer mailcatcher code_server_proxy task-runner)
 
 case "$COMMAND" in

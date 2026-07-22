@@ -19,10 +19,13 @@ jobs:
       BACKEND_IMAGE_NAME: ${{ vars.DOCKERHUB_BACKEND_IMAGE || 'backend' }}
       FRONTEND_IMAGE_NAME: ${{ vars.DOCKERHUB_FRONTEND_IMAGE || 'frontend' }}
       TASK_RUNNER_IMAGE_NAME: ${{ vars.DOCKERHUB_TASK_RUNNER_IMAGE || 'llm4ad-task-runner' }}
+      MINDMEMOS_IMAGE_NAME: ${{ vars.DOCKERHUB_MINDMEMOS_IMAGE || 'llm4ad-mindmemos' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Validate project version
         run: python scripts/project_version.py --check
@@ -98,6 +101,28 @@ jobs:
           labels: ${{ steps.task-runner-meta.outputs.labels }}
           cache-from: type=gha,scope=task-runner
           cache-to: type=gha,mode=max,scope=task-runner
+
+      - name: Extract MindMemOS metadata
+        id: mindmemos-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.MINDMEMOS_IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest
+
+      - name: Build and push MindMemOS image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/mindmemos/Dockerfile
+          push: true
+          build-args: |
+            UV_INDEX_URL=${{ vars.UV_INDEX_URL }}
+          tags: ${{ steps.mindmemos-meta.outputs.tags }}
+          labels: ${{ steps.mindmemos-meta.outputs.labels }}
+          cache-from: type=gha,scope=mindmemos
+          cache-to: type=gha,mode=max,scope=mindmemos
 
       - name: Extract frontend metadata
         id: frontend-meta

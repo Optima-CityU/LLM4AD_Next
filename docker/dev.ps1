@@ -95,7 +95,7 @@ function Invoke-Compose {
 }
 
 $LocalCompose = @("-f", "compose.yml", "-f", "compose.override.yml", "--profile", "debug")
-$FullCompose = @("-f", "compose.yml", "-f", "compose.deploy.debug.yml", "--profile", "debug")
+$FullCompose = @("-f", "compose.yml", "-f", "compose.mindmemos.yml", "-f", "compose.mindmemos.debug.yml", "-f", "compose.deploy.debug.yml", "--profile", "debug")
 $InfraServices = @("db", "redis", "rustfs", "adminer", "mailcatcher", "code_server_proxy", "task-runner")
 
 switch ($Command) {

@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 usage() {
   printf '%s\n' \
-    'Usage: TAG=v1.0.0 ./start.sh [start|stop|remove|upgrade] [--mirrors REGISTRY] [--debug] [--dry-run]' \
+    'Usage: TAG=v1.0.0 ./start.sh [start|stop|remove|upgrade] [--mirrors REGISTRY] [--with-mindmemos] [--debug] [--dry-run]' \
     '' \
     'Manage the image-based deployment.' \
     '' \
@@ -15,6 +15,7 @@ usage() {
     '' \
     'Options:' \
     '  --mirrors REGISTRY  Use a specific image registry namespace, for example docker.io/noah2012' \
+    '  --with-mindmemos   Include the optional MindMemOS memory services.' \
     '  --debug    Include compose.deploy.debug.yml and the debug profile.' \
     '  --dry-run  Print commands without running them.' \
     '  -h, --help Show this help.' \
@@ -29,6 +30,7 @@ usage() {
 
 COMMAND="start"
 DEBUG=0
+WITH_MINDMEMOS=0
 DRY_RUN=0
 MIRRORS=""
 while [[ $# -gt 0 ]]; do
@@ -39,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --debug)
       DEBUG=1
+      shift
+      ;;
+    --with-mindmemos)
+      WITH_MINDMEMOS=1
       shift
       ;;
     --dry-run)
@@ -89,8 +95,15 @@ SWR_REGISTRY="${SWR_REGISTRY%/}"
 export TAG
 export SWR_REGISTRY
 
-COMPOSE_ARGS=(-f compose.yml -f compose.swr.yml)
+COMPOSE_ARGS=(-f compose.yml)
+if [[ "$WITH_MINDMEMOS" -eq 1 ]]; then
+  COMPOSE_ARGS+=(-f compose.mindmemos.yml -f compose.mindmemos.swr.yml)
+fi
+COMPOSE_ARGS+=(-f compose.swr.yml)
 if [[ "$DEBUG" -eq 1 ]]; then
+  if [[ "$WITH_MINDMEMOS" -eq 1 ]]; then
+    COMPOSE_ARGS+=(-f compose.mindmemos.debug.yml)
+  fi
   COMPOSE_ARGS+=(-f compose.deploy.debug.yml --profile debug)
 fi
 

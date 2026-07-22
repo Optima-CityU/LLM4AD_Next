@@ -1,0 +1,6 @@
+# Use the published MindMemOS image when optional memory services are enabled.
+services:
+  mindmemos-api:
+    image: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_MINDMEMOS:-llm4ad-mindmemos}:${TAG-latest}"
+    pull_policy: always
+    build: !reset null
