@@ -188,7 +188,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    command: celery -A app.core.celery worker --loglevel=info --concurrency=8
+    command: celery -A app.core.celery worker --loglevel=info --concurrency=50
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
