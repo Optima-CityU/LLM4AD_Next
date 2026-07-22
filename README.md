@@ -31,6 +31,7 @@
 
 ## 🔥 News
 
+- 🔬 [2026.07][New Feature]: **Search methods migrated** — EoH, MEoH, ReEvo, and MCTS-AHD are now available as standalone orchestrators. See [Search Methods](#search-methods-automatic-heuristic-design).
 - 🧠 [2026.07][New Feature]: **[MindMemOS](https://github.com/dadastory/MindMemOS)-backed long-term memory** is now available, with global, project, and task memory scopes plus configurable Chat and Embedding model bindings. See the [Memory Guide](docs/en/guides/memory.md).
 - 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [https://llm4ad-next.cn/](https://llm4ad-next.cn/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
 - ✨ [2026.07][New Feature]: Introducing an **interactive problem-to-project workflow** that turns natural-language problem descriptions into runnable evolutionary algorithm search projects.
@@ -63,60 +64,21 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 
 Migration status of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform.
 
-| Method | Status |
-|--------|--------|
-| **EoH** | ✅ Available |
-| **MEoH** | ✅ Available |
-| **ReEvo** | ✅ Available |
-| **MCTS-AHD** | ✅ Available |
-| **FunSearch** | ⏳ Pending |
-| **HillClimb** | ⏳ Pending |
-| **LHNS** | ⏳ Pending |
-| **LLaMEA** | ⏳ Pending |
-| **MLES** | ⏳ Pending |
-| **MOEA/D** | ⏳ Pending |
-| **NSGA-II** | ⏳ Pending |
-| **PartEvo** | ⏳ Pending |
-| **RandSample** | ⏳ Pending |
+| Method | Status | Method | Status |
+|--------|--------|--------|--------|
+| **EoH** | ✅ Available | **FunSearch** | ⏳ Pending |
+| **MEoH** | ✅ Available | **HillClimb** | ⏳ Pending |
+| **ReEvo** | ✅ Available | **LHNS** | ⏳ Pending |
+| **MCTS-AHD** | ✅ Available | **LLaMEA** | ⏳ Pending |
+| | | **MLES** | ⏳ Pending |
+| | | **MOEA/D** | ⏳ Pending |
+| | | **NSGA-II** | ⏳ Pending |
+| | | **PartEvo** | ⏳ Pending |
+| | | **RandSample** | ⏳ Pending |
 
 ### Using the migrated methods
 
-Each method is a standalone orchestrator selected by `evolution.type`; its `planner_type` is set automatically, so no explicit `samplers` list is needed. See `examples/applications/cvrp_construct_python/comparison` for full runnable configs, then run `llm4ad run <config.yaml>`.
-
-**EoH** — single-objective Evolution of Heuristics (standalone orchestrator with rank-based survival; reuses the `meoh_evolution` planner and its I1/E1/E2/M1/M2 operator samplers):
-
-```yaml
-evolution:
-  type: "eoh"
-  population_size: 5
-  selection_num: 2
-  use_e2_operator: true
-  use_m1_operator: true
-  use_m2_operator: true
-```
-
-**ReEvo** — Reflective Evolution (standalone orchestrator with short-term reflection guiding crossover, long-term reflection guiding elite mutation):
-
-```yaml
-evolution:
-  type: "reevo"
-  population_size: 8
-  mutation_rate: 0.5
-  max_sample_nums: 100
-```
-
-**MCTS-AHD** — Monte Carlo Tree Search (standalone orchestrator with real UCT tree, i1 root init + e1 population init, weighted e2/m1/m2/s1 expansion operators, rank-based pool selection):
-
-```yaml
-evolution:
-  type: "mcts_ahd"
-  init_size: 4          # initial children under the root
-  population_size: 10          # active algorithm pool size
-  max_sample_nums: 100  # evaluation budget
-  alpha: 0.5            # UCT progressive-widening
-  lambda_0: 0.1         # UCT exploration constant
-  max_depth: 10         # maximum tree depth
-```
+Set `evolution.type` in your config and run `llm4ad run <config.yaml>`. See `examples/applications/cvrp_construct_python/comparison` for full examples.
 
 ## Quick Start
 
