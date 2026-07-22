@@ -13,6 +13,7 @@ import json
 import uuid
 from pathlib import Path
 
+from llm4ad.memory.pinned_memory import current_or_configured_pinned_ids, normalize_pinned_ids
 from sqlmodel import Session
 
 from app import models
@@ -41,45 +42,6 @@ def _pinned_memory_path(task: models.Task, current_user: models.User) -> Path:
     return base.joinpath(*_RUN_MEMORY_SUBPATH, PINNED_MEMORY_FILENAME)
 
 
-def _normalize_pinned_ids(raw: object) -> list[str]:
-    """Normalize a JSON/API pinned-id list without accepting other shapes."""
-    if not isinstance(raw, list):
-        return []
-    return [str(cid) for cid in raw if str(cid)]
-
-
-def _read_runtime_pinned_ids(path: Path) -> list[str] | None:
-    """Read a valid runtime selection, or ``None`` when it is unavailable.
-
-    An empty, valid JSON selection is deliberately distinct from an unavailable
-    file: the former represents a user clearing all pins while the latter can
-    occur in the short interval while a task run directory is being recreated.
-    """
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict) or not isinstance(data.get("pinned_card_ids"), list):
-        return None
-    return _normalize_pinned_ids(data["pinned_card_ids"])
-
-
-def _configured_pinned_ids(task: models.Task) -> list[str]:
-    """Return the saved manual-mode selection embedded in task input args."""
-    input_args = task.input_args
-    memory_config = input_args.get("memory") if isinstance(input_args, dict) else None
-    if not isinstance(memory_config, dict) or memory_config.get("retrieval_mode") != "manual":
-        return []
-    return _normalize_pinned_ids(memory_config.get("pinned_card_ids"))
-
-
-def _current_or_configured_pinned_ids(task: models.Task, path: Path) -> list[str]:
-    """Prefer the live runtime selection, with config as a startup fallback."""
-    runtime_ids = _read_runtime_pinned_ids(path)
-    return _configured_pinned_ids(task) if runtime_ids is None else runtime_ids
-
-
 def get_task_pinned_memory(
     db: Session,
     task_id: uuid.UUID,
@@ -99,7 +61,7 @@ def get_task_pinned_memory(
     """
     task = get_task_with_auth(db, task_id, current_user)
     path = _pinned_memory_path(task, current_user)
-    return _current_or_configured_pinned_ids(task, path)
+    return current_or_configured_pinned_ids(task.input_args, path)
 
 
 def set_task_pinned_memory(
@@ -125,7 +87,7 @@ def set_task_pinned_memory(
     task = get_task_with_auth(db, task_id, current_user)
     path = _pinned_memory_path(task, current_user)
     path.parent.mkdir(parents=True, exist_ok=True)
-    normalized = _normalize_pinned_ids(pinned_card_ids)
+    normalized = normalize_pinned_ids(pinned_card_ids)
     payload = {"pinned_card_ids": normalized}
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -153,7 +115,7 @@ def seed_task_pinned_memory(
     """
     path = _pinned_memory_path(task, current_user)
     path.parent.mkdir(parents=True, exist_ok=True)
-    normalized = _normalize_pinned_ids(pinned_card_ids)
+    normalized = normalize_pinned_ids(pinned_card_ids)
     payload = {"pinned_card_ids": normalized}
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with open(tmp_path, "w", encoding="utf-8") as f:
