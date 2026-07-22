@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from threading import Event
-from typing import Any
+from typing import Any, cast
 
 try:
     from textual import on, work
@@ -328,7 +328,7 @@ class NewMemoryModal(ModalScreen):
             content = self.query_one("#n-content", TextArea).text.strip()
             language = self.query_one("#n-language", Input).value.strip() or "auto"
             if content:
-                self.app.start_extraction(self, content, language)
+                cast("MemoryBrowser", self.app).start_extraction(self, content, language)
         elif self.mode == "preview":
             self.dismiss(self._selection())
 
@@ -371,7 +371,8 @@ class NewMemoryModal(ModalScreen):
             box.mount(Checkbox(f"[{mem_type}] {text[:80]}", value=True, id=f"keep-{i}"))
 
     def _selection(self) -> dict[str, list[str]]:
-        keep, discard = [], []
+        keep: list[str] = []
+        discard: list[str] = []
         for i, card in enumerate(self.cards):
             mid = str(card.get("id") or card.get("memory_id") or "")
             if not mid:
@@ -382,7 +383,7 @@ class NewMemoryModal(ModalScreen):
     def action_cancel(self) -> None:
         """Cancel extraction / discard preview / close."""
         if self.mode == "extracting":
-            self.app.cancel_extraction()
+            cast("MemoryBrowser", self.app).cancel_extraction()
             self.dismiss(None)
         elif self.mode == "preview":
             all_ids = [
@@ -453,7 +454,7 @@ class MemoryBrowser(App):
         Binding("q", "quit", "Quit/退出"),
         Binding("r", "refresh", "Refresh/刷新"),
         Binding("n", "new", "New/新增"),
-        Binding("space", "toggle", "Toggle/启用"),
+        Binding("space", "toggle_memory", "Toggle/启用"),
         Binding("d", "delete", "Delete/删除"),
         Binding("slash", "search", "Search/搜索", key_display="/"),
         Binding("c", "config", "Config/配置"),
@@ -607,8 +608,11 @@ class MemoryBrowser(App):
     @work(thread=True, exclusive=True, group="refresh")
     def _refresh_worker(self) -> None:
         """Fetch the memory list in a thread; report errors clearly."""
+        client = self.client
+        if client is None:
+            return
         try:
-            result = self.client.list_memories(
+            result = client.list_memories(
                 scope=self.scope, task_id=self.task_id, page=1, page_size=self.total or 50
             )
             data = result.get("data", {})
@@ -643,8 +647,11 @@ class MemoryBrowser(App):
     def _on_edit(self, draft: dict[str, Any] | None) -> None:
         if not draft:
             return
+        client = self.client
+        if client is None:
+            return
         try:
-            self.client.update_memory(
+            client.update_memory(
                 scope=self.scope,
                 task_id=self.task_id,
                 memory_id=draft["memory_id"],
@@ -663,17 +670,20 @@ class MemoryBrowser(App):
             self._set_status(self.tr.t("msg_error", error=str(e)))
 
     # --- toggle / delete --------------------------------------------------
-    def action_toggle(self) -> None:
+    def action_toggle_memory(self) -> None:
         """Enable/disable the highlighted memory."""
         if not self._require_ready():
             return
         memory = self._selected()
         if not memory:
             return
+        client = self.client
+        if client is None:
+            return
         mid = memory.get("id", "")
         new_enabled = not _card_enabled(memory)
         try:
-            self.client.update_memory(
+            client.update_memory(
                 scope=self.scope,
                 task_id=self.task_id,
                 memory_id=mid,
@@ -694,9 +704,12 @@ class MemoryBrowser(App):
         memory = self._selected()
         if not memory:
             return
+        client = self.client
+        if client is None:
+            return
         mid = memory.get("id", "")
         try:
-            self.client.delete_memory(memory_id=mid)
+            client.delete_memory(memory_id=mid)
             self._set_status(self.tr.t("msg_deleted", id=mid[:16]))
             self.action_refresh()
         except Exception as e:  # noqa: BLE001
@@ -736,18 +749,21 @@ class MemoryBrowser(App):
         self, content: str, language: str | None, cancel: Event, modal: NewMemoryModal
     ) -> None:
         """Stream extraction off the UI thread; show progress then preview."""
+        client = self.client
+        if client is None:
+            return
         tr = self.tr
         gen_id = f"cli-{uuid.uuid4().hex[:12]}"
         ids: list[str] = []
         completed = False
         try:
-            for event in self.client.add_memory_stream(
+            for event in client.add_memory_stream(
                 scope=self.scope,
                 task_id=self.task_id,
                 content=content,
                 generation_id=gen_id,
                 prompt_language=language,
-                timeout=self.client.timeout,
+                timeout=client.timeout,
                 cancel_event=cancel,
             ):
                 if cancel.is_set():
@@ -782,7 +798,7 @@ class MemoryBrowser(App):
         cards: list[dict[str, Any]] = []
         if ids:
             try:
-                cards = self.client.fetch_cards_by_ids(
+                cards = client.fetch_cards_by_ids(
                     scope=self.scope, task_id=self.task_id, memory_ids=ids
                 )
             except Exception:  # noqa: BLE001
@@ -792,11 +808,14 @@ class MemoryBrowser(App):
     @work(thread=True, exclusive=True, group="commit")
     def _commit_worker(self, keep_ids: list[str], discard_ids: list[str]) -> None:
         """Enable kept cards, delete discarded ones, then refresh."""
+        client = self.client
+        if client is None:
+            return
         tr = self.tr
         enabled = 0
         for mid in keep_ids:
             try:
-                self.client.update_memory(
+                client.update_memory(
                     scope=self.scope,
                     task_id=self.task_id,
                     memory_id=mid,
@@ -809,7 +828,7 @@ class MemoryBrowser(App):
         discarded = 0
         for mid in discard_ids:
             try:
-                self.client.delete_memory(memory_id=mid)
+                client.delete_memory(memory_id=mid)
                 discarded += 1
             except Exception:  # noqa: BLE001
                 continue
@@ -831,8 +850,11 @@ class MemoryBrowser(App):
     def _on_search(self, query: str | None) -> None:
         if not query:
             return
+        client = self.client
+        if client is None:
+            return
         try:
-            result = self.client.search_memories(
+            result = client.search_memories(
                 scope=self.scope, task_id=self.task_id, query=query, top_k=20
             )
             data = result.get("data", {})
@@ -868,13 +890,16 @@ class MemoryBrowser(App):
     @work(thread=True, exclusive=True, group="bind")
     def _bind_worker(self, embedding_overridden: bool) -> None:
         """Bind providers off the UI thread; lock embedding on first bind."""
+        client = self.client
+        if client is None:
+            return
         tr = self.tr
         p = memory_config.get_providers()
         chat, embed = p["chat"], p["embedding"]
         emb_model = embed["model"]
         emb_dim = embed.get("dimensions", 1536)
         try:
-            self.client.bind_providers(
+            client.bind_providers(
                 chat_base_url=chat["base_url"],
                 chat_api_key=chat["api_key"],
                 chat_model=chat["model"],

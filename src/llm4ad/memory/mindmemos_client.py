@@ -122,7 +122,12 @@ class MindMemOSClient:
                     message = response.text or f"HTTP {response.status_code}"
                 raise MindMemOSError(message, status_code=response.status_code)
 
-            return response.json()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise MindMemOSError(
+                    "MindMemOS returned an invalid JSON response", status_code=response.status_code
+                )
+            return data
 
     def health_check(self) -> dict[str, Any]:
         """Check MindMemOS service health."""

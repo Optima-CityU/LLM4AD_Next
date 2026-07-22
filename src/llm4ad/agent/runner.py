@@ -528,7 +528,7 @@ def make_tools(
             if not fp.is_file():
                 return None
             try:
-                return fp.read_text(encoding="utf-8", errors="replace")
+                return str(fp.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 return None
 
