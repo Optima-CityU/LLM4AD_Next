@@ -33,7 +33,7 @@ evolution:
   type: "meoh"
   planner_type: "meoh_evolution"
   max_generations: 5
-  pop_size: 8
+  population_size: 8
   selection_num: 2
   max_sample_nums: 32
   objective_metrics:

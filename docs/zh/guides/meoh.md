@@ -86,7 +86,7 @@ CLI
 也就是：
 
 - 新个体先进入 `next_gen_population`
-- 当 `next_gen_population` 累积到 `pop_size`
+- 当 `next_gen_population` 累积到 `population_size`
 - 触发一次 `survival()`
 - 然后 `generation += 1`
 
@@ -138,7 +138,7 @@ CLI
 1. 合并 `population + next_gen_population`
 2. 基于 `objective_metrics` 做 Pareto 非支配前沿更新
 3. 用 CodeBLEU 相似性惩罚和支配关系做 active population 截断
-4. 保留 `max(1, int(pop_size * active_population_ratio))` 个 active 个体
+4. 保留 `max(1, int(population_size * active_population_ratio))` 个 active 个体
 5. 清空 `next_gen_population`
 6. `generation += 1`
 
@@ -310,7 +310,7 @@ evolution:
   type: "meoh"
   planner_type: "meoh_evolution"
   max_generations: 5
-  pop_size: 8
+  population_size: 8
   selection_num: 2
   max_sample_nums: 32
   objective_metrics:
@@ -337,7 +337,7 @@ coder:
 
 关键字段如下。
 
-### `pop_size`
+### `population_size`
 
 - 每次 survival 前累计的新候选阈值
 - `next_gen_population` 达到这个大小时触发 `survival()`

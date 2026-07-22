@@ -201,7 +201,7 @@ def _create_orchestrator(tmp_path: Path) -> MEoHOrchestrator:
             type="meoh",
             planner_type="meoh_evolution",
             objective_metrics=["distance", "candidate_runtime_ms"],
-            pop_size=2,
+            population_size=2,
             selection_num=2,
             max_generations=2,
             max_sample_nums=20,
