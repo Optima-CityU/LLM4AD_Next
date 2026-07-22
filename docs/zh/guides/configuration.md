@@ -818,7 +818,7 @@ version_control:
 |---|---|
 | `island_ga` | [Island GA](island-ga.md) — `num_islands`、`island_population_size`、`migration_*`、`parallel_islands`、`per_island_config` |
 | `dyca` | [DyCA](dyca.md) — `n_clusters`、`clustering_method`、`recluster_interval`、`ari_threshold`、`n_anchors`、`*_pool_size`、`sos_stagnation_threshold`、`using_mode` |
-| `meoh` | [MEoH](meoh.md) — `pop_size`、`selection_num`、`max_sample_nums`、`objective_metrics`、`use_e2_operator`、`use_m1_operator`、`use_m2_operator`、`seed_path`、`code_generation_mode`、`active_population_ratio` |
+| `meoh` | [MEoH](meoh.md) — `population_size`、`selection_num`、`max_sample_nums`、`objective_metrics`、`use_e2_operator`、`use_m1_operator`、`use_m2_operator`、`seed_path`、`code_generation_mode`、`active_population_ratio` |
 
 多目标运行仅 MEoH 支持；通过 `objective_metrics: [...]` 定义 Pareto 维度。
 

@@ -15,6 +15,14 @@ from app.core.config import settings
 TASK_LOGS_PREFIX = "task_logs:"
 TASK_LOGS_DB = 2
 TASK_LOGS_TTL = 7 * 24 * 3600  # 7 days
+TASK_EXECUTION_LOCK_PREFIX = "task_execution_lock:"
+
+_RELEASE_TASK_EXECUTION_LOCK_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
 
 
 def _build_url() -> str:
@@ -33,6 +41,34 @@ def get_sync_redis() -> redis.Redis:
     if _sync_redis is None:
         _sync_redis = redis.from_url(_build_url(), decode_responses=True)
     return _sync_redis
+
+
+def task_execution_lock_key(task_id: str | uuid.UUID) -> str:
+    """构造任务执行互斥锁的 Redis key。"""
+    return f"{TASK_EXECUTION_LOCK_PREFIX}{task_id}"
+
+
+def acquire_task_execution_lock(
+    task_id: str | uuid.UUID, owner_token: str, ttl_seconds: int
+) -> bool:
+    """原子获取业务任务执行锁，避免重复投递并发执行同一任务。"""
+    return bool(
+        get_sync_redis().set(
+            task_execution_lock_key(task_id), owner_token, nx=True, ex=ttl_seconds
+        )
+    )
+
+
+def release_task_execution_lock(task_id: str | uuid.UUID, owner_token: str) -> bool:
+    """仅当锁仍归当前执行者所有时释放，避免误删后续执行的锁。"""
+    return bool(
+        get_sync_redis().eval(
+            _RELEASE_TASK_EXECUTION_LOCK_SCRIPT,
+            1,
+            task_execution_lock_key(task_id),
+            owner_token,
+        )
+    )
 
 
 # ---- Async client (FastAPI SSE) ----
@@ -84,9 +120,16 @@ def push_log_entry(task_id: str | uuid.UUID, entry: dict) -> None:
         entry: 待写入的日志条目字典，会被 JSON 序列化后存入。
     """
     try:
+        # Sanitize non-finite floats (inf/-inf/nan) to None so the Redis stream
+        # holds strict JSON. Otherwise json.dumps (allow_nan=True by default)
+        # emits `Infinity`/`NaN`, which crashes the frontend's JSON.parse and
+        # pollutes in-flight score statistics read back from Redis.
+        # Imported lazily to avoid a core -> utils import cycle.
+        from app.utils.log_persist import sanitize_for_json
+
         r = get_sync_redis()
         key = task_logs_key(task_id)
-        payload = json.dumps(entry, ensure_ascii=False, default=str)
+        payload = json.dumps(sanitize_for_json(entry), ensure_ascii=False, default=str)
         r.xadd(key, {"data": payload}, maxlen=settings.TASK_LOGS_MAXLEN, approximate=True)
         if r.ttl(key) == -1:
             r.expire(key, TASK_LOGS_TTL)
@@ -410,4 +453,3 @@ def get_cached_news(lang: str) -> dict | None:
             "Failed to read news cache from Redis, lang=%s", lang, exc_info=True
         )
         return None
-

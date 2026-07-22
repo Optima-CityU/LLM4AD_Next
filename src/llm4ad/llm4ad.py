@@ -210,7 +210,7 @@ class LLM4AD:
         planner_provider = self._providers[planner_provider_name]
 
         # Initialize planner
-        from llm4ad.planner.memory import Memory
+        from llm4ad.planner.memory import create_memory, create_memory_extractor
 
         # Get coder provider
         coder_provider_name = self.config.coder.provider
@@ -324,7 +324,8 @@ class LLM4AD:
             subdirs=self.config.workspace.subdirs,
         )
 
-        memory = Memory(self.config.memory.model_dump())
+        memory = create_memory(self.config.memory)
+        memory.set_query_provider(planner_provider)
 
         # Set up memory persistence directory
         if self._state_tracker.memory_dir:
@@ -337,19 +338,23 @@ class LLM4AD:
 
         # Create memory extractor for auto-extraction during evolution
         if self.config.memory.auto_extraction.enabled:
-            from llm4ad.planner.memory import MemoryExtractor
-
-            memory.extractor = MemoryExtractor(
+            auto_extraction_config = self.config.memory.auto_extraction
+            if self.config.memory.type == "mindmemos_cloud":
+                auto_extraction_config = auto_extraction_config.model_copy(
+                    update={"type": "mindmemos_raw_extractor"}
+                )
+            memory.extractor = create_memory_extractor(
                 provider=planner_provider,
-                config=self.config.memory.auto_extraction,
+                config=auto_extraction_config,
             )
 
         # Use planner_type from evolution config if available (e.g. MEoH),
         # otherwise fall back to planner config's type.
         planner_type = getattr(self.config.evolution, "planner_type", None) or self.config.planner.type
-        # MEoH planner expects a plain dict config; keep PlannerConfig for others.
+        # The operator-dispatch planners (MEoH/EoH/ReEvo/MCTS-AHD) expect a
+        # plain dict config; the default LLMEvolutionPlanner keeps PlannerConfig.
         planner_config: Any = self.config.planner
-        if planner_type == "meoh_evolution":
+        if planner_type in ("meoh_evolution", "eoh_evolution", "reevo_evolution", "mcts_ahd_evolution"):
             planner_config = self.config.planner.model_dump()
         else:
             # Inject multimodal config into each sampler for MLES support

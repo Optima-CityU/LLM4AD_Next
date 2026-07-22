@@ -16,6 +16,16 @@ export interface SelectedNodeInfo {
   parentIds: string[]
 }
 
+export interface TaskMemoryCreatedSignal {
+  event: Record<string, unknown>
+  nonce: number
+}
+
+export interface TaskMemoryInjectedSignal {
+  event: Record<string, unknown>
+  nonce: number
+}
+
 interface EvolutionContextValue {
   projectId: string | undefined
   projectValid: boolean
@@ -97,6 +107,12 @@ interface EvolutionContextValue {
   // SSE stream callbacks
   resetTaskData: () => void
   updateTaskStatus: (status: string) => void
+
+  // Latest task memory event from the task SSE stream
+  taskMemoryCreatedSignal: TaskMemoryCreatedSignal | null
+
+  // Latest MindMemOS injection stats from the task SSE stream
+  taskMemoryInjectedSignal: TaskMemoryInjectedSignal | null
 }
 
 export const EvolutionContext = createContext<EvolutionContextValue>({
@@ -143,6 +159,8 @@ export const EvolutionContext = createContext<EvolutionContextValue>({
   setLeftCollapsed: () => {},
   resetTaskData: () => {},
   updateTaskStatus: () => {},
+  taskMemoryCreatedSignal: null,
+  taskMemoryInjectedSignal: null,
 })
 
 export function useEvolution() {

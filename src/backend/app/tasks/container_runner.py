@@ -10,6 +10,7 @@ tail；stdout/stderr 仅承载依赖安装、用户 print 与未捕获 traceback
 
 import asyncio
 import json
+import math
 import os
 import subprocess
 import sys
@@ -18,8 +19,12 @@ import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
-# 与 container_runner.py 同目录，容器内以脚本方式启动时 sys.path[0] 即本目录
-import task_config_crypto  # noqa: E402
+# 与 container_runner.py 同目录，容器内以脚本方式启动时 sys.path[0] 即本目录。
+# 测试中按 app.tasks.container_runner 包导入时使用 package fallback。
+try:
+    import task_config_crypto  # noqa: E402
+except ModuleNotFoundError:  # pragma: no cover - only used outside script mode
+    from app.tasks import task_config_crypto  # type: ignore[no-redef]
 from llm4ad import LLM4AD
 from llm4ad.config import AppConfig
 from loguru import logger
@@ -30,6 +35,24 @@ FINAL_STATE_FILENAME = ".final_state.json"
 EVENTS_FILENAME = ".events.jsonl"  # 须与 app.core.constants.EVENTS_FILENAME 一致
 GENERATED_DIR = os.path.join(DATA_DIR, "llm4ad", "run", "generated")
 _GENERATED_SCAN_INTERVAL = 2.0  # 扫描 generated 目录的间隔（秒）
+
+
+def _sanitize_non_finite(obj):
+    """Replace non-finite floats (inf, -inf, nan) with None for strict JSON.
+
+    Lightweight helper that avoids importing app.utils to keep container_runner
+    decoupled from the backend package. Semantics match sanitize_for_json.
+    """
+    if isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_non_finite(item) for item in obj]
+    return obj
+
 
 
 class EventsSink:
@@ -56,6 +79,15 @@ class EventsSink:
     def __call__(self, message) -> None:
         """loguru sink：把日志记录转为 log 事件。"""
         record = message.record
+        extra = record.get("extra") or {}
+        event_type = extra.get("event_type")
+        if event_type:
+            self.emit({
+                "type": event_type,
+                "timestamp": record["time"].isoformat(),
+                **{key: value for key, value in extra.items() if key != "event_type"},
+            })
+            return
         self.emit({
             "type": "log",
             "timestamp": record["time"].isoformat(),
@@ -100,11 +132,14 @@ def _scan_generated(generated_dir: str, emit, seen: dict[str, float]) -> None:
                 content = json.load(f)
         except Exception:
             continue
+        # Sanitize non-finite floats before emitting so Redis/SSE stream is
+        # strict JSON; otherwise Algorithm.write's json.dump (allow_nan=True)
+        # puts -Infinity in the file, which crashes frontend's JSON.parse.
         emit({
             "type": "generated",
             "timestamp": datetime.now(UTC).isoformat(),
             "file_name": name,
-            "data": content,
+            "data": _sanitize_non_finite(content),
         })
 
 

@@ -25,6 +25,7 @@ env:
   BACKEND_IMAGE_NAME: ${{ vars.DOCKERHUB_BACKEND_IMAGE || 'backend' }}
   FRONTEND_IMAGE_NAME: ${{ vars.DOCKERHUB_FRONTEND_IMAGE || 'frontend' }}
   TASK_RUNNER_IMAGE_NAME: ${{ vars.DOCKERHUB_TASK_RUNNER_IMAGE || 'llm4ad-task-runner' }}
+  MINDMEMOS_IMAGE_NAME: ${{ vars.DOCKERHUB_MINDMEMOS_IMAGE || 'llm4ad-mindmemos' }}
 
 jobs:
   prepare:
@@ -74,6 +75,7 @@ jobs:
         env:
           VERSION_NO_V: ${{ steps.version.outputs.version_no_v }}
         run: |
+          python scripts/project_version.py --check --expected "$VERSION_NO_V"
           python - <<'PY'
           from pathlib import Path
           import json
@@ -146,6 +148,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          submodules: recursive
 
       - name: Validate Docker Hub configuration
         env:
@@ -221,6 +224,29 @@ jobs:
           cache-from: type=gha,scope=task-runner
           cache-to: type=gha,mode=max,scope=task-runner
 
+      - name: Extract MindMemOS metadata
+        id: mindmemos-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ env.MINDMEMOS_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.version_no_v }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push MindMemOS image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/mindmemos/Dockerfile
+          push: true
+          build-args: |
+            UV_INDEX_URL=${{ vars.UV_INDEX_URL }}
+          tags: ${{ steps.mindmemos-meta.outputs.tags }}
+          labels: ${{ steps.mindmemos-meta.outputs.labels }}
+          cache-from: type=gha,scope=mindmemos
+          cache-to: type=gha,mode=max,scope=mindmemos
+
       - name: Extract frontend metadata
         id: frontend-meta
         uses: docker/metadata-action@v5
@@ -240,6 +266,7 @@ jobs:
           build-args: |
             VITE_API_URL=
             VITE_CODE_SERVER_URL=${{ vars.VITE_CODE_SERVER_URL || '/code_ide' }}
+            VITE_FOOTER_BEIAN=${{ vars.VITE_FOOTER_BEIAN || '' }}
           tags: ${{ steps.frontend-meta.outputs.tags }}
           labels: ${{ steps.frontend-meta.outputs.labels }}
           cache-from: type=gha,scope=frontend

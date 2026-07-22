@@ -118,10 +118,13 @@ def _chat_tune_container_name(session_id: str) -> str:
 def chat_tune_container_host(session_id: str) -> str:
     """返回 backend 用于连接容器 SSE 服务的主机名。
 
-    CHAT_TUNE_CONTAINER_NETWORK=True 时通过容器名 DNS 解析（生产环境 Docker 内）；
-    False 时使用 localhost（本地开发，需配合端口发布）。
+    自动检测运行环境（无需手动配置）：
+    - backend 在容器内（Docker 部署）：通过容器名 DNS 解析连接。
+    - backend 在宿主机（本地开发）：使用 localhost（子容器发布端口到宿主机）。
     """
-    if settings.CHAT_TUNE_CONTAINER_NETWORK:
+    from app.core.env_detect import use_container_network
+
+    if use_container_network():
         return _chat_tune_container_name(session_id)
     return "localhost"
 
@@ -131,10 +134,20 @@ def _chat_tune_docker_workdir(session_id: str, turn_id: str) -> str:
 
     按 ``turn_id`` 隔离：同一会话相邻两轮（取消旧轮 + 立即起新轮）使用不同
     目录，避免旧轮 ``finally`` 的清理误删新轮正在挂载的目录。
+
+    自动检测运行环境并选择正确的路径（无需手动配置）。
     """
+    from app.core.env_detect import get_project_home
+
     sess = str(session_id).replace("-", "")
     turn = str(turn_id).replace("-", "")
-    base = settings.DOCKER_PROJECT_HOME.rstrip("/")
+
+    # 自动检测环境并选择路径
+    base = get_project_home(
+        host_home=settings.HOST_PROJECT_HOME,
+        docker_home=settings.DOCKER_PROJECT_HOME,
+    )
+
     return f"{base}/chat_tune/{sess}/{turn}/"
 
 
@@ -212,7 +225,9 @@ def start_chat_tune_container(session_id: str, host_workdir: str) -> str:
             f"Build it first: docker build -f src/backend/Dockerfile.task -t {settings.TASK_RUNNER_IMAGE} ."
         )
 
-    use_network = settings.CHAT_TUNE_CONTAINER_NETWORK
+    from app.core.env_detect import use_container_network
+
+    use_network = use_container_network()
     port = settings.CHAT_TUNE_CONTAINER_PORT
 
     network_kwargs: dict = {}

@@ -1869,10 +1869,30 @@ export const FeatureFlagsSchema = {
         enable_ai_agent_build: {
             type: 'boolean',
             title: 'Enable Ai Agent Build'
+        },
+        mindmemos_memory_enabled: {
+            type: 'boolean',
+            title: 'Mindmemos Memory Enabled'
+        },
+        mindmemos_runtime_available: {
+            type: 'boolean',
+            title: 'Mindmemos Runtime Available'
+        },
+        mindmemos_embedding_configured: {
+            type: 'boolean',
+            title: 'Mindmemos Embedding Configured'
+        },
+        mindmemos_rerank_enabled: {
+            type: 'boolean',
+            title: 'Mindmemos Rerank Enabled'
+        },
+        mindmemos_rerank_configured: {
+            type: 'boolean',
+            title: 'Mindmemos Rerank Configured'
         }
     },
     type: 'object',
-    required: ['enable_ai_agent_build'],
+    required: ['enable_ai_agent_build', 'mindmemos_memory_enabled', 'mindmemos_runtime_available', 'mindmemos_embedding_configured', 'mindmemos_rerank_enabled', 'mindmemos_rerank_configured'],
     title: 'FeatureFlags',
     description: 'Public feature flags the frontend uses to show/hide optional UI.'
 } as const;
@@ -3231,6 +3251,1013 @@ export const LiveCodeUpdateSchema = {
     description: '更新活码请求体，所有字段可选。'
 } as const;
 
+export const MemoryCardExtractionCommitRequestSchema = {
+    properties: {
+        selected_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Selected Ids'
+        },
+        all_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'All Ids'
+        }
+    },
+    type: 'object',
+    title: 'MemoryCardExtractionCommitRequest',
+    description: 'Confirm which extracted preview memories should become active.'
+} as const;
+
+export const MemoryCardExtractionDiscardRequestSchema = {
+    properties: {
+        memory_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Memory Ids'
+        }
+    },
+    type: 'object',
+    title: 'MemoryCardExtractionDiscardRequest',
+    description: 'Discard temporary extracted preview memories.'
+} as const;
+
+export const MemoryCardExtractionRequestSchema = {
+    properties: {
+        content: {
+            type: 'string',
+            maxLength: 20000,
+            minLength: 1,
+            title: 'Content'
+        },
+        prompt_language: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['ZH', 'EN']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Language'
+        }
+    },
+    type: 'object',
+    required: ['content'],
+    title: 'MemoryCardExtractionRequest',
+    description: 'Generate MindMemOS memory previews from a raw user description.'
+} as const;
+
+export const MemoryCardExtractionResponseSchema = {
+    properties: {
+        preview_id: {
+            type: 'string',
+            title: 'Preview Id'
+        },
+        items: {
+            items: {
+                '$ref': '#/components/schemas/MemoryCardResponse'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        message: {
+            type: 'string',
+            title: 'Message',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['preview_id', 'items'],
+    title: 'MemoryCardExtractionResponse',
+    description: 'Preview memories extracted by MindMemOS before the user confirms them.'
+} as const;
+
+export const MemoryCardPageResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/MemoryCardResponse'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        page: {
+            type: 'integer',
+            title: 'Page'
+        },
+        page_size: {
+            type: 'integer',
+            title: 'Page Size'
+        },
+        total: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Total'
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['items', 'page', 'page_size'],
+    title: 'MemoryCardPageResponse',
+    description: 'Paged MindMemOS memory list response.'
+} as const;
+
+export const MemoryCardReadonlyInfoSchema = {
+    properties: {
+        source: {
+            type: 'string',
+            title: 'Source',
+            default: 'mindmemos'
+        },
+        status: {
+            type: 'string',
+            title: 'Status',
+            default: 'active'
+        },
+        entity_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Entity Name'
+        },
+        property_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Property Name'
+        },
+        property_time: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Property Time'
+        },
+        last_update_at: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Update At'
+        },
+        event_time: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Event Time'
+        },
+        source_timestamp: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Timestamp'
+        }
+    },
+    type: 'object',
+    title: 'MemoryCardReadonlyInfo',
+    description: 'MindMemOS-managed fields shown as read-only details in the UI.'
+} as const;
+
+export const MemoryCardResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        type: {
+            type: 'string',
+            title: 'Type'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled',
+            default: true
+        },
+        source: {
+            type: 'string',
+            title: 'Source',
+            default: 'static'
+        },
+        tags: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Tags'
+        },
+        score: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Score'
+        },
+        generation: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Generation'
+        },
+        algorithm_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Algorithm Id'
+        },
+        metadata: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Metadata'
+        },
+        readonly: {
+            '$ref': '#/components/schemas/MemoryCardReadonlyInfo'
+        }
+    },
+    type: 'object',
+    required: ['id', 'type', 'title', 'content'],
+    title: 'MemoryCardResponse',
+    description: 'MindMemOS memory item mapped for the LLM4AD memory UI.'
+} as const;
+
+export const MemoryCardStatusUpdateSchema = {
+    properties: {
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled'
+        }
+    },
+    type: 'object',
+    required: ['enabled'],
+    title: 'MemoryCardStatusUpdate',
+    description: 'Update whether a MindMemOS memory can be injected.'
+} as const;
+
+export const MemoryCardUpsertRequestSchema = {
+    properties: {
+        id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Id'
+        },
+        type: {
+            type: 'string',
+            title: 'Type',
+            default: 'general_insight'
+        },
+        title: {
+            type: 'string',
+            title: 'Title',
+            default: ''
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled',
+            default: true
+        },
+        tags: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Tags'
+        },
+        score: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Score'
+        },
+        generation: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Generation'
+        },
+        algorithm_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Algorithm Id'
+        },
+        metadata: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Metadata'
+        }
+    },
+    type: 'object',
+    required: ['content'],
+    title: 'MemoryCardUpsertRequest',
+    description: 'Create or update a MindMemOS memory from user-provided text.'
+} as const;
+
+export const MemoryConfigUpdateSchema = {
+    properties: {
+        enabled: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Enabled'
+        },
+        include_user_memory: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Include User Memory'
+        },
+        include_project_memory: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Include Project Memory'
+        },
+        include_task_memory: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Include Task Memory'
+        },
+        user_memory_limit: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Memory Limit'
+        },
+        project_memory_limit: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Memory Limit'
+        },
+        task_memory_limit: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Memory Limit'
+        },
+        retrieval_mode: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['auto', 'manual']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Retrieval Mode'
+        },
+        pinned_card_ids: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pinned Card Ids'
+        },
+        task_injection_mode: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['topk', 'weight', 'random']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Injection Mode'
+        },
+        mindmemos_search_strategy: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Search Strategy'
+        },
+        mindmemos_rerank: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Rerank'
+        },
+        mindmemos_score_threshold: {
+            anyOf: [
+                {
+                    type: 'number',
+                    maximum: 1,
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Score Threshold'
+        },
+        mindmemos_fail_open: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Fail Open'
+        }
+    },
+    type: 'object',
+    title: 'MemoryConfigUpdate',
+    description: 'Update request for user/project memory defaults.'
+} as const;
+
+export const MemoryContributionScopeSummarySchema = {
+    properties: {
+        calls: {
+            type: 'integer',
+            title: 'Calls',
+            default: 0
+        },
+        positive_results: {
+            type: 'integer',
+            title: 'Positive Results',
+            default: 0
+        },
+        best_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Delta'
+        },
+        average_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Average Delta'
+        }
+    },
+    type: 'object',
+    title: 'MemoryContributionScopeSummary',
+    description: '单个 scope 的记忆贡献度估算。'
+} as const;
+
+export const MemoryContributionSummarySchema = {
+    properties: {
+        associated_generations: {
+            type: 'integer',
+            title: 'Associated Generations',
+            default: 0
+        },
+        scored_generations: {
+            type: 'integer',
+            title: 'Scored Generations',
+            default: 0
+        },
+        positive_results: {
+            type: 'integer',
+            title: 'Positive Results',
+            default: 0
+        },
+        best_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Delta'
+        },
+        average_delta: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Average Delta'
+        },
+        by_scope: {
+            additionalProperties: {
+                '$ref': '#/components/schemas/MemoryContributionScopeSummary'
+            },
+            type: 'object',
+            title: 'By Scope'
+        }
+    },
+    type: 'object',
+    title: 'MemoryContributionSummary',
+    description: 'MindMemOS 注入后候选算法评分变化的聚合估算。'
+} as const;
+
+export const MemoryHealthResponseSchema = {
+    properties: {
+        ok: {
+            type: 'boolean',
+            title: 'Ok'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        system_runtime_available: {
+            type: 'boolean',
+            title: 'System Runtime Available'
+        },
+        system_enabled: {
+            type: 'boolean',
+            title: 'System Enabled'
+        },
+        system_chat_configured: {
+            type: 'boolean',
+            title: 'System Chat Configured'
+        },
+        system_embedding_configured: {
+            type: 'boolean',
+            title: 'System Embedding Configured'
+        },
+        system_api_key_configured: {
+            type: 'boolean',
+            title: 'System Api Key Configured'
+        },
+        system_rerank_enabled: {
+            type: 'boolean',
+            title: 'System Rerank Enabled',
+            default: false
+        },
+        system_rerank_configured: {
+            type: 'boolean',
+            title: 'System Rerank Configured',
+            default: false
+        },
+        service_reachable: {
+            type: 'boolean',
+            title: 'Service Reachable',
+            default: false
+        },
+        auth_ok: {
+            type: 'boolean',
+            title: 'Auth Ok',
+            default: false
+        },
+        error_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Code'
+        },
+        details: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Details'
+        }
+    },
+    type: 'object',
+    required: ['ok', 'message', 'system_runtime_available', 'system_enabled', 'system_chat_configured', 'system_embedding_configured', 'system_api_key_configured'],
+    title: 'MemoryHealthResponse',
+    description: 'System MindMemOS health response for the frontend.'
+} as const;
+
+export const MemoryInjectionSummarySchema = {
+    properties: {
+        sampler: {
+            type: 'string',
+            title: 'Sampler',
+            default: 'unknown'
+        },
+        strategy: {
+            type: 'string',
+            title: 'Strategy',
+            default: ''
+        },
+        scope_hits: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Scope Hits'
+        },
+        deduped_hits: {
+            type: 'integer',
+            title: 'Deduped Hits',
+            default: 0
+        },
+        injected_chars: {
+            type: 'integer',
+            title: 'Injected Chars',
+            default: 0
+        },
+        elapsed_ms: {
+            type: 'integer',
+            title: 'Elapsed Ms',
+            default: 0
+        },
+        timestamp: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Timestamp'
+        }
+    },
+    type: 'object',
+    title: 'MemoryInjectionSummary',
+    description: '单次 MindMemOS 注入事件摘要。'
+} as const;
+
+export const MemoryProviderBindingResponseSchema = {
+    properties: {
+        configured: {
+            type: 'boolean',
+            title: 'Configured',
+            default: false
+        },
+        binding_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Binding Id'
+        },
+        project_id: {
+            type: 'string',
+            title: 'Project Id'
+        },
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        },
+        chat_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Chat Provider Id'
+        },
+        chat_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Chat Model'
+        },
+        embedding_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Provider Id'
+        },
+        embedding_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Model'
+        },
+        embedding_dim: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Embedding Dim'
+        },
+        embedding_locked: {
+            type: 'boolean',
+            title: 'Embedding Locked',
+            default: false
+        },
+        message: {
+            type: 'string',
+            title: 'Message',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'user_id'],
+    title: 'MemoryProviderBindingResponse',
+    description: 'Current MindMemOS provider binding state for a user memory space.'
+} as const;
+
+export const MemoryProviderBindingUpdateSchema = {
+    properties: {
+        chat_provider_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Chat Provider Id'
+        },
+        chat_model: {
+            type: 'string',
+            title: 'Chat Model'
+        },
+        embedding_provider_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Embedding Provider Id'
+        }
+    },
+    type: 'object',
+    required: ['chat_provider_id', 'chat_model', 'embedding_provider_id'],
+    title: 'MemoryProviderBindingUpdate',
+    description: 'Bind the current user memory space to existing provider configs.'
+} as const;
+
+export const MemoryTestRequestSchema = {
+    properties: {
+        type: {
+            type: 'string',
+            title: 'Type',
+            default: 'local_yaml'
+        },
+        mindmemos_base_url: {
+            type: 'string',
+            title: 'Mindmemos Base Url',
+            default: ''
+        },
+        mindmemos_api_key: {
+            type: 'string',
+            title: 'Mindmemos Api Key',
+            default: ''
+        },
+        mindmemos_user_id: {
+            type: 'string',
+            title: 'Mindmemos User Id',
+            default: ''
+        },
+        mindmemos_app_id: {
+            type: 'string',
+            title: 'Mindmemos App Id',
+            default: 'llm4ad'
+        },
+        mindmemos_agent_id: {
+            type: 'string',
+            title: 'Mindmemos Agent Id',
+            default: 'planner'
+        },
+        mindmemos_session_id: {
+            type: 'string',
+            title: 'Mindmemos Session Id',
+            default: ''
+        },
+        mindmemos_project_id: {
+            type: 'string',
+            title: 'Mindmemos Project Id',
+            default: ''
+        },
+        run_search_probe: {
+            type: 'boolean',
+            title: 'Run Search Probe',
+            default: false
+        }
+    },
+    type: 'object',
+    title: 'MemoryTestRequest',
+    description: 'Connectivity test request for the configured memory backend.'
+} as const;
+
+export const MemoryTestResponseSchema = {
+    properties: {
+        ok: {
+            type: 'boolean',
+            title: 'Ok'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        backend_type: {
+            type: 'string',
+            title: 'Backend Type'
+        },
+        base_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Base Url'
+        },
+        request_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Request Id'
+        },
+        details: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Details'
+        }
+    },
+    type: 'object',
+    required: ['ok', 'message', 'backend_type'],
+    title: 'MemoryTestResponse',
+    description: 'Connectivity test response for memory backend checks.'
+} as const;
+
 export const MessageSchema = {
     properties: {
         message: {
@@ -3535,6 +4562,42 @@ export const PermissionBaseSchema = {
     description: '权限基础 Schema，定义权限的公共字段。'
 } as const;
 
+export const PinnedMemoryResponseSchema = {
+    properties: {
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        }
+    },
+    type: 'object',
+    required: ['task_id'],
+    title: 'PinnedMemoryResponse',
+    description: 'Current pinned shared-memory ids for a running task (manual mode).'
+} as const;
+
+export const PinnedMemoryUpdateSchema = {
+    properties: {
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        }
+    },
+    type: 'object',
+    title: 'PinnedMemoryUpdate',
+    description: 'Replace the pinned shared-memory id set for a task.'
+} as const;
+
 export const PrivacyPolicyContentSchema = {
     properties: {
         title: {
@@ -3593,6 +4656,222 @@ export const ProjectCreateSchema = {
     required: ['name'],
     title: 'ProjectCreate',
     description: '项目创建请求。'
+} as const;
+
+export const ProjectMemoryConfigResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled'
+        },
+        include_user_memory: {
+            type: 'boolean',
+            title: 'Include User Memory'
+        },
+        include_project_memory: {
+            type: 'boolean',
+            title: 'Include Project Memory'
+        },
+        include_task_memory: {
+            type: 'boolean',
+            title: 'Include Task Memory'
+        },
+        user_memory_limit: {
+            type: 'integer',
+            title: 'User Memory Limit'
+        },
+        project_memory_limit: {
+            type: 'integer',
+            title: 'Project Memory Limit'
+        },
+        task_memory_limit: {
+            type: 'integer',
+            title: 'Task Memory Limit'
+        },
+        retrieval_mode: {
+            type: 'string',
+            title: 'Retrieval Mode',
+            default: 'auto'
+        },
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        },
+        task_injection_mode: {
+            type: 'string',
+            title: 'Task Injection Mode',
+            default: 'topk'
+        },
+        mindmemos_search_strategy: {
+            type: 'string',
+            title: 'Mindmemos Search Strategy'
+        },
+        mindmemos_rerank: {
+            type: 'boolean',
+            title: 'Mindmemos Rerank'
+        },
+        mindmemos_score_threshold: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Score Threshold'
+        },
+        mindmemos_fail_open: {
+            type: 'boolean',
+            title: 'Mindmemos Fail Open'
+        },
+        mindmemos_binding_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Binding Id'
+        },
+        mindmemos_chat_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Chat Provider Id'
+        },
+        mindmemos_chat_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Chat Model'
+        },
+        mindmemos_embedding_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Embedding Provider Id'
+        },
+        mindmemos_embedding_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Embedding Model'
+        },
+        mindmemos_embedding_dim: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Embedding Dim'
+        },
+        system_enabled: {
+            type: 'boolean',
+            title: 'System Enabled',
+            default: false
+        },
+        system_base_url: {
+            type: 'string',
+            title: 'System Base Url',
+            default: ''
+        },
+        system_api_key_configured: {
+            type: 'boolean',
+            title: 'System Api Key Configured',
+            default: false
+        },
+        system_chat_configured: {
+            type: 'boolean',
+            title: 'System Chat Configured',
+            default: false
+        },
+        system_embedding_configured: {
+            type: 'boolean',
+            title: 'System Embedding Configured',
+            default: false
+        },
+        system_embedding_dimensions: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'System Embedding Dimensions'
+        },
+        system_rerank_enabled: {
+            type: 'boolean',
+            title: 'System Rerank Enabled',
+            default: false
+        },
+        system_rerank_configured: {
+            type: 'boolean',
+            title: 'System Rerank Configured',
+            default: false
+        },
+        system_runtime_available: {
+            type: 'boolean',
+            title: 'System Runtime Available',
+            default: false
+        },
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_time', 'updated_time', 'enabled', 'include_user_memory', 'include_project_memory', 'include_task_memory', 'user_memory_limit', 'project_memory_limit', 'task_memory_limit', 'mindmemos_search_strategy', 'mindmemos_rerank', 'mindmemos_score_threshold', 'mindmemos_fail_open', 'project_id'],
+    title: 'ProjectMemoryConfigResponse',
+    description: 'Project-level memory defaults response.'
 } as const;
 
 export const ProjectResponseSchema = {
@@ -4893,6 +6172,121 @@ export const TaskLogsResponseSchema = {
     description: '任务日志游标分页响应。'
 } as const;
 
+export const TaskMemoryObservabilityResponseSchema = {
+    properties: {
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled'
+        },
+        injection_calls: {
+            type: 'integer',
+            title: 'Injection Calls',
+            default: 0
+        },
+        scope_hits_total: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Scope Hits Total'
+        },
+        deduped_hits_total: {
+            type: 'integer',
+            title: 'Deduped Hits Total',
+            default: 0
+        },
+        injected_chars_total: {
+            type: 'integer',
+            title: 'Injected Chars Total',
+            default: 0
+        },
+        elapsed_ms_total: {
+            type: 'integer',
+            title: 'Elapsed Ms Total',
+            default: 0
+        },
+        elapsed_ms_avg: {
+            type: 'integer',
+            title: 'Elapsed Ms Avg',
+            default: 0
+        },
+        sampler_counts: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Sampler Counts'
+        },
+        created_task_memory_count: {
+            type: 'integer',
+            title: 'Created Task Memory Count',
+            default: 0
+        },
+        latest_injection: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/MemoryInjectionSummary'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        contribution: {
+            '$ref': '#/components/schemas/MemoryContributionSummary'
+        }
+    },
+    type: 'object',
+    required: ['task_id', 'enabled'],
+    title: 'TaskMemoryObservabilityResponse',
+    description: '任务级 MindMemOS 记忆使用统计。'
+} as const;
+
+export const TaskMemoryPromotionRequestSchema = {
+    properties: {
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        memory_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            maxItems: 50,
+            minItems: 1,
+            title: 'Memory Ids'
+        },
+        prompt_language: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['ZH', 'EN']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Language'
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'task_id', 'memory_ids'],
+    title: 'TaskMemoryPromotionRequest',
+    description: 'Promote selected task-memory cards into project-memory previews.'
+} as const;
+
 export const TaskResponseSchema = {
     properties: {
         id: {
@@ -5833,6 +7227,222 @@ export const UserDefaultModelUpdateSchema = {
     type: 'object',
     title: 'UserDefaultModelUpdate',
     description: '用户默认模型配置更新请求（所有字段均可选）。'
+} as const;
+
+export const UserMemoryConfigResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        },
+        enabled: {
+            type: 'boolean',
+            title: 'Enabled'
+        },
+        include_user_memory: {
+            type: 'boolean',
+            title: 'Include User Memory'
+        },
+        include_project_memory: {
+            type: 'boolean',
+            title: 'Include Project Memory'
+        },
+        include_task_memory: {
+            type: 'boolean',
+            title: 'Include Task Memory'
+        },
+        user_memory_limit: {
+            type: 'integer',
+            title: 'User Memory Limit'
+        },
+        project_memory_limit: {
+            type: 'integer',
+            title: 'Project Memory Limit'
+        },
+        task_memory_limit: {
+            type: 'integer',
+            title: 'Task Memory Limit'
+        },
+        retrieval_mode: {
+            type: 'string',
+            title: 'Retrieval Mode',
+            default: 'auto'
+        },
+        pinned_card_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Pinned Card Ids'
+        },
+        task_injection_mode: {
+            type: 'string',
+            title: 'Task Injection Mode',
+            default: 'topk'
+        },
+        mindmemos_search_strategy: {
+            type: 'string',
+            title: 'Mindmemos Search Strategy'
+        },
+        mindmemos_rerank: {
+            type: 'boolean',
+            title: 'Mindmemos Rerank'
+        },
+        mindmemos_score_threshold: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Score Threshold'
+        },
+        mindmemos_fail_open: {
+            type: 'boolean',
+            title: 'Mindmemos Fail Open'
+        },
+        mindmemos_binding_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Binding Id'
+        },
+        mindmemos_chat_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Chat Provider Id'
+        },
+        mindmemos_chat_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Chat Model'
+        },
+        mindmemos_embedding_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Embedding Provider Id'
+        },
+        mindmemos_embedding_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Embedding Model'
+        },
+        mindmemos_embedding_dim: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mindmemos Embedding Dim'
+        },
+        system_enabled: {
+            type: 'boolean',
+            title: 'System Enabled',
+            default: false
+        },
+        system_base_url: {
+            type: 'string',
+            title: 'System Base Url',
+            default: ''
+        },
+        system_api_key_configured: {
+            type: 'boolean',
+            title: 'System Api Key Configured',
+            default: false
+        },
+        system_chat_configured: {
+            type: 'boolean',
+            title: 'System Chat Configured',
+            default: false
+        },
+        system_embedding_configured: {
+            type: 'boolean',
+            title: 'System Embedding Configured',
+            default: false
+        },
+        system_embedding_dimensions: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'System Embedding Dimensions'
+        },
+        system_rerank_enabled: {
+            type: 'boolean',
+            title: 'System Rerank Enabled',
+            default: false
+        },
+        system_rerank_configured: {
+            type: 'boolean',
+            title: 'System Rerank Configured',
+            default: false
+        },
+        system_runtime_available: {
+            type: 'boolean',
+            title: 'System Runtime Available',
+            default: false
+        },
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_time', 'updated_time', 'enabled', 'include_user_memory', 'include_project_memory', 'include_task_memory', 'user_memory_limit', 'project_memory_limit', 'task_memory_limit', 'mindmemos_search_strategy', 'mindmemos_rerank', 'mindmemos_score_threshold', 'mindmemos_fail_open', 'user_id'],
+    title: 'UserMemoryConfigResponse',
+    description: 'User-level memory defaults response.'
 } as const;
 
 export const UserPublicSchema = {

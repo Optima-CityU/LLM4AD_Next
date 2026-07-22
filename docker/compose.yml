@@ -73,9 +73,27 @@ services:
     volumes:
       - ./app-data/redis/data:/data
 
+  rustfs-permission-init:
+    image: rustfs/rustfs:latest
+    user: "0:0"
+    restart: "no"
+    entrypoint:
+      [
+        "sh",
+        "-c",
+        "mkdir -p /data /app/logs /opt/tls && chown -R 10001:10001 /data /app/logs /opt/tls",
+      ]
+    volumes:
+      - ./app-data/rustfs/data/pro:/data
+      - ./app-data/rustfs/logs:/app/logs
+      - ./app-data/rustfs/data/certs/:/opt/tls
+
   rustfs:
     image: rustfs/rustfs:latest
     restart: always
+    depends_on:
+      rustfs-permission-init:
+        condition: service_completed_successfully
     security_opt:
       - "no-new-privileges:true"
     environment:
@@ -170,7 +188,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    command: celery -A app.core.celery worker --loglevel=info --concurrency=8
+    command: celery -A app.core.celery worker --loglevel=info --concurrency=50
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
@@ -223,6 +241,7 @@ services:
       args:
         - VITE_API_URL=
         - VITE_CODE_SERVER_URL=${VITE_CODE_SERVER_URL:-/code_ide}
+        - VITE_FOOTER_BEIAN=${VITE_FOOTER_BEIAN:-}
         - NODE_ENV=production
     volumes:
       - ../src/frontend/nginx-api-proxy.conf:/etc/nginx/extra-conf.d/api-proxy.conf:ro

@@ -333,8 +333,9 @@ class MEoHConfig(EvolutionConfig):
             hidden=True,
         ),
     )
-    pop_size: int = Field(
+    population_size: int = Field(
         default=8,
+        ge=2,
         json_schema_extra=ui(
             label_zh="种群大小", label_en="Population Size",
             desc_zh="MEoH 种群中维护的个体数量，影响多目标搜索的覆盖范围",
@@ -445,7 +446,7 @@ class MEoHConfig(EvolutionConfig):
 
         table.add_row("Evolution Type:", self.type)
         table.add_row("Generations:", str(self.max_generations))
-        table.add_row("Population Size:", str(self.pop_size))
+        table.add_row("Population Size:", str(self.population_size))
         table.add_row("Selection Num:", str(self.selection_num))
         table.add_row("Max Samples:", str(self.max_sample_nums))
         table.add_row("Objective Metrics:", ", ".join(self.objective_metrics) or "none")
@@ -594,73 +595,355 @@ class DyCAConfig(EvolutionConfig):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class MCTSAHDConfig(IslandGAConfig):
-    """Configuration for the MCTS-AHD orchestrator.
+class EoHConfig(EvolutionConfig):
+    """Configuration for the EoH (Evolution of Heuristics) orchestrator.
 
-    Migrated from legacy LLM4AD MCTS-AHD. Inherits IslandGAConfig so the shared
-    IslandGA individual-generation pipeline keeps its fields (num_islands,
-    max_llm_concurrency, etc.), and adds MCTS tree-search parameters. Note the
-    MCTS-AHD orchestrator runs a single tree (num_islands is effectively 1).
+    Single-objective sibling of MEoH. Reuses the ``meoh_evolution`` planner
+    and the ``meoh_*`` operator samplers, but drives them with a
+    single-objective, generational loop: each generation runs the E1 (and
+    optionally E2/M1/M2) operators sequentially, offspring are scored on a
+    single fitness value, and survival is rank-based top-k truncation.
+
+    Reference:
+        Fei Liu et al. "Evolution of Heuristics: Towards Efficient Automatic
+        Algorithm Design Using Large Language Model." ICML 2024.
     """
 
-    type: Literal["mcts_ahd"] = Field(  # type: ignore[assignment]
-        default="mcts_ahd",
+    type: Literal["eoh"] = Field(
+        default="eoh",
         json_schema_extra=ui(
             label_zh="进化类型", label_en="Evolution Type",
-            desc_zh="蒙特卡洛树搜索启发式设计，用 UCT 平衡探索与利用",
-            desc_en="Monte Carlo Tree Search for heuristic design; balances exploration/exploitation with UCT",
+            desc_zh="启发式进化算法（单目标），使用 I1/E1/E2/M1/M2 算子逐代进化",
+            desc_en="Evolution of Heuristics (single-objective) using I1/E1/E2/M1/M2 operators",
             hidden=True,
         ),
-    )
+    )  # type: ignore[assignment]
 
     planner_type: str = Field(
-        default="llm_evolution",
+        default="eoh_evolution",
         json_schema_extra=ui(
             label_zh="规划器类型", label_en="Planner Type",
-            desc_zh="MCTS-AHD 使用的规划器类型",
-            desc_en="Planner type used by MCTS-AHD",
+            desc_zh="EoH 专用规划器，负责算子分发，通常无需修改",
+            desc_en="EoH's dedicated planner for operator dispatch; typically unchanged",
             hidden=True,
         ),
     )
-    lambda0: float = Field(
-        default=0.1, ge=0.0,
+    population_size: int = Field(
+        default=5,
+        ge=2,
         json_schema_extra=ui(
-            label_zh="探索常数 λ₀", label_en="Exploration Constant λ₀",
-            desc_zh="UCT 探索项的基础系数，越大越偏向探索",
-            desc_en="Base coefficient of the UCT exploration term; larger favors exploration",
+            label_zh="种群大小", label_en="Population Size",
+            desc_zh="EoH 种群维护的个体数量",
+            desc_en="Number of individuals maintained in the EoH population",
         ),
     )
-    alpha: float = Field(
-        default=0.5, ge=0.0,
+    selection_num: int = Field(
+        default=2,
+        ge=1,
         json_schema_extra=ui(
-            label_zh="渐进扩展参数 α", label_en="Progressive Widening α",
-            desc_zh="控制节点扩展节奏的参数（预留）",
-            desc_en="Parameter controlling node expansion cadence (reserved)",
-        ),
-    )
-    max_depth: int = Field(
-        default=10, ge=1,
-        json_schema_extra=ui(
-            label_zh="最大树深度", label_en="Max Tree Depth",
-            desc_zh="MCTS 树的最大深度，限制搜索路径长度",
-            desc_en="Maximum depth of the MCTS tree, bounding search path length",
-        ),
-    )
-    init_size: int = Field(
-        default=4, ge=1,
-        json_schema_extra=ui(
-            label_zh="初始子节点数", label_en="Initial Children",
-            desc_zh="根节点下初始生成的子节点（初始种群）数量",
-            desc_en="Number of first-level children generated under the root (initial population)",
+            label_zh="选择数量", label_en="Selection Number",
+            desc_zh="E1/E2 交叉算子每次从种群选择的父代个体数量",
+            desc_en="Number of parents selected for the E1/E2 crossover operators",
         ),
     )
     max_sample_nums: int = Field(
-        default=100, ge=1,
+        default=100,
+        ge=1,
         json_schema_extra=ui(
             label_zh="最大采样数", label_en="Max Sample Numbers",
-            desc_zh="整个搜索过程中允许的最大评估次数（终止条件）",
-            desc_en="Maximum number of evaluations allowed across the search (termination condition)",
+            desc_zh="整个进化过程中允许的最大 LLM 采样次数",
+            desc_en="Maximum number of LLM sampling calls allowed across the run",
+        ),
+    )
+    num_samplers: int = Field(
+        default=1,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="采样器数量", label_en="Number of Samplers",
+            desc_zh="每个算子每代并行生成的候选数量",
+            desc_en="Number of candidates generated in parallel per operator per generation",
+        ),
+    )
+    use_e2_operator: bool = Field(
+        default=True,
+        json_schema_extra=ui(
+            label_zh="使用 E2 算子", label_en="Use E2 Operator",
+            desc_zh="是否启用 E2（受共同骨架启发的交叉）算子",
+            desc_en="Whether to enable the E2 (backbone-motivated crossover) operator",
+        ),
+    )
+    use_m1_operator: bool = Field(
+        default=True,
+        json_schema_extra=ui(
+            label_zh="使用 M1 算子", label_en="Use M1 Operator",
+            desc_zh="是否启用 M1（结构变异）算子",
+            desc_en="Whether to enable the M1 (structural mutation) operator",
+        ),
+    )
+    use_m2_operator: bool = Field(
+        default=True,
+        json_schema_extra=ui(
+            label_zh="使用 M2 算子", label_en="Use M2 Operator",
+            desc_zh="是否启用 M2（参数变异）算子",
+            desc_en="Whether to enable the M2 (parameter mutation) operator",
+        ),
+    )
+    seed_path: str | None = Field(
+        default=None,
+        json_schema_extra=ui(
+            is_path=True,
+            label_zh="种子路径", label_en="Seed Path",
+            desc_zh="初始种子算法文件的路径，用于热启动进化过程",
+            desc_en="Path to an initial seed algorithm file for warm-starting evolution",
         ),
     )
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    def to_table(self) -> Table:
+        """Create a rich Table representation of the EoH config.
+
+        Returns:
+            Rich Table with EoH configuration.
+        """
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("key", style="bold white")
+        table.add_column("value", style="yellow")
+
+        table.add_row("Evolution Type:", self.type)
+        table.add_row("Generations:", str(self.max_generations))
+        table.add_row("Population Size:", str(self.population_size))
+        table.add_row("Selection Num:", str(self.selection_num))
+        table.add_row("Max Samples:", str(self.max_sample_nums))
+        table.add_row("E2 Operator:", str(self.use_e2_operator))
+        table.add_row("M1 Operator:", str(self.use_m1_operator))
+        table.add_row("M2 Operator:", str(self.use_m2_operator))
+
+        return table
+
+
+class ReEvoConfig(EvolutionConfig):
+    """Configuration for the ReEvo (Reflective Evolution) orchestrator.
+
+    ReEvo augments genetic search with two reflection signals:
+    a short-term reflection (comparing a worse/better parent pair) that
+    guides crossover, and a long-term reflection (accumulated across the
+    run) that guides elite mutation.
+
+    Reference:
+        Ye et al. "ReEvo: Large Language Models as Hyper-Heuristics with
+        Reflective Evolution." NeurIPS 2024.
+    """
+
+    type: Literal["reevo"] = Field(
+        default="reevo",
+        json_schema_extra=ui(
+            label_zh="进化类型", label_en="Evolution Type",
+            desc_zh="反思式进化：短期反思指导交叉，长期反思指导精英变异",
+            desc_en="Reflective Evolution: short-term reflection guides crossover, long-term guides elite mutation",
+            hidden=True,
+        ),
+    )  # type: ignore[assignment]
+
+    planner_type: str = Field(
+        default="reevo_evolution",
+        json_schema_extra=ui(
+            label_zh="规划器类型", label_en="Planner Type",
+            desc_zh="ReEvo 专用规划器，通常无需修改",
+            desc_en="ReEvo-specific planner; typically unchanged",
+            hidden=True,
+        ),
+    )
+    population_size: int = Field(
+        default=8,
+        ge=2,
+        json_schema_extra=ui(
+            label_zh="种群大小", label_en="Population Size",
+            desc_zh="ReEvo 种群维护的个体数量",
+            desc_en="Number of individuals maintained in the ReEvo population",
+        ),
+    )
+    mutation_rate: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        json_schema_extra=ui(
+            label_zh="变异率", label_en="Mutation Rate",
+            desc_zh="每代精英变异次数占种群大小的比例",
+            desc_en="Fraction of population_size used for elite mutations each generation",
+        ),
+    )
+    max_sample_nums: int = Field(
+        default=100,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="最大采样数", label_en="Max Sample Numbers",
+            desc_zh="整个进化过程中允许的最大 LLM 采样次数",
+            desc_en="Maximum number of LLM sampling calls allowed across the run",
+        ),
+    )
+    num_samplers: int = Field(
+        default=1,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="采样器数量", label_en="Number of Samplers",
+            desc_zh="每步并行生成的交叉候选数量",
+            desc_en="Number of crossover candidates generated in parallel per step",
+        ),
+    )
+    seed_path: str | None = Field(
+        default=None,
+        json_schema_extra=ui(
+            is_path=True,
+            label_zh="种子路径", label_en="Seed Path",
+            desc_zh="初始种子算法文件的路径，用于热启动进化过程",
+            desc_en="Path to an initial seed algorithm file for warm-starting evolution",
+        ),
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    def to_table(self) -> Table:
+        """Create a rich Table representation of the ReEvo config.
+
+        Returns:
+            Rich Table with ReEvo configuration.
+        """
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("key", style="bold white")
+        table.add_column("value", style="yellow")
+
+        table.add_row("Evolution Type:", self.type)
+        table.add_row("Generations:", str(self.max_generations))
+        table.add_row("Population Size:", str(self.population_size))
+        table.add_row("Mutation Rate:", str(self.mutation_rate))
+        table.add_row("Max Samples:", str(self.max_sample_nums))
+
+        return table
+
+
+class MCTSAHDConfig(EvolutionConfig):
+    """Configuration for the MCTS-AHD orchestrator.
+
+    Monte Carlo Tree Search for Automatic Heuristic Design. Builds a search
+    tree over algorithms, selecting nodes via UCT and expanding them with
+    the e1/e2/m1/m2/s1 operators. Not population-generational; ``max_generations``
+    is interpreted as the number of MCTS iterations.
+
+    Reference:
+        Zheng et al. "Monte Carlo Tree Search for Comprehensive Exploration
+        in LLM-based Automatic Heuristic Design." ICML 2025.
+    """
+
+    type: Literal["mcts_ahd"] = Field(
+        default="mcts_ahd",
+        json_schema_extra=ui(
+            label_zh="进化类型", label_en="Evolution Type",
+            desc_zh="基于蒙特卡洛树搜索的算法设计，通过 UCT 选择与算子扩展探索算法空间",
+            desc_en="MCTS for Automatic Heuristic Design; explores via UCT selection and operator expansion",
+            hidden=True,
+        ),
+    )  # type: ignore[assignment]
+
+    planner_type: str = Field(
+        default="mcts_ahd_evolution",
+        json_schema_extra=ui(
+            label_zh="规划器类型", label_en="Planner Type",
+            desc_zh="MCTS-AHD 专用规划器，通常无需修改",
+            desc_en="MCTS-AHD-specific planner; typically unchanged",
+            hidden=True,
+        ),
+    )
+    init_size: int = Field(
+        default=4,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="初始节点数", label_en="Init Size",
+            desc_zh="根节点下初始展开的子节点（算法）数量",
+            desc_en="Number of initial child nodes (algorithms) expanded under the root",
+        ),
+    )
+    population_size: int = Field(
+        default=10,
+        ge=2,
+        json_schema_extra=ui(
+            label_zh="种群大小", label_en="Population Size",
+            desc_zh="MCTS 维护的活跃算法池大小",
+            desc_en="Size of the active algorithm pool maintained by MCTS",
+        ),
+    )
+    selection_num: int = Field(
+        default=2,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="选择数量", label_en="Selection Number",
+            desc_zh="e1/e2 算子每次使用的父代个体数量",
+            desc_en="Number of parents used by the e1/e2 operators",
+        ),
+    )
+    max_sample_nums: int = Field(
+        default=100,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="最大采样数", label_en="Max Sample Numbers",
+            desc_zh="整个搜索过程中允许的最大 LLM 采样次数",
+            desc_en="Maximum number of LLM sampling calls allowed across the search",
+        ),
+    )
+    alpha: float = Field(
+        default=0.5,
+        ge=0.0,
+        json_schema_extra=ui(
+            label_zh="UCT alpha", label_en="UCT alpha",
+            desc_zh="UCT 渐进加宽参数，控制节点扩展的宽度",
+            desc_en="UCT progressive-widening parameter controlling expansion breadth",
+        ),
+    )
+    lambda_0: float = Field(
+        default=0.1,
+        ge=0.0,
+        json_schema_extra=ui(
+            label_zh="UCT lambda_0", label_en="UCT lambda_0",
+            desc_zh="UCT 探索常数基值，随剩余预算衰减",
+            desc_en="UCT exploration constant base, decayed by remaining budget",
+        ),
+    )
+    max_depth: int = Field(
+        default=10,
+        ge=1,
+        json_schema_extra=ui(
+            label_zh="最大树深", label_en="Max Tree Depth",
+            desc_zh="MCTS 树的最大深度",
+            desc_en="Maximum depth of the MCTS tree",
+        ),
+    )
+    seed_path: str | None = Field(
+        default=None,
+        json_schema_extra=ui(
+            is_path=True,
+            label_zh="种子路径", label_en="Seed Path",
+            desc_zh="初始种子算法文件的路径，用于热启动搜索",
+            desc_en="Path to an initial seed algorithm file for warm-starting the search",
+        ),
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    def to_table(self) -> Table:
+        """Create a rich Table representation of the MCTS-AHD config.
+
+        Returns:
+            Rich Table with MCTS-AHD configuration.
+        """
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("key", style="bold white")
+        table.add_column("value", style="yellow")
+
+        table.add_row("Evolution Type:", self.type)
+        table.add_row("MCTS Iterations:", str(self.max_generations))
+        table.add_row("Init Size:", str(self.init_size))
+        table.add_row("Pool Size:", str(self.population_size))
+        table.add_row("Max Samples:", str(self.max_sample_nums))
+        table.add_row("UCT alpha/lambda0:", f"{self.alpha}/{self.lambda_0}")
+
+        return table

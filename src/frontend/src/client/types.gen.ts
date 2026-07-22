@@ -669,6 +669,11 @@ export type ExampleTemplateListResponse = {
  */
 export type FeatureFlags = {
     enable_ai_agent_build: boolean;
+    mindmemos_memory_enabled: boolean;
+    mindmemos_runtime_available: boolean;
+    mindmemos_embedding_configured: boolean;
+    mindmemos_rerank_enabled: boolean;
+    mindmemos_rerank_configured: boolean;
 };
 
 /**
@@ -1200,6 +1205,243 @@ export type LiveCodeUpdate = {
 };
 
 /**
+ * Confirm which extracted preview memories should become active.
+ */
+export type MemoryCardExtractionCommitRequest = {
+    selected_ids?: Array<(string)>;
+    all_ids?: Array<(string)>;
+};
+
+/**
+ * Discard temporary extracted preview memories.
+ */
+export type MemoryCardExtractionDiscardRequest = {
+    memory_ids?: Array<(string)>;
+};
+
+/**
+ * Generate MindMemOS memory previews from a raw user description.
+ */
+export type MemoryCardExtractionRequest = {
+    content: string;
+    prompt_language?: ('ZH' | 'EN' | null);
+};
+
+/**
+ * Preview memories extracted by MindMemOS before the user confirms them.
+ */
+export type MemoryCardExtractionResponse = {
+    preview_id: string;
+    items: Array<MemoryCardResponse>;
+    message?: string;
+};
+
+/**
+ * Paged MindMemOS memory list response.
+ */
+export type MemoryCardPageResponse = {
+    items: Array<MemoryCardResponse>;
+    page: number;
+    page_size: number;
+    total?: (number | null);
+    has_more?: boolean;
+};
+
+/**
+ * MindMemOS-managed fields shown as read-only details in the UI.
+ */
+export type MemoryCardReadonlyInfo = {
+    source?: string;
+    status?: string;
+    entity_name?: (string | null);
+    property_name?: (string | null);
+    property_time?: (string | null);
+    last_update_at?: (string | null);
+    event_time?: (string | null);
+    source_timestamp?: (string | null);
+};
+
+/**
+ * MindMemOS memory item mapped for the LLM4AD memory UI.
+ */
+export type MemoryCardResponse = {
+    id: string;
+    type: string;
+    title: string;
+    content: string;
+    enabled?: boolean;
+    source?: string;
+    tags?: Array<(string)>;
+    score?: (number | null);
+    generation?: (number | null);
+    algorithm_id?: (string | null);
+    metadata?: {
+        [key: string]: unknown;
+    };
+    readonly?: MemoryCardReadonlyInfo;
+};
+
+/**
+ * Update whether a MindMemOS memory can be injected.
+ */
+export type MemoryCardStatusUpdate = {
+    enabled: boolean;
+};
+
+/**
+ * Create or update a MindMemOS memory from user-provided text.
+ */
+export type MemoryCardUpsertRequest = {
+    id?: (string | null);
+    type?: string;
+    title?: string;
+    content: string;
+    enabled?: boolean;
+    tags?: Array<(string)>;
+    score?: (number | null);
+    generation?: (number | null);
+    algorithm_id?: (string | null);
+    metadata?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * Update request for user/project memory defaults.
+ */
+export type MemoryConfigUpdate = {
+    enabled?: (boolean | null);
+    include_user_memory?: (boolean | null);
+    include_project_memory?: (boolean | null);
+    include_task_memory?: (boolean | null);
+    user_memory_limit?: (number | null);
+    project_memory_limit?: (number | null);
+    task_memory_limit?: (number | null);
+    retrieval_mode?: ('auto' | 'manual' | null);
+    pinned_card_ids?: (Array<(string)> | null);
+    task_injection_mode?: ('topk' | 'weight' | 'random' | null);
+    mindmemos_search_strategy?: (string | null);
+    mindmemos_rerank?: (boolean | null);
+    mindmemos_score_threshold?: (number | null);
+    mindmemos_fail_open?: (boolean | null);
+};
+
+/**
+ * 单个 scope 的记忆贡献度估算。
+ */
+export type MemoryContributionScopeSummary = {
+    calls?: number;
+    positive_results?: number;
+    best_delta?: (number | null);
+    average_delta?: (number | null);
+};
+
+/**
+ * MindMemOS 注入后候选算法评分变化的聚合估算。
+ */
+export type MemoryContributionSummary = {
+    associated_generations?: number;
+    scored_generations?: number;
+    positive_results?: number;
+    best_delta?: (number | null);
+    average_delta?: (number | null);
+    by_scope?: {
+        [key: string]: MemoryContributionScopeSummary;
+    };
+};
+
+/**
+ * System MindMemOS health response for the frontend.
+ */
+export type MemoryHealthResponse = {
+    ok: boolean;
+    message: string;
+    system_runtime_available: boolean;
+    system_enabled: boolean;
+    system_chat_configured: boolean;
+    system_embedding_configured: boolean;
+    system_api_key_configured: boolean;
+    system_rerank_enabled?: boolean;
+    system_rerank_configured?: boolean;
+    service_reachable?: boolean;
+    auth_ok?: boolean;
+    error_code?: (string | null);
+    details?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * 单次 MindMemOS 注入事件摘要。
+ */
+export type MemoryInjectionSummary = {
+    sampler?: string;
+    strategy?: string;
+    scope_hits?: {
+        [key: string]: (number);
+    };
+    deduped_hits?: number;
+    injected_chars?: number;
+    elapsed_ms?: number;
+    timestamp?: (string | null);
+};
+
+/**
+ * Current MindMemOS provider binding state for a user memory space.
+ */
+export type MemoryProviderBindingResponse = {
+    configured?: boolean;
+    binding_id?: (string | null);
+    project_id: string;
+    user_id: string;
+    chat_provider_id?: (string | null);
+    chat_model?: (string | null);
+    embedding_provider_id?: (string | null);
+    embedding_model?: (string | null);
+    embedding_dim?: (number | null);
+    embedding_locked?: boolean;
+    message?: string;
+};
+
+/**
+ * Bind the current user memory space to existing provider configs.
+ */
+export type MemoryProviderBindingUpdate = {
+    chat_provider_id: string;
+    chat_model: string;
+    embedding_provider_id: string;
+};
+
+/**
+ * Connectivity test request for the configured memory backend.
+ */
+export type MemoryTestRequest = {
+    type?: string;
+    mindmemos_base_url?: string;
+    mindmemos_api_key?: string;
+    mindmemos_user_id?: string;
+    mindmemos_app_id?: string;
+    mindmemos_agent_id?: string;
+    mindmemos_session_id?: string;
+    mindmemos_project_id?: string;
+    run_search_probe?: boolean;
+};
+
+/**
+ * Connectivity test response for memory backend checks.
+ */
+export type MemoryTestResponse = {
+    ok: boolean;
+    message: string;
+    backend_type: string;
+    base_url?: (string | null);
+    request_id?: (string | null);
+    details?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
  * 通用消息响应模型，用于返回简单的文本提示信息。
  */
 export type Message = {
@@ -1328,6 +1570,21 @@ export type PermissionBase = {
 };
 
 /**
+ * Current pinned shared-memory ids for a running task (manual mode).
+ */
+export type PinnedMemoryResponse = {
+    task_id: string;
+    pinned_card_ids?: Array<(string)>;
+};
+
+/**
+ * Replace the pinned shared-memory id set for a task.
+ */
+export type PinnedMemoryUpdate = {
+    pinned_card_ids?: Array<(string)>;
+};
+
+/**
  * 隐私协议内容响应。
  */
 export type PrivacyPolicyContent = {
@@ -1344,6 +1601,45 @@ export type ProjectCreate = {
     name: string;
     description?: (string | null);
     icon?: (string | null);
+};
+
+/**
+ * Project-level memory defaults response.
+ */
+export type ProjectMemoryConfigResponse = {
+    id: string;
+    created_time: string;
+    updated_time: string;
+    enabled: boolean;
+    include_user_memory: boolean;
+    include_project_memory: boolean;
+    include_task_memory: boolean;
+    user_memory_limit: number;
+    project_memory_limit: number;
+    task_memory_limit: number;
+    retrieval_mode?: string;
+    pinned_card_ids?: Array<(string)>;
+    task_injection_mode?: string;
+    mindmemos_search_strategy: string;
+    mindmemos_rerank: boolean;
+    mindmemos_score_threshold: (number | null);
+    mindmemos_fail_open: boolean;
+    mindmemos_binding_id?: (string | null);
+    mindmemos_chat_provider_id?: (string | null);
+    mindmemos_chat_model?: (string | null);
+    mindmemos_embedding_provider_id?: (string | null);
+    mindmemos_embedding_model?: (string | null);
+    mindmemos_embedding_dim?: (number | null);
+    system_enabled?: boolean;
+    system_base_url?: string;
+    system_api_key_configured?: boolean;
+    system_chat_configured?: boolean;
+    system_embedding_configured?: boolean;
+    system_embedding_dimensions?: (number | null);
+    system_rerank_enabled?: boolean;
+    system_rerank_configured?: boolean;
+    system_runtime_available?: boolean;
+    project_id: string;
 };
 
 /**
@@ -1851,6 +2147,38 @@ export type TaskLogsResponse = {
 };
 
 /**
+ * 任务级 MindMemOS 记忆使用统计。
+ */
+export type TaskMemoryObservabilityResponse = {
+    task_id: string;
+    enabled: boolean;
+    injection_calls?: number;
+    scope_hits_total?: {
+        [key: string]: (number);
+    };
+    deduped_hits_total?: number;
+    injected_chars_total?: number;
+    elapsed_ms_total?: number;
+    elapsed_ms_avg?: number;
+    sampler_counts?: {
+        [key: string]: (number);
+    };
+    created_task_memory_count?: number;
+    latest_injection?: (MemoryInjectionSummary | null);
+    contribution?: MemoryContributionSummary;
+};
+
+/**
+ * Promote selected task-memory cards into project-memory previews.
+ */
+export type TaskMemoryPromotionRequest = {
+    project_id: string;
+    task_id: string;
+    memory_ids: Array<(string)>;
+    prompt_language?: ('ZH' | 'EN' | null);
+};
+
+/**
  * 任务基础响应。
  */
 export type TaskResponse = {
@@ -2069,6 +2397,45 @@ export type UserDefaultModelUpdate = {
     other_model_name?: (string | null);
     embedding_enabled?: (boolean | null);
     embedding_provider_id?: (string | null);
+};
+
+/**
+ * User-level memory defaults response.
+ */
+export type UserMemoryConfigResponse = {
+    id: string;
+    created_time: string;
+    updated_time: string;
+    enabled: boolean;
+    include_user_memory: boolean;
+    include_project_memory: boolean;
+    include_task_memory: boolean;
+    user_memory_limit: number;
+    project_memory_limit: number;
+    task_memory_limit: number;
+    retrieval_mode?: string;
+    pinned_card_ids?: Array<(string)>;
+    task_injection_mode?: string;
+    mindmemos_search_strategy: string;
+    mindmemos_rerank: boolean;
+    mindmemos_score_threshold: (number | null);
+    mindmemos_fail_open: boolean;
+    mindmemos_binding_id?: (string | null);
+    mindmemos_chat_provider_id?: (string | null);
+    mindmemos_chat_model?: (string | null);
+    mindmemos_embedding_provider_id?: (string | null);
+    mindmemos_embedding_model?: (string | null);
+    mindmemos_embedding_dim?: (number | null);
+    system_enabled?: boolean;
+    system_base_url?: string;
+    system_api_key_configured?: boolean;
+    system_chat_configured?: boolean;
+    system_embedding_configured?: boolean;
+    system_embedding_dimensions?: (number | null);
+    system_rerank_enabled?: boolean;
+    system_rerank_configured?: boolean;
+    system_runtime_available?: boolean;
+    user_id: string;
 };
 
 /**
@@ -2427,6 +2794,135 @@ export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData = {
 
 export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse = (EmbeddingProviderTestResponse);
 
+export type Llm4AdMemoryTestMemoryBackendData = {
+    requestBody: MemoryTestRequest;
+};
+
+export type Llm4AdMemoryTestMemoryBackendResponse = (MemoryTestResponse);
+
+export type Llm4AdMemoryGetMemoryHealthResponse = (MemoryHealthResponse);
+
+export type Llm4AdMemoryGetMemoryProviderBindingResponse = (MemoryProviderBindingResponse);
+
+export type Llm4AdMemoryUpsertMemoryProviderBindingData = {
+    requestBody: MemoryProviderBindingUpdate;
+};
+
+export type Llm4AdMemoryUpsertMemoryProviderBindingResponse = (MemoryProviderBindingResponse);
+
+export type Llm4AdMemoryGetUserMemoryConfigResponse = (UserMemoryConfigResponse);
+
+export type Llm4AdMemoryUpdateUserMemoryConfigData = {
+    requestBody: MemoryConfigUpdate;
+};
+
+export type Llm4AdMemoryUpdateUserMemoryConfigResponse = (UserMemoryConfigResponse);
+
+export type Llm4AdMemoryGetProjectMemoryConfigData = {
+    projectId: string;
+};
+
+export type Llm4AdMemoryGetProjectMemoryConfigResponse = (ProjectMemoryConfigResponse);
+
+export type Llm4AdMemoryUpdateProjectMemoryConfigData = {
+    projectId: string;
+    requestBody: MemoryConfigUpdate;
+};
+
+export type Llm4AdMemoryUpdateProjectMemoryConfigResponse = (ProjectMemoryConfigResponse);
+
+export type Llm4AdMemoryListMemoryCardsData = {
+    page?: number;
+    pageSize?: number;
+    projectId?: (string | null);
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryListMemoryCardsResponse = (MemoryCardPageResponse);
+
+export type Llm4AdMemoryCreateMemoryCardData = {
+    projectId?: (string | null);
+    requestBody: MemoryCardUpsertRequest;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryCreateMemoryCardResponse = (MemoryCardResponse);
+
+export type Llm4AdMemoryExtractMemoryCardsData = {
+    projectId?: (string | null);
+    requestBody: MemoryCardExtractionRequest;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryExtractMemoryCardsResponse = (MemoryCardExtractionResponse);
+
+export type Llm4AdMemoryStreamExtractMemoryCardsData = {
+    projectId?: (string | null);
+    requestBody: MemoryCardExtractionRequest;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryStreamExtractMemoryCardsResponse = (unknown);
+
+export type Llm4AdMemoryStreamPromoteTaskMemoryCardsData = {
+    requestBody: TaskMemoryPromotionRequest;
+};
+
+export type Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse = (unknown);
+
+export type Llm4AdMemoryCommitMemoryCardExtractionData = {
+    previewId: string;
+    projectId?: (string | null);
+    requestBody: MemoryCardExtractionCommitRequest;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryCommitMemoryCardExtractionResponse = (MemoryCardExtractionResponse);
+
+export type Llm4AdMemoryDiscardMemoryCardExtractionData = {
+    previewId: string;
+    projectId?: (string | null);
+    requestBody: MemoryCardExtractionDiscardRequest;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryDiscardMemoryCardExtractionResponse = (Message);
+
+export type Llm4AdMemoryUpdateMemoryCardData = {
+    memoryId: string;
+    projectId?: (string | null);
+    requestBody: MemoryCardUpsertRequest;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryUpdateMemoryCardResponse = (MemoryCardResponse);
+
+export type Llm4AdMemoryDeleteMemoryCardData = {
+    memoryId: string;
+    projectId?: (string | null);
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryDeleteMemoryCardResponse = (Message);
+
+export type Llm4AdMemoryUpdateMemoryCardStatusData = {
+    memoryId: string;
+    projectId?: (string | null);
+    requestBody: MemoryCardStatusUpdate;
+    scope: 'user' | 'project' | 'task';
+    taskId?: (string | null);
+};
+
+export type Llm4AdMemoryUpdateMemoryCardStatusResponse = (MemoryCardResponse);
+
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
@@ -2637,6 +3133,55 @@ export type Llm4AdTasksCopyTaskData = {
 
 export type Llm4AdTasksCopyTaskResponse = (TaskResponse);
 
+export type Llm4AdTasksListTaskMemoryData = {
+    page?: number;
+    pageSize?: number;
+    taskId: string;
+};
+
+export type Llm4AdTasksListTaskMemoryResponse = (MemoryCardPageResponse);
+
+export type Llm4AdTasksUpsertTaskMemoryData = {
+    requestBody: MemoryCardUpsertRequest;
+    taskId: string;
+};
+
+export type Llm4AdTasksUpsertTaskMemoryResponse = (MemoryCardResponse);
+
+export type Llm4AdTasksGetTaskMemoryObservabilityData = {
+    taskId: string;
+};
+
+export type Llm4AdTasksGetTaskMemoryObservabilityResponse = (TaskMemoryObservabilityResponse);
+
+export type Llm4AdTasksGetTaskPinnedMemoryData = {
+    taskId: string;
+};
+
+export type Llm4AdTasksGetTaskPinnedMemoryResponse = (PinnedMemoryResponse);
+
+export type Llm4AdTasksSetTaskPinnedMemoryData = {
+    requestBody: PinnedMemoryUpdate;
+    taskId: string;
+};
+
+export type Llm4AdTasksSetTaskPinnedMemoryResponse = (PinnedMemoryResponse);
+
+export type Llm4AdTasksUpdateTaskMemoryData = {
+    memoryId: string;
+    requestBody: MemoryCardUpsertRequest;
+    taskId: string;
+};
+
+export type Llm4AdTasksUpdateTaskMemoryResponse = (MemoryCardResponse);
+
+export type Llm4AdTasksDeleteTaskMemoryData = {
+    memoryId: string;
+    taskId: string;
+};
+
+export type Llm4AdTasksDeleteTaskMemoryResponse = (Message);
+
 export type Llm4AdTasksRunTaskData = {
     taskId: string;
 };
@@ -2785,6 +3330,7 @@ export type Llm4AdTasksGetTaskLogsData = {
 export type Llm4AdTasksGetTaskLogsResponse = (TaskLogsResponse);
 
 export type Llm4AdTasksStreamTaskLogsData = {
+    lastId?: string;
     taskId: string;
 };
 

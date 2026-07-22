@@ -2,7 +2,10 @@
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from loguru import logger
+from openai import APIStatusError
 from openai.types.chat import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
 from openai.types.chat.chat_completion_chunk import Choice as ChunkChoice
@@ -334,6 +337,51 @@ async def test_chat_with_schema_success(provider):
     assert result.parsed is not None
     assert result.parsed.name == "Alice"
     assert result.parsed.age == 30
+
+
+@pytest.mark.asyncio
+async def test_chat_retry_log_interpolates_api_status_error(provider, monkeypatch):
+    """Retry logs should render status, wait, attempt, and error details."""
+
+    class Reply(BaseModel):
+        answer: str
+
+    mock_response = ChatCompletion(
+        id="retry-id-123",
+        created=1234567890,
+        model="test-model",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content='{"answer": "ok"}'),
+            )
+        ],
+        usage={"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        object="chat.completion",
+    )
+    status_error = APIStatusError(
+        "service unavailable",
+        response=httpx.Response(
+            status_code=503,
+            request=httpx.Request("POST", "http://localhost:8000/v1/chat/completions"),
+        ),
+        body={"error": "temporary overload"},
+    )
+    provider.client.chat.completions.create.side_effect = [status_error, mock_response]
+    monkeypatch.setattr("llm4ad.infra.provider.openai_compatible.asyncio.sleep", AsyncMock())
+
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        result = await provider.generate("Return JSON", schema=Reply)
+    finally:
+        logger.remove(sink_id)
+
+    assert result.parsed.answer == "ok"
+    messages = [record["message"] for record in records]
+    assert any("API returned 503, retrying in 1s (attempt 1/3)" in message for message in messages)
+    assert all("%d" not in message and "%s" not in message for message in messages)
 
 
 @pytest.mark.asyncio

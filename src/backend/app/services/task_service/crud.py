@@ -23,6 +23,68 @@ from .auth import get_task_with_auth
 from .templates import _apply_template
 
 
+def _apply_memory_defaults(
+    db: Session,
+    input_args: dict,
+    *,
+    current_user: models.User,
+    project_id: uuid.UUID,
+    explicit_memory: dict | None = None,
+) -> dict:
+    """Merge user/project memory defaults into task input args."""
+    from app.services import memory_service
+
+    project_defaults = memory_service.get_project_memory_config(db, project_id, current_user)
+    existing = input_args.get("memory")
+    memory = dict(existing) if isinstance(existing, dict) else {}
+    binding_error = memory_service.get_mindmemos_provider_binding_error(db, current_user)
+    mindmemos_available = (
+        settings.mindmemos_runtime_available
+        and bool(project_defaults.mindmemos_binding_id)
+        and binding_error is None
+    )
+    if binding_error:
+        logger.warning("Skipping MindMemOS task memory because the provider binding is invalid: {}", binding_error)
+    explicit_type = explicit_memory.get("type") if explicit_memory else None
+    if explicit_type == "local_yaml":
+        memory.update(explicit_memory or {})
+        memory.setdefault("enabled", True)
+        memory["type"] = "local_yaml"
+        input_args["memory"] = memory
+        return input_args
+
+    defaults = {
+        "enabled": True,
+        "type": "mindmemos_cloud" if mindmemos_available else "local_yaml",
+        "include_user_memory": project_defaults.include_user_memory,
+        "include_project_memory": project_defaults.include_project_memory,
+        "include_task_memory": project_defaults.include_task_memory,
+        "user_memory_limit": project_defaults.user_memory_limit,
+        "project_memory_limit": project_defaults.project_memory_limit,
+        "task_memory_limit": project_defaults.task_memory_limit,
+        "mindmemos_search_strategy": project_defaults.mindmemos_search_strategy,
+        "mindmemos_rerank": project_defaults.mindmemos_rerank,
+        "mindmemos_score_threshold": project_defaults.mindmemos_score_threshold
+        if project_defaults.mindmemos_rerank
+        else None,
+        "mindmemos_fail_open": project_defaults.mindmemos_fail_open,
+    }
+    preserved = {key: value for key, value in memory.items() if key not in defaults}
+    if explicit_memory:
+        preserved.update(explicit_memory)
+    merged = {**defaults, **preserved}
+    if merged.get("enabled") is False:
+        merged["type"] = "local_yaml"
+    elif mindmemos_available and merged.get("type") in (None, "", "local_yaml"):
+        merged["type"] = "mindmemos_cloud"
+    elif not mindmemos_available:
+        merged["type"] = "local_yaml"
+    if not merged.get("mindmemos_rerank"):
+        merged["mindmemos_score_threshold"] = None
+    input_args["memory"] = merged
+    return input_args
+
+
 def get_task_storage_usage(task: models.Task) -> schemas.StorageUsage:
     """计算任务输入数据的存储用量。"""
     used = storage.get_prefix_total_size(task.input_data_path) if task.input_data_path else 0
@@ -125,6 +187,11 @@ def create_task(db: Session, task_in: schemas.TaskCreate, current_user: models.U
     get_project_with_auth(db, task_in.project_id, current_user)
 
     input_args = task_in.input_args if task_in.input_args is not None else schemas.generate_default_input_args()
+    requested_memory = (
+        input_args.get("memory")
+        if task_in.input_args is not None and isinstance(input_args.get("memory"), dict)
+        else None
+    )
 
     # 处理供应商列表和模型选择，运行任务时需处理后传入llm4ad
     if "planner" not in input_args:
@@ -153,9 +220,27 @@ def create_task(db: Session, task_in: schemas.TaskCreate, current_user: models.U
     if task_in.template_name:
         config_name = task_in.config_name or "config.yaml"
         _apply_template(db, db_task, task_in.template_name, config_name)
+        if requested_memory is not None:
+            template_args = dict(db_task.input_args or {})
+            template_args["memory"] = requested_memory
+            db_task.input_args = template_args
+        db_task.input_args = _apply_memory_defaults(
+            db,
+            dict(db_task.input_args or {}),
+            current_user=current_user,
+            project_id=task_in.project_id,
+            explicit_memory=requested_memory,
+        )
         db.commit()
         db.refresh(db_task)
     else:
+        db_task.input_args = _apply_memory_defaults(
+            db,
+            dict(db_task.input_args or {}),
+            current_user=current_user,
+            project_id=task_in.project_id,
+            explicit_memory=requested_memory,
+        )
         # 非模板任务自动创建一个顶级文件夹；模板任务已有以模板名命名的顶级目录
         _create_top_level_folder(db, db_task, DEFAULT_TOP_FOLDER_NAME)
         db.commit()

@@ -183,7 +183,7 @@ class ConfigRecommender:
 
         logger.info(
             "ConfigRecommender: complexity_tier='{}' → num_islands={}, "
-            "pop_size={}, max_gens={}",
+            "island_population_size={}, max_gens={}",
             tier,
             COMPLEXITY_RULES[tier].num_islands,
             COMPLEXITY_RULES[tier].island_population_size,

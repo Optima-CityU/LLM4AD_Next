@@ -4,7 +4,7 @@ Defines configuration classes for the memory system including
 static memory cards, auto-extraction settings, and prompt integration.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,16 @@ class MemoryCardConfig(BaseModel):
             multiline=True,
         ),
     )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this memory card can be injected into prompts",
+        json_schema_extra=ui(
+            label_zh="启用",
+            label_en="Enabled",
+            desc_zh="是否允许该记忆卡片注入后续提示词",
+            desc_en="Whether this memory card can be injected into future prompts",
+        ),
+    )
     tags: list[str] = Field(
         default_factory=list, description="Tags for filtering and retrieval",
         json_schema_extra=ui(
@@ -79,6 +89,28 @@ class AutoExtractionConfig(BaseModel):
     - Bad algorithms: capture what to avoid
     """
 
+    type: str = Field(
+        default="llm_card_extractor",
+        description="Memory extractor implementation registered name",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="提取器类型",
+            label_en="Extractor Type",
+            desc_zh="记忆自动提取器的注册名称",
+            desc_en="Registered memory extractor implementation name",
+        ),
+    )
+    module: str | None = Field(
+        default=None,
+        description="Optional Python module to import before creating the extractor",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="提取器模块",
+            label_en="Extractor Module",
+            desc_zh="创建提取器前导入的可选 Python 模块",
+            desc_en="Optional Python module imported before creating the extractor",
+        ),
+    )
     enabled: bool = Field(
         default=True, description="Enable auto-extraction after evaluation",
         json_schema_extra=ui(
@@ -172,6 +204,30 @@ class AutoExtractionConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory system configuration."""
 
+    type: str = Field(
+        default="local_yaml",
+        description="Memory implementation registered name",
+        json_schema_extra=ui(
+            label_zh="Memory 类型",
+            label_en="Memory Type",
+            desc_zh="记忆模块注册名称：local_yaml 或 mindmemos_cloud；自定义实现可填写注册名",
+            desc_en=(
+                "Registered memory implementation: local_yaml or mindmemos_cloud; "
+                "custom backends can use their registered name"
+            ),
+        ),
+    )
+    module: str | None = Field(
+        default=None,
+        description="Optional Python module to import before creating memory",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="Memory 模块",
+            label_en="Memory Module",
+            desc_zh="创建记忆模块前导入的可选 Python 模块",
+            desc_en="Optional Python module imported before creating memory",
+        ),
+    )
     max_entries: int = Field(
         default=10000, ge=1, description="Maximum entries",
         json_schema_extra=ui(
@@ -193,6 +249,313 @@ class MemoryConfig(BaseModel):
             label_zh="衰减因子", label_en="Decay Factor",
             desc_zh="记忆随时间衰减的因子，值越小衰减越快（0.0-1.0）",
             desc_en="Temporal decay factor; lower values decay faster (0.0-1.0)",
+        ),
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether memory is enabled for this task",
+        json_schema_extra=ui(
+            label_zh="启用记忆",
+            label_en="Enable Memory",
+            desc_zh="是否在当前任务中启用记忆系统",
+            desc_en="Whether to enable memory for this task",
+        ),
+    )
+
+    # MindMemOS backend settings
+    mindmemos_base_url: str = Field(
+        default="",
+        description="MindMemOS API base URL",
+        json_schema_extra=ui(
+            label_zh="MindMemOS 服务地址",
+            label_en="MindMemOS Base URL",
+            desc_zh="容器内默认使用 http://mindmemos-api:8000",
+            desc_en="Use http://mindmemos-api:8000 from Docker containers",
+        ),
+    )
+    mindmemos_api_key: str = Field(
+        default="",
+        description="MindMemOS API key",
+        json_schema_extra=ui(
+            label_zh="MindMemOS API Key",
+            label_en="MindMemOS API Key",
+            desc_zh="MindMemOS api_keys.yaml 中配置的 bearer key",
+            desc_en="Bearer key configured in MindMemOS api_keys.yaml",
+        ),
+    )
+    mindmemos_user_id: str = Field(
+        default="",
+        description="MindMemOS user scope",
+        json_schema_extra=ui(
+            label_zh="用户级记忆范围",
+            label_en="User Scope",
+            desc_zh="用于隔离不同用户或租户的记忆",
+            desc_en="Memory isolation key for users or tenants",
+        ),
+    )
+    mindmemos_app_id: str = Field(
+        default="llm4ad",
+        description="MindMemOS app scope",
+        json_schema_extra=ui(
+            label_zh="应用范围",
+            label_en="App Scope",
+            desc_zh="默认 llm4ad",
+            desc_en="Defaults to llm4ad",
+        ),
+    )
+    mindmemos_agent_id: str = Field(
+        default="planner",
+        description="MindMemOS agent scope",
+        json_schema_extra=ui(
+            label_zh="Agent 范围",
+            label_en="Agent Scope",
+            desc_zh="默认 planner",
+            desc_en="Defaults to planner",
+        ),
+    )
+    mindmemos_session_id: str = Field(
+        default="",
+        description="MindMemOS session/task scope",
+        json_schema_extra=ui(
+            label_zh="任务级记忆范围",
+            label_en="Session Scope",
+            desc_zh="建议使用当前 task_id 或 run_id",
+            desc_en="Use the current task_id or run_id",
+        ),
+    )
+    mindmemos_project_id: str = Field(
+        default="",
+        description="Project memory scope stored as metadata filter",
+        json_schema_extra=ui(
+            label_zh="项目级记忆范围",
+            label_en="Project Scope",
+            desc_zh="用于项目级长期记忆过滤",
+            desc_en="Used as project-level long-term memory filter",
+        ),
+    )
+    mindmemos_search_strategy: str = Field(
+        default="fast",
+        description="MindMemOS search strategy: fast or agentic",
+        json_schema_extra=ui(
+            label_zh="检索策略",
+            label_en="Search Strategy",
+            desc_zh="fast 或 agentic",
+            desc_en="fast or agentic",
+        ),
+    )
+    mindmemos_rerank: bool = Field(
+        default=False,
+        description="Enable MindMemOS rerank for search",
+        json_schema_extra=ui(
+            label_zh="启用重排",
+            label_en="Enable Rerank",
+            desc_zh="是否启用 MindMemOS 检索结果重排",
+            desc_en="Whether to rerank MindMemOS search results",
+        ),
+    )
+    mindmemos_score_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Optional MindMemOS search score threshold",
+        json_schema_extra=ui(
+            label_zh="检索分数阈值",
+            label_en="Score Threshold",
+            desc_zh="仅在启用重排时传给 MindMemOS，用于过滤低相关记忆",
+            desc_en="Passed to MindMemOS only when rerank is enabled to filter weak memories",
+        ),
+    )
+    mindmemos_fail_open: bool = Field(
+        default=True,
+        description="Do not interrupt evolution when MindMemOS runtime calls fail",
+        json_schema_extra=ui(
+            label_zh="失败时不中断任务",
+            label_en="Fail Open",
+            desc_zh="MindMemOS 运行中不可用时返回空记忆并记录告警",
+            desc_en="Return empty memory context and log warnings when MindMemOS is unavailable",
+        ),
+    )
+    mindmemos_request_timeout: float = Field(
+        default=300.0,
+        ge=0,
+        description="MindMemOS runtime request timeout in seconds",
+        json_schema_extra=ui(
+            label_zh="请求超时",
+            label_en="Request Timeout",
+            desc_zh="单次 MindMemOS 运行时请求的最长等待时间，单位秒；0 表示无限等待",
+            desc_en="Maximum wait time in seconds for each MindMemOS runtime request; 0 waits indefinitely",
+        ),
+    )
+    mindmemos_add_timeout: float = Field(
+        default=300.0,
+        ge=0,
+        description="MindMemOS runtime memory write timeout in seconds",
+        json_schema_extra=ui(
+            label_zh="记忆写入超时",
+            label_en="Memory Write Timeout",
+            desc_zh="单次 MindMemOS 记忆提取和写入的最长等待时间，单位秒；0 表示无限等待",
+            desc_en="Maximum wait time in seconds for each MindMemOS extraction/write request; 0 waits indefinitely",
+        ),
+    )
+    mindmemos_extraction_prompt_language: Literal["auto", "ZH", "EN"] = Field(
+        default="auto",
+        description="Preferred language for MindMemOS memory extraction prompts",
+        json_schema_extra=ui(
+            label_zh="记忆提取语言",
+            label_en="Extraction Language",
+            desc_zh="auto 使用 MindMemOS 默认策略；ZH 强制中文；EN 强制英文",
+            desc_en="auto uses MindMemOS defaults; ZH forces Chinese; EN forces English",
+        ),
+    )
+    mindmemos_sync_static_cards: bool = Field(
+        default=False,
+        description="Sync static cards to MindMemOS on load",
+        json_schema_extra=ui(
+            label_zh="同步静态卡片",
+            label_en="Sync Static Cards",
+            desc_zh="默认关闭，避免重复污染远端记忆",
+            desc_en="Disabled by default to avoid duplicating remote memories",
+        ),
+    )
+    mindmemos_allow_remote_clear: bool = Field(
+        default=False,
+        description="Allow clear() to delete remote memories",
+        json_schema_extra=ui(
+            hidden=True,
+            label_zh="允许远端清理",
+            label_en="Allow Remote Clear",
+            desc_zh="危险选项，默认关闭",
+            desc_en="Dangerous option, disabled by default",
+        ),
+    )
+    include_project_memory: bool = Field(
+        default=False,
+        description="Include project-scoped memory when building prompt context",
+        json_schema_extra=ui(
+            label_zh="注入项目级记忆",
+            label_en="Include Project Memory",
+            desc_zh="是否在当前任务中注入项目级共享记忆",
+            desc_en="Whether to include project-scoped shared memory in this task",
+        ),
+    )
+    include_user_memory: bool = Field(
+        default=False,
+        description="Include user-scoped memory when building prompt context",
+        json_schema_extra=ui(
+            label_zh="注入用户级记忆",
+            label_en="Include User Memory",
+            desc_zh="是否在当前任务中注入用户级共享记忆",
+            desc_en="Whether to include user-scoped shared memory in this task",
+        ),
+    )
+    include_task_memory: bool = Field(
+        default=True,
+        description="Include task-scoped memory when building prompt context",
+        json_schema_extra=ui(
+            label_zh="注入任务级记忆",
+            label_en="Include Task Memory",
+            desc_zh="是否在当前任务中注入任务级记忆",
+            desc_en="Whether to include task-scoped memory in this task",
+        ),
+    )
+    project_memory_limit: int = Field(
+        default=0,
+        ge=0,
+        description="Maximum project-scoped memories to include",
+        json_schema_extra=ui(
+            label_zh="项目级记忆数量",
+            label_en="Project Memory Limit",
+            desc_zh="每次提示词中最多注入的项目级记忆数量",
+            desc_en="Maximum project-scoped memories injected into each prompt",
+        ),
+    )
+    user_memory_limit: int = Field(
+        default=0,
+        ge=0,
+        description="Maximum user-scoped memories to include",
+        json_schema_extra=ui(
+            label_zh="用户级记忆数量",
+            label_en="User Memory Limit",
+            desc_zh="每次提示词中最多注入的用户级记忆数量",
+            desc_en="Maximum user-scoped memories injected into each prompt",
+        ),
+    )
+    task_memory_limit: int = Field(
+        default=5,
+        ge=0,
+        description="Maximum task-scoped memories to include",
+        json_schema_extra=ui(
+            label_zh="任务级记忆数量",
+            label_en="Task Memory Limit",
+            desc_zh="每次提示词中最多注入的任务级记忆数量",
+            desc_en="Maximum task-scoped memories injected into each prompt",
+        ),
+    )
+
+    # Long-term memory retrieval / injection modes
+    retrieval_mode: Literal["auto", "manual"] = Field(
+        default="auto",
+        description="How shared (global/project) long-term memory is selected",
+        json_schema_extra=ui(
+            label_zh="检索模式",
+            label_en="Retrieval Mode",
+            desc_zh=(
+                "长期记忆的检索方式：auto 自动检索并注入全局与项目记忆；"
+                "manual 由用户手动选择固定注入的记忆"
+            ),
+            desc_en=(
+                "How long-term memory is selected: auto retrieves and injects "
+                "global/project memory; manual injects a fixed user-selected set"
+            ),
+        ),
+    )
+    pinned_card_ids: list[str] = Field(
+        default_factory=list,
+        description="Fixed memory card ids injected in manual retrieval mode",
+        json_schema_extra=ui(
+            label_zh="固定注入记忆",
+            label_en="Pinned Memories",
+            desc_zh="手动检索模式下，用户选定后固定注入的记忆卡片 id 列表",
+            desc_en="Memory card ids the user pinned for fixed injection in manual mode",
+        ),
+    )
+    task_injection_mode: Literal["topk", "weight", "random"] = Field(
+        default="topk",
+        description="How retrieved task-scoped memories are ordered before injection",
+        json_schema_extra=ui(
+            label_zh="任务记忆注入模式",
+            label_en="Task Memory Injection Mode",
+            desc_zh=(
+                "任务记忆总是先检索出候选，再决定注入方式："
+                "topk 按检索相关度取最相关的前 N 条；"
+                "weight 按“相似度与时间先后”加权做轮盘赌随机抽样；"
+                "random 从候选中均匀随机注入"
+            ),
+            desc_en=(
+                "Task memories are always retrieved first, then ordered for "
+                "injection: topk keeps the most relevant, weight does roulette-wheel "
+                "sampling weighted by blended similarity and recency, random samples "
+                "the pool uniformly"
+            ),
+        ),
+    )
+    task_injection_lambda: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Similarity-vs-recency blend for weight injection mode",
+        json_schema_extra=ui(
+            label_zh="相似度权重 λ",
+            label_en="Similarity Weight (λ)",
+            desc_zh=(
+                "仅在权重模式生效：注入权重 = λ×相似度 + (1-λ)×时间先后。"
+                "λ 越大越偏向相关性，越小越偏向新鲜度（0-1，默认 0.5）"
+            ),
+            desc_en=(
+                "Only for weight mode: injection weight = λ×similarity + "
+                "(1-λ)×recency. Higher λ favors relevance, lower favors "
+                "freshness (0-1, default 0.5)"
+            ),
         ),
     )
 
@@ -236,3 +599,4 @@ class MemoryConfig(BaseModel):
             desc_en="Whether to persist auto-extracted cards to the memory/ directory",
         ),
     )
+

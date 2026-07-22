@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 import type { TaskResponse } from "@/client"
 import { Llm4AdTasksService } from "@/client"
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { useEvolution } from "@/hooks/useEvolution"
+import { setTaskStatusInCache, taskKeys } from "@/lib/task-queries"
 import { handleError } from "@/utils"
 import AppConfigForm from "./config-form/AppConfigForm"
 import type { AppConfig } from "./config-form/appConfigSchema"
@@ -20,32 +21,48 @@ export default function ParameterConfigStep({
   onBack,
 }: ParameterConfigStepProps) {
   const {
+    projectId,
+    selectedTask,
     resetTaskData,
     setSelectedTask,
     setActiveTab,
     setIsConfiguring,
     setIsViewingParams,
+    updateTaskStatus,
   } = useEvolution()
+  const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
 
   const mutation = useMutation({
     mutationFn: async (data: AppConfig) => {
-      await Llm4AdTasksService.updateTask({
+      const updatedTask = await Llm4AdTasksService.updateTask({
         taskId: task.id,
         requestBody: { input_args: data as unknown as Record<string, unknown> },
       })
-      await Llm4AdTasksService.runTask({ taskId: task.id })
+      queryClient.setQueryData(taskKeys.detail(task.id), updatedTask)
+      const result = await Llm4AdTasksService.runTask({ taskId: task.id })
+      const nextStatus = result.status ?? "pending"
+      setTaskStatusInCache(queryClient, task.id, nextStatus, projectId)
+      updateTaskStatus(nextStatus)
+      return { updatedTask, nextStatus }
     },
-    onSuccess: () => {
+    onSuccess: ({ updatedTask, nextStatus }) => {
       showSuccessToast("任务已提交运行")
       setIsConfiguring(false)
       setIsViewingParams(false)
       setActiveTab("overview")
-      setSelectedTask({
-        ...task,
-        status: "pending" as TaskResponse["status"],
-      })
+      if (selectedTask?.id === updatedTask.id) {
+        setSelectedTask({
+          ...updatedTask,
+          status: nextStatus,
+          active_status: nextStatus,
+        })
+      }
       resetTaskData()
+      // Refresh after the server-side update so consumers sharing the detail
+      // query, including the right panel, receive the latest input_args.
+      queryClient.invalidateQueries({ queryKey: taskKeys.detail(task.id) })
+      queryClient.invalidateQueries({ queryKey: ["memory", "pinned", task.id] })
     },
     onError: handleError.bind(showErrorToast),
   })

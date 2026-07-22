@@ -12,7 +12,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from llm4ad.config.coder import ClaudeCodeConfig, CustomCoderConfig, OpenCodeConfig
 from llm4ad.config.evaluator import CustomEvaluatorConfig, ExecutableEvaluatorConfig
-from llm4ad.config.evolution import DyCAConfig, IslandGAConfig, MCTSAHDConfig, MEoHConfig
+from llm4ad.config.evolution import (
+    DyCAConfig,
+    EoHConfig,
+    IslandGAConfig,
+    MCTSAHDConfig,
+    MEoHConfig,
+    ReEvoConfig,
+)
 from llm4ad.config.memory import MemoryConfig
 from llm4ad.config.planner import PlannerConfig
 from llm4ad.config.ui import ui
@@ -442,13 +449,13 @@ class AppConfig(BaseModel):
             desc_en="Configure how algorithms are evaluated; supports custom or executable evaluators",
         ),
     )
-    evolution: IslandGAConfig | DyCAConfig | MEoHConfig | MCTSAHDConfig = Field(
+    evolution: IslandGAConfig | DyCAConfig | MEoHConfig | EoHConfig | ReEvoConfig | MCTSAHDConfig = Field(
         default_factory=DyCAConfig,
         discriminator="type",
         json_schema_extra=ui(
             label_zh="进化算法", label_en="Evolution",
-            desc_zh="选择并配置进化算法策略：岛屿遗传算法、DyCA 或 MEoH",
-            desc_en="Select and configure evolution strategy: Island GA, DyCA, or MEoH",
+            desc_zh="选择并配置进化算法策略：岛屿遗传算法、DyCA、MEoH、EoH、ReEvo 或 MCTS-AHD",
+            desc_en="Select evolution strategy: Island GA, DyCA, MEoH, EoH, ReEvo, or MCTS-AHD",
         ),
     )
     coder: CustomCoderConfig | ClaudeCodeConfig | OpenCodeConfig = Field(

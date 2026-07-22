@@ -109,6 +109,43 @@ class TaskValidator:
         logger.error("Validation failed after {} attempts", max_attempts)
         return blueprint
 
+    def check(
+        self,
+        blueprint: TaskBlueprint,
+        *,
+        multimodal: bool = False,
+        skip_debug_run: bool = False,
+    ) -> TaskBlueprint:
+        """Run the validation gate once with no auto-repair.
+
+        Unlike :meth:`validate`, this never calls the LLM to repair the
+        blueprint — it only runs the validation stages a single time and
+        records the outcome. Use it to re-check a blueprint whose code was
+        edited by hand (e.g. by the build agent) without overwriting those
+        edits with LLM-generated repairs.
+
+        Args:
+            blueprint: TaskBlueprint to check (its ``*_code`` fields are read
+                as-is; the caller is responsible for loading any on-disk edits
+                back onto the blueprint first).
+            multimodal: Whether to apply multimodal-specific validation.
+            skip_debug_run: Skip the debug_run.py validation stage.
+
+        Returns:
+            The same blueprint with ``validation_status`` set to ``"passed"``
+            or ``"failed"`` and ``validation_errors`` reflecting this check.
+        """
+        error = self._run_validation_stages(
+            blueprint, multimodal=multimodal, skip_debug_run=skip_debug_run
+        )
+        if error is None:
+            blueprint.validation_status = "passed"
+            blueprint.validation_errors = []
+        else:
+            blueprint.validation_status = "failed"
+            blueprint.validation_errors = [error]
+        return blueprint
+
     # ------------------------------------------------------------------
     # Validation stages
     # ------------------------------------------------------------------

@@ -231,7 +231,7 @@ evolution:
 
   # --- MEoH Parameters (type: "meoh") ---
   planner_type: "meoh_evolution"  # type: str
-  pop_size: 10               # type: int, MEoH population size
+  population_size: 10               # type: int, MEoH population size
   selection_num: 2           # type: int, parents selected per generation
   num_samplers: 1            # type: int
   max_sample_nums: 800       # type: int, total samples budget

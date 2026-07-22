@@ -35,9 +35,9 @@ import { useTranslation } from "react-i18next"
 import { NewsService } from "@/client"
 import IslandBackground from "@/components/Common/IslandBackground"
 import LanguageToggle from "@/components/Common/LanguageToggle"
+import { FooterMetadataLinks } from "@/components/Common/Footer"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
-import { FeedbackSubmitDialog } from "@/components/Feedback/FeedbackSubmitDialog"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
@@ -1060,7 +1060,6 @@ function NewsSection() {
 function LandingFooter() {
   const { t } = useTranslation()
   const [manualOpen, setManualOpen] = useState(false)
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
 
   return (
@@ -1080,14 +1079,6 @@ function LandingFooter() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors whitespace-nowrap"
-              onClick={() => setFeedbackOpen(true)}
-            >
-              <MessageSquareText className="size-3.5" />
-              {t("sidebar.feedback")}
-            </button>
             <button
               type="button"
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors whitespace-nowrap"
@@ -1112,17 +1103,16 @@ function LandingFooter() {
             &copy; {new Date().getFullYear()} LLM4AD_Next Team. All rights
             reserved.
           </p>
-          {t("landing.footer.team") && (
-            <p className="text-xs text-muted-foreground/50">
-              {t("landing.footer.team")}
-            </p>
-          )}
+          <div className="flex flex-col items-center gap-1 sm:items-end">
+            <FooterMetadataLinks />
+            {t("landing.footer.team") && (
+              <p className="text-xs text-muted-foreground/50">
+                {t("landing.footer.team")}
+              </p>
+            )}
+          </div>
         </div>
       </div>
-      <FeedbackSubmitDialog
-        open={feedbackOpen}
-        onOpenChange={setFeedbackOpen}
-      />
       <UserManualDialog open={manualOpen} onOpenChange={setManualOpen} />
       <ContactUsDialog open={contactOpen} onOpenChange={setContactOpen} />
     </footer>

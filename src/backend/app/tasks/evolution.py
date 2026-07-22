@@ -1,12 +1,13 @@
 """演化算法任务模块。
 
-定义 LLM4AD 演化算法的 Celery 异步任务，通过 Celery 信号自动同步任务状态到
-数据库。任务在隔离容器中执行（见 :mod:`app.services.evolution_runner`）；日志与
-指标经 Redis 实时推送，任务结束后持久化到数据库。
+定义 LLM4AD 演化算法的 Celery 异步任务。任务在隔离容器中执行
+（见 :mod:`app.services.evolution_runner`）；日志与指标经 Redis 实时推送，
+任务结束后持久化到数据库。
 """
 
 import os
 import traceback
+import uuid
 from datetime import UTC, datetime
 
 import celery.contrib.abortable
@@ -16,8 +17,14 @@ from sqlalchemy import update
 from sqlmodel import select
 
 from app.core.celery import celery_app
+from app.core.config import settings
 from app.core.db import get_db_session
-from app.core.redis import push_log_entry, read_all_logs
+from app.core.redis import (
+    acquire_task_execution_lock,
+    push_log_entry,
+    read_all_logs,
+    release_task_execution_lock,
+)
 from app.models import Task, TaskStatus
 
 
@@ -46,6 +53,14 @@ def _update_task_status(celery_task_id: str, status: TaskStatus) -> str | None:
             query = select(Task).where(Task.celery_task_id == celery_task_id)
             task = session.exec(query).first()
             if task:
+                if status == TaskStatus.RUNNING and task.status in (
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                ):
+                    logger.warning(
+                        f"任务 {task.id} 已是终态 {task.status}，跳过延迟消息的状态更新"
+                    )
+                    return None
                 task.status = status
                 task.updated_time = datetime.now(UTC)
                 session.add(task)
@@ -152,16 +167,6 @@ def _finalize_task(celery_task_id: str, status: TaskStatus) -> None:
         logger.error(f"_finalize_task 失败，celery_task_id={celery_task_id}: {e}")
 
 
-# ---- Celery 信号 ----
-
-
-@signals.task_prerun.connect
-def on_task_prerun(sender=None, task_id=None, **kwargs):  # noqa: ARG001
-    """任务开始执行时，状态 → RUNNING"""
-    if sender and sender.name == "app.tasks.evolution.run_evolution":
-        _update_task_status(task_id, TaskStatus.RUNNING)
-
-
 # ---- 运行环境准备与任务入口 ----
 
 
@@ -240,8 +245,28 @@ def run_evolution(self, data: dict):
     """
     task_id = str(data["task_id"])
     final_status = TaskStatus.FAILED
+    lock_owner_token = str(uuid.uuid4())
+    lock_ttl_seconds = settings.TASK_TIME_LIMIT + 3600
 
+    if not acquire_task_execution_lock(task_id, lock_owner_token, lock_ttl_seconds):
+        logger.warning(f"任务 {task_id} 收到重复投递，已跳过执行")
+        push_log_entry(
+            task_id,
+            {
+                "type": "system",
+                "message": "检测到重复任务投递，已跳过重复执行。",
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )
+        return
+
+    execution_claimed = False
     try:
+        # 状态变更必须发生在取得执行锁后，避免延迟的重复消息重置已结束任务。
+        if _update_task_status(self.request.id, TaskStatus.RUNNING) is None:
+            logger.warning(f"任务 {task_id} 已结束或不存在，跳过延迟消息的执行")
+            return
+        execution_claimed = True
         try:
             # 保证幂等：清理旧产物并重新下载输入数据
             _prepare_run_environment(data)
@@ -265,4 +290,8 @@ def run_evolution(self, data: dict):
         else:
             final_status = TaskStatus.COMPLETED
     finally:
-        _finalize_task(self.request.id, final_status)
+        try:
+            if execution_claimed:
+                _finalize_task(self.request.id, final_status)
+        finally:
+            release_task_execution_lock(task_id, lock_owner_token)

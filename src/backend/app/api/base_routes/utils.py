@@ -20,6 +20,11 @@ class FeatureFlags(BaseModel):
     """Public feature flags the frontend uses to show/hide optional UI."""
 
     enable_ai_agent_build: bool
+    mindmemos_memory_enabled: bool
+    mindmemos_runtime_available: bool
+    mindmemos_embedding_configured: bool
+    mindmemos_rerank_enabled: bool
+    mindmemos_rerank_configured: bool
 
 
 @router.post(
@@ -69,4 +74,11 @@ async def feature_flags() -> FeatureFlags:
     Returns:
         FeatureFlags: 当前生效的特性开关集合。
     """
-    return FeatureFlags(enable_ai_agent_build=settings.ENABLE_AI_AGENT_BUILD)
+    return FeatureFlags(
+        enable_ai_agent_build=settings.ENABLE_AI_AGENT_BUILD,
+        mindmemos_memory_enabled=settings.LLM4AD_MINDMEMOS_ENABLED,
+        mindmemos_runtime_available=settings.mindmemos_runtime_available,
+        mindmemos_embedding_configured=settings.mindmemos_embedding_configured,
+        mindmemos_rerank_enabled=settings.MINDMEMOS_RERANK_ENABLED,
+        mindmemos_rerank_configured=settings.mindmemos_rerank_configured,
+    )

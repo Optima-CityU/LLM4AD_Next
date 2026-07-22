@@ -50,6 +50,7 @@ async def _call_llm_and_build_algorithm(
     operator_name: str,
     parent_ids: list[str],
     generation: int,
+    operation_params: dict[str, Any] | None = None,
 ) -> Algorithm:
     """Call LLM and build an Algorithm from the response.
 
@@ -57,6 +58,7 @@ async def _call_llm_and_build_algorithm(
         provider: LLM provider.
         prompt: Formatted prompt string.
         temperature: Sampling temperature.
+        operation_params: Optional operator-specific metadata.
         max_tokens: Maximum tokens.
         insight_type: Insight type for the algorithm.
         operator_name: Name of the sampler operator.
@@ -104,6 +106,7 @@ async def _call_llm_and_build_algorithm(
         generation_time_ms=generation_time_ms,
         tokens_used=response.prompt_tokens + response.completion_tokens,
         agent_name=operator_name,
+        operation_params=operation_params or {},
         change_description=algorithm.description,
     )
 
@@ -172,7 +175,15 @@ class E1Sampler(BaseSampler):
         top_k: list[Algorithm] = kwargs.get("top_k_algorithms", [])
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "dyca_e1",
+                "cluster_id": cluster_id,
+                "parent_score": parent.score,
+                "parent_description": parent.description,
+            },
+        ) if self.memory else ""
 
         parent_cluster = cluster_score(parent, cluster_instances)
         all_cluster_scores = [
@@ -209,6 +220,15 @@ class E1Sampler(BaseSampler):
             operator_name="e1_sampler",
             parent_ids=[parent.id],
             generation=generation,
+            operation_params={
+                "cluster_id": cluster_id,
+                "parent_id": parent.id,
+                "parent_score": parent.score,
+                "parent_cluster_score": parent_cluster,
+                "parent_description": parent.description,
+                "best_cluster_score": best_cs,
+                "worst_cluster_score": worst_cs,
+            },
         )
 
 
@@ -272,7 +292,15 @@ class E2Sampler(BaseSampler):
         cluster_id: int = kwargs.get("cluster_id", 0)
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "dyca_e2",
+                "cluster_id": cluster_id,
+                "parent_score": parent.score,
+                "parent_description": parent.description,
+            },
+        ) if self.memory else ""
 
         parent_cluster = cluster_score(parent, cluster_instances)
         all_cluster_scores = [
@@ -301,6 +329,14 @@ class E2Sampler(BaseSampler):
             operator_name="e2_sampler",
             parent_ids=[parent.id],
             generation=generation,
+            operation_params={
+                "cluster_id": cluster_id,
+                "parent_id": parent.id,
+                "parent_score": parent.score,
+                "parent_cluster_score": parent_cluster,
+                "parent_description": parent.description,
+                "best_cluster_score": best_cs,
+            },
         )
 
 
@@ -364,7 +400,15 @@ class M1Sampler(BaseSampler):
         cluster_id: int = kwargs.get("cluster_id", 0)
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "dyca_m1",
+                "cluster_id": cluster_id,
+                "parent_score": parent.score,
+                "parent_description": parent.description,
+            },
+        ) if self.memory else ""
 
         parent_cluster = cluster_score(parent, cluster_instances)
         all_cluster_scores = [
@@ -391,6 +435,14 @@ class M1Sampler(BaseSampler):
             operator_name="m1_sampler",
             parent_ids=[parent.id],
             generation=generation,
+            operation_params={
+                "cluster_id": cluster_id,
+                "parent_id": parent.id,
+                "parent_score": parent.score,
+                "parent_cluster_score": parent_cluster,
+                "parent_description": parent.description,
+                "best_cluster_score": best_cs,
+            },
         )
 
 
@@ -452,7 +504,14 @@ class M2Sampler(BaseSampler):
         background: str = kwargs.get("background", "")
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "dyca_m2",
+                "parent_score": parent.score,
+                "parent_description": parent.description,
+            },
+        ) if self.memory else ""
 
         prompt = M2_MUTATE_PROMPT.format(
             background=background,
@@ -470,6 +529,11 @@ class M2Sampler(BaseSampler):
             operator_name="m2_sampler",
             parent_ids=[parent.id],
             generation=generation,
+            operation_params={
+                "parent_id": parent.id,
+                "parent_score": parent.score,
+                "parent_description": parent.description,
+            },
         )
 
 
@@ -532,7 +596,16 @@ class SummarySampler(BaseSampler):
         background: str = kwargs.get("background", "")
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "dyca_summary",
+                "parents": [
+                    {"score": parent.score, "description": parent.description}
+                    for parent in parents
+                ],
+            },
+        ) if self.memory else ""
 
         algo_descs = "\n\n".join(
             f"## Algorithm {i + 1}: {a.name}\n"
@@ -556,6 +629,16 @@ class SummarySampler(BaseSampler):
             operator_name="summary_sampler",
             parent_ids=[p.id for p in parents],
             generation=generation,
+            operation_params={
+                "parents": [
+                    {
+                        "id": parent.id,
+                        "score": parent.score,
+                        "description": parent.description,
+                    }
+                    for parent in parents
+                ],
+            },
         )
 
 
@@ -622,7 +705,18 @@ class ComplementaryCrossSampler(BaseSampler):
         cluster_instances_2: list[str] = kwargs.get("cluster_instances_2", [])
 
         # Build memory context
-        memory_context = self.memory.get_prompt_context(query=background) if self.memory else ""
+        memory_context = await self.memory.aget_prompt_context(
+            query=background,
+            context={
+                "sampler": "dyca_complementary_cross",
+                "cluster_id_1": cluster_id_1,
+                "cluster_id_2": cluster_id_2,
+                "parent_1_score": parents[0].score,
+                "parent_1_description": parents[0].description,
+                "parent_2_score": parents[1].score,
+                "parent_2_description": parents[1].description,
+            },
+        ) if self.memory else ""
 
         score1 = cluster_score(parents[0], cluster_instances_1) if cluster_instances_1 else parents[0].score
         score2 = cluster_score(parents[1], cluster_instances_2) if cluster_instances_2 else parents[1].score
@@ -647,4 +741,14 @@ class ComplementaryCrossSampler(BaseSampler):
             operator_name="complementary_cross_sampler",
             parent_ids=[p.id for p in parents],
             generation=generation,
+            operation_params={
+                "cluster_id_1": cluster_id_1,
+                "cluster_id_2": cluster_id_2,
+                "parent_1_id": parents[0].id,
+                "parent_1_score": score1,
+                "parent_1_description": parents[0].description,
+                "parent_2_id": parents[1].id,
+                "parent_2_score": score2,
+                "parent_2_description": parents[1].description,
+            },
         )

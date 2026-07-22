@@ -354,6 +354,59 @@ def _apply_credential_proxy(
         _swap(cfg)
 
 
+def _apply_mindmemos_runtime_config(
+    input_args: dict,
+    *,
+    current_user: models.User,
+    task_id: uuid.UUID | str,
+    project_id: uuid.UUID | str,
+    memory_task_id: uuid.UUID | str | None = None,
+) -> None:
+    """Inject system-level MindMemOS settings into task run arguments."""
+    if not settings.mindmemos_runtime_available:
+        return
+
+    memory = input_args.get("memory")
+    if not isinstance(memory, dict):
+        memory = {}
+        input_args["memory"] = memory
+    if memory.get("enabled") is False:
+        return
+    if memory.get("type") not in (None, "", "mindmemos_cloud"):
+        return
+
+    memory_scope_task_id = memory_task_id or task_id
+    memory.update(
+        {
+            "type": "mindmemos_cloud",
+            "mindmemos_base_url": settings.LLM4AD_MINDMEMOS_BASE_URL.rstrip("/"),
+            "mindmemos_api_key": _mindmemos_task_token(current_user),
+            "mindmemos_user_id": str(current_user.id),
+            "mindmemos_app_id": settings.LLM4AD_MINDMEMOS_APP_ID,
+            "mindmemos_agent_id": "task",
+            "mindmemos_session_id": str(memory_scope_task_id),
+            "mindmemos_project_id": str(project_id),
+        }
+    )
+    memory.setdefault("mindmemos_fail_open", settings.LLM4AD_MINDMEMOS_FAIL_OPEN)
+    memory.setdefault("mindmemos_request_timeout", 300.0)
+    memory.setdefault("mindmemos_add_timeout", settings.LLM4AD_MINDMEMOS_ADD_TIMEOUT)
+    memory.setdefault("mindmemos_extraction_prompt_language", "auto")
+    memory.setdefault("include_user_memory", True)
+    memory.setdefault("include_project_memory", True)
+    memory.setdefault("include_task_memory", True)
+
+
+def _mindmemos_task_token(current_user: models.User) -> str:
+    from app.services import memory_service
+
+    return memory_service._mindmemos_gateway_token(
+        current_user,
+        scopes=["memory:read", "memory:write"],
+        ttl_seconds=settings.TASK_TIME_LIMIT + 3600,
+    )
+
+
 def run_task(
     db: Session,
     task_id: uuid.UUID,
@@ -388,13 +441,41 @@ def run_task(
     input_args = _resolve_providers(db, input_args, current_user, access_token, task_id=task_id)
 
     # 准备运行参数
+    from app.core.env_detect import get_project_home
+
     container_name = f"code_user-{current_user.id}"
-    user_home = f"{settings.DOCKER_PROJECT_HOME}{container_name}/"
+
+    # 自动检测运行环境并选择正确的路径（无需手动配置）
+    project_home = get_project_home(
+        host_home=settings.HOST_PROJECT_HOME,
+        docker_home=settings.DOCKER_PROJECT_HOME,
+    )
+
+    user_home = f"{project_home}/{container_name}/"
     run_dir = f"{user_home}{task_id}/"
 
     input_args["project_name"] = "llm4ad"
     input_args["base_dir"] = "/task/data/"
     input_args["run_id"] = "run"
+    _apply_mindmemos_runtime_config(
+        input_args,
+        current_user=current_user,
+        task_id=task_id,
+        memory_task_id=task.group_id or task.id,
+        project_id=task.project_id,
+    )
+    # Seed the pinned-memory file from the latest config now (synchronously), so
+    # the right-panel editor reflects this run's selection immediately instead of
+    # a stale value from a previous run. Manual retrieval mode only.
+    _memory_cfg = input_args.get("memory")
+    if isinstance(_memory_cfg, dict) and _memory_cfg.get("retrieval_mode") == "manual":
+        from .pinned_memory import seed_task_pinned_memory
+
+        seed_task_pinned_memory(
+            task,
+            current_user,
+            list(_memory_cfg.get("pinned_card_ids") or []),
+        )
     task_args = {
         "task_id": task_id,
         "project_id": task.project_id,
