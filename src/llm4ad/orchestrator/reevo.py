@@ -75,7 +75,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
         self.planner: ReEvoEvolutionPlanner = planner
         self.config: ReEvoConfig = config
         self.version_control = version_control
-        self.reevo_population = EoHPopulation(pop_size=config.pop_size)
+        self.reevo_population = EoHPopulation(pop_size=config.population_size)
         self._background = background or getattr(config, "background", "")
         self.total_samples = 0
 
@@ -168,7 +168,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
                 self.best_individual = self.reevo_population.best()
                 return self.population
 
-        init_target = self.config.pop_size
+        init_target = self.config.population_size
         max_init_samples = min(self.config.max_sample_nums, 2 * init_target)
         init_start = time.time()
 
@@ -212,7 +212,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
         generation = self.current_generation
 
         # --- 1. Crossover batch (each does short-term reflection internally) ---
-        n_crossover = max(1, self.config.pop_size)
+        n_crossover = max(1, self.config.population_size)
         tasks_info = []
         for _ in range(n_crossover):
             if self.total_samples + len(tasks_info) >= self.config.max_sample_nums:
@@ -248,7 +248,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
             )
 
         # --- 3. Elite mutation batch guided by long-term reflection ---
-        n_mutation = max(1, int(self.config.mutation_rate * self.config.pop_size))
+        n_mutation = max(1, int(self.config.mutation_rate * self.config.population_size))
         results = []
         for mutation_idx in range(n_mutation):
             if self.total_samples + mutation_idx >= self.config.max_sample_nums:
@@ -400,27 +400,34 @@ class ReEvoOrchestrator(BaseOrchestrator):
 
         for alg, result in zip(to_evaluate, results, strict=True):
             self._apply_eval_result(alg, result)
-            if self.state_tracker.generated_dir:
+            if result.success and self.state_tracker.generated_dir:
                 alg.write(self.state_tracker.generated_dir, "evaluation", island_id=None, generation=alg.generation)
         return algorithms
 
     def _apply_eval_result(self, algorithm: Algorithm, result: EvaluationResult) -> None:
-        """Apply an evaluation result to an algorithm and update counters."""
+        """Apply an evaluation result to an algorithm and update counters.
+
+        On failure the algorithm is left unevaluated (``evaluation`` stays
+        ``None``) instead of recording a placeholder ``0.0`` score, matching
+        the IslandGA behaviour. Failed candidates are excluded from selection
+        via ``is_evaluated()``.
+        """
+        if not result.success:
+            self._eval_failures += 1
+            logger.warning(
+                f"[ReEvo] Evaluation failed for {algorithm.id}: {result.error_message}"
+            )
+            return
+
         algorithm.set_evaluation_result(
             score=result.score,
             metrics=dict(result.metrics),
-            error=result.error_message if not result.success else None,
+            error=None,
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(evaluation_total_ms=result.duration_ms),
         )
         algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
-        if algorithm.is_evaluated():
-            self._eval_successes += 1
-        else:
-            self._eval_failures += 1
-            logger.warning(
-                f"[ReEvo] Evaluation failed for {algorithm.id}: {result.error_message} (score={result.score})"
-            )
+        self._eval_successes += 1
 
     # ------------------------------------------------------------------ #
     # Checkpoint / status / logging
@@ -484,7 +491,7 @@ class ReEvoOrchestrator(BaseOrchestrator):
         raw = json.loads(Path(seed_path).read_text(encoding="utf-8"))
         payload = raw if isinstance(raw, list) else raw.get("algorithms", [])
         algorithms = [Algorithm.model_validate(item) for item in payload]
-        self.reevo_population.population = algorithms[: self.config.pop_size]
+        self.reevo_population.population = algorithms[: self.config.population_size]
 
     def _log_generation_stats(self) -> None:
         """Record and log statistics for the current generation."""

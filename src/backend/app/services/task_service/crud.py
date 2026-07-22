@@ -37,7 +37,14 @@ def _apply_memory_defaults(
     project_defaults = memory_service.get_project_memory_config(db, project_id, current_user)
     existing = input_args.get("memory")
     memory = dict(existing) if isinstance(existing, dict) else {}
-    mindmemos_available = settings.mindmemos_runtime_available and bool(project_defaults.mindmemos_binding_id)
+    binding_error = memory_service.get_mindmemos_provider_binding_error(db, current_user)
+    mindmemos_available = (
+        settings.mindmemos_runtime_available
+        and bool(project_defaults.mindmemos_binding_id)
+        and binding_error is None
+    )
+    if binding_error:
+        logger.warning("Skipping MindMemOS task memory because the provider binding is invalid: {}", binding_error)
     explicit_type = explicit_memory.get("type") if explicit_memory else None
     if explicit_type == "local_yaml":
         memory.update(explicit_memory or {})

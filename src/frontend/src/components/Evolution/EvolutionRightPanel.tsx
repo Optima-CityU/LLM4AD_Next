@@ -1798,7 +1798,7 @@ function NodeInfoSection({
   })()
 
   return (
-    <div className={`flex flex-col min-h-0 ${isOpen ? "flex-1" : "shrink-0"}`}>
+    <div className="flex min-h-0 shrink-0 flex-col">
       <SectionHeader
         icon={Network}
         title={t("evolution.nodeInfo")}
@@ -1809,7 +1809,7 @@ function NodeInfoSection({
       {isOpen && (
         <div
           ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto px-4 py-3 border-b border-border/30"
+          className="max-h-[60vh] overflow-y-auto border-b border-border/30 px-4 py-3"
         >
           {selectedNodes.length === 0 ? (
             /* ===== No selection — minimal hint ===== */
@@ -2586,7 +2586,7 @@ export default function EvolutionRightPanel({
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex h-full flex-col overflow-y-auto">
       <PanelErrorBoundary resetKey={task.id}>
         <TaskInfoSection
           task={task}

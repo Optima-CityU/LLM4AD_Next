@@ -15,7 +15,7 @@ import yaml
 # jwt_secret defaults to the standard MindMemOS deployment secret so the local
 # default setup works out of the box; override it if the deployment sets a
 # custom LLM4AD_MINDMEMOS_JWT_SECRET.
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "base_url": "http://127.0.0.1:18000",
     "jwt_secret": "demo-jwt-secret-key",
     "jwt_issuer": "demo-jwt-gateway",
@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
 }
 
 # Prefilled with OpenAI defaults so users only need to add an API key.
-DEFAULT_PROVIDERS = {
+DEFAULT_PROVIDERS: dict[str, dict[str, Any]] = {
     "chat": {
         "base_url": "https://api.openai.com/v1",
         "api_key": "",
@@ -50,6 +50,13 @@ def settings_path() -> Path:
     return Path.home() / ".llm4ad" / "settings.yaml"
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    """Return a string-keyed mapping, or an empty mapping for invalid YAML values."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
 def load_settings() -> dict[str, Any]:
     """Load CLI settings from file."""
     path = settings_path()
@@ -58,8 +65,8 @@ def load_settings() -> dict[str, Any]:
 
     try:
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-            return data.get("memory", {})
+            data = _as_mapping(yaml.safe_load(f))
+            return _as_mapping(data.get("memory"))
     except Exception:
         return {}
 
@@ -72,12 +79,12 @@ def save_settings(config: dict[str, Any]) -> None:
     # Load existing settings
     if path.exists():
         with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+            data = _as_mapping(yaml.safe_load(f))
     else:
         data = {}
 
     # Update memory section
-    if "memory" not in data:
+    if not isinstance(data.get("memory"), dict):
         data["memory"] = {}
 
     # Deep merge config into memory section

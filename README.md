@@ -24,7 +24,7 @@
 
 ## 🔥 News
 
-- 🧠 [2026.07][New Feature]: **MindMemOS-backed long-term memory** is now available, with global, project, and task memory scopes plus configurable Chat and Embedding model bindings. See the [Memory Guide](docs/en/guides/memory.md).
+- 🧠 [2026.07][New Feature]: **[MindMemOS](https://github.com/dadastory/MindMemOS)-backed long-term memory** is now available, with global, project, and task memory scopes plus configurable Chat and Embedding model bindings. See the [Memory Guide](docs/en/guides/memory.md).
 - 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [https://llm4ad-next.cn/](https://llm4ad-next.cn/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
 - ✨ [2026.07][New Feature]: Introducing an **interactive problem-to-project workflow** that turns natural-language problem descriptions into runnable evolutionary algorithm search projects.
 - 🐳 [2026.07][New Feature]: Versioned **Docker Hub deployment images** are now aligned with GitHub Release tags for reproducible local deployment.
@@ -81,7 +81,7 @@ Each method is a standalone orchestrator selected by `evolution.type`; its `plan
 ```yaml
 evolution:
   type: "eoh"
-  pop_size: 5
+  population_size: 5
   selection_num: 2
   use_e2_operator: true
   use_m1_operator: true
@@ -93,7 +93,7 @@ evolution:
 ```yaml
 evolution:
   type: "reevo"
-  pop_size: 8
+  population_size: 8
   mutation_rate: 0.5
   max_sample_nums: 100
 ```
@@ -104,7 +104,7 @@ evolution:
 evolution:
   type: "mcts_ahd"
   init_size: 4          # initial children under the root
-  pop_size: 10          # active algorithm pool size
+  population_size: 10          # active algorithm pool size
   max_sample_nums: 100  # evaluation budget
   alpha: 0.5            # UCT progressive-widening
   lambda_0: 0.1         # UCT exploration constant

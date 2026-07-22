@@ -10,6 +10,7 @@ tail；stdout/stderr 仅承载依赖安装、用户 print 与未捕获 traceback
 
 import asyncio
 import json
+import math
 import os
 import subprocess
 import sys
@@ -34,6 +35,24 @@ FINAL_STATE_FILENAME = ".final_state.json"
 EVENTS_FILENAME = ".events.jsonl"  # 须与 app.core.constants.EVENTS_FILENAME 一致
 GENERATED_DIR = os.path.join(DATA_DIR, "llm4ad", "run", "generated")
 _GENERATED_SCAN_INTERVAL = 2.0  # 扫描 generated 目录的间隔（秒）
+
+
+def _sanitize_non_finite(obj):
+    """Replace non-finite floats (inf, -inf, nan) with None for strict JSON.
+
+    Lightweight helper that avoids importing app.utils to keep container_runner
+    decoupled from the backend package. Semantics match sanitize_for_json.
+    """
+    if isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_non_finite(item) for item in obj]
+    return obj
+
 
 
 class EventsSink:
@@ -113,11 +132,14 @@ def _scan_generated(generated_dir: str, emit, seen: dict[str, float]) -> None:
                 content = json.load(f)
         except Exception:
             continue
+        # Sanitize non-finite floats before emitting so Redis/SSE stream is
+        # strict JSON; otherwise Algorithm.write's json.dump (allow_nan=True)
+        # puts -Infinity in the file, which crashes frontend's JSON.parse.
         emit({
             "type": "generated",
             "timestamp": datetime.now(UTC).isoformat(),
             "file_name": name,
-            "data": content,
+            "data": _sanitize_non_finite(content),
         })
 
 

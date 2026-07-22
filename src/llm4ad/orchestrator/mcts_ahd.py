@@ -366,7 +366,7 @@ class MCTSAHDOrchestrator(BaseOrchestrator):
                 continue
             seen.add(key)
             unique.append(a)
-        self.pool = unique[: self.config.pop_size]
+        self.pool = unique[: self.config.population_size]
 
     def _is_duplicate(self, algorithm: Algorithm) -> bool:
         """Check whether an algorithm duplicates one already in the pool.
@@ -505,24 +505,28 @@ class MCTSAHDOrchestrator(BaseOrchestrator):
             self._eval_failures += 1
             return
         result: EvaluationResult = results[0]
+
+        if not result.success:
+            # Leave the algorithm unevaluated so no placeholder score is
+            # written; it is excluded from selection via is_evaluated().
+            self._eval_failures += 1
+            logger.warning(
+                f"[MCTS-AHD] Evaluation failed for {algorithm.id}: {result.error_message}"
+            )
+            return
+
         algorithm.set_evaluation_result(
             score=result.score,
             metrics=dict(result.metrics),
-            error=result.error_message if not result.success else None,
+            error=None,
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(evaluation_total_ms=result.duration_ms),
         )
         algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
-        if algorithm.is_evaluated():
-            self._eval_successes += 1
-            if self.state_tracker.generated_dir:
-                algorithm.write(
-                    self.state_tracker.generated_dir, "evaluation", island_id=None, generation=algorithm.generation
-                )
-        else:
-            self._eval_failures += 1
-            logger.warning(
-                f"[MCTS-AHD] Evaluation failed for {algorithm.id}: {result.error_message} (score={result.score})"
+        self._eval_successes += 1
+        if self.state_tracker.generated_dir:
+            algorithm.write(
+                self.state_tracker.generated_dir, "evaluation", island_id=None, generation=algorithm.generation
             )
 
     # ------------------------------------------------------------------ #
@@ -545,7 +549,7 @@ class MCTSAHDOrchestrator(BaseOrchestrator):
             population=self.pool,
             best_individual=self._best_in_pool(),
             history=self.history,
-            metadata={"total_samples": self.total_samples, "pool_size": self.config.pop_size},
+            metadata={"total_samples": self.total_samples, "pool_size": self.config.population_size},
         )
         checkpoint_dir = getattr(self.config, "checkpoint_dir", None) or "."
         checkpoint_path = Path(path or (Path(checkpoint_dir) / f"mcts_ahd_{self._iteration}.json"))

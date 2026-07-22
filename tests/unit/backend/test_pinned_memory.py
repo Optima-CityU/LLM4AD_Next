@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.services.task_service.pinned_memory import _current_or_configured_pinned_ids
+from llm4ad.memory.pinned_memory import current_or_configured_pinned_ids
 
 
 def _task(memory: dict) -> SimpleNamespace:
@@ -12,6 +12,7 @@ def _task(memory: dict) -> SimpleNamespace:
 
 
 def test_missing_runtime_file_falls_back_to_manual_task_configuration(tmp_path: Path) -> None:
+    """A missing runtime file uses the manual selection saved with the task."""
     task = _task(
         {
             "retrieval_mode": "manual",
@@ -19,13 +20,14 @@ def test_missing_runtime_file_falls_back_to_manual_task_configuration(tmp_path: 
         }
     )
 
-    assert _current_or_configured_pinned_ids(task, tmp_path / "pinned_memory.json") == [
+    assert current_or_configured_pinned_ids(task.input_args, tmp_path / "pinned_memory.json") == [
         "project-card",
         "user-card",
     ]
 
 
 def test_explicit_empty_runtime_file_overrides_task_configuration(tmp_path: Path) -> None:
+    """An explicit empty runtime selection clears the configured pins."""
     path = tmp_path / "pinned_memory.json"
     path.write_text(json.dumps({"pinned_card_ids": []}), encoding="utf-8")
     task = _task(
@@ -35,4 +37,4 @@ def test_explicit_empty_runtime_file_overrides_task_configuration(tmp_path: Path
         }
     )
 
-    assert _current_or_configured_pinned_ids(task, path) == []
+    assert current_or_configured_pinned_ids(task.input_args, path) == []

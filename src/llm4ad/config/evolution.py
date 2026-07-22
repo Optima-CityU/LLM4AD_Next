@@ -333,8 +333,9 @@ class MEoHConfig(EvolutionConfig):
             hidden=True,
         ),
     )
-    pop_size: int = Field(
+    population_size: int = Field(
         default=8,
+        ge=2,
         json_schema_extra=ui(
             label_zh="种群大小", label_en="Population Size",
             desc_zh="MEoH 种群中维护的个体数量，影响多目标搜索的覆盖范围",
@@ -445,7 +446,7 @@ class MEoHConfig(EvolutionConfig):
 
         table.add_row("Evolution Type:", self.type)
         table.add_row("Generations:", str(self.max_generations))
-        table.add_row("Population Size:", str(self.pop_size))
+        table.add_row("Population Size:", str(self.population_size))
         table.add_row("Selection Num:", str(self.selection_num))
         table.add_row("Max Samples:", str(self.max_sample_nums))
         table.add_row("Objective Metrics:", ", ".join(self.objective_metrics) or "none")
@@ -627,7 +628,7 @@ class EoHConfig(EvolutionConfig):
             hidden=True,
         ),
     )
-    pop_size: int = Field(
+    population_size: int = Field(
         default=5,
         ge=2,
         json_schema_extra=ui(
@@ -711,7 +712,7 @@ class EoHConfig(EvolutionConfig):
 
         table.add_row("Evolution Type:", self.type)
         table.add_row("Generations:", str(self.max_generations))
-        table.add_row("Population Size:", str(self.pop_size))
+        table.add_row("Population Size:", str(self.population_size))
         table.add_row("Selection Num:", str(self.selection_num))
         table.add_row("Max Samples:", str(self.max_sample_nums))
         table.add_row("E2 Operator:", str(self.use_e2_operator))
@@ -753,7 +754,7 @@ class ReEvoConfig(EvolutionConfig):
             hidden=True,
         ),
     )
-    pop_size: int = Field(
+    population_size: int = Field(
         default=8,
         ge=2,
         json_schema_extra=ui(
@@ -769,7 +770,7 @@ class ReEvoConfig(EvolutionConfig):
         json_schema_extra=ui(
             label_zh="变异率", label_en="Mutation Rate",
             desc_zh="每代精英变异次数占种群大小的比例",
-            desc_en="Fraction of pop_size used for elite mutations each generation",
+            desc_en="Fraction of population_size used for elite mutations each generation",
         ),
     )
     max_sample_nums: int = Field(
@@ -814,7 +815,7 @@ class ReEvoConfig(EvolutionConfig):
 
         table.add_row("Evolution Type:", self.type)
         table.add_row("Generations:", str(self.max_generations))
-        table.add_row("Population Size:", str(self.pop_size))
+        table.add_row("Population Size:", str(self.population_size))
         table.add_row("Mutation Rate:", str(self.mutation_rate))
         table.add_row("Max Samples:", str(self.max_sample_nums))
 
@@ -862,7 +863,7 @@ class MCTSAHDConfig(EvolutionConfig):
             desc_en="Number of initial child nodes (algorithms) expanded under the root",
         ),
     )
-    pop_size: int = Field(
+    population_size: int = Field(
         default=10,
         ge=2,
         json_schema_extra=ui(
@@ -941,7 +942,7 @@ class MCTSAHDConfig(EvolutionConfig):
         table.add_row("Evolution Type:", self.type)
         table.add_row("MCTS Iterations:", str(self.max_generations))
         table.add_row("Init Size:", str(self.init_size))
-        table.add_row("Pool Size:", str(self.pop_size))
+        table.add_row("Pool Size:", str(self.population_size))
         table.add_row("Max Samples:", str(self.max_sample_nums))
         table.add_row("UCT alpha/lambda0:", f"{self.alpha}/{self.lambda_0}")
 

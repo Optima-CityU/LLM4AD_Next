@@ -4,6 +4,7 @@
 的生成与缓存。
 """
 
+import math
 import uuid
 from typing import TYPE_CHECKING
 
@@ -64,7 +65,10 @@ def get_task_stats(
         if not isinstance(evaluation, dict):
             continue
         score = evaluation.get("score")
-        if isinstance(score, (int, float)) and not isinstance(score, bool):
+        # Filter out non-finite floats (inf/-inf/nan) to defend against stale
+        # Redis data written before the sanitize fix. DB-persisted logs already
+        # have sanitize_for_json applied, but in-flight tasks read from Redis.
+        if isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score):
             scores.append(float(score))
 
     solution_count = len(entries)

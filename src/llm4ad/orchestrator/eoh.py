@@ -219,7 +219,7 @@ class EoHOrchestrator(BaseOrchestrator):
         self.planner: EoHEvolutionPlanner = planner
         self.config: EoHConfig = config
         self.version_control = version_control
-        self.eoh_population = EoHPopulation(pop_size=config.pop_size)
+        self.eoh_population = EoHPopulation(pop_size=config.population_size)
         self._background = background or getattr(config, "background", "")
         self.total_samples = 0
 
@@ -318,7 +318,7 @@ class EoHOrchestrator(BaseOrchestrator):
                 self.best_individual = self.eoh_population.best()
                 return self.population
 
-        init_target = self.config.pop_size
+        init_target = self.config.population_size
         # Cap the number of init trials (mirrors legacy initial_sample_nums_max)
         max_init_samples = min(self.config.max_sample_nums, 2 * init_target)
         init_start = time.time()
@@ -542,7 +542,7 @@ class EoHOrchestrator(BaseOrchestrator):
 
         for alg, result in zip(to_evaluate, results, strict=True):
             self._apply_eval_result(alg, result)
-            if self.state_tracker.generated_dir:
+            if result.success and self.state_tracker.generated_dir:
                 alg.write(self.state_tracker.generated_dir, "evaluation", island_id=None, generation=alg.generation)
         return algorithms
 
@@ -553,21 +553,22 @@ class EoHOrchestrator(BaseOrchestrator):
             algorithm: Algorithm to update.
             result: Dispatcher evaluation result.
         """
+        if not result.success:
+            self._eval_failures += 1
+            logger.warning(
+                f"[EoH] Evaluation failed for {algorithm.id}: {result.error_message}"
+            )
+            return
+
         algorithm.set_evaluation_result(
             score=result.score,
             metrics=dict(result.metrics),
-            error=result.error_message if not result.success else None,
+            error=None,
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(evaluation_total_ms=result.duration_ms),
         )
         algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
-        if algorithm.is_evaluated():
-            self._eval_successes += 1
-        else:
-            self._eval_failures += 1
-            logger.warning(
-                f"[EoH] Evaluation failed for {algorithm.id}: {result.error_message} (score={result.score})"
-            )
+        self._eval_successes += 1
 
     # ------------------------------------------------------------------ #
     # Operators / selection
@@ -678,7 +679,7 @@ class EoHOrchestrator(BaseOrchestrator):
         raw = json.loads(Path(seed_path).read_text(encoding="utf-8"))
         payload = raw if isinstance(raw, list) else raw.get("algorithms", [])
         algorithms = [Algorithm.model_validate(item) for item in payload]
-        self.eoh_population.population = algorithms[: self.config.pop_size]
+        self.eoh_population.population = algorithms[: self.config.population_size]
 
     def _log_generation_stats(self) -> None:
         """Record and log statistics for the current generation."""

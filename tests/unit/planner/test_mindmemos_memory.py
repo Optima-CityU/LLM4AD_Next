@@ -25,6 +25,7 @@ class FakeMindMemOSMemoryResource:
         self.list_calls = []
         self.search_result = SimpleNamespace(memories=[])
         self.list_result = SimpleNamespace(memories=[])
+        self.presence_result = SimpleNamespace(memories=[SimpleNamespace(id="existing-memory")])
         self.add_error: Exception | None = None
         self.search_error: Exception | None = None
 
@@ -38,6 +39,8 @@ class FakeMindMemOSMemoryResource:
     def list(self, **kwargs):
         """Record a fake list call."""
         self.list_calls.append(kwargs)
+        if kwargs.get("page_size") == 1:
+            return self.presence_result
         return self.list_result
 
     def update(self, **kwargs):
@@ -419,7 +422,11 @@ async def test_add_card_passes_configured_extraction_prompt_language_to_mindmemo
 async def test_mindmemos_management_uses_local_view_and_enabled_filter():
     """Manage cards through MindMemOS APIs."""
     memory = MindMemOSMemory(
-        _config(include_user_memory=False, include_project_memory=False),
+        _config(
+            mindmemos_agent_id="task",
+            include_user_memory=False,
+            include_project_memory=False,
+        ),
         client_factory=FakeMindMemOSClient,
     )
     card = MemoryCard(
@@ -451,6 +458,118 @@ async def test_mindmemos_management_uses_local_view_and_enabled_filter():
 
     await memory.delete_card("remote-card")
     assert memory.client.memory.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_remote_clear_uses_archive_only_delete_contract():
+    """Remote clear must call the strict archive-only delete API."""
+    memory = MindMemOSMemory(
+        _config(mindmemos_allow_remote_clear=True),
+        client_factory=FakeMindMemOSClient,
+    )
+
+    await memory.delete_card("remote-card")
+
+    assert memory.client.memory.delete_calls == [{"memory_id": "remote-card"}]
+
+
+def test_empty_task_scope_skips_search_after_one_presence_probe():
+    """Avoid repeated remote searches for a task scope known to be empty."""
+    memory = MindMemOSMemory(
+        _config(include_user_memory=False, include_project_memory=False),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.presence_result = SimpleNamespace(memories=[])
+
+    assert memory.get_prompt_context("tour construction") == ""
+    assert memory.get_prompt_context("tour construction") == ""
+
+    assert memory.client.memory.search_calls == []
+    assert len(memory.client.memory.list_calls) == 1
+    probe = memory.client.memory.list_calls[0]
+    assert probe["page"] == 1
+    assert probe["page_size"] == 1
+    assert probe["include_total"] is False
+    assert probe["include_inactive"] is False
+    assert probe["filters"] == {
+        "user_id": "user-1",
+        "app_id": "llm4ad",
+        "session_id": "task-1",
+        "agent_id": "task",
+        "entity_type": "llm4ad_memory_card",
+        "property_name": {
+            "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_task_memory_add_marks_an_empty_scope_available_for_search():
+    """A successful task-memory write must make later retrieval eligible immediately."""
+    memory = MindMemOSMemory(
+        _config(
+            mindmemos_agent_id="task",
+            include_user_memory=False,
+            include_project_memory=False,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.presence_result = SimpleNamespace(memories=[])
+
+    assert memory.get_prompt_context("tour construction") == ""
+    await memory.add_card(
+        MemoryCard(
+            type=MemoryType.GOOD_ALGORITHM,
+            title="Nearest-neighbor seed",
+            content="Seed routes with nearest-neighbor construction.",
+            source="auto",
+        )
+    )
+
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="remote-1",
+                memory="Seed routes with nearest-neighbor construction.",
+                memory_type="good_algorithm",
+            )
+        ]
+    )
+
+    context = memory.get_prompt_context("tour construction")
+
+    assert "nearest-neighbor construction" in context
+    assert len(memory.client.memory.list_calls) == 1
+    assert len(memory.client.memory.search_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_task_memory_delete_invalidates_scope_presence_cache():
+    """Removing task memory must force the next retrieval to re-check the scope."""
+    memory = MindMemOSMemory(
+        _config(
+            mindmemos_agent_id="task",
+            include_user_memory=False,
+            include_project_memory=False,
+            mindmemos_allow_remote_clear=True,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.presence_result = SimpleNamespace(memories=[])
+
+    await memory.add_card(
+        MemoryCard(
+            type=MemoryType.GOOD_ALGORITHM,
+            title="Nearest-neighbor seed",
+            content="Seed routes with nearest-neighbor construction.",
+            source="auto",
+        )
+    )
+    await memory.delete_card("remote-1")
+
+    assert memory.get_prompt_context("tour construction") == ""
+    assert memory.client.memory.search_calls == []
+    assert len(memory.client.memory.list_calls) == 1
 
 
 def test_get_prompt_context_formats_search_results_by_memory_type():

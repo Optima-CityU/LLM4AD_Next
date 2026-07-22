@@ -122,7 +122,12 @@ class MindMemOSClient:
                     message = response.text or f"HTTP {response.status_code}"
                 raise MindMemOSError(message, status_code=response.status_code)
 
-            return response.json()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise MindMemOSError(
+                    "MindMemOS returned an invalid JSON response", status_code=response.status_code
+                )
+            return data
 
     def health_check(self) -> dict[str, Any]:
         """Check MindMemOS service health."""
@@ -563,15 +568,12 @@ class MindMemOSClient:
             scopes=["memory:write"],
         )
 
-    def delete_memory(self, *, memory_id: str, hard: bool = True) -> dict[str, Any]:
+    def delete_memory(self, *, memory_id: str) -> dict[str, Any]:
         """Delete memory.
 
         Matches backend's _remote_delete_card (memory_service.py:1319).
         """
-        payload = {
-            "memory_id": memory_id,
-            "hard": hard,
-        }
+        payload = {"memory_id": memory_id}
 
         return self._request(
             "POST",

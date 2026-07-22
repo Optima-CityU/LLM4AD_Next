@@ -1,4 +1,5 @@
 import {
+  Brain,
   BookOpen,
   Boxes,
   Code2,
@@ -51,6 +52,7 @@ export const guideNav: GuideNavItem[] = [
         key: "guides/memory",
         labelZh: "长期记忆",
         labelEn: "Long-term Memory",
+        icon: Brain,
       },
     ],
   },

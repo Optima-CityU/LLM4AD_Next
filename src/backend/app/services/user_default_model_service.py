@@ -286,18 +286,21 @@ def update_user_default_model(
     if embedding_provider_id is not None:
         embedding_provider = db.get(models.EmbeddingProvider, embedding_provider_id)
         if not embedding_provider:
-            raise HTTPException(
-                status_code=404,
-                detail=f"embedding 供应商配置 {embedding_provider_id} 不存在",
+            if embedding_enabled:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"embedding 供应商配置 {embedding_provider_id} 不存在",
+                )
+            update_data["embedding_provider_id"] = None
+        else:
+            is_visible_builtin_embedding = (
+                embedding_provider.is_builtin and embedding_provider.visible_to_all
             )
-        is_visible_builtin_embedding = (
-            embedding_provider.is_builtin and embedding_provider.visible_to_all
-        )
-        if embedding_provider.user_id != user_id and not is_visible_builtin_embedding:
-            raise HTTPException(
-                status_code=403,
-                detail=f"无权使用 embedding 供应商配置 {embedding_provider_id}",
-            )
+            if embedding_provider.user_id != user_id and not is_visible_builtin_embedding:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"无权使用 embedding 供应商配置 {embedding_provider_id}",
+                )
     elif embedding_enabled:
         raise HTTPException(
             status_code=400,

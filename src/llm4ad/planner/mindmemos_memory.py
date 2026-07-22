@@ -21,11 +21,11 @@ from llm4ad.planner.task_memory_selector import (
     create_task_memory_selector,
 )
 
-
 LLM4AD_MEMORY_ENTITY_TYPE = "llm4ad_memory_card"
 LLM4AD_MEMORY_CARD_PROPERTY_FILTER = {
     "in": ["good_algorithm", "error_reflection", "domain_knowledge", "general_insight"]
 }
+_SCOPE_PRESENCE_TTL_SECONDS = 60.0
 
 # Human-readable labels for memory event/type in user-facing logs. Keeps the
 # implementation name (MindMemOS) out of logs — users just see "long-term memory".
@@ -225,11 +225,13 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
     """Select old extraction candidates but let MindMemOS do the actual extraction."""
 
     def __init__(self, provider: Any, config: Any):
+        """Initialize the extractor and its per-generation state."""
         super().__init__(provider, config)
         self._cards_this_gen = 0
         self._best_score = float("-inf")
 
     def reset_generation(self) -> None:
+        """Clear extraction candidates accumulated for the current generation."""
         self._cards_this_gen = 0
 
     def _budget_available(self) -> bool:
@@ -272,6 +274,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         generation: int,
         background: str = "",
     ) -> MemoryCard | None:
+        """Collect a strictly improved result as a potential good-algorithm memory."""
         if not _cfg_get(self.config, "enabled", True) or not _cfg_get(self.config, "extract_good", True):
             return None
         if not self._budget_available() or not algorithm.is_evaluated():
@@ -292,6 +295,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         generation: int,
         background: str = "",
     ) -> MemoryCard | None:
+        """Collect low-score feedback as a potential reflection memory."""
         if not _cfg_get(self.config, "enabled", True) or not _cfg_get(self.config, "extract_bad", True):
             return None
         if not self._budget_available() or not algorithm.is_evaluated():
@@ -310,6 +314,7 @@ class MindMemOSRawMemoryExtractor(BaseMemoryExtractor):
         generation: int,
         background: str = "",
     ) -> MemoryCard | None:
+        """Collect an execution failure as a potential reflection memory."""
         if not _cfg_get(self.config, "enabled", True) or not _cfg_get(self.config, "extract_on_failure", True):
             return None
         if not self._budget_available():
@@ -493,14 +498,20 @@ class MindMemOSMemory(BaseMemory):
             "last_search_scope_hits": {},
             "last_injected_chars": 0,
         }
+        # A task repeatedly asks the same scopes for prompt injection. Remember
+        # whether a scope has at least one active card, so known-empty scopes do
+        # not issue a semantic search on every sampler invocation. The complete
+        # identity stays in the key even though this object is task-local, which
+        # prevents accidental cross-user reuse if the cache scope changes later.
+        self._scope_presence: dict[tuple[str, str, str, str, str], tuple[bool, float]] = {}
 
         if client_factory is None:
             try:
                 from mindmemos_sdk import MindMemOSClient
             except ImportError:
-                MindMemOSClient = _HttpMindMemOSClient
-
-            client_factory = MindMemOSClient
+                client_factory = _HttpMindMemOSClient
+            else:
+                client_factory = MindMemOSClient
         self.client = _create_client_with_timeout(
             client_factory,
             {
@@ -592,6 +603,7 @@ class MindMemOSMemory(BaseMemory):
                 add_payload["prompt_language"] = self.extraction_prompt_language
             result = self.add_client.memory.add(**add_payload)
             self._stats["add_count"] += 1
+            self._mark_task_scope_present()
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             memory_id = _memory_id_from_add_result(result)
             logger.info(
@@ -649,6 +661,10 @@ class MindMemOSMemory(BaseMemory):
                     metadata_patch=self._card_metadata(card),
                     status="active" if card.enabled else "archived",
                 )
+                if card.enabled:
+                    self._mark_task_scope_present()
+                else:
+                    self._invalidate_task_scope_presence()
                 return card
             except Exception as exc:  # noqa: BLE001
                 self._record_error(exc)
@@ -665,7 +681,8 @@ class MindMemOSMemory(BaseMemory):
         if delete is None or not self.allow_remote_clear:
             return
         try:
-            delete(memory_id=card_id, user_id=self.user_id, hard=True)
+            delete(memory_id=card_id)
+            self._invalidate_task_scope_presence()
         except Exception as exc:  # noqa: BLE001
             self._record_error(exc)
             if not self.fail_open:
@@ -686,6 +703,10 @@ class MindMemOSMemory(BaseMemory):
                     metadata_patch=self._card_metadata(updated),
                     status="active" if enabled else "archived",
                 )
+                if enabled:
+                    self._mark_task_scope_present()
+                else:
+                    self._invalidate_task_scope_presence()
                 return updated
         raise KeyError(card_id)
 
@@ -778,6 +799,14 @@ class MindMemOSMemory(BaseMemory):
             top_k = min(requested_limit, configured_limit)
             if top_k <= 0:
                 continue
+            if not self._scope_has_active_cards(scope, session_id, agent_id):
+                logger.debug(
+                    "🔎 [long-term memory] scope search skipped: scope={} agent_id={} session_id={} reason=empty",
+                    scope,
+                    agent_id,
+                    session_id,
+                )
+                continue
             # Weight/random injection needs a wider task-scope candidate pool to
             # choose from; the pool is trimmed back to top_k after selection.
             # TopK fetches exactly top_k since trimming a ranked list is a no-op.
@@ -841,7 +870,7 @@ class MindMemOSMemory(BaseMemory):
                 completed[index] = run_search(job)
 
         scope_hits: dict[str, int] = {}
-        for index, job in enumerate(search_jobs):
+        for index, _job in enumerate(search_jobs):
             outcome = completed[index]
             scope = str(outcome["scope"])
             session_id = str(outcome["session_id"])
@@ -1049,6 +1078,73 @@ class MindMemOSMemory(BaseMemory):
             page += 1
         return hits
 
+    def _scope_presence_key(self, scope: str, session_id: str, agent_id: str) -> tuple[str, str, str, str, str]:
+        """Return the complete identity for one remote memory scope."""
+        return (self.user_id, self.app_id, scope, session_id, agent_id)
+
+    def _scope_has_active_cards(self, scope: str, session_id: str, agent_id: str) -> bool:
+        """Return whether a scope has active cards, falling back to search on probe errors."""
+        key = self._scope_presence_key(scope, session_id, agent_id)
+        now = time.monotonic()
+        cached = self._scope_presence.get(key)
+        if cached is not None and now - cached[1] < _SCOPE_PRESENCE_TTL_SECONDS:
+            return cached[0]
+
+        list_method = getattr(self.client.memory, "list", None)
+        if list_method is None:
+            return True
+        filters: dict[str, Any] = {
+            "user_id": self.user_id,
+            "app_id": self.app_id,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "entity_type": LLM4AD_MEMORY_ENTITY_TYPE,
+            "property_name": LLM4AD_MEMORY_CARD_PROPERTY_FILTER,
+        }
+        try:
+            result = list_method(
+                user_id=self.user_id,
+                app_id=self.app_id or None,
+                agent_id=agent_id,
+                session_id=session_id,
+                page=1,
+                page_size=1,
+                include_total=False,
+                include_inactive=False,
+                filters=filters,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._record_error(exc)
+            logger.warning(
+                "🔎 [long-term memory] scope presence probe failed; searching anyway: "
+                "scope={} agent_id={} session_id={}: {}",
+                scope,
+                agent_id,
+                session_id,
+                exc,
+            )
+            return True
+
+        if getattr(result, "code", None) not in (None, "ok", "queued"):
+            return True
+        has_active_cards = any(_hit_is_enabled(item) for item in (getattr(result, "memories", None) or []))
+        self._scope_presence[key] = (has_active_cards, now)
+        return has_active_cards
+
+    def _mark_task_scope_present(self) -> None:
+        """Record a successful task-memory write without waiting for cache expiry."""
+        if not self.session_id:
+            return
+        key = self._scope_presence_key("task", self.session_id, self.agent_id)
+        self._scope_presence[key] = (True, time.monotonic())
+
+    def _invalidate_task_scope_presence(self) -> None:
+        """Force the next task-scope retrieval to re-check after a mutation."""
+        if not self.session_id:
+            return
+        key = self._scope_presence_key("task", self.session_id, self.agent_id)
+        self._scope_presence.pop(key, None)
+
     async def _rewrite_query(self, query: str, context: dict[str, Any] | None = None) -> str:
         """Use planner provider to compress broad sampler context into a search query."""
         if self.query_provider is None:
@@ -1144,6 +1240,7 @@ class MindMemOSMemory(BaseMemory):
         self._stats["last_search_elapsed_ms"] = None
         self._stats["last_search_scope_hits"] = {}
         self._stats["last_injected_chars"] = 0
+        self._scope_presence.clear()
 
     @staticmethod
     def _dialogue_message(role: str, content: str) -> Any:
@@ -1487,7 +1584,7 @@ def _memory_id_from_add_result(result: Any) -> str | None:
 class _HttpMindMemOSMemoryResource:
     """Minimal HTTP client for MindMemOS public memory APIs."""
 
-    def __init__(self, parent: "_HttpMindMemOSClient") -> None:
+    def __init__(self, parent: _HttpMindMemOSClient) -> None:
         self._parent = parent
 
     def add(self, **kwargs: Any) -> Any:
@@ -1520,10 +1617,7 @@ class _HttpMindMemOSMemoryResource:
 
     def delete(self, **kwargs: Any) -> Any:
         memory_id = kwargs.get("memory_id") or kwargs.get("id")
-        payload = {"memory_id": memory_id}
-        if kwargs.get("hard") is not None:
-            payload["hard"] = bool(kwargs.get("hard"))
-        return self._parent.post("/v1/memory/delete", payload)
+        return self._parent.post("/v1/memory/delete", {"memory_id": memory_id})
 
     def update(self, memory_id: str, content: str, **kwargs: Any) -> Any:
         return self._parent.post("/v1/memory/update", {"memory_id": memory_id, "content": content, **kwargs})

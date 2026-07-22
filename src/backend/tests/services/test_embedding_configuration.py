@@ -19,7 +19,7 @@ from app.core.db import engine
 from app.models import EmbeddingMode, EmbeddingProviderType, ProviderType
 from app.schemas import embedding_provider as embedding_provider_schemas
 from app.schemas.result_render import ResultRenderGenerateRequest, ResultRenderType
-from app.services import embedding_provider_service, user_default_model_service
+from app.services import embedding_provider_service, memory_service, user_default_model_service
 from app.services.task_service.execution import _resolve_providers
 from app.services.task_service.stats import generate_result_render
 from app.utils import init_db
@@ -222,6 +222,49 @@ def test_jina_embedding_provider_persists_model_and_task_modes(db: Session):
     assert provider.model == "jina-embeddings-v4-custom"
     assert provider.text_task == "retrieval.query"
     assert provider.code_task == "code.passage"
+
+
+@pytest.mark.parametrize(
+    ("base_url", "api_key", "expected_detail"),
+    [
+        ("gfdasrew", "jina-key", "API 地址"),
+        ("https://api.jinaai.cn/v1", "", "API Key"),
+    ],
+)
+def test_jina_embedding_provider_rejects_invalid_memory_connection_fields(
+    base_url: str,
+    api_key: str,
+    expected_detail: str,
+):
+    """Reject Jina settings that MindMemOS cannot use for embedding calls."""
+    with pytest.raises(HTTPException) as exc_info:
+        embedding_provider_service._normalize_provider_data(  # noqa: SLF001
+            {
+                "name": "invalid-jina",
+                "type": EmbeddingProviderType.JINA,
+                "base_url": base_url,
+                "api_key": api_key,
+            }
+        )
+
+    assert exc_info.value.status_code == 400
+    assert expected_detail in exc_info.value.detail
+
+
+def test_mindmemos_rejects_persisted_invalid_jina_embedding_provider():
+    """Do not pass a legacy invalid Jina configuration to MindMemOS."""
+    provider = models.EmbeddingProvider(
+        name="legacy-invalid-jina",
+        user_id=uuid.uuid4(),
+        type=EmbeddingProviderType.JINA,
+        base_url="gfdasrew",
+        api_key="",
+        model="jina-embeddings-v4",
+        dim=2048,
+    )
+
+    with pytest.raises(HTTPException, match="Embedding 配置无效"):
+        memory_service._validate_mindmemos_embedding_provider(provider)  # noqa: SLF001
 
 
 @pytest.mark.asyncio
@@ -557,6 +600,25 @@ def test_embedding_default_model_rejects_missing_provider(db: Session):
 
     assert exc_info.value.status_code == 404
     assert "embedding" in exc_info.value.detail
+
+
+def test_deleting_bound_embedding_provider_clears_default_configuration(db: Session):
+    user = create_random_user(db)
+    provider = _embedding_provider(db, user.id)
+    user_default_model_service.update_user_default_model(
+        db,
+        user.id,
+        {
+            "embedding_enabled": True,
+            "embedding_provider_id": provider.id,
+        },
+    )
+
+    embedding_provider_service.delete_embedding_provider(db, provider.id, user)
+
+    defaults = user_default_model_service.get_user_default_model(db, user.id)
+    assert defaults.embedding_enabled is False
+    assert defaults.embedding_provider_id is None
 
 
 def test_embedding_provider_rejects_incomplete_split_configuration(db: Session):
