@@ -52,6 +52,7 @@ import {
 import { handleError } from "@/utils"
 
 const JINA_DEFAULT_MODEL = "jina-embeddings-v4"
+const JINA_DEFAULT_BASE_URL = "https://api.jinaai.cn/v1"
 const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 const OPENAI_DEFAULT_MODEL = "text-embedding-3-small"
 const OPENAI_DEFAULT_DIM = 1536
@@ -175,7 +176,7 @@ const defaultValues: FormData = {
   type: "jina",
   api_key: "",
   auth_token: "",
-  base_url: "",
+  base_url: JINA_DEFAULT_BASE_URL,
   mode: "shared",
   model: JINA_DEFAULT_MODEL,
   dim: 2048,
@@ -225,7 +226,8 @@ function providerToFormData(provider: EmbeddingProviderResponse): FormData {
     type: provider.type,
     api_key: "",
     auth_token: "",
-    base_url: provider.base_url ?? "",
+    base_url:
+      provider.base_url ?? (provider.type === "jina" ? JINA_DEFAULT_BASE_URL : ""),
     mode: provider.mode,
     model: provider.model || (provider.type === "jina" ? JINA_DEFAULT_MODEL : ""),
     dim: provider.dim,
@@ -485,6 +487,7 @@ export default function EmbeddingProviderSettings() {
     if (value === "jina") {
       setShareTaskConfig(false)
       form.setValue("mode", "shared")
+      form.setValue("base_url", JINA_DEFAULT_BASE_URL)
       form.setValue("dim", 2048)
       form.setValue("model", JINA_DEFAULT_MODEL)
       form.setValue("text_type", "jina")
@@ -717,7 +720,7 @@ export default function EmbeddingProviderSettings() {
                           <FormItem>
                             <FormLabel>Base URL</FormLabel>
                             <FormControl>
-                              <Input placeholder="https://api.jinaai.cn/v1" {...field} />
+                              <Input placeholder={JINA_DEFAULT_BASE_URL} {...field} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
