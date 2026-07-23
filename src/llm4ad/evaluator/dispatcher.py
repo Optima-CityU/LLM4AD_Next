@@ -372,6 +372,7 @@ class EvaluationDispatcher:
 
         TODO: Now → Means, maybe can update to more configuration（算术平均，几何平均，最大值，最小值之类的）
         """
+        kwargs.setdefault("timeout", self.config.timeout)
         n_files = len(self._data_files)
 
         if n_files == 0:
