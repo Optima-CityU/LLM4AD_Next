@@ -232,7 +232,9 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
-def build_config_summary_md(base_dir: str, project_name: str) -> str:
+def build_config_summary_md(
+    base_dir: str, project_name: str, language: str = "zh"
+) -> str:
     """Read the produced config.yaml and render an evolution-params + cost summary.
 
     Returns a markdown block (heading + params table + token estimate) to append
@@ -241,6 +243,7 @@ def build_config_summary_md(base_dir: str, project_name: str) -> str:
     Args:
         base_dir: Workspace root.
         project_name: Produced project directory name.
+        language: ``"zh"`` or ``"en"``.
 
     Returns:
         A markdown string, or "" on failure (the caller still reports success).
@@ -257,28 +260,39 @@ def build_config_summary_md(base_dir: str, project_name: str) -> str:
         return ""
     est = estimate_evolution_cost(evo)
     etype = evo.get("type", "island_ga")
+    _zh = language == "zh"
     lines = [
-        "### ⚙️ 进化参数配置",
+        "### ⚙️ 进化参数配置" if _zh else "### ⚙️ Evolution Parameters",
         "",
-        "| 参数 | 值 |",
+        "| 参数 | 值 |" if _zh else "| Parameter | Value |",
         "|---|---|",
-        f"| 进化算法 | {etype} |",
-        f"| 迭代代数 (max_generations) | {est['max_generations']} |",
-        f"| 岛屿数 (num_islands) | {est['num_islands']} |",
-        f"| 每岛种群 (island_population_size) | {est['island_population_size']} |",
-        f"| 变异率 (mutation_rate) | {evo.get('mutation_rate', '—')} |",
-        f"| 交叉率 (crossover_rate) | {evo.get('crossover_rate', '—')} |",
-        f"| 精英比例 (elite_ratio) | {evo.get('elite_ratio', '—')} |",
+        f"| {'进化算法' if _zh else 'Evolution algorithm'} | {etype} |",
+        f"| {'迭代代数 (max_generations)' if _zh else 'Max generations'} | {est['max_generations']} |",
+        f"| {'岛屿数 (num_islands)' if _zh else 'Number of islands'} | {est['num_islands']} |",
+        f"| {'每岛种群 (island_population_size)' if _zh else 'Island population size'} | {est['island_population_size']} |",
+        f"| {'变异率 (mutation_rate)' if _zh else 'Mutation rate'} | {evo.get('mutation_rate', '—')} |",
+        f"| {'交叉率 (crossover_rate)' if _zh else 'Crossover rate'} | {evo.get('crossover_rate', '—')} |",
+        f"| {'精英比例 (elite_ratio)' if _zh else 'Elite ratio'} | {evo.get('elite_ratio', '—')} |",
         "",
-        "### 💰 预计 token 消耗（粗略上限）",
+        "### 💰 预计 token 消耗（粗略上限）" if _zh else "### 💰 Estimated Token Usage (rough upper bound)",
         "",
         f"- 预计生成候选算法：约 **{est['total_candidates']}** 个"
-        f"（每个含 planner + coder 两次 LLM 调用，共约 **{est['llm_calls']}** 次调用）",
+        f"（每个含 planner + coder 两次 LLM 调用，共约 **{est['llm_calls']}** 次调用）"
+        if _zh else
+        f"- Estimated candidate algorithms: ~**{est['total_candidates']}** "
+        f"(each with 2 LLM calls — planner + coder — totalling ~**{est['llm_calls']}** calls)",
         f"- 预计输出 token：约 **{_fmt_tokens(est['tokens_low'])} ~ "
+        f"{_fmt_tokens(est['tokens_high'])}**"
+        if _zh else
+        f"- Estimated output tokens: ~**{_fmt_tokens(est['tokens_low'])} – "
         f"{_fmt_tokens(est['tokens_high'])}**",
         "",
-        "> 这是**按迭代代数满跑**估算的上限；实际会因早停（early stopping）而更少，"
-        "且不含输入 token。可通过调小 `max_generations` / `island_population_size` 降低消耗。",
+        ("> 这是**按迭代代数满跑**估算的上限；实际会因早停（early stopping）而更少，"
+         "且不含输入 token。可通过调小 `max_generations` / `island_population_size` 降低消耗。"
+         if _zh else
+         "> This is a rough upper bound assuming **all generations run to completion**; "
+         "actual usage will be lower due to early stopping, and input tokens are not "
+         "included. Reduce `max_generations` / `island_population_size` to lower costs."),
     ]
     return "\n".join(lines)
 
@@ -312,6 +326,7 @@ def make_tools(
     state: _BuildState,
     *,
     allow_build: bool = False,
+    language: str = "zh",
 ) -> list[Any]:
     """Build the agent's tools for the current phase.
 
@@ -346,6 +361,11 @@ def make_tools(
     from llm4ad.consultant.needs import NeedsProfile
 
     base = Path(base_dir).resolve()
+
+    # Save UI language under a distinct name so inner functions (which have
+    # their own ``language`` parameter for the programming language) don't
+    # accidentally shadow the closure variable.
+    _ui_lang = language
 
     def _tool(func: Callable[..., Any], **kwargs: Any) -> FunctionTool:
         """Wrap a workspace tool function as an agentscope ``FunctionTool``.
@@ -676,7 +696,7 @@ def make_tools(
             for p in (base / blueprint.project_name).rglob("*")
             if p.is_file()
         )
-        cfg_summary = build_config_summary_md(str(base), blueprint.project_name)
+        cfg_summary = build_config_summary_md(str(base), blueprint.project_name, _ui_lang)
         return (
             f"Build succeeded and passed the validation gate.\n"
             f"Project: {blueprint.project_name}\n"
@@ -825,8 +845,12 @@ def make_tools(
         }
         state.summary_text = summary.strip()
         return (
-            "Plan recorded. The user is now shown a confirmation card with the 7 "
-            "plan items. Stop here and wait for their decision — do nothing else."
+            "方案已记录。用户现在看到一张包含 7 个规划项的确认卡片。"
+            "请停止并等待用户决定——不要做任何其他操作。"
+            if _ui_lang == "zh"
+            else "Plan recorded. The user is now shown a confirmation card with "
+            "the 7 plan items. Stop here and wait for their decision — "
+            "do nothing else."
         )
 
     def ask_choice(
@@ -843,11 +867,13 @@ def make_tools(
 
         Attaching upload to a specific option (PREFERRED): put a ``[dir]`` or
         ``[file]`` tag at the START of that option's text. Clicking THAT option
-        then opens a directory / file picker. Example:
-        ``["由你来设计 — 我帮你设计求解函数",
-          "[dir] 进化我现有的代码 — 上传我的项目目录让 LLM 优化"]``
+        then opens a directory / file picker. Example:""" + (
+            ' ``["由你来设计 — 我帮你设计求解函数", "[dir] 进化我现有的代码 — 上传我的项目目录让 LLM 优化"]``'
+            if _ui_lang == "zh"
+            else ' ``["Let you design it — I\'ll create the solver", "[dir] Evolve my existing code — Upload my project for LLM optimization"]``'
+        ) + """
         This is better than a separate "upload" option because the upload lives on
-        the semantically meaningful choice ("evolve my code"), so one click does it.
+        the semantically meaningful choice, so one click does it.
 
         Args:
             question: The single question to ask.
@@ -855,8 +881,12 @@ def make_tools(
                 ``"Label — short description"`` (em dash separates label from hint).
                 Prefix an option with ``[dir]`` or ``[file]`` to make clicking it
                 open a directory / file picker.
-            allow_custom: If True (default), a "自行输入 / Enter your own" free-text
-                option is appended so the user isn't boxed in.
+            allow_custom: If True (default), a free-text option is appended so
+                the user is not boxed in.""" + (
+                ' (Shown as "自行输入 / Enter your own".)'
+                if _ui_lang == "zh"
+                else ' (Shown as "Enter your own".)'
+            ) + """
             upload: Legacy fallback: ``"file"`` / ``"dir"`` appends a standalone
                 upload option. Prefer the inline ``[dir]``/``[file]`` tag instead.
 
@@ -895,21 +925,21 @@ def make_tools(
         if upload == "file":
             opts.append({
                 "value": "__upload_file__",
-                "label": "上传文件 / Upload a file",
-                "description": "选择本地文件提供给助手",
+                "label": "上传文件 / Upload a file" if _ui_lang == "zh" else "Upload a file",
+                "description": "选择本地文件提供给助手" if _ui_lang == "zh" else "Select a local file for the assistant",
                 "ask_for_path": True,
             })
         elif upload == "dir":
             opts.append({
                 "value": "__upload_dir__",
-                "label": "上传目录 / Upload a directory",
-                "description": "选择本地项目目录提供给助手",
+                "label": "上传目录 / Upload a directory" if _ui_lang == "zh" else "Upload a directory",
+                "description": "选择本地项目目录提供给助手" if _ui_lang == "zh" else "Select a local project directory for the assistant",
                 "ask_for_dir": True,
             })
         if allow_custom:
             opts.append({
                 "value": "__custom__",
-                "label": "自行输入 / Enter your own",
+                "label": "自行输入 / Enter your own" if _ui_lang == "zh" else "Enter your own",
                 "description": "",
                 "is_custom": True,
             })
@@ -993,7 +1023,11 @@ def _detect_project_dir(base_dir: str) -> str:
     return ""
 
 
-def _confirm_build_card(summary: str, proposed: dict[str, Any] | None = None) -> dict[str, Any]:
+def _confirm_build_card(
+    summary: str,
+    proposed: dict[str, Any] | None = None,
+    language: str = "zh",
+) -> dict[str, Any]:
     """Build the confirm/decline card shown after a gather proposal.
 
     Renders the structured 7-item Plan in the card prompt (the frontend displays
@@ -1005,6 +1039,7 @@ def _confirm_build_card(summary: str, proposed: dict[str, Any] | None = None) ->
     Args:
         summary: The agent's one-paragraph task recap.
         proposed: The structured plan dict recorded by ``propose_plan``.
+        language: ``"zh"`` or ``"en"``.
 
     Returns:
         The payload dict for a ``{"type": "payload", "data": ...}`` event.
@@ -1015,6 +1050,7 @@ def _confirm_build_card(summary: str, proposed: dict[str, Any] | None = None) ->
         """Escape a value for use inside a markdown table cell."""
         return str(text).replace("|", "\\|").replace("\n", " ")
 
+    _zh = language == "zh"
     lines: list[str] = []
     if proposed:
         # Render the plan as markdown (heading + table), the SAME style the agent
@@ -1024,40 +1060,55 @@ def _confirm_build_card(summary: str, proposed: dict[str, Any] | None = None) ->
             f"复用已有代码 `{proposed['code_path']}`"
             if proposed.get("code_path")
             else "从零生成"
+        ) if _zh else (
+            f"Reuse existing code `{proposed['code_path']}`"
+            if proposed.get("code_path")
+            else "Generate from scratch"
         )
         eval_src = (
             f"复用已有评估器 `{proposed['existing_evaluator_path']}`"
             if proposed.get("use_existing_evaluator")
             else "自动生成"
+        ) if _zh else (
+            f"Reuse existing evaluator `{proposed['existing_evaluator_path']}`"
+            if proposed.get("use_existing_evaluator")
+            else "Auto-generate"
         )
         data_src = (
             f"使用已有数据 `{proposed['data_path']}`"
             if proposed.get("data_path")
             else "自动生成样本"
+        ) if _zh else (
+            f"Use existing data `{proposed['data_path']}`"
+            if proposed.get("data_path")
+            else "Generate sample data"
         )
-        fn = proposed.get("function_to_evolve") or "由助手设计"
-        io = proposed.get("io_format") or "由助手设计"
-        metric = proposed.get("metrics_hints") or proposed.get("evaluation_hints") or "(未填)"
+        fn = proposed.get("function_to_evolve") or ("由助手设计" if _zh else "Designed by assistant")
+        io = proposed.get("io_format") or ("由助手设计" if _zh else "Designed by assistant")
+        metric_default = "(未填)" if _zh else "(not specified)"
+        metric = proposed.get("metrics_hints") or proposed.get("evaluation_hints") or metric_default
         lines = [
-            "## 📋 构建方案确认",
+            "## 📋 构建方案确认" if _zh else "## 📋 Build Plan Confirmation",
             "",
-            "| # | 项目 | 内容 |",
+            "| # | 项目 | 内容 |" if _zh else "| # | Item | Details |",
             "|---|---|---|",
-            f"| 1 | 问题描述 | {_md_cell(proposed.get('description') or '(未填)')} |",
-            f"| 2 | 进化目标 | {_md_cell(fn)} |",
-            f"| 3 | 输入 / 输出 | {_md_cell(io)} |",
-            f"| 4 | 评估指标 | {_md_cell(metric)} |",
-            f"| 5 | 代码来源 | {_md_cell(code_src)}（评估器：{_md_cell(eval_src)}） |",
-            f"| 6 | 数据来源 | {_md_cell(data_src)} |",
-            f"| 7 | 语言 / 项目名 | {_md_cell(proposed.get('language') or 'python')} / "
-            f"`{_md_cell(proposed.get('project_name') or '自动')}` |",
+            f"| 1 | {'问题描述' if _zh else 'Problem description'} | {_md_cell(proposed.get('description') or ('(未填)' if _zh else '(not specified)'))} |",
+            f"| 2 | {'进化目标' if _zh else 'Evolution target'} | {_md_cell(fn)} |",
+            f"| 3 | {'输入 / 输出' if _zh else 'Input / Output'} | {_md_cell(io)} |",
+            f"| 4 | {'评估指标' if _zh else 'Evaluation metric'} | {_md_cell(metric)} |",
+            f"| 5 | {'代码来源' if _zh else 'Code source'} | {_md_cell(code_src)}（{'评估器' if _zh else 'Evaluator'}：{_md_cell(eval_src)}） |",
+            f"| 6 | {'数据来源' if _zh else 'Data source'} | {_md_cell(data_src)} |",
+            f"| 7 | {'语言 / 项目名' if _zh else 'Language / Project'} | {_md_cell(proposed.get('language') or 'python')} / "
+            f"`{_md_cell(proposed.get('project_name') or ('自动' if _zh else 'auto'))}` |",
             "",
-            "还有要补充或修改的吗？**确认无误我就开始构建** 🚀",
+            "还有要补充或修改的吗？**确认无误我就开始构建** 🚀"
+            if _zh else
+            "Anything to add or revise? **I'll start building once confirmed** 🚀",
         ]
     elif summary:
         lines.append(summary.strip())
 
-    prompt = "\n".join(lines) if lines else "需求已明确，是否开始构建？"
+    prompt = "\n".join(lines) if lines else ("需求已明确，是否开始构建？" if _zh else "Requirements are clear — shall I start building?")
     return {
         "cardId": f"card-{uuid.uuid4().hex[:8]}",
         "kind": "choice",
@@ -1067,13 +1118,13 @@ def _confirm_build_card(summary: str, proposed: dict[str, Any] | None = None) ->
         "options": [
             {
                 "value": "confirm_build",
-                "label": "确认构建",
-                "description": "按上述方案开始构建任务",
+                "label": "确认构建" if _zh else "Confirm Build",
+                "description": "按上述方案开始构建任务" if _zh else "Start building the task as specified above",
             },
             {
                 "value": "decline_build",
-                "label": "继续调整",
-                "description": "继续对话补充或修改需求",
+                "label": "继续调整" if _zh else "Keep Adjusting",
+                "description": "继续对话补充或修改需求" if _zh else "Continue the conversation to refine requirements",
             },
         ],
     }
@@ -1238,19 +1289,20 @@ async def run_agent_build(config: AgentBuildConfig) -> AsyncIterator[dict[str, A
     try:
         state = _BuildState()
         model = build_model(config.provider_config)
+        language = (config.gathering_context or {}).get("language", "zh")
         toolkit = Toolkit(
             tools=make_tools(
                 config.base_dir,
                 config.provider_config,
                 state,
                 allow_build=config.allow_build,
+                language=language,
             )
         )
-
         system_prompt = (
-            build_system_prompt(config.base_dir, config.surface)
+            build_system_prompt(config.base_dir, config.surface, language)
             if config.allow_build
-            else build_gather_system_prompt(config.base_dir)
+            else build_gather_system_prompt(config.base_dir, language)
         )
 
         # Restore prior conversation memory if present (resume across turns).
@@ -1343,7 +1395,7 @@ async def run_agent_build(config: AgentBuildConfig) -> AsyncIterator[dict[str, A
         elif not config.allow_build and state.proposed is not None:
             yield {
                 "type": "payload",
-                "data": _confirm_build_card(state.summary_text, state.proposed),
+                "data": _confirm_build_card(state.summary_text, state.proposed, language),
                 "proposed": state.proposed,
             }
 
