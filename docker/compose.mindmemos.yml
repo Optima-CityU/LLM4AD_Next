@@ -56,9 +56,12 @@ services:
     build:
       context: ../
       dockerfile: docker/mindmemos/Dockerfile
-      network: host
       args:
         UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+      ulimits:
+        nofile:
+          soft: 65535
+          hard: 65535
     image: llm4ad-mindmemos:latest
     pull_policy: never
     restart: always
