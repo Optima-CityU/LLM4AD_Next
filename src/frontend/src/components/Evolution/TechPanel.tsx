@@ -8,6 +8,8 @@ interface TechPanelProps {
   className?: string
   cornerSize?: number
   cornerColor?: string
+  /** 是否渲染四角切角装饰（默认 true）。圆角容器下可关闭以免与圆角冲突。 */
+  showCorners?: boolean
 }
 
 export default function TechPanel({
@@ -15,6 +17,7 @@ export default function TechPanel({
   className,
   cornerSize = 20,
   cornerColor,
+  showCorners = true,
 }: TechPanelProps) {
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
@@ -37,18 +40,30 @@ export default function TechPanel({
             }
       }
     >
-      <TechCorner position="top-left" size={cornerSize} color={cornerColor} />
-      <TechCorner position="top-right" size={cornerSize} color={cornerColor} />
-      <TechCorner
-        position="bottom-left"
-        size={cornerSize}
-        color={cornerColor}
-      />
-      <TechCorner
-        position="bottom-right"
-        size={cornerSize}
-        color={cornerColor}
-      />
+      {showCorners && (
+        <>
+          <TechCorner
+            position="top-left"
+            size={cornerSize}
+            color={cornerColor}
+          />
+          <TechCorner
+            position="top-right"
+            size={cornerSize}
+            color={cornerColor}
+          />
+          <TechCorner
+            position="bottom-left"
+            size={cornerSize}
+            color={cornerColor}
+          />
+          <TechCorner
+            position="bottom-right"
+            size={cornerSize}
+            color={cornerColor}
+          />
+        </>
+      )}
       {children}
     </div>
   )

@@ -196,7 +196,7 @@ class Settings(BaseSettings):
         """Celery 任务队列数据库"""
         return self.REDIS_BASE_URL + "/0"
 
-    @computed_field  # typrop-decorator]
+    @computed_field
     @property
     def CELERY_BACKEND(self) -> str:
         """Celery 结果后端数据库"""
@@ -231,6 +231,12 @@ class Settings(BaseSettings):
     TASK_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 任务运行镜像名称
     TASK_CONTAINER_MEMORY_LIMIT: str = "4g"  # 容器内存限制
     TASK_CONTAINER_CPU_LIMIT: float = 2.0                  # 容器 CPU 核心数限制
+
+    # ---- AutoResearch（researchclaw pipeline）隔离容器配置 ----
+    # 研究 pipeline 执行 LLM 生成的代码，多用户下必须容器隔离；默认复用任务镜像（一镜多入口）。
+    RESEARCH_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 研究运行镜像（默认复用任务镜像）
+    RESEARCH_CONTAINER_MEMORY_LIMIT: str = "4g"   # 研究容器内存限制
+    RESEARCH_CONTAINER_CPU_LIMIT: float = 2.0     # 研究容器 CPU 核心数限制
 
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）

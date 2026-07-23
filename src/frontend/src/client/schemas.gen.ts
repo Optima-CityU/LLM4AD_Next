@@ -5712,6 +5712,2430 @@ Attributes:
     CHAMPION_BIRTH: 冠军算法诞生报告。`
 } as const;
 
+export const ResearchAnalysisDataSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        run_dir: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Dir'
+        },
+        overview: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Overview',
+            description: 'pipeline_summary.json + checkpoint.json 摘要'
+        },
+        quality_gate: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quality Gate',
+            description: 'degradation_signal.json：score/verdict/weaknesses'
+        },
+        experiment: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Experiment',
+            description: 'experiment_summary_best.json 指标摘要'
+        },
+        deliverables: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Deliverables',
+            description: 'deliverables/manifest.json'
+        },
+        decisions: {
+            items: {
+                '$ref': '#/components/schemas/ResearchAnalysisDecisionItem'
+            },
+            type: 'array',
+            title: 'Decisions'
+        },
+        stages: {
+            items: {
+                '$ref': '#/components/schemas/ResearchAnalysisStageItem'
+            },
+            type: 'array',
+            title: 'Stages'
+        }
+    },
+    type: 'object',
+    required: ['session_id'],
+    title: 'ResearchAnalysisData',
+    description: `会话结果的结构化聚合（纯读盘、零 LLM），供前端直接渲染分析页。
+
+各字段对应 \`\`run_dir\`\` 下现成文件；缺文件时降级为 None/空，不报错。
+这份数据既独立可用（图表/时间线），也作为 LLM 报告的输入上下文。`
+} as const;
+
+export const ResearchAnalysisDecisionItemSchema = {
+    properties: {
+        decision: {
+            type: 'string',
+            title: 'Decision'
+        },
+        rollback_target: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Rollback Target'
+        },
+        rollback_stage_num: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Rollback Stage Num'
+        },
+        attempt: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Attempt'
+        },
+        timestamp: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Timestamp'
+        }
+    },
+    type: 'object',
+    required: ['decision'],
+    title: 'ResearchAnalysisDecisionItem',
+    description: '一次 pivot/refine 回滚记录（来自 decision_history.json）。'
+} as const;
+
+export const ResearchAnalysisDetailResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        data: {
+            '$ref': '#/components/schemas/ResearchAnalysisData'
+        },
+        report: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchAnalysisEntry'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'data'],
+    title: 'ResearchAnalysisDetailResponse',
+    description: '获取分析报告详情：结构化聚合数据 + 最近一次 LLM 报告（可为空）。'
+} as const;
+
+export const ResearchAnalysisEntrySchema = {
+    properties: {
+        status: {
+            type: 'string',
+            enum: ['generating', 'completed', 'failed', 'cancelled'],
+            title: 'Status'
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        provider_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Model'
+        },
+        language: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Language'
+        }
+    },
+    type: 'object',
+    required: ['status', 'created_at', 'updated_at'],
+    title: 'ResearchAnalysisEntry',
+    description: '存储于 ``session.analysis_report`` 的单条报告条目。'
+} as const;
+
+export const ResearchAnalysisGenerateRequestSchema = {
+    properties: {
+        language: {
+            type: 'string',
+            enum: ['zh', 'en'],
+            title: 'Language',
+            description: "报告输出语言：'zh' 中文，'en' 英文",
+            default: 'zh'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id',
+            description: "LLM Provider：空/'default' 用用户默认，'mock' 走 mock，或真实 UUID"
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name',
+            description: '模型名；为空用 Provider 默认模型'
+        },
+        prompt_template: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Prompt Template',
+            description: '自定义 user prompt 模板；为空用内置默认模板'
+        }
+    },
+    type: 'object',
+    title: 'ResearchAnalysisGenerateRequest',
+    description: `触发 LLM 生成结果分析报告的请求体。
+
+入参对齐 chat 端 \`\`ReportGenerateRequest\`\`：由用户传入模型与语言。
+\`\`provider_id\`\`/\`\`model_name\`\` 为空时回退到用户默认报告模型，再兜底 mock。`
+} as const;
+
+export const ResearchAnalysisGenerateResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        status: {
+            type: 'string',
+            enum: ['generating', 'completed', 'failed', 'cancelled'],
+            title: 'Status'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'status', 'message'],
+    title: 'ResearchAnalysisGenerateResponse',
+    description: '触发分析报告生成后的受理响应。'
+} as const;
+
+export const ResearchAnalysisStageItemSchema = {
+    properties: {
+        stage: {
+            type: 'integer',
+            title: 'Stage',
+            description: '阶段号（1-23）'
+        },
+        name: {
+            type: 'string',
+            title: 'Name',
+            description: '阶段可读名，如 EXPERIMENT_RUN'
+        },
+        status: {
+            type: 'string',
+            title: 'Status',
+            description: 'done/failed/pending 等',
+            default: 'pending'
+        },
+        decision: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Decision',
+            description: 'proceed/pivot/refine/degraded'
+        },
+        next_stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Next Stage'
+        },
+        duration_sec: {
+            type: 'number',
+            title: 'Duration Sec',
+            description: '该阶段总耗时（含全部重跑）',
+            default: 0
+        },
+        versions: {
+            items: {
+                type: 'number'
+            },
+            type: 'array',
+            title: 'Versions',
+            description: '每次执行的耗时（秒），按 base/v1/v2 顺序'
+        },
+        artifacts_count: {
+            type: 'integer',
+            title: 'Artifacts Count',
+            default: 0
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        is_gate: {
+            type: 'boolean',
+            title: 'Is Gate',
+            description: '是否门控阶段（5/9/20）',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['stage', 'name'],
+    title: 'ResearchAnalysisStageItem',
+    description: `结构化聚合中单个阶段（含重跑版本）的耗时/决策快照。
+
+直接读盘拼装，**不经过 LLM**：\`\`duration_sec\`\` 取 \`\`stage_health.json\`\`，
+\`\`decision\`\`/\`\`next_stage\`\` 取 \`\`decision.json\`\`，\`\`versions\`\` 覆盖回跳产生的
+\`\`stage-NN_v1/_v2\`\` 目录（每次重跑一段）。`
+} as const;
+
+export const ResearchAnalysisStopResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        status: {
+            type: 'string',
+            enum: ['generating', 'completed', 'failed', 'cancelled'],
+            title: 'Status'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'status', 'message'],
+    title: 'ResearchAnalysisStopResponse',
+    description: '停止分析报告生成后的响应。'
+} as const;
+
+export const ResearchArtifactItemSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path',
+            description: '相对 run_dir 的路径'
+        },
+        kind: {
+            type: 'string',
+            enum: ['paper_draft', 'paper_final', 'figure', 'code', 'data', 'log', 'state', 'config', 'other'],
+            title: 'Kind',
+            description: '产物类别，前端可据此选渲染方式'
+        },
+        stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stage',
+            description: '来自哪个 ARC 阶段'
+        },
+        size: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Size',
+            description: '字节数'
+        },
+        mtime: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mtime',
+            description: '最后修改时间'
+        },
+        mime: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mime'
+        }
+    },
+    type: 'object',
+    required: ['path', 'kind'],
+    title: 'ResearchArtifactItem',
+    description: '单个产物元数据（不含内容）。'
+} as const;
+
+export const ResearchArtifactListResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        run_dir: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Dir'
+        },
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchArtifactItem'
+            },
+            type: 'array',
+            title: 'Items'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'run_dir'],
+    title: 'ResearchArtifactListResponse',
+    description: '产物列表。'
+} as const;
+
+export const ResearchArtifactTreeNodeSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        is_dir: {
+            type: 'boolean',
+            title: 'Is Dir'
+        },
+        size: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Size'
+        },
+        mtime: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mtime'
+        },
+        children: {
+            items: {
+                '$ref': '#/components/schemas/ResearchArtifactTreeNode'
+            },
+            type: 'array',
+            title: 'Children'
+        }
+    },
+    type: 'object',
+    required: ['name', 'path', 'is_dir'],
+    title: 'ResearchArtifactTreeNode',
+    description: '产物目录树节点。'
+} as const;
+
+export const ResearchArtifactTreeResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        run_dir: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Dir'
+        },
+        root: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchArtifactTreeNode'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'run_dir'],
+    title: 'ResearchArtifactTreeResponse',
+    description: '产物目录树响应。'
+} as const;
+
+export const ResearchArtifactWriteRequestSchema = {
+    properties: {
+        content: {
+            type: 'string',
+            title: 'Content',
+            description: '文件新全文（UTF-8）'
+        }
+    },
+    type: 'object',
+    required: ['content'],
+    title: 'ResearchArtifactWriteRequest',
+    description: '覆写产物文件内容（门控编辑）。'
+} as const;
+
+export const ResearchArtifactWriteResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        path: {
+            type: 'string',
+            title: 'Path',
+            description: '相对 run_dir 的路径'
+        },
+        size: {
+            type: 'integer',
+            title: 'Size',
+            description: '写入后字节数'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'path', 'size'],
+    title: 'ResearchArtifactWriteResponse',
+    description: '覆写产物文件的结果。'
+} as const;
+
+export const ResearchCollabStartRequestSchema = {
+    properties: {
+        message: {
+            type: 'string',
+            maxLength: 20000,
+            minLength: 1,
+            title: 'Message',
+            description: '发给 agent 的消息'
+        },
+        stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stage',
+            description: '协作针对的 stage 号；缺省由后端推断'
+        }
+    },
+    type: 'object',
+    required: ['message'],
+    title: 'ResearchCollabStartRequest',
+    description: `向常驻协作 agent 发一条消息（answer 问题 / 改 stage 产物）。
+
+只要**流水线没在跑**（session 非 \`\`running\`\`）就能发——pending / paused（门控中）
+/ 终态皆可。协作是与门控按钮平行的独立通道：agent 只读写 \`\`stage-NN/\`\` 产物 +
+答疑，**不推进流水线、不改 session 主状态**。\`\`stage\`\` 缺省时后端按
+当前门控 stage > \`\`session.active_stage\`\` > 0 推断。`
+} as const;
+
+export const ResearchCollabStartResponseSchema = {
+    properties: {
+        session: {
+            '$ref': '#/components/schemas/ResearchSessionItem'
+        },
+        turn: {
+            '$ref': '#/components/schemas/ResearchTurnItem'
+        },
+        user_message: {
+            '$ref': '#/components/schemas/ResearchMessageItem'
+        }
+    },
+    type: 'object',
+    required: ['session', 'turn', 'user_message'],
+    title: 'ResearchCollabStartResponse',
+    description: '发起协作后的响应：新建的 COLLABORATING turn + 用户消息回显。'
+} as const;
+
+export const ResearchDeleteResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        message: {
+            type: 'string',
+            title: 'Message',
+            default: 'deleted'
+        }
+    },
+    type: 'object',
+    required: ['id'],
+    title: 'ResearchDeleteResponse',
+    description: '删除操作的响应（会话 / 文件夹）。'
+} as const;
+
+export const ResearchFolderCreateRequestSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name',
+            description: '文件夹名'
+        },
+        parent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Id',
+            description: '父文件夹 ID，None 表示根'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order',
+            description: '同级排序权重',
+            default: 0
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'ResearchFolderCreateRequest',
+    description: '新建文件夹的请求体。'
+} as const;
+
+export const ResearchFolderItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        },
+        parent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        },
+        session_count: {
+            type: 'integer',
+            title: 'Session Count',
+            description: '该文件夹直接归属的会话数（不含子文件夹内的）',
+            default: 0
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'user_id', 'parent_id', 'name', 'sort_order', 'created_time', 'updated_time'],
+    title: 'ResearchFolderItem',
+    description: '文件夹响应模型。'
+} as const;
+
+export const ResearchFolderListResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchFolderItem'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        total: {
+            type: 'integer',
+            title: 'Total',
+            default: 0
+        },
+        ungrouped_session_count: {
+            type: 'integer',
+            title: 'Ungrouped Session Count',
+            description: '未归属任何文件夹的会话数量',
+            default: 0
+        }
+    },
+    type: 'object',
+    title: 'ResearchFolderListResponse',
+    description: '扁平文件夹列表（前端可自选按 parent 组织树）。'
+} as const;
+
+export const ResearchFolderReorderItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        }
+    },
+    type: 'object',
+    required: ['id', 'sort_order'],
+    title: 'ResearchFolderReorderItem',
+    description: '批量重排单条：只需 id + 新 sort_order。'
+} as const;
+
+export const ResearchFolderReorderRequestSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchFolderReorderItem'
+            },
+            type: 'array',
+            maxItems: 500,
+            minItems: 1,
+            title: 'Items',
+            description: '要重排的文件夹列表；未列出的不动'
+        }
+    },
+    type: 'object',
+    required: ['items'],
+    title: 'ResearchFolderReorderRequest',
+    description: `\`POST /folders/reorder\` 请求体：一次性重排多个文件夹。`
+} as const;
+
+export const ResearchFolderTreeNodeSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        parent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        },
+        session_count: {
+            type: 'integer',
+            title: 'Session Count',
+            default: 0
+        },
+        children: {
+            items: {
+                '$ref': '#/components/schemas/ResearchFolderTreeNode'
+            },
+            type: 'array',
+            title: 'Children'
+        }
+    },
+    type: 'object',
+    required: ['id', 'parent_id', 'name', 'sort_order'],
+    title: 'ResearchFolderTreeNode',
+    description: '树形节点，含子节点与该文件夹直接归属的会话数量。'
+} as const;
+
+export const ResearchFolderTreeResponseSchema = {
+    properties: {
+        tree: {
+            items: {
+                '$ref': '#/components/schemas/ResearchFolderTreeNode'
+            },
+            type: 'array',
+            title: 'Tree'
+        },
+        ungrouped_session_count: {
+            type: 'integer',
+            title: 'Ungrouped Session Count',
+            default: 0
+        }
+    },
+    type: 'object',
+    title: 'ResearchFolderTreeResponse',
+    description: `\`GET /folders/tree\` 响应：嵌套树 + 未归属会话计数。`
+} as const;
+
+export const ResearchFolderUpdateRequestSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        parent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Id',
+            description: '新的父文件夹 ID。传 None 且请求体显式包含该键时移到根；未提供该键则不改变。'
+        },
+        sort_order: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sort Order'
+        }
+    },
+    type: 'object',
+    title: 'ResearchFolderUpdateRequest',
+    description: '改文件夹（改名、移动、排序）。'
+} as const;
+
+export const ResearchGeneratedItemSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path',
+            description: '相对 run_dir 的路径，可直接用于 /artifacts/download'
+        },
+        name: {
+            type: 'string',
+            title: 'Name',
+            description: '文件名'
+        },
+        stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stage',
+            description: '来自哪个 ARC 阶段'
+        },
+        run_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Id',
+            description: 'llm4ad 演化 run 短 id（路径中 generated 的上一级目录名）'
+        },
+        size: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Size',
+            description: '字节数'
+        },
+        mtime: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mtime',
+            description: '最后修改时间'
+        },
+        data: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Data',
+            description: '剥离大字段后的解内容；解析失败为 null'
+        }
+    },
+    type: 'object',
+    required: ['path', 'name'],
+    title: 'ResearchGeneratedItem',
+    description: `单个 \`\`generated/*.json\`\` 解，内容内联且已剥离大字段。
+
+剥离策略复用演化任务持久化的
+:data:\`app.utils.log_persist.LIST_STRIPPED_GENERATED_FIELDS\`
+（\`\`code_artifacts\`\` / \`\`generation_meta\`\` / \`\`worktree\`\` / \`\`description\`\`
+置空），避免整段源码/长文本撑爆响应。`
+} as const;
+
+export const ResearchGeneratedResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        run_dir: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Dir'
+        },
+        groups: {
+            items: {
+                '$ref': '#/components/schemas/ResearchGeneratedStageGroup'
+            },
+            type: 'array',
+            title: 'Groups'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'run_dir'],
+    title: 'ResearchGeneratedResponse',
+    description: '所有 generated 解，内容内联、按 stage 分组。'
+} as const;
+
+export const ResearchGeneratedStageGroupSchema = {
+    properties: {
+        stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stage',
+            description: 'stage 号；无法解析为 null'
+        },
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchGeneratedItem'
+            },
+            type: 'array',
+            title: 'Items'
+        }
+    },
+    type: 'object',
+    title: 'ResearchGeneratedStageGroup',
+    description: '按 stage 分组的 generated 解。'
+} as const;
+
+export const ResearchLLM4ADWorkspaceRefSchema = {
+    properties: {
+        kind: {
+            type: 'string',
+            enum: ['task_ref', 'inline', 'upload'],
+            title: 'Kind',
+            description: 'task_ref: 引用现有调参任务；inline: 前端直接内联 LLM4AD AppConfig；upload: 走 upload-file 端点上传后传相对路径'
+        },
+        task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Id',
+            description: 'task_ref 用'
+        },
+        config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config',
+            description: 'inline 用；结构与 LLM4AD AppConfig.from_dict 一致'
+        },
+        path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Path',
+            description: 'upload 用；相对 session 数据目录的路径'
+        }
+    },
+    type: 'object',
+    required: ['kind'],
+    title: 'ResearchLLM4ADWorkspaceRef',
+    description: 'LLM4AD workspace 引用的三种形态。'
+} as const;
+
+export const ResearchMessageItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        turn_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Turn Id'
+        },
+        role: {
+            '$ref': '#/components/schemas/ResearchMessageRole'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        turn_status: {
+            '$ref': '#/components/schemas/ResearchTurnStatus'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        payload: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Payload'
+        },
+        payload_locked: {
+            type: 'boolean',
+            title: 'Payload Locked',
+            default: false
+        },
+        payload_locked_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Payload Locked At'
+        },
+        payload_submission: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Payload Submission'
+        },
+        stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stage'
+        },
+        event_type: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Event Type'
+        },
+        event_key: {
+            type: 'string',
+            title: 'Event Key',
+            default: ''
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'session_id', 'turn_id', 'role', 'content', 'turn_status', 'created_time', 'updated_time'],
+    title: 'ResearchMessageItem',
+    description: '单条消息。'
+} as const;
+
+export const ResearchMessageListResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchMessageItem'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        next_cursor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Next Cursor'
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['items'],
+    title: 'ResearchMessageListResponse',
+    description: `\`/turns/{tid}/messages\` 分页响应。
+
+正序游标翻页：\`\`cursor\`\` = 上一页最后一条的 \`\`created_time\`\` ISO 字符串，
+首次不传；\`\`next_cursor\`\` 为 \`\`None\`\` 时表示无更多数据。`
+} as const;
+
+export const ResearchMessageRoleSchema = {
+    type: 'string',
+    enum: ['user', 'assistant', 'system'],
+    title: 'ResearchMessageRole',
+    description: '会话消息角色。'
+} as const;
+
+export const ResearchModeSchema = {
+    type: 'string',
+    enum: ['full-auto', 'gate-only', 'checkpoint', 'step-by-step', 'co-pilot', 'express', 'thorough', 'learning'],
+    title: 'ResearchMode',
+    description: `ARC 执行模式（映射到 \`\`researchclaw run --mode\`\`）。
+
+与 ARC 的 \`\`PROJECT_MODES\`\` / 常见 CLI 值保持一致；未列出的值前端不给出，
+但 backend 允许透传以便未来 ARC 升级新增模式无需 backend 同步改动。`
+} as const;
+
+export const ResearchSessionCreateRequestSchema = {
+    properties: {
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title',
+            description: '会话显示名；缺省时后端用 topic 前 60 字符生成'
+        },
+        topic: {
+            type: 'string',
+            maxLength: 20000,
+            minLength: 1,
+            title: 'Topic',
+            description: '研究问题 / 主题'
+        },
+        profile: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Profile',
+            description: 'ARC domain profile id',
+            default: 'algorithm_design'
+        },
+        mode: {
+            '$ref': '#/components/schemas/ResearchMode',
+            description: 'ARC HITL 模式',
+            default: 'co-pilot'
+        },
+        folder_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Folder Id',
+            description: '归属分组，可选'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id',
+            description: "默认 LLM Provider（支持 'default' / 'mock' / UUID）"
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        llm4ad_workspace: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchLLM4ADWorkspaceRef'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            description: 'LLM4AD workspace 引用；缺省时首轮会引导用户补齐'
+        }
+    },
+    type: 'object',
+    required: ['topic'],
+    title: 'ResearchSessionCreateRequest',
+    description: '创建会话（不立即触发首轮）。'
+} as const;
+
+export const ResearchSessionDetailResponseSchema = {
+    properties: {
+        session: {
+            '$ref': '#/components/schemas/ResearchSessionItem'
+        },
+        active_turn: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchTurnItem'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        messages: {
+            items: {
+                '$ref': '#/components/schemas/ResearchMessageItem'
+            },
+            type: 'array',
+            title: 'Messages'
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            description: '是否还有更早的历史消息；True 时用最早一条 id 做 before 游标',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['session'],
+    title: 'ResearchSessionDetailResponse',
+    description: '会话详情 + 分页消息 + 最近一轮。'
+} as const;
+
+export const ResearchSessionItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        user_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'User Id'
+        },
+        folder_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Folder Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        topic: {
+            type: 'string',
+            title: 'Topic'
+        },
+        profile: {
+            type: 'string',
+            title: 'Profile'
+        },
+        mode: {
+            type: 'string',
+            title: 'Mode'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id'
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        status: {
+            '$ref': '#/components/schemas/ResearchSessionStatus'
+        },
+        active_turn_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Turn Id'
+        },
+        active_stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Stage'
+        },
+        active_stage_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Stage Name'
+        },
+        run_dir: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Dir'
+        },
+        best_objective: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Objective'
+        },
+        best_code_sha256: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Code Sha256'
+        },
+        ended_time: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ended Time'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'user_id', 'folder_id', 'title', 'topic', 'profile', 'mode', 'provider_id', 'model_name', 'status', 'active_turn_id', 'active_stage', 'active_stage_name', 'run_dir', 'best_objective', 'best_code_sha256', 'ended_time', 'error', 'created_time', 'updated_time'],
+    title: 'ResearchSessionItem',
+    description: '会话响应模型。'
+} as const;
+
+export const ResearchSessionListResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchSessionItem'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        next_cursor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Next Cursor',
+            description: '下一页游标 = 本页最后一条的 updated_time ISO；None 表示无更多'
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            default: false
+        }
+    },
+    type: 'object',
+    title: 'ResearchSessionListResponse',
+    description: '会话分页列表（游标分页，与 turn/message 列表统一）。'
+} as const;
+
+export const ResearchSessionMessagesResponseSchema = {
+    properties: {
+        messages: {
+            items: {
+                '$ref': '#/components/schemas/ResearchMessageItem'
+            },
+            type: 'array',
+            title: 'Messages'
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            description: '是否还有更早的历史消息；True 时用最早一条 id 做 before 游标',
+            default: false
+        }
+    },
+    type: 'object',
+    title: 'ResearchSessionMessagesResponse',
+    description: `\`/sessions/{sid}/messages\` 会话级消息分页响应。
+
+与 \`\`ResearchSessionDetailResponse.messages\`\` 同款翻页语义（\`\`before\`\`/倒序
+游标，返回时升序），但脱离会话详情单独成端点：供消息列表与日志面板各自带
+\`\`event_type\`\` 过滤、各自分页，互不饥饿。\`\`messages\`\` 升序（最旧在前）；
+\`\`has_more\`\` 为 True 时用最早一条 \`\`id\`\` 作 \`\`before\`\` 继续往前翻。`
+} as const;
+
+export const ResearchSessionStatusSchema = {
+    type: 'string',
+    enum: ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled'],
+    title: 'ResearchSessionStatus',
+    description: `会话整体状态。
+
+状态机：
+    \`\`PENDING\`\`（新建，未触发首轮） → \`\`RUNNING\`\` → 三个可暂停终态之一
+    （\`\`PAUSED\`\` 等待用户输入 / \`\`COMPLETED\`\` 23 阶段跑完 /
+    \`\`FAILED\`\` 异常终止 / \`\`CANCELLED\`\` 用户主动停止）。
+
+\`\`PAUSED\`\` 是「非终止的暂停」，可以再次 \`\`POST /turns\`\` 恢复运行；
+其余三态是终止态但仍允许 \`\`retry\`\` 或删除。`
+} as const;
+
+export const ResearchSessionUpdateRequestSchema = {
+    properties: {
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        topic: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 2000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Topic',
+            description: '研究主题/问题'
+        },
+        folder_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Folder Id',
+            description: '传 None 且请求体显式包含该键时移到未分组；未提供不变'
+        },
+        mode: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchMode'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id'
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        }
+    },
+    type: 'object',
+    title: 'ResearchSessionUpdateRequest',
+    description: '更新会话（改名 / 移动分组 / 改默认 provider / 改 mode / 改 topic 等）。'
+} as const;
+
+export const ResearchStageGuideRequestSchema = {
+    properties: {
+        message: {
+            type: 'string',
+            maxLength: 8192,
+            minLength: 1,
+            title: 'Message',
+            description: '要注入的引导文本；ARC 下次跑到该 stage 时读取并注入 prompt'
+        }
+    },
+    type: 'object',
+    required: ['message'],
+    title: 'ResearchStageGuideRequest',
+    description: `\`POST /sessions/{sid}/stages/{stage_num}/guide\` 请求体。`
+} as const;
+
+export const ResearchStageGuideResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        stage: {
+            type: 'integer',
+            title: 'Stage'
+        },
+        length: {
+            type: 'integer',
+            title: 'Length'
+        },
+        guidance_path: {
+            type: 'string',
+            title: 'Guidance Path'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'stage', 'length', 'guidance_path'],
+    title: 'ResearchStageGuideResponse',
+    description: `\`POST /guide\` 响应。`
+} as const;
+
+export const ResearchStageSnapshotSchema = {
+    properties: {
+        stage: {
+            type: 'integer',
+            title: 'Stage'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        status: {
+            type: 'string',
+            enum: ['pending', 'running', 'done', 'failed', 'skipped', 'waiting'],
+            title: 'Status'
+        },
+        started_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Started At'
+        },
+        ended_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ended At'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        }
+    },
+    type: 'object',
+    required: ['stage', 'name', 'status'],
+    title: 'ResearchStageSnapshot',
+    description: '单个阶段的状态快照。'
+} as const;
+
+export const ResearchStateResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        status: {
+            '$ref': '#/components/schemas/ResearchSessionStatus'
+        },
+        active_stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Stage'
+        },
+        active_stage_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Stage Name'
+        },
+        stages: {
+            items: {
+                '$ref': '#/components/schemas/ResearchStageSnapshot'
+            },
+            type: 'array',
+            title: 'Stages'
+        },
+        best_objective: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Objective'
+        },
+        best_code_sha256: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Best Code Sha256'
+        },
+        metrics: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Metrics'
+        },
+        hypotheses: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Hypotheses'
+        },
+        updated_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'status', 'active_stage', 'active_stage_name'],
+    title: 'ResearchStateResponse',
+    description: `会话当前状态的结构化快照。
+
+比 SSE 流更"高层"：只有当前阶段号 + 进度、最优个体、最近关键 metrics。
+前端列表页 / 详情页头部展示用。`
+} as const;
+
+export const ResearchTurnItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        celery_task_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Celery Task Id'
+        },
+        status: {
+            '$ref': '#/components/schemas/ResearchTurnStatus'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id'
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        mode: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Mode'
+        },
+        from_stage: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'From Stage'
+        },
+        to_stage: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'To Stage'
+        },
+        user_input: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'User Input'
+        },
+        respond_to_message_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Respond To Message Id'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        started_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Started At'
+        },
+        ended_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ended At'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'session_id', 'celery_task_id', 'status', 'provider_id', 'model_name', 'mode', 'from_stage', 'to_stage', 'user_input', 'respond_to_message_id', 'error', 'started_at', 'ended_at', 'created_time', 'updated_time'],
+    title: 'ResearchTurnItem',
+    description: '轮次响应模型。'
+} as const;
+
+export const ResearchTurnListResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchTurnItem'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        next_cursor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Next Cursor'
+        },
+        has_more: {
+            type: 'boolean',
+            title: 'Has More',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['items'],
+    title: 'ResearchTurnListResponse',
+    description: `\`/sessions/{sid}/turns\` 分页响应，倒序（最新的在前）。`
+} as const;
+
+export const ResearchTurnRetryRequestSchema = {
+    properties: {
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id'
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        mode: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchMode'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        }
+    },
+    type: 'object',
+    title: 'ResearchTurnRetryRequest',
+    description: '重跑一个失败 / 停止的轮次。'
+} as const;
+
+export const ResearchTurnStartRequestSchema = {
+    properties: {
+        content: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 20000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        },
+        respond_to_message_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Respond To Message Id'
+        },
+        submission: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Submission',
+            description: '表单提交值；与 respond_to_message_id 必须同时出现或同时缺省'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id'
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        mode: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchMode'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        from_stage: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'From Stage',
+            description: 'ARC --from-stage'
+        },
+        to_stage: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'To Stage',
+            description: 'ARC --to-stage'
+        }
+    },
+    type: 'object',
+    title: 'ResearchTurnStartRequest',
+    description: `触发新一轮（首启 / stop 后 resume / 表单回填 均走这里）。
+
+三种触发方式：
+- 首启会话（\`\`session.status == PENDING\`\`）：只需 \`\`content\`\` 或直接空
+  body（会话已带 topic）。
+- stop 后继续：可携带 \`\`content\`\` 追加消息；也可直接空 body 走 resume
+  语义（复用会话现有 topic + 现有 workspace）。
+- 表单回填：填 \`\`respond_to_message_id + submission\`\`，\`\`content\`\` 可省略。
+
+\`\`provider_id\`\`/\`\`model_name\`\`/\`\`mode\`\`/\`\`from_stage\`\`/\`\`to_stage\`\` 允许覆盖
+会话默认值，本轮生效但不写回 session（用户下次不指定则回退到 session 默认）。`
+} as const;
+
+export const ResearchTurnStartResponseSchema = {
+    properties: {
+        session: {
+            '$ref': '#/components/schemas/ResearchSessionItem'
+        },
+        turn: {
+            '$ref': '#/components/schemas/ResearchTurnItem'
+        },
+        user_message: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchMessageItem'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        assistant_message: {
+            '$ref': '#/components/schemas/ResearchMessageItem'
+        },
+        locked_message: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchMessageItem'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            description: '若本轮由表单提交触发，被锁定的旧 assistant 消息（最新状态）'
+        }
+    },
+    type: 'object',
+    required: ['session', 'turn', 'assistant_message'],
+    title: 'ResearchTurnStartResponse',
+    description: '触发新一轮后的响应。'
+} as const;
+
+export const ResearchTurnStatusSchema = {
+    type: 'string',
+    enum: ['running', 'paused_gate', 'collaborating', 'completed', 'failed', 'cancelled'],
+    title: 'ResearchTurnStatus',
+    description: `单轮生成状态。
+
+- \`\`RUNNING\`\`：ARC subprocess 运行中。
+- \`\`PAUSED_GATE\`\`：命中硬门控、释放 worker，等用户回复后新建一轮续跑。
+- \`\`COLLABORATING\`\`：门控暂停时发起的「人 + AI 协作改产物」子会话，不推进 pipeline。
+- \`\`COMPLETED\`\` / \`\`FAILED\`\` / \`\`CANCELLED\`\`：终态。`
+} as const;
+
+export const ResearchTurnStopResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        turn_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Turn Id'
+        },
+        status: {
+            '$ref': '#/components/schemas/ResearchTurnStatus'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'turn_id', 'status', 'message'],
+    title: 'ResearchTurnStopResponse',
+    description: '停止轮次的响应。'
+} as const;
+
 export const ResendVerifyCodeRequestSchema = {
     properties: {
         email: {

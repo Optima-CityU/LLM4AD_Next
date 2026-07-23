@@ -515,7 +515,9 @@ def get_task_logs(
     )
 
 
-def _task_log_entry_handler(fields: dict) -> tuple[str, bool] | None:
+def _task_log_entry_handler(
+    entry_id: str, fields: dict
+) -> tuple[str, bool] | None:
     """解析任务日志流条目为 SSE 帧。
 
     对脏数据宽松忽略，避免单个坏帧破坏整条 SSE 流。
@@ -526,7 +528,10 @@ def _task_log_entry_handler(fields: dict) -> tuple[str, bool] | None:
         return None
     if not isinstance(entry, dict):
         return None
-    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    sse_text = (
+        f"id: {entry_id}\n"
+        f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    )
     is_terminal = entry.get("type") == "end"
     return sse_text, is_terminal
 
@@ -570,8 +575,10 @@ async def stream_task_logs(
             redis_key=task_logs_key(task_id),
             connected_data={"task_id": str(task_id)},
             entry_handler=_task_log_entry_handler,
+            # 永不因静默关流：演化任务可能跑几十分钟，阶段间静默是常态。
+            # 终止只由 end 事件或已终态短路驱动；心跳（15s）保活连接。
+            max_idle=None,
             last_id=last_id,
-            max_idle=1800.0,
             use_draining=True,
         )
     )

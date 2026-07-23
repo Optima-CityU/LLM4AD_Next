@@ -91,6 +91,18 @@ from app.models.rbac import (  # noqa: F401
     UserRoleLink,
 )
 
+# 自动科研（Research）模型
+from app.models.research import (  # noqa: F401
+    ResearchFolder,
+    ResearchMessage,
+    ResearchMessageRole,
+    ResearchMode,
+    ResearchSession,
+    ResearchSessionStatus,
+    ResearchTurn,
+    ResearchTurnStatus,
+)
+
 # 用户模型
 from app.models.user import (  # noqa: F401
     UpdatePassword,

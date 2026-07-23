@@ -628,9 +628,16 @@ def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = Non
         成功移除的容器数量。
     """
     cli = client or get_docker_client()
-    filters = {"label": f"{MANAGED_LABEL_KEY}={MANAGED_LABEL_VALUE}"}
+    # 管理标签是安全网：只回收本模块创建的容器。extra_filters 里若也带 "label"，
+    # 必须与管理标签**合并成列表**（docker 对 label 做 AND），而不是 dict.update
+    # 直接覆盖——否则安全网被丢，会误伤任何命中 extra label 的容器。
+    filters: dict = {"label": f"{MANAGED_LABEL_KEY}={MANAGED_LABEL_VALUE}"}
     if extra_filters:
-        filters.update(extra_filters)
+        for key, value in extra_filters.items():
+            if key == "label":
+                filters["label"] = [filters["label"], value]
+            else:
+                filters[key] = value
 
     try:
         containers = cli.containers.list(all=True, filters=filters)
