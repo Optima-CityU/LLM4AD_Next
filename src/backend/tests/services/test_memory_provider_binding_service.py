@@ -196,6 +196,47 @@ def test_ensure_memory_provider_binding_refreshes_stale_router(
     assert chat_endpoint["model"] == "openai/qwen-plus"
 
 
+def test_ensure_memory_provider_binding_replaces_stale_embedding_identity(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    chat_provider = _create_chat_provider(db, user.id)
+    embedding_provider = _create_embedding_provider(db, user.id)
+    _enable_mindmemos(monkeypatch)
+
+    memory_service.get_user_memory_config(db, user)
+    stored = db.exec(select(models.UserMemoryConfig).where(models.UserMemoryConfig.user_id == user.id)).one()
+    stored.mindmemos_binding_id = "pb_stale_embedding"
+    stored.mindmemos_chat_provider_id = chat_provider.id
+    stored.mindmemos_chat_model = "qwen-plus"
+    stored.mindmemos_embedding_provider_id = embedding_provider.id
+    stored.mindmemos_embedding_model = "jina_ai/jina-embeddings-v4"
+    stored.mindmemos_embedding_dim = 1024
+    db.add(stored)
+    db.commit()
+
+    posts: list[dict] = []
+
+    def fake_get(_current_user, _path, *, _scopes):
+        routers = memory_service._memory_provider_routers(chat_provider, "qwen-plus", embedding_provider)
+        routers["embed_model_router"]["endpoints"][0]["model"] = "openai/jina-embeddings-v4"
+        return {"code": "ok", "data": {"items": [{"binding_id": "pb_stale_embedding", "routers": routers}]}}
+
+    def fake_post(_current_user, path, payload, *, scopes):
+        posts.append({"path": path, "payload": payload, "scopes": scopes})
+        return {"code": "ok", "data": {"binding_id": "pb_stale_embedding"}}
+
+    monkeypatch.setattr(memory_service, "_mindmemos_get", fake_get)
+    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
+    monkeypatch.setattr(memory_service, "_mindmemos_patch", lambda *_args, **_kwargs: pytest.fail("must not PATCH immutable embedding identity"))
+
+    memory_service._ensure_mindmemos_provider_binding(db, user)
+
+    assert posts[0]["path"].endswith("/provider-bindings")
+    assert posts[0]["payload"]["scope"] == {"user_id": str(user.id)}
+
+
 def test_ensure_memory_provider_binding_refreshes_changed_api_key(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,

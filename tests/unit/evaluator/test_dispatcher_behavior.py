@@ -1,5 +1,9 @@
 """Tests for dispatcher behavior data aggregation."""
 
+import asyncio
+from types import SimpleNamespace
+
+from llm4ad.config.evaluator import CustomEvaluatorConfig
 from llm4ad.evaluator.base import EvaluationResult
 from llm4ad.evaluator.behavior import BehaviorData, BehaviorVisualization
 from llm4ad.evaluator.dispatcher import EvaluationDispatcher
@@ -33,6 +37,17 @@ def _make_result(
         behavior=behavior,
         duration_ms=10.0,
     )
+
+
+class _TimeoutRecordingEvaluator:
+    """Minimal evaluator used to observe the context built by the dispatcher."""
+
+    def __init__(self) -> None:
+        self.contexts = []
+
+    async def evaluate(self, cfg):
+        self.contexts.append(cfg)
+        return _make_result(1.0)
 
 
 class TestDispatcherBehaviorAggregation:
@@ -99,3 +114,21 @@ class TestDispatcherBehaviorAggregation:
         assert aggregated.behavior is bd
         all_behavior = aggregated.metadata.get("all_behavior", [])
         assert len(all_behavior) == 1
+
+
+def test_dispatch_batch_uses_configured_evaluator_timeout():
+    """The evaluator timeout must not fall back to EvalContext's 60-second default."""
+    dispatcher = EvaluationDispatcher.__new__(EvaluationDispatcher)
+    dispatcher.config = CustomEvaluatorConfig(module="example.py:ExampleEvaluator", timeout=600)
+    dispatcher._parallel = True
+    dispatcher._data_files = ["/tmp/input"]
+    dispatcher._behavior_storage = "none"
+    dispatcher._semaphore = asyncio.Semaphore(1)
+    evaluator = _TimeoutRecordingEvaluator()
+    dispatcher._create_evaluator = lambda: evaluator
+
+    algorithm = SimpleNamespace(worktree=SimpleNamespace(path="/tmp/worktree"))
+    results = asyncio.run(dispatcher.dispatch_batch([algorithm]))
+
+    assert results[0].success is True
+    assert [context.timeout for context in evaluator.contexts] == [600]
