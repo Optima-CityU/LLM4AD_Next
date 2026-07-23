@@ -1,4 +1,6 @@
-<h1 align="center">LLM4AD_Next</h1>
+<p align="center">
+  <img src="docs/en/LLM4AD Next.jpg" alt="LLM4AD Next" width="400">
+</p>
 
 <p align="center">
   <strong>From problem description to runnable evolutionary algorithm search — in one command.</strong><br>
