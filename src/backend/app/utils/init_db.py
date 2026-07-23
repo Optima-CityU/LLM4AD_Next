@@ -175,7 +175,7 @@ def seed_builtin_embedding_provider() -> models.EmbeddingProvider | None:
             "base_url": None,
             "mode": models.EmbeddingMode.SPLIT,
             "model": "",
-            "dim": 2048,
+            "dim": settings.EMBEDDING_DIM,
             "timeout": 60.0,
             "embedding_func_max_async": 2,
             "text_type": models.EmbeddingProviderType.OPENAI_COMPATIBLE,

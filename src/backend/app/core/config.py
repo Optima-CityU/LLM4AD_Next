@@ -216,6 +216,7 @@ class Settings(BaseSettings):
     JINA_API_KEY: str = ""
     TEAM_ID: str = ""
     EMBEDDING_MODEL: str = "jina-embeddings-v4"
+    EMBEDDING_DIM: int = 2048
     EMBEDDING_TEXT_MODEL: str = ""
     EMBEDDING_CODE_MODEL: str = ""
 

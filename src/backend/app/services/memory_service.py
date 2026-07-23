@@ -1498,20 +1498,15 @@ def upsert_memory_provider_binding(
     routers = _memory_provider_routers(chat_provider, request.chat_model, embedding_provider)
     payload = _memory_provider_binding_payload(current_user, routers)
     project_id = _mindmemos_project_id(current_user)
-    if config.mindmemos_binding_id:
-        data = _mindmemos_patch(
-            current_user,
-            f"/internal/v1/projects/{project_id}/provider-bindings/{config.mindmemos_binding_id}",
-            {"routers": routers},
-            scopes=["provider:write"],
-        )
-    else:
-        data = _mindmemos_post(
-            current_user,
-            f"/internal/v1/projects/{project_id}/provider-bindings",
-            payload,
-            scopes=["provider:write"],
-        )
+    # MindMemOS POST is an upsert for this user's deterministic binding scope.
+    # Use it for explicit rebinding because PATCH rejects an embedding identity
+    # left stale by a prior model configuration.
+    data = _mindmemos_post(
+        current_user,
+        f"/internal/v1/projects/{project_id}/provider-bindings",
+        payload,
+        scopes=["provider:write"],
+    )
 
     binding = data.get("data") or {}
     config.mindmemos_binding_id = str(binding.get("binding_id") or config.mindmemos_binding_id or "")
@@ -1607,12 +1602,25 @@ def _ensure_mindmemos_provider_binding(db: Session, current_user: models.User) -
     routers = _memory_provider_routers(chat_provider, config.mindmemos_chat_model, embedding_provider)
     if existing is not None:
         if _provider_routers_need_refresh(existing.get("routers") or {}, routers):
-            _mindmemos_patch(
-                current_user,
-                f"/internal/v1/projects/{project_id}/provider-bindings/{config.mindmemos_binding_id}",
-                {"routers": routers},
-                scopes=["provider:write"],
-            )
+            if _embedding_router_identity_changed(existing.get("routers") or {}, routers):
+                data = _mindmemos_post(
+                    current_user,
+                    f"/internal/v1/projects/{project_id}/provider-bindings",
+                    _memory_provider_binding_payload(current_user, routers),
+                    scopes=["provider:write"],
+                )
+                binding = data.get("data") or {}
+                config.mindmemos_binding_id = str(binding.get("binding_id") or config.mindmemos_binding_id)
+                config.updated_time = datetime.now(UTC)
+                db.add(config)
+                db.commit()
+            else:
+                _mindmemos_patch(
+                    current_user,
+                    f"/internal/v1/projects/{project_id}/provider-bindings/{config.mindmemos_binding_id}",
+                    {"routers": routers},
+                    scopes=["provider:write"],
+                )
         return
 
     data = _mindmemos_post(
@@ -1642,6 +1650,18 @@ def _provider_routers_need_refresh(current: dict[str, Any], expected: dict[str, 
     return False
 
 
+def _embedding_router_identity_changed(current: dict[str, Any], expected: dict[str, Any]) -> bool:
+    current_endpoints = ((current.get("embed_model_router") or {}).get("endpoints") or [])
+    expected_endpoints = ((expected.get("embed_model_router") or {}).get("endpoints") or [])
+    if len(current_endpoints) != len(expected_endpoints):
+        return True
+    return any(
+        current_endpoint.get(field) != expected_endpoint.get(field)
+        for current_endpoint, expected_endpoint in zip(current_endpoints, expected_endpoints, strict=True)
+        for field in ("model", "dimensions")
+    )
+
+
 def _provider_accessible(provider: models.LLMProvider, current_user: models.User) -> bool:
     return bool(
         current_user.is_superuser
@@ -1654,7 +1674,7 @@ def _mindmemos_model_name(provider_type: str, model: str) -> str:
     if "/" in model:
         return model
     if provider_type in {"openai", "openai_compatible", "local"}:
-        return f"openai/{model}"
+        return model
     if provider_type == "anthropic":
         return f"anthropic/{model}"
     if provider_type == "jina":
@@ -1673,7 +1693,10 @@ def _memory_gateway_base_url(base_url: str | None) -> str | None:
 
 def _chat_endpoint(provider: models.LLMProvider, model: str) -> dict[str, Any]:
     endpoint: dict[str, Any] = {
-        "model": _mindmemos_model_name(str(provider.type.value), model),
+        # MindMemOS invokes LiteLLM directly for chat, so OpenAI-compatible
+        # chat models need an explicit provider prefix. Embedding models remain
+        # raw because the gateway authorizes them by their LiteLLM model name.
+        "model": _mindmemos_chat_model_name(str(provider.type.value), model),
         "api_key": provider.api_key or provider.auth_token,
         "timeout": _mindmemos_provider_timeout(provider.timeout),
         "num_retries": 1,
@@ -1685,6 +1708,14 @@ def _chat_endpoint(provider: models.LLMProvider, model: str) -> dict[str, Any]:
     if base_url:
         endpoint["api_base"] = base_url.rstrip("/")
     return endpoint
+
+
+def _mindmemos_chat_model_name(provider_type: str, model: str) -> str:
+    if "/" in model:
+        return model
+    if provider_type in {"openai", "openai_compatible", "local"}:
+        return f"openai/{model}"
+    return _mindmemos_model_name(provider_type, model)
 
 
 def _embedding_identity(provider: models.EmbeddingProvider) -> dict[str, Any]:

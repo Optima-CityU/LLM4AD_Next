@@ -28,6 +28,8 @@ ARG VITE_FOOTER_BEIAN
 RUN APP_VERSION="$(tr -d '\r\n' < /app/VERSION)" && \
     if [ "$APP_VERSION" = "develop" ]; then \
       VITE_APP_VERSION="develop"; \
+    elif [ "${APP_VERSION#v}" != "$APP_VERSION" ]; then \
+      VITE_APP_VERSION="$APP_VERSION"; \
     else \
       VITE_APP_VERSION="v$APP_VERSION"; \
     fi && \

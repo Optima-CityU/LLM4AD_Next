@@ -47,7 +47,6 @@ x-backend-common: &backend-common
   pull_policy: never
   build:
     context: ../
-    network: host
     dockerfile: src/backend/Dockerfile
     args:
       UV_INDEX_URL: ${UV_INDEX_URL:-}
@@ -227,7 +226,6 @@ services:
     pull_policy: never
     build:
       context: ../
-      network: host
       dockerfile: src/backend/Dockerfile.task
       args:
         APT_MIRROR: ${APT_MIRROR:-}
@@ -249,7 +247,6 @@ services:
         condition: service_healthy
     build:
       context: ../
-      network: host
       dockerfile: src/frontend/Dockerfile
       args:
         - VITE_API_URL=
@@ -326,7 +323,6 @@ services:
     container_name: gateway
     build:
       context: ../src/gateway
-      network: host
       dockerfile: Dockerfile
       ulimits: *build-ulimits
     image: gateway:latest
