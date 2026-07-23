@@ -349,6 +349,9 @@ def make_tools(
         provider_config: Provider config driving the engine's LLM calls.
         state: Mutable holder for the produced blueprint / needs / proposal.
         allow_build: Whether to include the build/verify tools (BUILD phase).
+        language: UI language (``"zh"`` or ``"en"``) from the frontend toggle;
+            drives card labels and option text inside ``ask_choice`` and
+            ``propose_plan``.
 
     Returns:
         List of ``FunctionTool`` instances to register on the toolkit.
@@ -870,7 +873,11 @@ def make_tools(
         then opens a directory / file picker. Example:""" + (
             ' ``["由你来设计 — 我帮你设计求解函数", "[dir] 进化我现有的代码 — 上传我的项目目录让 LLM 优化"]``'
             if _ui_lang == "zh"
-            else ' ``["Let you design it — I\'ll create the solver", "[dir] Evolve my existing code — Upload my project for LLM optimization"]``'
+            else (
+                ' ``["Let you design it — I\'ll create the solver", '
+                '"[dir] Evolve my existing code — '
+                'Upload my project for LLM optimization"]``'
+            )
         ) + """
         This is better than a separate "upload" option because the upload lives on
         the semantically meaningful choice, so one click does it.
@@ -933,7 +940,10 @@ def make_tools(
             opts.append({
                 "value": "__upload_dir__",
                 "label": "上传目录 / Upload a directory" if _ui_lang == "zh" else "Upload a directory",
-                "description": "选择本地项目目录提供给助手" if _ui_lang == "zh" else "Select a local project directory for the assistant",
+                "description": (
+                    "选择本地项目目录提供给助手" if _ui_lang == "zh"
+                    else "Select a local project directory for the assistant"
+                ),
                 "ask_for_dir": True,
             })
         if allow_custom:
@@ -1092,14 +1102,23 @@ def _confirm_build_card(
             "",
             "| # | 项目 | 内容 |" if _zh else "| # | Item | Details |",
             "|---|---|---|",
-            f"| 1 | {'问题描述' if _zh else 'Problem description'} | {_md_cell(proposed.get('description') or ('(未填)' if _zh else '(not specified)'))} |",
+            (
+                f"| 1 | {'问题描述' if _zh else 'Problem description'} | "
+                f"{_md_cell(proposed.get('description') or ('(未填)' if _zh else '(not specified)'))} |"
+            ),
             f"| 2 | {'进化目标' if _zh else 'Evolution target'} | {_md_cell(fn)} |",
             f"| 3 | {'输入 / 输出' if _zh else 'Input / Output'} | {_md_cell(io)} |",
             f"| 4 | {'评估指标' if _zh else 'Evaluation metric'} | {_md_cell(metric)} |",
-            f"| 5 | {'代码来源' if _zh else 'Code source'} | {_md_cell(code_src)}（{'评估器' if _zh else 'Evaluator'}：{_md_cell(eval_src)}） |",
+            (
+                f"| 5 | {'代码来源' if _zh else 'Code source'} | "
+                f"{_md_cell(code_src)}（{'评估器' if _zh else 'Evaluator'}：{_md_cell(eval_src)}） |"
+            ),
             f"| 6 | {'数据来源' if _zh else 'Data source'} | {_md_cell(data_src)} |",
-            f"| 7 | {'语言 / 项目名' if _zh else 'Language / Project'} | {_md_cell(proposed.get('language') or 'python')} / "
-            f"`{_md_cell(proposed.get('project_name') or ('自动' if _zh else 'auto'))}` |",
+            (
+                f"| 7 | {'语言 / 项目名' if _zh else 'Language / Project'} | "
+                f"{_md_cell(proposed.get('language') or 'python')} / "
+                f"`{_md_cell(proposed.get('project_name') or ('自动' if _zh else 'auto'))}` |"
+            ),
             "",
             "还有要补充或修改的吗？**确认无误我就开始构建** 🚀"
             if _zh else
@@ -1108,7 +1127,11 @@ def _confirm_build_card(
     elif summary:
         lines.append(summary.strip())
 
-    prompt = "\n".join(lines) if lines else ("需求已明确，是否开始构建？" if _zh else "Requirements are clear — shall I start building?")
+    prompt = (
+        "\n".join(lines) if lines
+        else ("需求已明确，是否开始构建？" if _zh
+              else "Requirements are clear — shall I start building?")
+    )
     return {
         "cardId": f"card-{uuid.uuid4().hex[:8]}",
         "kind": "choice",
