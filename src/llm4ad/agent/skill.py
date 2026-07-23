@@ -74,7 +74,9 @@ def _with_skill_knowledge(prompt: str) -> str:
     )
 
 
-def build_gather_system_prompt(workspace_dir: str) -> str:
+def build_gather_system_prompt(
+    workspace_dir: str, language: str = "zh"
+) -> str:
     """System prompt for the GATHER phase: step-by-step requirement gathering.
 
     The agent asks one question at a time and, when ready, calls ``propose_build``
@@ -83,10 +85,50 @@ def build_gather_system_prompt(workspace_dir: str) -> str:
 
     Args:
         workspace_dir: The sandbox root (informational; tool paths are fenced here).
+        language: ``"zh"`` or ``"en"``, from the frontend language toggle.
 
     Returns:
         The full system prompt string.
     """
+    lang_name = "Chinese" if language == "zh" else "English"
+    _problem_cats = (
+        '"运筹优化 / Operations Research — TSP、背包、调度", '
+        '"数学求解 / Mathematical — 数值优化、方程、回归", '
+        '"AI/ML 策略演化 / AI-ML strategy — 网络架构、超参数、RL策略"'
+        if language == "zh"
+        else
+        '"Operations Research — TSP, Knapsack, Scheduling", '
+        '"Mathematical — Numerical Optimization, Equations, Regression", '
+        '"AI/ML Strategy — Neural Architecture, Hyperparameters, RL Policy"'
+    )
+    _code_opts = (
+        '"由你设计 / Let you design it", '
+        '"[dir] 进化我现有的代码 / Evolve my existing code"'
+        if language == "zh"
+        else
+        '"Let you design it", '
+        '"[dir] Evolve my existing code"'
+    )
+    _data_opts = (
+        '"由你生成样本数据 / Generate sample data", '
+        '"[dir] 上传我的数据 / Upload my data"'
+        if language == "zh"
+        else
+        '"Generate sample data", '
+        '"[dir] Upload my data"'
+    )
+    _plan_confirm_example = (
+        '"需求已明确，请确认下面的方案："'
+        if language == "zh"
+        else
+        '"Requirements are clear — please review the plan below:"'
+    )
+    _ready_examples = (
+        '"开始构建吧", "就这样", "OK 构建", "go ahead"'
+        if language == "zh"
+        else
+        '"Start building", "Go ahead", "Build it", "OK"'
+    )
     prompt = f"""You are a friendly, proactive assistant helping a user specify an \
 LLM4AD task before it is built. LLM4AD evolves a marked block of code (between \
 EVOLVE_START / EVOLVE_END) to optimize a problem, scored by a custom evaluator.
@@ -117,12 +159,10 @@ function design). Do not call early.
 WHAT TO GATHER (ask ONE at a time, using ask_choice with preset options wherever \
 possible; mirror and exceed the classic wizard):
 1. **Problem description** (required — ask) — what is being optimized. UNLESS the \
-first message already makes it concrete, open with ask_choice offering: "运筹优化 / \
-Operations Research — TSP、背包、调度", "数学求解 / Mathematical — 数值优化、方程、回归", \
-"AI/ML 策略演化 / AI-ML strategy — 网络架构、超参数、RL策略". If already concrete, skip.
+first message already makes it concrete, open with ask_choice offering: \
+{_problem_cats}. If already concrete, skip.
 2. **What code to evolve** — ask what algorithm/function they want to evolve, and \
-offer via ask_choice TWO options: "由你设计 / Let you design it" AND \
-"[dir] 进化我现有的代码 / Evolve my existing code" — note the ``[dir]`` prefix, which \
+offer via ask_choice TWO options: {_code_opts} — note the ``[dir]`` prefix, which \
 makes clicking THAT option open a directory picker (do NOT add a separate "upload" \
 option). ONLY if they upload: inspect it with read_file/list_dir, and if you find \
 an evaluator script (``*evaluator.py``), ask whether to reuse it (set \
@@ -131,9 +171,8 @@ metrics). If they let you design it, YOU choose the function and I/O format — 
 record them in function_to_evolve / io_format.
 3. **Evaluation metric(s)** (required — ask clearly) — what to minimize/maximize. \
 Offer likely options via ask_choice when you can infer them.
-4. **Data source** — ask_choice with two options: "由你生成样本数据 / Generate sample \
-data" AND "[dir] 上传我的数据 / Upload my data" (the ``[dir]`` prefix makes that \
-option open a picker). Record data_path only if they upload.
+4. **Data source** — ask_choice with two options: {_data_opts} (the ``[dir]`` \
+prefix makes that option open a picker). Record data_path only if they upload.
 5. **Programming language** — ask_choice with Python as the default option.
 6. **Project name** — propose one from the description and ask the user to confirm \
 or rename.
@@ -149,7 +188,7 @@ over the old fixed wizard; use it.
 ``summary`` and every field filled. Keep your own text before the card SHORT — do \
 NOT re-list the plan in prose and do NOT mention how many items there are; the card \
 renders the structured plan and asks the user whether anything needs adjusting. A \
-single brief sentence like "需求已明确，请确认下面的方案：" is enough.
+single brief sentence like {_plan_confirm_example} is enough.
 
 CRITICAL — the confirm card (propose_plan) is the ONLY way the user can enter the \
 build phase, so you MUST re-call propose_plan whenever the plan could have changed \
@@ -160,15 +199,15 @@ data, metric, seeds, algorithm, project name, etc.) — re-propose so the card \
 reflects the change and the user can confirm the UPDATED plan.
 - The user asks a question about, or points out something missing in, the plan — \
 answer briefly, then re-call propose_plan so a fresh confirm card is shown.
-- The user expresses readiness in free text (e.g. "开始构建吧", "就这样", "OK 构建", \
-"go ahead") — do NOT reply that you "cannot build" or "have no write tool"; instead \
-re-call propose_plan so the confirm card reappears for them to click. Building \
-starts only after they confirm via the card; your job in this phase is to keep the \
-confirm card available and current.
+- The user expresses readiness in free text (e.g. {_ready_examples}) — do NOT \
+reply that you "cannot build" or "have no write tool"; instead re-call \
+propose_plan so the confirm card reappears for them to click. Building starts only \
+after they confirm via the card; your job in this phase is to keep the confirm \
+card available and current.
 Never leave the user in a state where the plan is settled but no confirm card is on \
 screen — that traps them, because plain text cannot start the build.
 
-Respond in the user's language."""
+Respond in {lang_name}."""
     return _with_skill_knowledge(prompt)
 
 
@@ -189,22 +228,29 @@ def _closing_for_surface(surface: str) -> str:
         return (
             "CLOSING (CLI): after the build is verified, tell the user they can run "
             "it with `llm4ad run <project>/config.yaml` (it needs LLM_BASE_URL / "
-            "LLM_API_KEY / LLM_MODEL env vars set), and that they may tune "
-            "config.yaml evolution parameters. Offer to keep helping."
+            "LLM_API_KEY / LLM_MODEL env vars set). Also say (translate to the "
+            "user's language): \"The task package has been built and verified. I "
+            "can help you choose the evolution method (such as EoH, ReEvo, or "
+            "MCTS-AHD), and adjust evolution parameters (such as max_generations, "
+            "population size, etc.), or feel free to let me know if you have other "
+            "needs!\""
         )
     return (
         "CLOSING (platform): the user is on the web platform — they do NOT run any "
         "CLI command and do NOT set environment variables; the platform runs the "
-        "task for them. So do NOT mention `llm4ad run` or LLM_* env vars. Instead, "
-        "after the build is verified, tell them the task package is ready and offer "
-        "to keep helping — e.g. tuning evolution parameters (max_generations, "
-        "num_islands, mutation_rate, ...), adjusting the algorithm or evaluator, or "
-        "answering any questions. Say something like: “任务包已构建完成并通过验证。我"
-        "可以继续帮你调整演化参数，或者你有别的需求也可以随时告诉我，我都能为你解答。”"
+        "task for them. So do NOT mention `llm4ad run` or LLM_* env vars. "
+        "After the build is verified, always close with exactly this line "
+        "(translate to the user's language as needed): \"The task package has been "
+        "built and verified. I can help you choose the evolution method (such as "
+        "EoH, ReEvo, or MCTS-AHD), and adjust evolution parameters (such as "
+        "max_generations, population size, etc.), or feel free to let me know if "
+        "you have other needs!\""
     )
 
 
-def build_system_prompt(workspace_dir: str, surface: str = "platform") -> str:
+def build_system_prompt(
+    workspace_dir: str, surface: str = "platform", language: str = "zh"
+) -> str:
     """System prompt for the BUILD phase: build + self-verify (post-confirmation).
 
     Reached only after the user confirmed the proposal. The requirements are
@@ -216,10 +262,12 @@ def build_system_prompt(workspace_dir: str, surface: str = "platform") -> str:
         surface: ``"platform"`` (Web UI — the platform runs the package for the
             user; do NOT tell them to run the CLI or set env vars) or ``"cli"``
             (the user runs ``llm4ad run`` themselves).
+        language: ``"zh"`` or ``"en"``, from the frontend language toggle.
 
     Returns:
         The full system prompt string.
     """
+    lang_name = "Chinese" if language == "zh" else "English"
     prompt = f"""You are an expert assistant that builds runnable LLM4AD task \
 packages. The user has ALREADY confirmed the requirements (given below); build \
 the task now — do not re-ask for requirements.
@@ -287,7 +335,7 @@ tried to leave the workspace — stay within it.
 
 {_closing_for_surface(surface)}
 
-Respond in the user's language."""
+Respond in {lang_name}."""
     return _with_skill_knowledge(prompt)
 
 
