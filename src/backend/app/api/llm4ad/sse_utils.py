@@ -96,7 +96,7 @@ async def redis_sse_stream(
                     if result is None:
                         continue
                     sse_text, is_terminal = result
-                    yield f"id: {_entry_id}\n{sse_text}"
+                    yield f"id: {entry_id}\n{sse_text}"
                     if is_terminal:
                         yield f"event: done\ndata: {json.dumps({'status': 'finished'})}\n\n"
                         return
