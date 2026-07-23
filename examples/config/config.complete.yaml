@@ -201,7 +201,7 @@ evaluator:
 # ==============================================================================
 evolution:
   # --- Evolution Type ---
-  type: "island_ga"  # type: enum [island_ga, meoh, dyca]
+  type: "island_ga"  # type: enum [island_ga, meoh, dyca, eoh, reevo, mcts-ahd]
 
   # --- Common Parameters (all types) ---
   max_generations: 3       # type: int

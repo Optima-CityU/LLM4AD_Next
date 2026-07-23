@@ -1,4 +1,4 @@
-# LLM4AD_Next
+<h1 align="center">LLM4AD_Next</h1>
 
 <p align="center">
   <strong>From problem description to runnable evolutionary algorithm search — in one command.</strong><br>
@@ -66,19 +66,24 @@ Migration status of the Automatic Heuristic Design (AHD) search methods from the
 
 | Method | Status | Method | Status |
 |--------|--------|--------|--------|
-| **EoH** | ✅ Available | **FunSearch** | ⏳ Pending |
+| **IslandGA** | ✅ Available | **FunSearch** | ⏳ Pending |
 | **MEoH** | ✅ Available | **HillClimb** | ⏳ Pending |
-| **ReEvo** | ✅ Available | **LHNS** | ⏳ Pending |
-| **MCTS-AHD** | ✅ Available | **LLaMEA** | ⏳ Pending |
-| | | **MLES** | ⏳ Pending |
-| | | **MOEA/D** | ⏳ Pending |
+| **DyCA** | ✅ Available | **LHNS** | ⏳ Pending |
+| **EoH** | ✅ Available | **LLaMEA** | ⏳ Pending |
+| **ReEvo** | ✅ Available | **MLES** | ⏳ Pending |
+| **MCTS-AHD** | ✅ Available | **MOEA/D** | ⏳ Pending |
 | | | **NSGA-II** | ⏳ Pending |
 | | | **PartEvo** | ⏳ Pending |
 | | | **RandSample** | ⏳ Pending |
 
 ### Using the migrated methods
 
-Set `evolution.type` in your config and run `llm4ad run <config.yaml>`. See `examples/applications/cvrp_construct_python/comparison` for full examples.
+Set `evolution.type` in your config and run `llm4ad run <config.yaml>`. See `examples/config/config.complete.yaml` for full examples.
+
+```yaml
+evolution:
+  type: "eoh"  # options: "eoh", "meoh", "reevo", "mcts_ahd", "island_ga", "dyca"
+```
 
 ## Quick Start
 
