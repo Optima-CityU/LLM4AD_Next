@@ -1519,7 +1519,7 @@
     }
   },
   "landing": {
-    "pageTitle": "LLM4AD_Next - 基于大语言模型的算法设计工具",
+    "pageTitle": "LLM4AD_Next - 基于大模型的算法设计工具",
     "nav": {
       "demo": "演示视频",
       "features": "核心特性",
@@ -1530,9 +1530,9 @@
       "signup": "注册"
     },
     "hero": {
-      "title": "基于大语言模型的",
+      "title": "基于大模型的",
       "titleHighlight": "算法设计工具",
-      "description": "面向算法设计的开放平台，用大语言模型与进化计算自动为你的问题设计算法。",
+      "description": "面向算法设计的开放平台，用大模型与进化计算自动为你的问题设计算法。",
       "cta": "立即试用",
       "research": "研究",
       "autoresearch": "Auto Research",
@@ -1619,7 +1619,7 @@
       "viewMore": "查看更多"
     },
     "footer": {
-      "copyright": "LLM4AD_Next - 基于大语言模型的算法设计工具",
+      "copyright": "LLM4AD_Next - 基于大模型的算法设计工具",
       "team": "",
       "resources": "资源"
     }
