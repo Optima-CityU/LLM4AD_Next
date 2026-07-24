@@ -164,40 +164,6 @@ def resolve_provider_for_arc(
         }
 
 
-# ---- Topic 包装：强制 LLM4AD 演化算法路数 ----
-
-
-def _wrap_topic_for_algorithm_design(raw_topic: str | None) -> str:
-    """把用户 topic 包装成「LLM4AD 符号算法演化」框架下的问题。
-
-    平台只做符号算法演化、不训神经网络。前置框架句让下游 stage 的 LLM 按算法
-    设计路数生成 hypothesis / experiment / code，避免 topic 里的 ML 词汇把
-    pipeline 引到"训 CNN"上；CODE_GENERATION 会自动产出 template/evaluator/config
-    三件套，sandbox 从 stage-* 目录自动发现，无需用户预上传 workspace。
-    """
-    user_goal = (raw_topic or "").strip() or "untitled"
-    return (
-        "Automatic algorithm design task via LLM4AD "
-        "(islands / EoH / MEoH heuristic evolution).\n\n"
-        f"User goal:\n{user_goal}\n\n"
-        "Constraints for the entire pipeline (hypothesis, experiment design, "
-        "code generation, execution):\n"
-        "1. The deliverable is an evolved **symbolic algorithm** (a Python "
-        "function), NOT a trained neural network model.\n"
-        "2. If the user goal is expressed in terms of ML training, reframe it "
-        "as a symbolic-algorithm sub-problem (e.g. 'evolve a data-augmentation "
-        "policy', 'evolve a heuristic search operator') and pursue that.\n"
-        "3. Code generation must produce three files ready for LLM4AD:\n"
-        "   - template.py — the seed algorithm skeleton (with EVOLVE markers)\n"
-        "   - evaluator.py — a scalar-returning Python evaluator\n"
-        "   - config.yaml — an LLM4AD AppConfig (algorithm=island_ga/eoh/meoh,\n"
-        "     planner/coder providers, sample_num, seeds)\n"
-        "4. Experiment execution runs LLM4AD (not sklearn/torch training). "
-        "Compare against symbolic baselines (nearest-neighbor, first-fit, "
-        "hand-crafted heuristics), not deep-learning SOTA.\n"
-    )
-
-
 # ---- ARC config 主函数 ----
 
 
@@ -225,7 +191,7 @@ def build_arc_config(
             "profile": session.profile,
         },
         "research": {
-            "topic": _wrap_topic_for_algorithm_design(session.topic),
+            "topic": session.topic,
         },
         "security": {
             # 门控实际由容器内原生 HITLSession 决定（见 research_container_runner），
