@@ -140,6 +140,38 @@ def test_upsert_memory_provider_binding_stores_embedding_identity(db: Session, m
     assert chat_endpoint["num_retries"] == 1
 
 
+def test_upsert_memory_provider_binding_allows_visible_builtin_embedding_provider(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    chat_provider = _create_chat_provider(db, user.id)
+    embedding_provider = _create_embedding_provider(db, user.id)
+    embedding_provider.user_id = None
+    embedding_provider.is_builtin = True
+    embedding_provider.visible_to_all = True
+    db.add(embedding_provider)
+    db.commit()
+    _enable_mindmemos(monkeypatch)
+    monkeypatch.setattr(
+        memory_service,
+        "_mindmemos_post",
+        lambda *_args, **_kwargs: {"code": "ok", "data": {"binding_id": "pb_builtin"}},
+    )
+
+    binding = memory_service.upsert_memory_provider_binding(
+        db,
+        user,
+        MemoryProviderBindingUpdate(
+            chat_provider_id=chat_provider.id,
+            chat_model="qwen-plus",
+            embedding_provider_id=embedding_provider.id,
+        ),
+    )
+
+    assert binding.binding_id == "pb_builtin"
+
+
 def test_ensure_memory_provider_binding_recreates_missing_remote_binding(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,

@@ -1485,7 +1485,7 @@ def upsert_memory_provider_binding(
     embedding_provider = db.get(models.EmbeddingProvider, request.embedding_provider_id)
     if embedding_provider is None:
         raise HTTPException(status_code=404, detail="Embedding provider does not exist")
-    if not (current_user.is_superuser or embedding_provider.user_id == current_user.id):
+    if not _embedding_provider_accessible(embedding_provider, current_user):
         raise HTTPException(status_code=403, detail="No access to selected embedding provider")
     _validate_mindmemos_embedding_provider(embedding_provider)
 
@@ -1663,6 +1663,15 @@ def _embedding_router_identity_changed(current: dict[str, Any], expected: dict[s
 
 
 def _provider_accessible(provider: models.LLMProvider, current_user: models.User) -> bool:
+    return bool(
+        current_user.is_superuser
+        or provider.user_id == current_user.id
+        or (provider.is_builtin and provider.visible_to_all)
+    )
+
+
+def _embedding_provider_accessible(provider: models.EmbeddingProvider, current_user: models.User) -> bool:
+    """Return whether a user may bind an embedding provider to MindMemOS."""
     return bool(
         current_user.is_superuser
         or provider.user_id == current_user.id
