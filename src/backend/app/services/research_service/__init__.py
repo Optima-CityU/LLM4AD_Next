@@ -42,6 +42,7 @@ from .sessions import (
     list_sessions,
     update_session,
 )
+from .translate import get_translate_stream_type, translate_artifact
 from .turns import (
     get_stream_context,
     get_turn,
@@ -65,6 +66,7 @@ __all__ = [
     "get_session_detail",
     "get_state",
     "get_stream_context",
+    "get_translate_stream_type",
     "get_turn",
     "inject_stage_guidance",
     "list_artifacts",
@@ -81,6 +83,7 @@ __all__ = [
     "start_turn",
     "stop_analysis_report",
     "stop_turn",
+    "translate_artifact",
     "update_folder",
     "update_session",
     "write_artifact",

@@ -1067,7 +1067,7 @@ function EmptyState({
                     </div>
                   </div>
                 ) : (
-                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90 text-left w-full min-h-[56px] max-h-[20vh] overflow-y-auto">
+                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground text-left w-full min-h-[56px] max-h-[20vh] overflow-y-auto">
                     {session.topic}
                   </p>
                 )}

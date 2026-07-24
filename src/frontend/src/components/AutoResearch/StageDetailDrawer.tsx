@@ -7,7 +7,7 @@ import {
   MessageSquarePlus,
   X,
 } from "lucide-react"
-import { type ReactNode, useCallback, useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -31,6 +31,7 @@ import ArtifactPreviewDialog, {
   formatSize,
   type PreviewFile,
 } from "./ArtifactPreviewDialog"
+// PreviewFile 仍用于抽屉内自己的 stage 文件列表类型。
 import type { StageCell, StageStatus } from "./tech"
 
 interface Props {
@@ -67,18 +68,8 @@ export default function StageDetailDrawer({
     () => (cell ? collectStageFiles(treeQ.data?.root ?? null, cell.stage) : []),
     [treeQ.data, cell],
   )
-  const [preview, setPreview] = useState<PreviewFile | null>(null)
-
-  // 包装 setPreview：点击同一文件时先关闭再打开，强制刷新
-  const handlePreview = useCallback((file: PreviewFile) => {
-    setPreview((prev) => {
-      if (prev?.path === file.path) {
-        setTimeout(() => setPreview(file), 0)
-        return null
-      }
-      return file
-    })
-  }, [])
+  // 产物预览弹框：保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
+  const [previewPath, setPreviewPath] = useState<string | null>(null)
 
   const [text, setText] = useState("")
   const [noteError, setNoteError] = useState(false)
@@ -195,13 +186,7 @@ export default function StageDetailDrawer({
                         >
                           <button
                             type="button"
-                            onClick={() =>
-                              handlePreview({
-                                path: f.path,
-                                name: f.name,
-                                size: f.size ?? null,
-                              })
-                            }
+                            onClick={() => setPreviewPath(f.path)}
                             className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
                           >
                             <FileKindIcon name={f.name} />
@@ -289,10 +274,8 @@ export default function StageDetailDrawer({
 
       <ArtifactPreviewDialog
         sessionId={sessionId}
-        file={preview}
-        fileList={stageFiles.length > 1 ? stageFiles : undefined}
-        onFileChange={handlePreview}
-        onClose={() => setPreview(null)}
+        path={previewPath}
+        onClose={() => setPreviewPath(null)}
       />
     </>
   )

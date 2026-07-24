@@ -6241,6 +6241,106 @@ export const ResearchArtifactListResponseSchema = {
     description: '产物列表。'
 } as const;
 
+export const ResearchArtifactTranslateRequestSchema = {
+    properties: {
+        target_language: {
+            type: 'string',
+            enum: ['zh', 'en'],
+            title: 'Target Language',
+            description: "目标翻译语言：'zh' 中文，'en' 英文",
+            default: 'zh'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id',
+            description: "LLM Provider：空/'default' 用用户默认，'mock' 走 mock，或真实 UUID"
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name',
+            description: '模型名；为空用 Provider 默认模型'
+        },
+        force: {
+            type: 'boolean',
+            title: 'Force',
+            description: '强制翻译开关：True 时不读缓存、重新翻译（覆盖同源缓存）',
+            default: false
+        }
+    },
+    type: 'object',
+    title: 'ResearchArtifactTranslateRequest',
+    description: `翻译单个产物文件的请求体。
+
+入参对齐 \`\`ResearchAnalysisGenerateRequest\`\`：由用户传入模型与目标语言。
+\`\`provider_id\`\`/\`\`model_name\`\` 为空时回退到用户默认报告模型，再兜底 mock。
+\`\`force\`\` 为 True 时跳过缓存、强制重新翻译。`
+} as const;
+
+export const ResearchArtifactTranslateResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        path: {
+            type: 'string',
+            title: 'Path',
+            description: '相对 run_dir 的路径'
+        },
+        status: {
+            type: 'string',
+            enum: ['cached', 'translating'],
+            title: 'Status'
+        },
+        source_hash: {
+            type: 'string',
+            title: 'Source Hash',
+            description: '源文件内容哈希；SSE 流按此键控'
+        },
+        target_language: {
+            type: 'string',
+            title: 'Target Language'
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content',
+            description: '命中缓存时的译文全文；translating 时为 None'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'path', 'status', 'source_hash', 'target_language'],
+    title: 'ResearchArtifactTranslateResponse',
+    description: `翻译产物文件的受理响应。
+
+\`\`status\`\` 为 \`\`cached\`\` 时 \`\`content\`\` 直接带回缓存译文，无需再走 SSE；
+为 \`\`translating\`\` 时表示已后台启动，需连 \`\`/artifacts/translate/stream\`\`
+按 \`\`source_hash\`\` 拉取增量。`
+} as const;
+
 export const ResearchArtifactTreeNodeSchema = {
     properties: {
         name: {

@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react"
-import { useCallback, useId, useMemo, useState } from "react"
+import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import Markdown from "react-markdown"
 import { toast } from "sonner"
@@ -28,9 +28,7 @@ import { downloadResearchArtifact } from "@/hooks/useAutoResearch"
 import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { cn } from "@/lib/utils"
 
-import ArtifactPreviewDialog, {
-  type PreviewFile,
-} from "./ArtifactPreviewDialog"
+import ArtifactPreviewDialog from "./ArtifactPreviewDialog"
 
 /** 聊天气泡内的 markdown 渲染（GFM + 代码高亮 + mermaid）。 */
 function MessageMarkdown({ content }: { content: string }) {
@@ -335,33 +333,12 @@ function AssistantFormRow({
   > | null
 
   const [summaryOpen, setSummaryOpen] = useState(false)
-  const [preview, setPreview] = useState<PreviewFile | null>(null)
-
-  // 包装 setPreview：点击同一文件时先关闭再打开，强制刷新
-  const handlePreview = useCallback((file: PreviewFile) => {
-    setPreview((prev) => {
-      if (prev?.path === file.path) {
-        setTimeout(() => setPreview(file), 0)
-        return null
-      }
-      return file
-    })
-  }, [])
+  const [preview, setPreview] = useState<string | null>(null)
 
   const stageDir =
     payload.stage != null
       ? `stage-${String(payload.stage).padStart(2, "0")}`
       : null
-
-  // 构建文件列表用于预览切换
-  const fileList = useMemo(() => {
-    if (!stageDir || !payload.output_files) return undefined
-    return payload.output_files.map((name) => ({
-      path: `${stageDir}/${name}`,
-      name,
-      size: null,
-    }))
-  }, [stageDir, payload.output_files])
 
   const downloadFile = async (name: string) => {
     if (!sessionId || !stageDir) return
@@ -412,12 +389,7 @@ function AssistantFormRow({
                     type="button"
                     disabled={!clickable}
                     onClick={() =>
-                      clickable &&
-                      handlePreview({
-                        path: `${stageDir}/${f}`,
-                        name: f,
-                        size: null,
-                      })
+                      clickable && setPreview(`${stageDir}/${f}`)
                     }
                     className={cn(
                       "inline-flex items-center gap-1 min-w-0",
@@ -484,9 +456,7 @@ function AssistantFormRow({
       {sessionId && (
         <ArtifactPreviewDialog
           sessionId={sessionId}
-          file={preview}
-          fileList={fileList}
-          onFileChange={handlePreview}
+          path={preview}
           onClose={() => setPreview(null)}
         />
       )}

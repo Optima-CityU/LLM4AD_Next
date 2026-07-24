@@ -19,6 +19,8 @@ import { useCallback } from "react"
 import {
   Llm4AdResearchService,
   type ResearchCollabStartRequest,
+  type ResearchArtifactTranslateRequest,
+  type ResearchArtifactTranslateResponse,
   type ResearchCollabStartResponse,
   type ResearchFolderCreateRequest,
   type ResearchFolderListResponse,
@@ -692,6 +694,30 @@ export async function fetchResearchArtifact(
   const resp = await authFetch(url)
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   return resp
+}
+
+/** 触发单个产物文件翻译：命中缓存直接回内容，否则返回 source_hash 供 SSE 拉流。 */
+export function translateResearchArtifact(
+  sessionId: string,
+  path: string,
+  body: ResearchArtifactTranslateRequest,
+): Promise<ResearchArtifactTranslateResponse> {
+  return Llm4AdResearchService.translateArtifact({
+    sessionId,
+    path,
+    requestBody: body,
+  })
+}
+
+/** 构造产物翻译 SSE 地址（实际拉流仍由 ``authFetch`` 执行以保留 Bearer 头）。 */
+export function buildResearchArtifactTranslateStreamUrl(
+  sessionId: string,
+  sourceHash: string,
+  targetLanguage: string,
+): string {
+  return `${API_BASE}/sessions/${sessionId}/artifacts/translate/stream?source_hash=${encodeURIComponent(
+    sourceHash,
+  )}&target_language=${encodeURIComponent(targetLanguage)}`
 }
 
 /** 下载会话的 config.arc.yaml（调试用）。 */

@@ -219,7 +219,7 @@ export default function BottomComposer({
   }
 
   // 门控按钮：理由取底部输入框。reject/inject 必填，空则高亮报错；
-  // 提交成功后清空输入框，submission 组装在此统一处理。
+  // 提交成功后清空输入框，submission 组装在此统一处理（含 mode）。
   // collabBusy（问 AI 进行中）时禁止提交，避免与协作轮抢同一个输入框。
   const handleGateAction = (value: string) => {
     if (!gateMessage || inputDisabled) return
@@ -228,7 +228,7 @@ export default function BottomComposer({
       setNoteError(true)
       return
     }
-    const submission: Record<string, unknown> = { action: value }
+    const submission: Record<string, unknown> = { action: value, mode }
     if (trimmed) {
       submission.message = trimmed
       if (GUIDANCE_ACTIONS.has(value)) submission.guidance = trimmed
@@ -371,6 +371,8 @@ export default function BottomComposer({
               message={gateMessage}
               sessionId={session.id}
               disabled={inputDisabled}
+              mode={mode}
+              onModeChange={onModeChange}
               onAction={handleGateAction}
               headerRight={
                 <LogButton

@@ -496,6 +496,39 @@ class ResearchArtifactWriteResponse(BaseModel):
     size: int = Field(description="写入后字节数")
 
 
+class ResearchArtifactTranslateRequest(BaseModel):
+    """翻译单个产物文件的请求体（入参对齐 ``ResearchAnalysisGenerateRequest``）。"""
+
+    target_language: Literal["zh", "en"] = Field(
+        default="zh", description="目标翻译语言：'zh' 中文，'en' 英文"
+    )
+    provider_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="LLM Provider：空/'default' 用用户默认，'mock' 走 mock，或真实 UUID",
+    )
+    model_name: str | None = Field(
+        default=None, max_length=255, description="模型名；为空用 Provider 默认模型"
+    )
+    force: bool = Field(
+        default=False,
+        description="强制翻译开关：True 时不读缓存、重新翻译（覆盖同源缓存）",
+    )
+
+
+class ResearchArtifactTranslateResponse(BaseModel):
+    """翻译受理响应：``cached`` 带全文；``translating`` 需连 SSE 拉增量。"""
+
+    session_id: uuid.UUID
+    path: str = Field(description="相对 run_dir 的路径")
+    status: Literal["cached", "translating"]
+    source_hash: str = Field(description="源文件内容哈希；SSE 流按此键控")
+    target_language: str
+    content: str | None = Field(
+        default=None, description="命中缓存时的译文全文；translating 时为 None"
+    )
+
+
 class ResearchArtifactTreeNode(BaseModel):
     """产物目录树节点。"""
 

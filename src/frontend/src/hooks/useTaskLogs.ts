@@ -264,6 +264,11 @@ export function useTaskLogs(
                         scheduleFlush()
                         break
 
+                      case "print":
+                        entriesBuffer.current.push(parsed as LogEntry)
+                        scheduleFlush()
+                        break
+
                       case "generated":
                         if (!cancelled) onGeneratedRef.current?.(parsed)
                         break

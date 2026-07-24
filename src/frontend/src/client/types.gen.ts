@@ -2142,6 +2142,64 @@ export type ResearchArtifactListResponse = {
 };
 
 /**
+ * 翻译单个产物文件的请求体。
+ *
+ * 入参对齐 ``ResearchAnalysisGenerateRequest``：由用户传入模型与目标语言。
+ * ``provider_id``/``model_name`` 为空时回退到用户默认报告模型，再兜底 mock。
+ * ``force`` 为 True 时跳过缓存、强制重新翻译。
+ */
+export type ResearchArtifactTranslateRequest = {
+    /**
+     * 目标翻译语言：'zh' 中文，'en' 英文
+     */
+    target_language?: 'zh' | 'en';
+    /**
+     * LLM Provider：空/'default' 用用户默认，'mock' 走 mock，或真实 UUID
+     */
+    provider_id?: (string | null);
+    /**
+     * 模型名；为空用 Provider 默认模型
+     */
+    model_name?: (string | null);
+    /**
+     * 强制翻译开关：True 时不读缓存、重新翻译（覆盖同源缓存）
+     */
+    force?: boolean;
+};
+
+/**
+ * 目标翻译语言：'zh' 中文，'en' 英文
+ */
+export type target_language = 'zh' | 'en';
+
+/**
+ * 翻译产物文件的受理响应。
+ *
+ * ``status`` 为 ``cached`` 时 ``content`` 直接带回缓存译文，无需再走 SSE；
+ * 为 ``translating`` 时表示已后台启动，需连 ``/artifacts/translate/stream``
+ * 按 ``source_hash`` 拉取增量。
+ */
+export type ResearchArtifactTranslateResponse = {
+    session_id: string;
+    /**
+     * 相对 run_dir 的路径
+     */
+    path: string;
+    status: 'cached' | 'translating';
+    /**
+     * 源文件内容哈希；SSE 流按此键控
+     */
+    source_hash: string;
+    target_language: string;
+    /**
+     * 命中缓存时的译文全文；translating 时为 None
+     */
+    content?: (string | null);
+};
+
+export type status2 = 'cached' | 'translating';
+
+/**
  * 产物目录树节点。
  */
 export type ResearchArtifactTreeNode = {
@@ -2626,7 +2684,7 @@ export type ResearchStageSnapshot = {
     error?: (string | null);
 };
 
-export type status2 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
+export type status3 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
 
 /**
  * 会话当前状态的结构化快照。
@@ -4109,6 +4167,31 @@ export type Llm4AdResearchDownloadArtifactData = {
 };
 
 export type Llm4AdResearchDownloadArtifactResponse = (unknown);
+
+export type Llm4AdResearchTranslateArtifactData = {
+    /**
+     * 相对 run_dir 的路径，如 stage-05/outline.md
+     */
+    path: string;
+    requestBody: ResearchArtifactTranslateRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchTranslateArtifactResponse = (ResearchArtifactTranslateResponse);
+
+export type Llm4AdResearchStreamTranslateData = {
+    sessionId: string;
+    /**
+     * POST /translate 返回的源文件哈希
+     */
+    sourceHash: string;
+    /**
+     * 目标语言：'zh' / 'en'
+     */
+    targetLanguage?: string;
+};
+
+export type Llm4AdResearchStreamTranslateResponse = (unknown);
 
 export type Llm4AdResearchDownloadArtifactsArchiveData = {
     sessionId: string;

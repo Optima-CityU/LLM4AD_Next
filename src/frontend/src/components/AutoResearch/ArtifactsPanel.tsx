@@ -40,7 +40,6 @@ import AnalysisReport from "./AnalysisReport"
 import ArtifactPreviewDialog, {
   FileKindIcon,
   formatSize,
-  type PreviewFile,
 } from "./ArtifactPreviewDialog"
 import ExperimentPanel from "./ExperimentPanel"
 import { PlaceholderTab } from "./PlaceholderTab"
@@ -89,57 +88,8 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
     session.id,
     session.status === "running" || session.status === "paused",
   )
-  const [preview, setPreview] = useState<PreviewFile | null>(null)
-
-  // 收集同目录下的所有文件（用于预览切换）
-  const getSiblingFiles = useCallback(
-    (filePath: string): PreviewFile[] => {
-      if (!root) return []
-      const parts = filePath.split("/")
-      const dirPath = parts.slice(0, -1).join("/")
-
-      // 遍历树找到父目录
-      const findDir = (
-        node: ResearchArtifactTreeNode,
-        path: string,
-      ): ResearchArtifactTreeNode | null => {
-        if (node.path === path) return node
-        if (node.children) {
-          for (const child of node.children) {
-            const found = findDir(child, path)
-            if (found) return found
-          }
-        }
-        return null
-      }
-
-      const parentDir = dirPath ? findDir(root, dirPath) : root
-      if (!parentDir?.children) return []
-
-      // 收集所有文件（非目录）
-      return parentDir.children
-        .filter((c) => !c.is_dir)
-        .map((c) => ({
-          path: c.path,
-          name: c.name,
-          size: c.size ?? null,
-        }))
-    },
-    [root],
-  )
-
-  // 包装 setPreview：点击同一文件时先关闭再打开，强制刷新
-  const handlePreview = useCallback((file: PreviewFile) => {
-    setPreview((prev) => {
-      // 如果点击的是同一个文件，先设为 null 触发关闭
-      if (prev?.path === file.path) {
-        // 下一帧再打开，确保 Dialog 完全关闭后重新打开
-        setTimeout(() => setPreview(file), 0)
-        return null
-      }
-      return file
-    })
-  }, [])
+  // 产物预览弹框：只保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
+  const [previewPath, setPreviewPath] = useState<string | null>(null)
 
   // 产物树展开态提升到此处，让标题行的「全部收起」能控制它。
   const [treeExpanded, setTreeExpanded] = useState<Set<string>>(new Set())
@@ -221,7 +171,7 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
 
           {/* 研究主题：直接显示内容，无 label、无嵌套面板 */}
           <p
-            className="text-[13px] font-semibold text-foreground/90 leading-relaxed line-clamp-3"
+            className="text-[13px] font-semibold text-foreground leading-relaxed line-clamp-3"
             title={session.topic}
           >
             {session.topic || "—"}
@@ -353,7 +303,7 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
                 expanded={treeExpanded}
                 onToggle={toggleDir}
                 onExpandDir={expandDir}
-                onPreview={handlePreview}
+                onPreview={setPreviewPath}
               />
             ))}
           </ul>
@@ -362,10 +312,8 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
 
       <ArtifactPreviewDialog
         sessionId={session.id}
-        file={preview}
-        fileList={preview ? getSiblingFiles(preview.path) : undefined}
-        onFileChange={handlePreview}
-        onClose={() => setPreview(null)}
+        path={previewPath}
+        onClose={() => setPreviewPath(null)}
       />
 
       {/* 报告分析 / IDE 弹层（全屏，占位） */}
@@ -573,7 +521,7 @@ function TreeNode({
   expanded: Set<string>
   onToggle: (path: string) => void
   onExpandDir: (node: ResearchArtifactTreeNode) => void
-  onPreview: (file: PreviewFile) => void
+  onPreview: (path: string) => void
 }) {
   const { t } = useTranslation()
   const pad = { paddingLeft: `${depth * 12 + 4}px` }
@@ -648,13 +596,7 @@ function TreeNode({
       >
         <button
           type="button"
-          onClick={() =>
-            onPreview({
-              path: node.path,
-              name: node.name,
-              size: node.size ?? null,
-            })
-          }
+          onClick={() => onPreview(node.path)}
           className="flex-1 min-w-0 flex items-center gap-1 text-left"
         >
           <span className="w-3 shrink-0" />

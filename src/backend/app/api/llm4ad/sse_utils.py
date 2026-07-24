@@ -34,6 +34,8 @@ async def redis_sse_stream(
         connected_data: 初始 ``connected`` 事件中携带的数据。
         entry_handler: 对每条 Redis Stream 条目的 ID 和 *fields* 字典调用。
             返回 ``(sse_text, is_terminal)`` 表示产出，返回 ``None`` 表示跳过。
+            ``sse_text`` 只应包含 ``event:`` / ``data:`` 行——``id:`` 行由本
+            生成器统一前置拼接，handler 不要重复输出。
             当 *is_terminal* 为 True 时会额外产出 ``done`` 事件并关闭流。
         last_id: 起始 Redis Stream ID。
         max_idle: 无数据超时秒数，超出后产出 ``timeout`` 事件并关闭。

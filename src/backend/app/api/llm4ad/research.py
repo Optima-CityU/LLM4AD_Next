@@ -22,6 +22,8 @@ from app.schemas.research import (
     ResearchAnalysisGenerateResponse,
     ResearchAnalysisStopResponse,
     ResearchArtifactListResponse,
+    ResearchArtifactTranslateRequest,
+    ResearchArtifactTranslateResponse,
     ResearchArtifactTreeResponse,
     ResearchArtifactWriteRequest,
     ResearchArtifactWriteResponse,
@@ -461,9 +463,11 @@ _TERMINAL_TURN_STATUSES = frozenset({
 
 
 def _research_entry_handler(
-    entry_id: str, fields: dict
+    _entry_id: str, fields: dict
 ) -> tuple[str, bool] | None:
     """把 Redis Stream 条目转为 SSE 帧。终止事件：``done`` / ``error``。
+
+    id 行由 :func:`redis_sse_stream` 统一拼接，handler 只产出 event/data。
     """
     try:
         entry = json.loads(fields["data"])
@@ -471,10 +475,7 @@ def _research_entry_handler(
         return None
     if not isinstance(entry, dict):
         return None
-    sse_text = (
-        f"id: {entry_id}\n"
-        f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
-    )
+    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
     is_terminal = entry.get("type") in ("done", "error")
     return sse_text, is_terminal
 
@@ -615,6 +616,81 @@ def download_artifact(
         target,
         filename=target.name,
         content_disposition_type="attachment",
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/artifacts/translate",
+    response_model=ResearchArtifactTranslateResponse,
+    summary="翻译单个产物文件（带磁盘缓存，支持强制重译）",
+)
+async def translate_artifact(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    token: TokenDep,
+    request: ResearchArtifactTranslateRequest,
+    path: str = Query(..., description="相对 run_dir 的路径，如 stage-05/outline.md"),
+):
+    """把产物文件译成目标语言：命中缓存回 ``cached``+全文，否则 ``translating``
+    并后台启动翻译，前端连 ``/artifacts/translate/stream?source_hash=<返回值>``
+    接收增量；``force=true`` 跳过缓存重译。
+
+    Note:
+        必须是 ``async`` 路由：服务层用 ``asyncio.create_task`` 提交后台协程，
+        同步路由会被丢进线程池，导致「no current event loop」。
+    """
+    return research_service.translate_artifact(
+        db, session_id, current_user, path, request, token
+    )
+
+
+def _translate_entry_handler(_entry_id: str, fields: dict) -> tuple[str, bool] | None:
+    """解析翻译流条目为 SSE 帧。终止事件：``done`` / ``error`` / ``cancelled``。
+
+    id 行由 :func:`redis_sse_stream` 统一拼接，handler 只产出 event/data。
+    """
+    entry = json.loads(fields["data"])
+    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
+    is_terminal = isinstance(entry, dict) and entry.get("type") in (
+        "done",
+        "error",
+        "cancelled",
+    )
+    return sse_text, is_terminal
+
+
+@router.get(
+    "/sessions/{session_id}/artifacts/translate/stream",
+    summary="SSE：实时推送产物翻译增量",
+)
+async def stream_translate(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    source_hash: str = Query(..., description="POST /translate 返回的源文件哈希"),
+    target_language: str = Query("zh", description="目标语言：'zh' / 'en'"),
+):
+    """订阅产物翻译的 Redis Stream，推送增量译文。
+
+    键控 ``translate:<hash>:<lang>``；断线可重连从流头重放（Redis 保留 1h）。
+    事件：``chunk`` / ``done`` / ``error`` / ``cancelled``。
+    """
+    report_type = research_service.get_translate_stream_type(
+        db, session_id, current_user, source_hash, target_language
+    )
+    return sse_response(
+        redis_sse_stream(
+            redis_key=report_stream_key(session_id, report_type),
+            connected_data={
+                "session_id": str(session_id),
+                "source_hash": source_hash,
+                "target_language": target_language,
+            },
+            entry_handler=_translate_entry_handler,
+            max_idle=300.0,
+            use_draining=True,
+        )
     )
 
 
@@ -780,13 +856,13 @@ def stop_analysis(
     return research_service.stop_analysis_report(db, session_id, current_user)
 
 
-def _analysis_entry_handler(entry_id: str, fields: dict) -> tuple[str, bool] | None:
-    """解析分析报告流条目为 SSE 帧。"""
+def _analysis_entry_handler(_entry_id: str, fields: dict) -> tuple[str, bool] | None:
+    """解析分析报告流条目为 SSE 帧。
+
+    id 行由 :func:`redis_sse_stream` 统一拼接，handler 只产出 event/data。
+    """
     entry = json.loads(fields["data"])
-    sse_text = (
-        f"id: {entry_id}\n"
-        f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
-    )
+    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
     is_terminal = isinstance(entry, dict) and entry.get("type") in (
         "done",
         "error",

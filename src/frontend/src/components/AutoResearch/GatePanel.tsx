@@ -4,19 +4,26 @@ import {
   FileText,
   FlaskConical,
   Pencil,
+  Settings2,
 } from "lucide-react"
-import { type ReactNode, useCallback, useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
-import type { ResearchMessageItem } from "@/client"
+import type { ResearchMessageItem, ResearchMode } from "@/client"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { downloadResearchArtifact } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
 
-import ArtifactPreviewDialog, {
-  type PreviewFile,
-} from "./ArtifactPreviewDialog"
+import ArtifactPreviewDialog from "./ArtifactPreviewDialog"
 import GateEditDialog from "./GateEditDialog"
+import { MODE_OPTIONS } from "./shared"
 
 interface GateFormPayload {
   kind?: string
@@ -47,6 +54,8 @@ interface Props {
   message: ResearchMessageItem
   sessionId: string
   disabled?: boolean
+  mode: ResearchMode
+  onModeChange: (mode: ResearchMode) => void
   onAction: (value: string) => void
   /** 输入框插槽：渲染在「上下文/产物」与「决策按钮」之间——先写理由，再点决策。 */
   children?: ReactNode
@@ -56,7 +65,7 @@ interface Props {
 
 /**
  * 门控操作条：贴在底部输入框上方。命中门控时自上而下展示
- * 阶段上下文/产物 → 输入框（children）→ 决策按钮
+ * 阶段上下文/产物 → 模式选择 → 输入框（children）→ 决策按钮
  * （approve / reject / edit / abort …）。理由由输入框统一提供，
  * 本组件只上报点了哪个 action，submission 的组装/校验交给父组件。
  */
@@ -64,6 +73,8 @@ export default function GatePanel({
   message,
   sessionId,
   disabled,
+  mode,
+  onModeChange,
   onAction,
   children,
   headerRight,
@@ -72,31 +83,7 @@ export default function GatePanel({
   const payload = (message.payload ?? {}) as GateFormPayload
 
   const [detailOpen, setDetailOpen] = useState(true)
-  const [preview, setPreview] = useState<PreviewFile | null>(null)
-
-  // 构建文件列表用于预览切换
-  const stageDir =
-    payload.stage != null
-      ? `stage-${String(payload.stage).padStart(2, "0")}`
-      : null
-  const fileList = useMemo(() => {
-    if (!stageDir || !payload.output_files) return undefined
-    return payload.output_files.map((name) => ({
-      path: `${stageDir}/${name}`,
-      name,
-      size: null,
-    }))
-  }, [stageDir, payload.output_files])
-
-  // 每次点击都传入新的 file 对象，预览弹框的 effect 依赖 file 引用变化即可
-  // 重新拉取，无需先置 null 再置回（那样会让加载态卡在「加载预览中」）。
-  const handlePreview = useCallback((file: PreviewFile) => {
-    setPreview(file)
-  }, [])
-
-  const [editOpen, setEditOpen] = useState(false)
-  // 打开编辑弹框时默认激活的文件（点具体文件 → 激活该文件；点「编辑产物」→ null 走第一个）。
-  const [editFile, setEditFile] = useState<string | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
 
   // 一次 memo 算出 actions（排序、去隐藏）与 canEdit，键在 payload.available_actions
   // 上而非每次 render 新建的中间数组，避免无谓重算。
@@ -114,6 +101,11 @@ export default function GatePanel({
     return { actions: vals, canEdit: raw.includes("edit") }
   }, [payload.available_actions])
 
+  const stageDir =
+    payload.stage != null
+      ? `stage-${String(payload.stage).padStart(2, "0")}`
+      : null
+
   const stage = payload.stage ?? message.stage ?? null
   const outputFiles = payload.output_files ?? []
   // 目录不可编辑，只有普通文件能进编辑弹框。
@@ -123,8 +115,11 @@ export default function GatePanel({
   )
   // 编辑需要具体文件才有意义：无可编辑文件时不显示编辑入口（否则点了没弹窗）。
   const canEditFiles = canEdit && !!stageDir && editableFiles.length > 0
+
+  const [editOpen, setEditOpen] = useState(false)
+  // 打开编辑弹框时默认激活的文件（点具体文件 → 激活该文件；点「编辑产物」→ null 走第一个）。
+  const [editFile, setEditFile] = useState<string | null>(null)
   const summary = payload.context_summary ?? ""
-  const reason = payload.reason || payload.prompt || message.content || ""
 
   const downloadFile = async (name: string) => {
     if (!stageDir) return
@@ -147,7 +142,7 @@ export default function GatePanel({
     if (canEditFiles && !isFolderEntry(name)) {
       openEdit(name)
     } else {
-      handlePreview({ path: `${stageDir}/${name}`, name, size: null })
+      setPreview(`${stageDir}/${name}`)
     }
   }
 
@@ -163,6 +158,29 @@ export default function GatePanel({
               })
             : t("autoResearch.gate.awaiting")}
         </span>
+
+        {/* 运行模式选择器 - 移到标题后面 */}
+        <Select
+          value={mode}
+          onValueChange={(v) => onModeChange(v as ResearchMode)}
+        >
+          <SelectTrigger
+            size="sm"
+            aria-label={t("autoResearch.create.modeLabel")}
+            className="h-6 w-auto gap-1.5 rounded-md border-border/60 bg-background/50 px-2 py-0 text-[11px] font-medium text-foreground/80 shadow-sm [&>svg:last-child]:size-3"
+          >
+            <Settings2 className="size-3 shrink-0" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MODE_OPTIONS.map((m) => (
+              <SelectItem key={m} value={m} className="text-xs">
+                {t(`autoResearch.mode.${m}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <div className="ml-auto flex items-center gap-1.5">
           {(summary || outputFiles.length > 0) && (
             <button
@@ -183,14 +201,9 @@ export default function GatePanel({
         </div>
       </div>
 
-      {reason && (
-        <p className="px-3.5 pb-1.5 text-[11px] text-foreground/70 whitespace-pre-wrap line-clamp-3">
-          {reason}
-        </p>
-      )}
-
       {detailOpen && (
         <div className="px-3.5 pb-2 space-y-2">
+          {/* 产物文件列表 */}
           {outputFiles.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
@@ -240,11 +253,13 @@ export default function GatePanel({
               )}
             </div>
           )}
-          {summary && (
-            <p className="rounded-md bg-background/60 border border-border/50 px-2.5 py-1.5 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto">
-              {summary}
+
+          {/* 引导提示：告知用户如何操作 - 移到产物后面 */}
+          <div className="rounded-md bg-amber-500/[0.08] border border-amber-500/30 px-3 py-2">
+            <p className="text-[11px] leading-relaxed text-foreground/80">
+              {t("autoResearch.gate.confirmHint")}
             </p>
-          )}
+          </div>
         </div>
       )}
 
@@ -285,9 +300,7 @@ export default function GatePanel({
 
       <ArtifactPreviewDialog
         sessionId={sessionId}
-        file={preview}
-        fileList={fileList}
-        onFileChange={handlePreview}
+        path={preview}
         onClose={() => setPreview(null)}
       />
 

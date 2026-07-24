@@ -2828,7 +2828,8 @@
     "gate": {
       "awaiting": "Awaiting your gate decision",
       "awaitingStage": "Stage {{stage}} {{name}} · awaiting decision",
-      "details": "Details"
+      "details": "Details",
+      "confirmHint": "Please confirm the artifacts above are correct. If correct, click 'Approve' to proceed. If there are issues, describe them in the input below and click 'Reject' or directly edit the artifacts. To exit, click 'Abort'."
     },
     "artifacts": {
       "title": "Artifacts",
@@ -2841,11 +2842,36 @@
       "collapseAll": "Collapse all",
       "expandDir": "Expand all children",
       "fileList": "File List",
+      "selectFile": "Select a file from the tree on the left to preview",
       "previewLoading": "Loading preview...",
       "previewError": "Failed to load preview",
       "previewUnsupported": "This file type can't be previewed inline. Download to view.",
       "previewTooLarge": "File too large to preview inline. Download to view.",
-      "previewFolder": "This is a folder. Browse it in the artifact list on the right."
+      "previewFolder": "This is a folder. Browse it in the artifact list on the right.",
+      "source": "Source",
+      "translation": "Translation",
+      "translate": "Translate",
+      "startTranslation": "Start translation",
+      "retranslate": "Re-translate",
+      "forceRetranslate": "Force re-translate",
+      "stopTranslation": "Stop",
+      "translationCached": "Cached",
+      "translationStarting": "Starting...",
+      "translationStreaming": "Translating...",
+      "translationStreamingHint": "The translated content will appear here as it streams in.",
+      "translationReady": "Ready",
+      "translationFailed": "Translation failed",
+      "translationCancelled": "Translation stopped",
+      "translationCancelledHint": "You can restart translation at any time.",
+      "noTranslationYet": "No translation yet",
+      "noTranslationYetHint": "Start a translation to view the translated version while keeping the original available.",
+      "copySource": "Copy source",
+      "copyTranslation": "Copy translation",
+      "copySourceSuccess": "Source copied",
+      "copyTranslationSuccess": "Translation copied",
+      "copyFailed": "Copy failed",
+      "confirmTranslationTitle": "Confirm Translation",
+      "confirmTranslationMessage": "The text is quite long ({{chars}} characters). Translation will consume a significant amount of tokens. Continue?"
     },
     "state": {
       "taskInfo": "Task info",

@@ -516,11 +516,12 @@ def get_task_logs(
 
 
 def _task_log_entry_handler(
-    entry_id: str, fields: dict
+    _entry_id: str, fields: dict
 ) -> tuple[str, bool] | None:
     """解析任务日志流条目为 SSE 帧。
 
     对脏数据宽松忽略，避免单个坏帧破坏整条 SSE 流。
+    id 行由 :func:`redis_sse_stream` 统一拼接，handler 只产出 event/data。
     """
     try:
         entry = json.loads(fields["data"])
@@ -528,10 +529,7 @@ def _task_log_entry_handler(
         return None
     if not isinstance(entry, dict):
         return None
-    sse_text = (
-        f"id: {entry_id}\n"
-        f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
-    )
+    sse_text = f"data: {json.dumps(entry, ensure_ascii=False)}\n\n"
     is_terminal = entry.get("type") == "end"
     return sse_text, is_terminal
 

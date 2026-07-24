@@ -2749,7 +2749,8 @@
     "gate": {
       "awaiting": "等待你的门控决策",
       "awaitingStage": "阶段 {{stage}} {{name}} · 等待决策",
-      "details": "详情"
+      "details": "详情",
+      "confirmHint": "请确认上方产物是否正确。正确则点「通过」进入下一步，有问题可在下方输入框说明后点「重做」或直接编辑产物，需要退出则点「结束运行」。"
     },
     "artifacts": {
       "title": "产物",
@@ -2762,11 +2763,36 @@
       "collapseAll": "全部收起",
       "expandDir": "展开全部子项",
       "fileList": "文件列表",
+      "selectFile": "请从左侧文件树中选择一个文件进行预览",
       "previewLoading": "加载预览中...",
       "previewError": "预览加载失败",
       "previewUnsupported": "该文件类型不支持在线预览，请下载后查看",
       "previewTooLarge": "文件过大，暂不支持在线预览，请下载后查看",
-      "previewFolder": "这是文件夹，请在右侧产物列表查看"
+      "previewFolder": "这是文件夹，请在右侧产物列表查看",
+      "source": "原文",
+      "translation": "译文",
+      "translate": "翻译",
+      "startTranslation": "开始翻译",
+      "retranslate": "重新翻译",
+      "forceRetranslate": "强制重译",
+      "stopTranslation": "停止",
+      "translationCached": "缓存命中",
+      "translationStarting": "准备中...",
+      "translationStreaming": "翻译中...",
+      "translationStreamingHint": "译文会随着流式返回逐步显示在这里。",
+      "translationReady": "已完成",
+      "translationFailed": "翻译失败",
+      "translationCancelled": "翻译已停止",
+      "translationCancelledHint": "你可以随时重新开始翻译。",
+      "noTranslationYet": "还没有译文",
+      "noTranslationYetHint": "开始翻译后，即可在保留原文的同时查看译文。",
+      "copySource": "复制原文",
+      "copyTranslation": "复制译文",
+      "copySourceSuccess": "已复制原文",
+      "copyTranslationSuccess": "已复制译文",
+      "copyFailed": "复制失败",
+      "confirmTranslationTitle": "确认翻译",
+      "confirmTranslationMessage": "文本较长（{{chars}} 字符），翻译会消耗较多 token。确认继续？"
     },
     "state": {
       "taskInfo": "任务信息",
