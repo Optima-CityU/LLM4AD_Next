@@ -1,28 +1,37 @@
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
-  ChevronRight,
   Copy,
   Download,
   FileCode,
   File as FileIcon,
   FileText,
-  Folder,
   FolderOpen,
   ImageIcon,
   Languages,
   Loader2,
   MousePointerClick,
+  Save,
   Square,
   WandSparkles,
 } from "lucide-react"
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react"
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 import { useTranslation } from "react-i18next"
 import Markdown from "react-markdown"
 import { toast } from "sonner"
 
-import type { ResearchArtifactTreeNode } from "@/client"
+import {
+  Llm4AdResearchService,
+  type FileTreeNode,
+  type ResearchArtifactTreeNode,
+} from "@/client"
+import FileTreeView from "@/components/Evolution/TaskDetail/steps/FileTreeView"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -34,16 +43,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import {
   downloadResearchArtifact,
   fetchResearchArtifact,
+  researchKeys,
   useResearchArtifactTree,
 } from "@/hooks/useAutoResearch"
 import {
@@ -52,11 +57,23 @@ import {
 } from "@/hooks/useArtifactTranslation"
 import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { cn } from "@/lib/utils"
+import { useQueryClient } from "@tanstack/react-query"
+
+import ArtifactCodeEditor from "./ArtifactCodeEditor"
 
 export interface PreviewFile {
   path: string
   name: string
   size: number | null
+}
+
+interface FileState {
+  loaded: boolean
+  loading: boolean
+  error: string | null
+  saved: string
+  draft: string
+  saving: boolean
 }
 
 const IMAGE_EXTS = new Set([
@@ -116,8 +133,15 @@ const TEXT_EXTS = new Set([
 ])
 const TEXT_MAX = 512 * 1024
 
-type PreviewKind = "image" | "pdf" | "markdown" | "text" | "binary" | "folder"
-type PreviewView = "source" | "translation"
+type PreviewKind =
+  | "image"
+  | "pdf"
+  | "markdown"
+  | "text"
+  | "binary"
+  | "folder"
+type ArtifactViewMode = "friendly" | "raw"
+type TranslationView = "source" | "translation"
 
 function classifyArtifact(nameOrPath: string): PreviewKind {
   if (nameOrPath.endsWith("/")) return "folder"
@@ -148,18 +172,15 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}M`
 }
 
-/** 去掉尾部斜杠，得到归一化路径。 */
 function normalizePath(p: string): string {
   return p.replace(/\/+$/, "")
 }
 
-/** 路径最后一段（文件名 / 目录名）。 */
 function lastSegment(p: string): string {
   const norm = normalizePath(p)
   return norm.includes("/") ? (norm.split("/").pop() ?? norm) : norm
 }
 
-/** 按 path 在树中精确定位节点。 */
 function findNodeByPath(
   root: ResearchArtifactTreeNode,
   target: string,
@@ -172,7 +193,6 @@ function findNodeByPath(
   return null
 }
 
-/** 收集节点及其所有子孙目录的 path（默认展开用）。 */
 function collectDirPaths(node: ResearchArtifactTreeNode): string[] {
   if (!node.is_dir) return []
   const out = [node.path]
@@ -180,14 +200,6 @@ function collectDirPaths(node: ResearchArtifactTreeNode): string[] {
   return out
 }
 
-/**
- * 依据传入 path 计算左侧目录树的显示范围与初始激活文件。
- *
- * - 取 path 的「第一层目录」作为范围根：展示该目录下的所有文件（若第一层本身
- *   是文件，则只展示该文件）。
- * - path 指向文件 → 直接激活该文件；指向目录 → 不激活，右侧提示请选择文件。
- * - 树未加载时用扩展名/尾斜杠兜底判断文件/目录。
- */
 function computeScope(
   root: ResearchArtifactTreeNode | null,
   path: string,
@@ -202,7 +214,6 @@ function computeScope(
   const firstSeg = norm.includes("/") ? norm.split("/")[0] : norm
 
   if (!root) {
-    // 树未就绪：用尾斜杠 / 扩展名兜底判断是否文件。
     const looksFile = !path.endsWith("/") && name.includes(".")
     return {
       nodes: [],
@@ -215,26 +226,23 @@ function computeScope(
   const node = findNodeByPath(root, norm)
   const isFile = node ? !node.is_dir : !path.endsWith("/") && name.includes(".")
 
-  // 范围根 = 第一层节点（与顶层同名）。
   const scopeNode =
     (root.children ?? []).find((c) => c.path === firstSeg) ?? null
 
   let nodes: ResearchArtifactTreeNode[]
   let scopeName: string | null
-  if (scopeNode?.is_dir) {
-    nodes = scopeNode.children ?? []
-    scopeName = scopeNode.name
-  } else if (scopeNode) {
+  if (scopeNode) {
     nodes = [scopeNode]
-    scopeName = null
+    scopeName = scopeNode.is_dir ? scopeNode.name : null
   } else {
     nodes = root.children ?? []
     scopeName = null
   }
 
-  // 默认展开范围内所有目录，方便浏览与定位激活文件。
   const expandInit = new Set<string>()
-  for (const n of nodes) for (const p of collectDirPaths(n)) expandInit.add(p)
+  for (const n of nodes) {
+    for (const p of collectDirPaths(n)) expandInit.add(p)
+  }
 
   return {
     nodes,
@@ -242,6 +250,31 @@ function computeScope(
     initialFile: isFile ? { path: norm, name, size: node?.size ?? null } : null,
     expandInit,
   }
+}
+
+function adaptResearchNode(node: ResearchArtifactTreeNode): FileTreeNode {
+  return {
+    name: node.name,
+    path: node.path,
+    type: node.is_dir ? "directory" : "file",
+    children: node.children?.map(adaptResearchNode),
+  }
+}
+
+function adaptScopeNodes(nodes: ResearchArtifactTreeNode[]): FileTreeNode[] {
+  return nodes.map(adaptResearchNode)
+}
+
+function preferRawFriendly(path: string): boolean {
+  const fileName = lastSegment(path).toLowerCase()
+  if (fileName === "decision.json") return false
+  const ext = path.split(".").pop()?.toLowerCase() ?? ""
+  return ext === "json" || ext === "jsonl" || ext === "ndjson"
+}
+
+function hasNamedFriendlyRenderer(path: string): boolean {
+  const fileName = lastSegment(path).toLowerCase()
+  return fileName === "decision.json" || fileName === "hardware_profile.json"
 }
 
 function TranslationStatusBadge({
@@ -261,18 +294,21 @@ function TranslationStatusBadge({
   > = {
     cached: {
       label: t("autoResearch.artifacts.translationCached"),
-      className: "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      className:
+        "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     },
     translating: {
       label: isStreaming
         ? t("autoResearch.artifacts.translationStreaming")
         : t("autoResearch.artifacts.translationStarting"),
-      className: "border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+      className:
+        "border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400",
       icon: <Loader2 className="size-3 animate-spin" />,
     },
     completed: {
       label: t("autoResearch.artifacts.translationReady"),
-      className: "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+      className:
+        "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
       icon: <Check className="size-3" />,
     },
     failed: {
@@ -282,7 +318,8 @@ function TranslationStatusBadge({
     },
     cancelled: {
       label: t("autoResearch.artifacts.translationCancelled"),
-      className: "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      className:
+        "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
       icon: <Square className="size-3 fill-current" />,
     },
   }
@@ -301,15 +338,283 @@ function TranslationStatusBadge({
   )
 }
 
-function ArtifactTextContent({
+function safeParseJson(content: string): unknown {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}
+
+interface DecisionArtifactData {
+  stage_id?: string | null
+  run_id?: string | null
+  status?: string | null
+  decision?: string | null
+  output_artifacts?: string[] | null
+  evidence_refs?: string[] | null
+  error?: string | null
+  ts?: string | null
+  next_stage?: number | null
+}
+
+function DecisionArtifactView({ data }: { data: DecisionArtifactData }) {
+  const { t } = useTranslation()
+
+  const rows = [
+    {
+      label: t("autoResearch.artifacts.decisionFields.stageId"),
+      value: data.stage_id || "—",
+    },
+    {
+      label: t("autoResearch.artifacts.decisionFields.runId"),
+      value: data.run_id || "—",
+      mono: true,
+    },
+    {
+      label: t("autoResearch.artifacts.decisionFields.status"),
+      value: data.status || "—",
+      pill: true,
+    },
+    {
+      label: t("autoResearch.artifacts.decisionFields.decision"),
+      value: data.decision || "—",
+      pill: true,
+      accent: data.decision === "proceed",
+    },
+    {
+      label: t("autoResearch.artifacts.decisionFields.timestamp"),
+      value: data.ts || "—",
+      mono: true,
+    },
+    {
+      label: t("autoResearch.artifacts.decisionFields.nextStage"),
+      value:
+        data.next_stage == null ? "—" : `#${String(data.next_stage)}`,
+    },
+    {
+      label: t("autoResearch.artifacts.decisionFields.error"),
+      value: data.error || "—",
+      destructive: !!data.error,
+    },
+  ]
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="rounded-lg border border-border/50 bg-background/70 px-3 py-2.5"
+          >
+            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {row.label}
+            </div>
+            {row.pill ? (
+              <div className="mt-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                    row.destructive
+                      ? "border-destructive/20 bg-destructive/10 text-destructive"
+                      : row.accent
+                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        : "border-border/60 bg-muted/40 text-foreground/80",
+                  )}
+                >
+                  {row.value}
+                </span>
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "mt-1.5 text-sm text-foreground break-all",
+                  row.mono && "font-mono text-[12px]",
+                  row.destructive && "text-destructive",
+                )}
+              >
+                {row.value}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-3">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+            {t("autoResearch.artifacts.decisionFields.outputArtifacts")}
+          </div>
+          {data.output_artifacts?.length ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {data.output_artifacts.map((item) => (
+                <span
+                  key={item}
+                  className="inline-flex items-center rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-xs text-foreground/85"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 text-sm text-muted-foreground">—</div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-3">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+            {t("autoResearch.artifacts.decisionFields.evidenceRefs")}
+          </div>
+          {data.evidence_refs?.length ? (
+            <div className="mt-2 space-y-1.5">
+              {data.evidence_refs.map((item) => (
+                <div
+                  key={item}
+                  className="rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[12px] text-foreground/85 break-all"
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 text-sm text-muted-foreground">—</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface HardwareProfileArtifactData {
+  has_gpu?: boolean | null
+  gpu_type?: string | null
+  gpu_name?: string | null
+  vram_mb?: number | null
+  tier?: string | null
+  warning?: string | null
+}
+
+function HardwareProfileArtifactView({
+  data,
+}: {
+  data: HardwareProfileArtifactData
+}) {
+  const { t } = useTranslation()
+
+  const rows = [
+    {
+      label: t("autoResearch.artifacts.hardwareFields.hasGpu"),
+      value: data.has_gpu == null ? "—" : data.has_gpu ? t("common.yes") : t("common.no"),
+      pill: true,
+      accent: !!data.has_gpu,
+      muted: data.has_gpu === false,
+    },
+    {
+      label: t("autoResearch.artifacts.hardwareFields.gpuType"),
+      value: data.gpu_type || "—",
+      pill: true,
+    },
+    {
+      label: t("autoResearch.artifacts.hardwareFields.gpuName"),
+      value: data.gpu_name || "—",
+    },
+    {
+      label: t("autoResearch.artifacts.hardwareFields.vram"),
+      value:
+        data.vram_mb == null ? "—" : `${String(data.vram_mb)} MB`,
+      mono: true,
+    },
+    {
+      label: t("autoResearch.artifacts.hardwareFields.tier"),
+      value: data.tier || "—",
+      pill: true,
+      muted: data.tier === "cpu_only",
+    },
+  ]
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="rounded-lg border border-border/50 bg-background/70 px-3 py-2.5"
+          >
+            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+              {row.label}
+            </div>
+            {row.pill ? (
+              <div className="mt-2">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                    row.accent
+                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                      : row.muted
+                        ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        : "border-border/60 bg-muted/40 text-foreground/80",
+                  )}
+                >
+                  {row.value}
+                </span>
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "mt-1.5 text-sm text-foreground break-all",
+                  row.mono && "font-mono text-[12px]",
+                )}
+              >
+                {row.value}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-amber-700/90 dark:text-amber-300/90">
+          {t("autoResearch.artifacts.hardwareFields.warning")}
+        </div>
+        <div className="mt-2 text-sm leading-relaxed text-foreground/85 whitespace-pre-wrap">
+          {data.warning || "—"}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ArtifactFriendlyContent({
+  filePath,
   kind,
   content,
   mdId,
 }: {
+  filePath: string
   kind: PreviewKind
   content: string
   mdId: string
 }) {
+  const fileName = lastSegment(filePath).toLowerCase()
+
+  if (fileName === "decision.json") {
+    const parsed = safeParseJson(content)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return <DecisionArtifactView data={parsed as DecisionArtifactData} />
+    }
+  }
+
+  if (fileName === "hardware_profile.json") {
+    const parsed = safeParseJson(content)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return (
+        <HardwareProfileArtifactView
+          data={parsed as HardwareProfileArtifactData}
+        />
+      )
+    }
+  }
+
   if (kind === "markdown") {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none p-4 prose-headings:text-foreground prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-pre:bg-transparent prose-pre:p-0">
@@ -331,153 +636,53 @@ function ArtifactTextContent({
   )
 }
 
-/** 左侧目录树的单个节点：目录可折叠，文件点击激活。 */
-function ArtifactTreeNode({
-  node,
-  depth,
-  selectedPath,
-  expanded,
-  onToggle,
-  onSelect,
-  sessionId,
-}: {
-  node: ResearchArtifactTreeNode
-  depth: number
-  selectedPath: string | null
-  expanded: Set<string>
-  onToggle: (path: string) => void
-  onSelect: (file: PreviewFile) => void
-  sessionId: string
-}) {
-  const { t } = useTranslation()
-  const pad = { paddingLeft: `${depth * 12 + 4}px` }
-
-  if (node.is_dir) {
-    const open = expanded.has(node.path)
-    return (
-      <li>
-        <button
-          type="button"
-          style={pad}
-          onClick={() => onToggle(node.path)}
-          className="w-full flex items-center gap-1 py-1 pr-1 rounded hover:bg-primary/[0.06] text-xs text-foreground/80 text-left"
-        >
-          {open ? (
-            <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-          )}
-          {open ? (
-            <FolderOpen className="size-3.5 shrink-0 text-amber-500" />
-          ) : (
-            <Folder className="size-3.5 shrink-0 text-amber-500" />
-          )}
-          <span className="truncate">{node.name}</span>
-        </button>
-        {open && (node.children?.length ?? 0) > 0 && (
-          <ul className="relative space-y-0.5">
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 w-px bg-border/60 dark:bg-border/40"
-              style={{ left: `${depth * 12 + 11}px` }}
-            />
-            {node.children?.map((c) => (
-              <ArtifactTreeNode
-                key={c.path}
-                node={c}
-                depth={depth + 1}
-                selectedPath={selectedPath}
-                expanded={expanded}
-                onToggle={onToggle}
-                onSelect={onSelect}
-                sessionId={sessionId}
-              />
-            ))}
-          </ul>
-        )}
-      </li>
-    )
-  }
-
-  const active = node.path === selectedPath
-  return (
-    <li>
-      <div
-        style={pad}
-        className={cn(
-          "group flex items-center gap-1 py-1 pr-1 rounded text-xs transition-colors",
-          active ? "bg-primary/15 text-primary" : "hover:bg-primary/[0.06]",
-        )}
-      >
-        <button
-          type="button"
-          onClick={() =>
-            onSelect({
-              path: node.path,
-              name: node.name,
-              size: node.size ?? null,
-            })
-          }
-          className="flex-1 min-w-0 flex items-center gap-1 text-left"
-        >
-          <span className="w-3 shrink-0" />
-          <FileKindIcon name={node.name} />
-          <span
-            className={cn(
-              "truncate flex-1",
-              active ? "font-medium" : "text-foreground/80",
-            )}
-            title={node.path}
-          >
-            {node.name}
-          </span>
-          {node.size != null && (
-            <span className="text-[10px] text-muted-foreground/60 shrink-0 tabular-nums">
-              {formatSize(node.size)}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            void downloadResearchArtifact(sessionId, node.path).catch(
-              (err: unknown) =>
-                toast.error((err as Error)?.message ?? "download failed"),
-            )
-          }
-          title={t("autoResearch.artifacts.download")}
-          className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-primary shrink-0 transition-opacity"
-        >
-          <Download className="size-3.5" />
-        </button>
-      </div>
-    </li>
-  )
-}
-
-/**
- * 右侧预览面板：按文件类型渲染（图片 / PDF / markdown / 文本 / 二进制），
- * 文本与 markdown 额外提供原文 · 译文切换与复制。``file`` 为 null 时提示请选择文件。
- */
 function PreviewPane({
   sessionId,
   file,
+  state,
+  onDraftChange,
+  onSave,
+  readOnly,
+  editable,
+  allowSave,
+  onConfirm,
+  confirmLabel,
 }: {
   sessionId: string
   file: PreviewFile | null
+  state?: FileState
+  onDraftChange: (path: string, draft: string) => void
+  onSave: (path: string) => Promise<void>
+  readOnly: boolean
+  editable: boolean
+  allowSave: boolean
+  onConfirm?: () => void
+  confirmLabel?: string
 }) {
   const { t } = useTranslation()
   useHljsTheme()
   const mdId = useId()
   const [copiedText, copy] = useCopyToClipboard()
   const kind = file ? classifyArtifact(file.path || file.name) : "binary"
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [text, setText] = useState<string | null>(null)
-  const [url, setUrl] = useState<string | null>(null)
-  const [tooLarge, setTooLarge] = useState(false)
-  const [activeView, setActiveView] = useState<PreviewView>("source")
+  const namedFriendly = !!file && hasNamedFriendlyRenderer(file.path)
+  const forceRawFriendly = !!file && preferRawFriendly(file.path)
+  const canFriendly = namedFriendly || kind === "markdown" || kind === "text"
+  const canRaw = kind === "markdown" || kind === "text"
+  const canEdit = editable && !readOnly && canRaw
+  const [viewMode, setViewMode] = useState<ArtifactViewMode>("friendly")
+  const [translationView, setTranslationView] = useState<TranslationView>("source")
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
+
+  const text = state?.loaded ? state.saved : null
+  const draft = state?.loaded ? state.draft : null
+  const loading = state?.loading ?? false
+  const error = state?.error ?? null
+  const saving = state?.saving ?? false
+  const dirty = !!state && state.loaded && state.saved !== state.draft
+  const tooLarge = !!file &&
+    (kind === "text" || kind === "markdown") &&
+    file.size != null &&
+    file.size > TEXT_MAX
 
   const canTranslate =
     !!file &&
@@ -495,64 +700,43 @@ function PreviewPane({
 
   useEffect(() => {
     if (!file) return
-    let objectUrl: string | null = null
-    let cancelled = false
-    setError(null)
-    setText(null)
-    setUrl(null)
-    setTooLarge(false)
-    setLoading(false)
-
-    if (kind === "binary" || kind === "folder") return
-
-    if (
-      (kind === "text" || kind === "markdown") &&
-      file.size != null &&
-      file.size > TEXT_MAX
-    ) {
-      setTooLarge(true)
+    if (canEdit) {
+      setViewMode("raw")
       return
     }
-
-    setLoading(true)
-    ;(async () => {
-      try {
-        const resp = await fetchResearchArtifact(sessionId, file.path)
-        if (cancelled) return
-        if (kind === "text" || kind === "markdown") {
-          const txt = await resp.text()
-          if (!cancelled) setText(txt)
-        } else {
-          const blob = await resp.blob()
-          objectUrl = URL.createObjectURL(blob)
-          if (!cancelled) setUrl(objectUrl)
-        }
-      } catch (e) {
-        if (!cancelled) setError((e as Error)?.message ?? "error")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    if (forceRawFriendly) {
+      setViewMode("raw")
+      return
     }
-  }, [file, kind, sessionId])
+    if (canFriendly) {
+      setViewMode("friendly")
+      return
+    }
+    if (canRaw) {
+      setViewMode("raw")
+      return
+    }
+    setViewMode("friendly")
+  }, [file?.path, canEdit, canFriendly, canRaw, forceRawFriendly])
 
   useEffect(() => {
-    setActiveView("source")
+    setTranslationView("source")
     setShowConfirmDialog(false)
   }, [file?.path])
 
   useEffect(() => {
-    if (!canTranslate && activeView === "translation") {
-      setActiveView("source")
+    if (!canTranslate && translationView === "translation") {
+      setTranslationView("source")
     }
-  }, [activeView, canTranslate])
+  }, [translationView, canTranslate])
 
-  // 切换到译文标签时自动触发翻译
   useEffect(() => {
-    if (activeView === "translation" && canTranslate && !translation.hasTranslation && !translation.isStreaming) {
+    if (
+      translationView === "translation" &&
+      canTranslate &&
+      !translation.hasTranslation &&
+      !translation.isStreaming
+    ) {
       const textLength = text?.length ?? 0
       if (textLength > 10000) {
         setShowConfirmDialog(true)
@@ -560,7 +744,7 @@ function PreviewPane({
         void handleTranslate(false)
       }
     }
-  }, [activeView, canTranslate])
+  }, [translationView, canTranslate])
 
   const triggerDownload = () => {
     if (!file) return
@@ -569,37 +753,32 @@ function PreviewPane({
     )
   }
 
+  const targetLanguage = "zh"
+  const isTranslationTargetCurrent =
+    translation.targetLanguage === targetLanguage && translation.hasTranslation
+
   const handleTranslate = async (force = false) => {
     if (!canTranslate) return
     setShowConfirmDialog(false)
     try {
-      await translation.startTranslation({ force })
+      await translation.startTranslation({
+        force,
+        targetLanguage,
+      })
     } catch (err) {
-      toast.error((err as Error)?.message ?? t("autoResearch.artifacts.translationFailed"))
+      toast.error(
+        (err as Error)?.message ?? t("autoResearch.artifacts.translationFailed"),
+      )
     }
   }
 
-  const handleConfirmTranslation = () => {
-    void handleTranslate(false)
-  }
-
-  const handleCancelTranslation = () => {
-    setShowConfirmDialog(false)
-    setActiveView("source")
-  }
-
-  const copyContent = useMemo(() => {
-    if (activeView === "translation") return translation.content
-    return text ?? ""
-  }, [activeView, text, translation.content])
-
-  const canCopy = (kind === "markdown" || kind === "text") && copyContent.length > 0
-
   const handleCopy = async () => {
-    const ok = await copy(copyContent)
+    const content = currentTextContent
+    if (!content) return
+    const ok = await copy(content)
     if (ok) {
       toast.success(
-        activeView === "translation"
+        translationView === "translation"
           ? t("autoResearch.artifacts.copyTranslationSuccess")
           : t("autoResearch.artifacts.copySourceSuccess"),
       )
@@ -608,7 +787,14 @@ function PreviewPane({
     }
   }
 
-  // 未选择文件：提示从左侧选择。
+  const sourceContent = canEdit ? (draft ?? text ?? "") : (text ?? "")
+  const translatedContent =
+    translationView === "translation" && isTranslationTargetCurrent
+      ? translation.content
+      : ""
+  const currentTextContent =
+    translationView === "translation" ? translatedContent : sourceContent
+
   if (!file) {
     return (
       <div className="flex flex-1 min-w-0 flex-col items-center justify-center gap-3 rounded-md border border-border/50 bg-muted/20 px-6 text-center">
@@ -621,8 +807,7 @@ function PreviewPane({
   }
 
   return (
-    <div className="flex-1 min-w-0 rounded-md border border-border/50 bg-muted/20 overflow-hidden">
-      {/* 翻译确认对话框 */}
+    <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-border/50 bg-muted/20">
       {showConfirmDialog && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-lg border border-border bg-background p-6 shadow-lg">
@@ -643,14 +828,17 @@ function PreviewPane({
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={handleCancelTranslation}
+                  onClick={() => {
+                    setShowConfirmDialog(false)
+                    setTranslationView("source")
+                  }}
                   className="px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-background hover:bg-muted transition-colors"
                 >
                   {t("common.cancel")}
                 </button>
                 <button
                   type="button"
-                  onClick={handleConfirmTranslation}
+                  onClick={() => void handleTranslate(false)}
                   className="px-3 py-1.5 rounded-md text-xs font-medium border border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
                 >
                   {t("common.confirm")}
@@ -661,225 +849,414 @@ function PreviewPane({
         </div>
       )}
 
-      {canTranslate ? (
-        <Tabs
-          value={activeView}
-          onValueChange={(value) => setActiveView(value as PreviewView)}
-          className="h-full gap-0"
-        >
-          <div className="flex items-center justify-between gap-3 border-b border-border/50 bg-background/80 px-3 py-2 backdrop-blur-sm">
-            <div className="flex min-w-0 items-center gap-2">
-              <TabsList className="h-8">
-                <TabsTrigger value="source" className="text-xs px-3">
-                  {t("autoResearch.artifacts.source")}
-                </TabsTrigger>
-                <TabsTrigger value="translation" className="text-xs px-3">
-                  {t("autoResearch.artifacts.translation")}
-                </TabsTrigger>
-              </TabsList>
+      <div className="flex items-center justify-between gap-3 border-b border-border/50 bg-background/80 px-3 py-2 backdrop-blur-sm">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="inline-flex items-center rounded-md border border-border/60 bg-background/60 p-0.5">
+            {canFriendly && !forceRawFriendly && (
+              <button
+                type="button"
+                onClick={() => setViewMode("friendly")}
+                className={cn(
+                  "rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                  viewMode === "friendly"
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t("autoResearch.artifacts.viewFriendly")}
+              </button>
+            )}
+            {canRaw && (
+              <button
+                type="button"
+                onClick={() => setViewMode("raw")}
+                className={cn(
+                  "rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                  viewMode === "raw"
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t("autoResearch.artifacts.viewRaw")}
+              </button>
+            )}
+          </div>
+
+          {canTranslate && (
+            <>
+              <div className="h-4 w-px bg-border/60" />
+              <Tabs
+                value={translationView}
+                onValueChange={(value) =>
+                  setTranslationView(value as TranslationView)
+                }
+                className="gap-0"
+              >
+                <TabsList className="h-8">
+                  <TabsTrigger value="source" className="text-xs px-3">
+                    {t("autoResearch.artifacts.source")}
+                  </TabsTrigger>
+                  <TabsTrigger value="translation" className="text-xs px-3">
+                    {t("autoResearch.artifacts.translation")}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
               <TranslationStatusBadge
                 status={translation.status}
                 isStreaming={translation.isStreaming}
                 t={t}
               />
-            </div>
+            </>
+          )}
+        </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              {translation.isStreaming && (
-                <button
-                  type="button"
-                  onClick={translation.stop}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                >
-                  <Square className="size-3.5 fill-current" />
-                  {t("autoResearch.artifacts.stopTranslation")}
-                </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {canTranslate && translation.isStreaming && (
+            <button
+              type="button"
+              onClick={translation.stop}
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/15 dark:text-amber-300"
+            >
+              <Square className="size-3.5 fill-current" />
+              {t("autoResearch.artifacts.stopTranslation")}
+            </button>
+          )}
+
+          {canTranslate && (
+            <button
+              type="button"
+              onClick={() => void handleTranslate(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <WandSparkles className="size-3.5" />
+              {t("autoResearch.artifacts.forceRetranslate")}
+            </button>
+          )}
+
+          {(kind === "text" || kind === "markdown") && currentTextContent ? (
+            <button
+              type="button"
+              onClick={() => void handleCopy()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              {copiedText === currentTextContent && currentTextContent ? (
+                <Check className="size-3.5 text-emerald-500" />
+              ) : (
+                <Copy className="size-3.5" />
               )}
+              {translationView === "translation"
+                ? t("autoResearch.artifacts.copyTranslation")
+                : t("autoResearch.artifacts.copySource")}
+            </button>
+          ) : null}
 
-              <button
-                type="button"
-                onClick={() => void handleCopy()}
-                disabled={!canCopy}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {copiedText === copyContent && copyContent ? (
-                  <Check className="size-3.5 text-emerald-500" />
-                ) : (
-                  <Copy className="size-3.5" />
-                )}
-                {activeView === "translation"
-                  ? t("autoResearch.artifacts.copyTranslation")
-                  : t("autoResearch.artifacts.copySource")}
-              </button>
-            </div>
-          </div>
-
-          <TabsContent value="source" className="mt-0 h-full overflow-auto">
-            {text != null ? <ArtifactTextContent kind={kind} content={text} mdId={mdId} /> : null}
-          </TabsContent>
-
-          <TabsContent value="translation" className="mt-0 h-full overflow-auto">
-            {translation.content ? (
-              <ArtifactTextContent
-                kind={kind}
-                content={translation.content}
-                mdId={`${mdId}-translation`}
-              />
-            ) : translation.status === "failed" ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                <AlertTriangle className="size-8 text-destructive" />
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("autoResearch.artifacts.translationFailed")}
-                  </p>
-                  {translation.error && (
-                    <p className="text-xs text-muted-foreground break-all">
-                      {translation.error}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleTranslate(false)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
-                  >
-                    <Languages className="size-3.5" />
-                    {t("common.retry")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleTranslate(true)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-                  >
-                    <WandSparkles className="size-3.5" />
-                    {t("autoResearch.artifacts.forceRetranslate")}
-                  </button>
-                </div>
-              </div>
-            ) : translation.status === "cancelled" ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                <Square className="size-8 fill-current text-amber-500" />
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("autoResearch.artifacts.translationCancelled")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("autoResearch.artifacts.translationCancelledHint")}
-                  </p>
-                </div>
-              </div>
-            ) : translation.isStreaming ? (
-              <div className="flex h-full flex-col">
-                {translation.content ? (
-                  <ArtifactTextContent
-                    kind={kind}
-                    content={translation.content}
-                    mdId={`${mdId}-translation`}
-                  />
-                ) : (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                    <Loader2 className="size-8 animate-spin text-primary" />
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-foreground">
-                        {t("autoResearch.artifacts.translationStreaming")}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {t("autoResearch.artifacts.translationStreamingHint")}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                <Languages className="size-8 text-muted-foreground/50" />
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("autoResearch.artifacts.noTranslationYet")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("autoResearch.artifacts.noTranslationYetHint")}
-                  </p>
-                </div>
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-      ) : loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          {t("autoResearch.artifacts.previewLoading")}
-        </div>
-      ) : error ? (
-        <div className="flex flex-col items-center gap-2 py-16 px-4 text-center text-sm text-destructive">
-          <AlertTriangle className="size-6" />
-          {t("autoResearch.artifacts.previewError")}
-          <span className="text-xs text-muted-foreground break-all">{error}</span>
-        </div>
-      ) : tooLarge || kind === "binary" ? (
-        <div className="flex flex-col items-center gap-3 py-16 px-4 text-center">
-          <FileIcon className="size-8 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">
-            {tooLarge
-              ? t("autoResearch.artifacts.previewTooLarge")
-              : t("autoResearch.artifacts.previewUnsupported")}
-          </p>
           <button
             type="button"
             onClick={triggerDownload}
-            className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+            title={t("autoResearch.artifacts.download")}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
           >
             <Download className="size-3.5" />
             {t("autoResearch.artifacts.download")}
           </button>
         </div>
-      ) : kind === "image" && url ? (
-        <div className="flex items-center justify-center p-4 h-full overflow-auto">
-          <img
-            src={url}
-            alt={file.name}
-            className="max-w-full max-h-[64vh] object-contain"
-          />
-        </div>
-      ) : kind === "pdf" && url ? (
-        <iframe
-          src={url}
-          title={file.name ?? "pdf"}
-          className="w-full h-[70vh] bg-white"
-        />
-      ) : kind === "markdown" && text != null ? (
-        <div className="h-full overflow-auto">
-          <ArtifactTextContent kind={kind} content={text} mdId={mdId} />
-        </div>
-      ) : text != null ? (
-        <div className="h-full overflow-auto">
-          <ArtifactTextContent kind={kind} content={text} mdId={mdId} />
-        </div>
-      ) : null}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {loading ? (
+          <div className="flex h-full items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            {t("autoResearch.artifacts.previewLoading")}
+          </div>
+        ) : error ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 py-16 px-4 text-center text-sm text-destructive">
+            <AlertTriangle className="size-6" />
+            {t("autoResearch.artifacts.previewError")}
+            <span className="text-xs text-muted-foreground break-all">{error}</span>
+          </div>
+        ) : tooLarge || kind === "binary" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 py-16 px-4 text-center">
+            <FileIcon className="size-8 text-muted-foreground/50" />
+            <p className="text-sm text-muted-foreground">
+              {tooLarge
+                ? t("autoResearch.artifacts.previewTooLarge")
+                : t("autoResearch.artifacts.previewUnsupported")}
+            </p>
+          </div>
+        ) : kind === "folder" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 py-16 px-4 text-center">
+            <FolderOpen className="size-8 text-muted-foreground/50" />
+            <p className="text-sm text-muted-foreground">
+              {t("autoResearch.artifacts.previewFolder")}
+            </p>
+          </div>
+        ) : kind === "image" ? (
+          <ImagePreview sessionId={sessionId} path={file.path} alt={file.name} />
+        ) : kind === "pdf" ? (
+          <PdfPreview sessionId={sessionId} path={file.path} title={file.name} />
+        ) : viewMode === "raw" && currentTextContent ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex items-center gap-2 border-b border-border/50 bg-background/60 px-3 py-2">
+              <span className="truncate text-[11px] font-mono text-muted-foreground">
+                {file.path}
+              </span>
+              {canEdit && dirty && (
+                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="size-3" />
+                  {t("autoResearch.artifacts.unsaved")}
+                </span>
+              )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ArtifactCodeEditor
+                filePath={file.path}
+                value={canEdit ? (draft ?? "") : currentTextContent}
+                readOnly={!canEdit}
+                onChange={
+                  canEdit
+                    ? (next) => onDraftChange(file.path, next)
+                    : undefined
+                }
+              />
+            </div>
+            {(canEdit || onConfirm) && (
+              <div className="flex items-center justify-between gap-2 border-t border-border/50 bg-background/60 px-3 py-2">
+                <span className="text-[11px] text-muted-foreground">
+                  {canEdit
+                    ? t("autoResearch.artifacts.editableFile")
+                    : t("autoResearch.artifacts.readOnlyFile")}
+                </span>
+                <div className="flex items-center gap-2">
+                  {canEdit && allowSave && (
+                    <button
+                      type="button"
+                      onClick={() => void onSave(file.path)}
+                      disabled={!dirty || saving}
+                      className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+                    >
+                      {saving ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Save className="size-3.5" />
+                      )}
+                      {t("autoResearch.form.editSave")}
+                    </button>
+                  )}
+                  {onConfirm && (
+                    <button
+                      type="button"
+                      onClick={onConfirm}
+                      disabled={dirty || saving}
+                      title={t("autoResearch.form.editConfirmHint")}
+                      className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+                    >
+                      <Check className="size-3.5" />
+                      {confirmLabel ?? t("autoResearch.form.editConfirm")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : currentTextContent ? (
+          <div className="h-full overflow-auto">
+            <ArtifactFriendlyContent
+              filePath={file.path}
+              kind={kind}
+              content={currentTextContent}
+              mdId={
+                translationView === "translation"
+                  ? `${mdId}-translation`
+                  : mdId
+              }
+            />
+          </div>
+        ) : translationView === "translation" && translation.status === "failed" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <AlertTriangle className="size-8 text-destructive" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">
+                {t("autoResearch.artifacts.translationFailed")}
+              </p>
+              {translation.error && (
+                <p className="text-xs text-muted-foreground break-all">
+                  {translation.error}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : translationView === "translation" && translation.status === "cancelled" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <Square className="size-8 fill-current text-amber-500" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">
+                {t("autoResearch.artifacts.translationCancelled")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("autoResearch.artifacts.translationCancelledHint")}
+              </p>
+            </div>
+          </div>
+        ) : translationView === "translation" && translation.isStreaming ? (
+          <div className="flex h-full flex-col">
+            {translation.content ? (
+              viewMode === "raw" ? (
+                <ArtifactCodeEditor
+                  filePath={file.path}
+                  value={translation.content}
+                  readOnly
+                />
+              ) : (
+                <ArtifactFriendlyContent
+                  filePath={file.path}
+                  kind={kind}
+                  content={translation.content}
+                  mdId={`${mdId}-translation`}
+                />
+              )
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <Loader2 className="size-8 animate-spin text-primary" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {t("autoResearch.artifacts.translationStreaming")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("autoResearch.artifacts.translationStreamingHint")}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : translationView === "translation" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <Languages className="size-8 text-muted-foreground/50" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">
+                {t("autoResearch.artifacts.noTranslationYet")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("autoResearch.artifacts.noTranslationYetHint")}
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
 
-/**
- * 公共产物预览弹框：左侧目录树 + 右侧预览。
- *
- * 三个入口共用（顶部阶段抽屉的文件 / 右侧产物树的文件 / 中间门控卡片的阶段产物）。
- * 只需传 ``sessionId`` 与目标 ``path``（文件或目录）：
- * - 组件自行拉取整棵产物树，按 ``path`` 的第一层目录过滤出左侧树；
- * - ``path`` 指向文件则直接激活预览，指向目录则等待用户从左侧选择。
- */
+function ImagePreview({
+  sessionId,
+  path,
+  alt,
+}: {
+  sessionId: string
+  path: string
+  alt: string
+}) {
+  const [url, setUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl: string | null = null
+    ;(async () => {
+      try {
+        const resp = await fetchResearchArtifact(sessionId, path)
+        const blob = await resp.blob()
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setUrl(objectUrl)
+      } catch {
+        setUrl(null)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [sessionId, path])
+
+  if (!url) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full items-center justify-center p-4 overflow-auto">
+      <img src={url} alt={alt} className="max-w-full max-h-[64vh] object-contain" />
+    </div>
+  )
+}
+
+function PdfPreview({
+  sessionId,
+  path,
+  title,
+}: {
+  sessionId: string
+  path: string
+  title: string
+}) {
+  const [url, setUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl: string | null = null
+    ;(async () => {
+      try {
+        const resp = await fetchResearchArtifact(sessionId, path)
+        const blob = await resp.blob()
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setUrl(objectUrl)
+      } catch {
+        setUrl(null)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [sessionId, path])
+
+  if (!url) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+      </div>
+    )
+  }
+
+  return <iframe src={url} title={title} className="w-full h-full bg-white" />
+}
+
 export default function ArtifactPreviewDialog({
   sessionId,
   path,
   onClose,
+  readOnly = true,
+  allowSave,
+  editablePaths,
+  onConfirm,
+  confirmLabel,
 }: {
   sessionId: string
-  /** 目标文件或目录路径；null = 关闭弹框。 */
   path: string | null
   onClose: () => void
+  readOnly?: boolean
+  allowSave?: boolean
+  editablePaths?: string[]
+  onConfirm?: () => void
+  confirmLabel?: string
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const treeQ = useResearchArtifactTree(path ? sessionId : null)
   const root = treeQ.data?.root ?? null
 
@@ -887,34 +1264,116 @@ export default function ArtifactPreviewDialog({
     () => (path ? computeScope(root, path) : null),
     [root, path],
   )
+  const treeNodes = useMemo(
+    () => adaptScopeNodes(scope?.nodes ?? []),
+    [scope?.nodes],
+  )
 
   const [selected, setSelected] = useState<PreviewFile | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [states, setStates] = useState<Record<string, FileState>>({})
 
-  // 每次打开（path 变化）或树首次到位时：定位初始激活文件 + 展开范围内目录。
-  // 以 path + 树是否就绪为键，避免用户后续手动切换文件被重置。
+  const editableSet = useMemo(
+    () => new Set(editablePaths?.map(normalizePath) ?? []),
+    [editablePaths],
+  )
+
   const treeReady = !!root
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在 path / 树就绪变化时重置
   useEffect(() => {
     if (!path || !scope) {
       setSelected(null)
-      setExpanded(new Set())
       return
     }
     setSelected(scope.initialFile)
-    setExpanded(scope.expandInit)
   }, [path, treeReady])
 
-  const toggleDir = (p: string) =>
-    setExpanded((s) => {
-      const n = new Set(s)
-      if (n.has(p)) n.delete(p)
-      else n.add(p)
-      return n
-    })
+  useEffect(() => {
+    if (!path) {
+      setStates({})
+    }
+  }, [path])
 
-  const nodes = scope?.nodes ?? []
-  const hasTree = nodes.length > 0
+  const patch = (filePath: string, p: Partial<FileState>) => {
+    setStates((prev) => {
+      const base: FileState = prev[filePath] ?? {
+        loaded: false,
+        loading: false,
+        error: null,
+        saved: "",
+        draft: "",
+        saving: false,
+      }
+      return {
+        ...prev,
+        [filePath]: {
+          ...base,
+          ...p,
+        },
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!selected) return
+    const kind = classifyArtifact(selected.path)
+    if (kind !== "text" && kind !== "markdown") return
+    const current = states[selected.path]
+    if (current?.loaded || current?.loading) return
+    if (selected.size != null && selected.size > TEXT_MAX) return
+
+    let cancelled = false
+    patch(selected.path, { loading: true, error: null })
+    ;(async () => {
+      try {
+        const resp = await fetchResearchArtifact(sessionId, selected.path)
+        const txt = await resp.text()
+        if (cancelled) return
+        patch(selected.path, {
+          loaded: true,
+          loading: false,
+          saved: txt,
+          draft: txt,
+        })
+      } catch (e) {
+        if (cancelled) return
+        patch(selected.path, {
+          loading: false,
+          error: (e as Error)?.message ?? "error",
+        })
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selected?.path, sessionId])
+
+  const saveFile = async (filePath: string) => {
+    const current = states[filePath]
+    if (!current || !current.loaded || current.saved === current.draft || current.saving)
+      return
+    patch(filePath, { saving: true })
+    try {
+      await Llm4AdResearchService.writeArtifact({
+        sessionId,
+        path: filePath,
+        requestBody: { content: current.draft },
+      })
+      patch(filePath, { saving: false, saved: current.draft })
+      qc.invalidateQueries({ queryKey: researchKeys.artifacts(sessionId) })
+      qc.invalidateQueries({ queryKey: researchKeys.artifactTree(sessionId) })
+      toast.success(t("autoResearch.form.editSaved"))
+    } catch (e) {
+      patch(filePath, { saving: false })
+      toast.error(
+        (e as Error)?.message ?? t("autoResearch.form.editSaveFailed"),
+      )
+    }
+  }
+
+  const selectedState = selected ? states[selected.path] : undefined
+  const currentEditable =
+    !!selected && !readOnly && editableSet.has(normalizePath(selected.path))
+  const effectiveAllowSave = allowSave ?? !readOnly
 
   return (
     <Dialog open={!!path} onOpenChange={(o) => !o && onClose()}>
@@ -930,21 +1389,6 @@ export default function ArtifactPreviewDialog({
                     {formatSize(selected.size)}
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() =>
-                    void downloadResearchArtifact(
-                      sessionId,
-                      selected.path,
-                    ).catch((err: unknown) =>
-                      toast.error((err as Error)?.message ?? "download failed"),
-                    )
-                  }
-                  title={t("autoResearch.artifacts.download")}
-                  className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
-                >
-                  <Download className="size-4" />
-                </button>
               </>
             ) : (
               <>
@@ -958,44 +1402,52 @@ export default function ArtifactPreviewDialog({
         </DialogHeader>
 
         <div className="flex gap-3 h-[74vh] min-h-[420px] min-w-0">
-          {/* 左：目录树 */}
-          <div className="w-60 shrink-0 flex flex-col rounded-md border border-border/50 bg-muted/20">
+          <div className="w-64 shrink-0 flex flex-col rounded-md border border-border/50 bg-muted/20 overflow-hidden">
             <div className="shrink-0 border-b border-border/50 bg-muted/40 px-3 py-2 backdrop-blur-sm">
               <span className="text-xs font-semibold text-muted-foreground">
                 {t("autoResearch.artifacts.fileList")}
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {treeQ.isLoading ? (
                 <div className="flex items-center gap-2 py-3 px-1 text-xs text-muted-foreground">
                   <Loader2 className="size-3.5 animate-spin" />
                   {t("autoResearch.artifacts.loading")}
                 </div>
-              ) : !hasTree ? (
+              ) : treeNodes.length === 0 ? (
                 <p className="py-3 px-1 text-xs text-muted-foreground/60">
                   {t("autoResearch.artifacts.empty")}
                 </p>
               ) : (
-                <ul className="space-y-0.5">
-                  {nodes.map((node) => (
-                    <ArtifactTreeNode
-                      key={node.path}
-                      node={node}
-                      depth={0}
-                      selectedPath={selected?.path ?? null}
-                      expanded={expanded}
-                      onToggle={toggleDir}
-                      onSelect={setSelected}
-                      sessionId={sessionId}
-                    />
-                  ))}
-                </ul>
+                <FileTreeView
+                  tree={treeNodes}
+                  selectedPath={selected?.path ?? null}
+                  onSelectFile={(nextPath, isDir) => {
+                    if (isDir) return
+                    const node = root ? findNodeByPath(root, nextPath) : null
+                    setSelected({
+                      path: nextPath,
+                      name: node?.name ?? lastSegment(nextPath),
+                      size: node?.size ?? null,
+                    })
+                  }}
+                />
               )}
             </div>
           </div>
 
-          {/* 右：预览 */}
-          <PreviewPane sessionId={sessionId} file={selected} />
+          <PreviewPane
+            sessionId={sessionId}
+            file={selected}
+            state={selectedState}
+            onDraftChange={(filePath, draft) => patch(filePath, { draft })}
+            onSave={saveFile}
+            readOnly={readOnly}
+            editable={currentEditable}
+            allowSave={effectiveAllowSave}
+            onConfirm={onConfirm}
+            confirmLabel={confirmLabel}
+          />
         </div>
       </DialogContent>
     </Dialog>

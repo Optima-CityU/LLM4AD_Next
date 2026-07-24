@@ -645,6 +645,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           content: null,
           respond_to_message_id: messageId,
           submission,
+          mode: runMode,
         } as never,
       },
       { onError: toastErr },

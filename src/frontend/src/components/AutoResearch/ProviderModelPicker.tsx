@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useProviders } from "@/hooks/useProviders"
+import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { cn } from "@/lib/utils"
 
 const SPECIAL_PROVIDERS = ["", "default", "mock"] as const
@@ -149,7 +149,16 @@ export default function ProviderModelPicker({
 }: Props) {
   const { t } = useTranslation()
   const { data } = useProviders()
+  const { data: defaultModels } = useUserDefaultModels()
   const providers: ProviderResponse[] = data?.items ?? []
+
+  // 「默认」项显示实际生效的系统默认供应商/模型（与 evolution 的 AI 构建选择器一致）。
+  const defaultHint = [
+    defaultModels?.planner_provider_name,
+    defaultModels?.planner_model_name,
+  ]
+    .filter(Boolean)
+    .join(" / ")
 
   const selected = providers.find((p) => p.id === provider)
   const availableModels = selected ? parseModels(selected.model) : []
@@ -193,7 +202,7 @@ export default function ProviderModelPicker({
                   DEFAULT
                 </Badge>
                 <span className="text-muted-foreground">
-                  {t("autoResearch.provider.default")}
+                  {defaultHint || t("autoResearch.provider.default")}
                 </span>
               </div>
             </SelectItem>

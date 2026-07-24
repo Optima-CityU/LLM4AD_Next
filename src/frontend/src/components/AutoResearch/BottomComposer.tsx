@@ -8,7 +8,6 @@ import {
   Play,
   RotateCcw,
   Send,
-  Settings2,
   Square,
   Terminal,
 } from "lucide-react"
@@ -33,6 +32,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { cn } from "@/lib/utils"
 
 import GatePanel from "./GatePanel"
@@ -125,6 +130,8 @@ export default function BottomComposer({
   onLoadMoreLogs,
 }: Props) {
   const { t, i18n } = useTranslation()
+  const { data: providersData } = useProviders()
+  const { data: defaultModels } = useUserDefaultModels()
   const [text, setText] = useState("")
   const [noteError, setNoteError] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -219,7 +226,7 @@ export default function BottomComposer({
   }
 
   // 门控按钮：理由取底部输入框。reject/inject 必填，空则高亮报错；
-  // 提交成功后清空输入框，submission 组装在此统一处理（含 mode）。
+  // 提交成功后清空输入框，submission 只组装表单值；mode 由父层顶层请求体传递。
   // collabBusy（问 AI 进行中）时禁止提交，避免与协作轮抢同一个输入框。
   const handleGateAction = (value: string) => {
     if (!gateMessage || inputDisabled) return
@@ -228,7 +235,7 @@ export default function BottomComposer({
       setNoteError(true)
       return
     }
-    const submission: Record<string, unknown> = { action: value, mode }
+    const submission: Record<string, unknown> = { action: value }
     if (trimmed) {
       submission.message = trimmed
       if (GUIDANCE_ACTIONS.has(value)) submission.guidance = trimmed
@@ -248,10 +255,22 @@ export default function BottomComposer({
     })
   }
 
-  const providerLabel =
-    provider && provider !== "default" && provider !== ""
-      ? provider + (model ? ` / ${model}` : "")
-      : t("autoResearch.provider.default")
+  const providerList = providersData?.items ?? []
+  const selectedProvider = providerList.find((p) => p.id === provider)
+  const defaultProviderName = defaultModels?.planner_provider_name || t("autoResearch.provider.default")
+  const defaultModelName = defaultModels?.planner_model_name || ""
+
+  const providerLabel = (() => {
+    if (!provider || provider === "default") {
+      const label = defaultProviderName
+      return defaultModelName ? `${label} / ${defaultModelName}` : label
+    }
+    if (provider === "mock") {
+      return t("autoResearch.provider.mock")
+    }
+    const label = selectedProvider?.name || provider
+    return model ? `${label} / ${model}` : label
+  })()
 
   // 输入框行：
   // - 非门控：透明贴合外层大卡片（单层框，聚焦光晕由外层承载），支持多行自增高。
@@ -291,9 +310,8 @@ export default function BottomComposer({
         className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 max-h-32 py-1 disabled:opacity-60 transition-[height] duration-150 ease-out"
       />
 
-      {/* 日志抽屉入口：无工具行且非门控时随输入框；门控时移到门控区右上角；
-          pending/终态由工具行承载 */}
-      {!showRunTools && !gateMessage && (
+      {/* 日志抽屉入口：随输入框（含门控时）；pending/终态由工具行承载 */}
+      {!showRunTools && (
         <LogButton
           count={logs.length}
           active={logsActive}
@@ -365,7 +383,8 @@ export default function BottomComposer({
                 : "border-primary/20 shadow-primary/8 hover:border-primary/30 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/15",
           )}
         >
-          {/* 门控决策区：上下文/产物 → 输入框 → 决策按钮，同框一体 */}
+          {/* 门控决策区：上下文/产物 → 输入框 → 决策按钮，同框一体。
+              日志入口随输入框（发送按钮旁），标题右上角只留「结束运行」。 */}
           {gateMessage && (
             <GatePanel
               message={gateMessage}
@@ -374,15 +393,6 @@ export default function BottomComposer({
               mode={mode}
               onModeChange={onModeChange}
               onAction={handleGateAction}
-              headerRight={
-                <LogButton
-                  count={logs.length}
-                  active={logsActive}
-                  onOpen={() => openDrawer("logs")}
-                  label={t("autoResearch.chat.streamLogs.title")}
-                  compact
-                />
-              }
             >
               {composerRow}
             </GatePanel>
@@ -391,6 +401,29 @@ export default function BottomComposer({
           {/* 运行工具行：仅 pending / 终态显示。控件为幽灵文字按钮 + 下拉，省空间。 */}
           {showRunTools && (
             <div className="flex items-center gap-0.5 flex-wrap px-2.5 pt-2 pb-1.5 border-b border-border/40">
+              {/* 运行模式：两态分段开关（与门控面板一致），选中项高亮。放最左。 */}
+              <div
+                role="group"
+                aria-label={t("autoResearch.create.modeLabel")}
+                className="inline-flex items-center rounded-md border border-border/60 bg-background/50 p-0.5"
+              >
+                {MODE_OPTIONS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onModeChange(m)}
+                    className={cn(
+                      "px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors",
+                      mode === m
+                        ? "bg-primary/15 text-primary"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {t(`autoResearch.mode.${m}`)}
+                  </button>
+                ))}
+              </div>
+
               <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
                 <PopoverTrigger asChild>
                   <button
@@ -426,27 +459,7 @@ export default function BottomComposer({
                 </PopoverContent>
               </Popover>
 
-              <Select
-                value={mode}
-                onValueChange={(v) => onModeChange(v as ResearchMode)}
-              >
-                <SelectTrigger
-                  size="sm"
-                  aria-label={t("autoResearch.create.modeLabel")}
-                  className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60"
-                >
-                  <Settings2 className="size-3 shrink-0" />
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MODE_OPTIONS.map((m) => (
-                    <SelectItem key={m} value={m} className="text-xs">
-                      {t(`autoResearch.mode.${m}`)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
+              {/* 起始阶段：终态可从某一步重跑。带 tooltip 说明用途，放模式左侧。 */}
               {terminal && stages.length > 0 && (
                 <Select
                   value={fromStage || "__begin__"}
@@ -454,14 +467,21 @@ export default function BottomComposer({
                     onFromStageChange(v === "__begin__" ? "" : v)
                   }
                 >
-                  <SelectTrigger
-                    size="sm"
-                    aria-label={t("autoResearch.input.fromStageLabel")}
-                    className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60"
-                  >
-                    <ListStart className="size-3 shrink-0" />
-                    <SelectValue />
-                  </SelectTrigger>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SelectTrigger
+                        size="sm"
+                        aria-label={t("autoResearch.input.fromStageLabel")}
+                        className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60"
+                      >
+                        <ListStart className="size-3 shrink-0" />
+                        <SelectValue />
+                      </SelectTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[240px]">
+                      {t("autoResearch.input.fromStageHint")}
+                    </TooltipContent>
+                  </Tooltip>
                   <SelectContent>
                     <SelectItem value="__begin__" className="text-xs">
                       {t("autoResearch.input.fromStageBegin")}

@@ -165,6 +165,11 @@ export function useArtifactTranslation({
           })
         }
 
+        const flushContent = () => {
+          cancelAnimationFrame(rafId.current)
+          if (!cancelled) setContent(contentBuffer.current)
+        }
+
         try {
           for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (cancelled) return
@@ -208,11 +213,13 @@ export function useArtifactTranslation({
                       continue
                     }
                     if (currentEvent === "done") {
+                      flushContent()
                       setStatus("completed")
                       setIsStreaming(false)
                       return
                     }
                     if (currentEvent === "timeout") {
+                      flushContent()
                       setStatus("failed")
                       setError("stream timeout")
                       setIsStreaming(false)
@@ -225,14 +232,17 @@ export function useArtifactTranslation({
                           contentBuffer.current += parsed.content
                           scheduleFlush()
                         } else if (parsed.type === "done") {
+                          flushContent()
                           setStatus("completed")
                           setIsStreaming(false)
                           return
                         } else if (parsed.type === "cancelled") {
+                          flushContent()
                           setStatus("cancelled")
                           setIsStreaming(false)
                           return
                         } else if (parsed.type === "error") {
+                          flushContent()
                           setStatus("failed")
                           setError(parsed.error || "translation failed")
                           setIsStreaming(false)
@@ -247,6 +257,7 @@ export function useArtifactTranslation({
                   }
                 }
               }
+              flushContent()
               throw new Error("translation stream ended unexpectedly")
             } catch (err) {
               if (cancelled || (err as Error).name === "AbortError") return
@@ -254,6 +265,7 @@ export function useArtifactTranslation({
                 await new Promise((r) => setTimeout(r, RETRY_DELAY))
                 continue
               }
+              flushContent()
               setError((err as Error).message || "connection failed")
               setStatus("failed")
               setIsStreaming(false)
@@ -266,6 +278,7 @@ export function useArtifactTranslation({
         }
       } catch (err) {
         if ((err as Error).name === "AbortError") return
+        setContent(contentBuffer.current)
         setError((err as Error).message || "translation failed")
         setStatus("failed")
         setIsStreaming(false)

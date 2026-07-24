@@ -2142,11 +2142,7 @@ export type ResearchArtifactListResponse = {
 };
 
 /**
- * 翻译单个产物文件的请求体。
- *
- * 入参对齐 ``ResearchAnalysisGenerateRequest``：由用户传入模型与目标语言。
- * ``provider_id``/``model_name`` 为空时回退到用户默认报告模型，再兜底 mock。
- * ``force`` 为 True 时跳过缓存、强制重新翻译。
+ * 翻译单个产物文件的请求体（入参对齐 ``ResearchAnalysisGenerateRequest``）。
  */
 export type ResearchArtifactTranslateRequest = {
     /**
@@ -2173,11 +2169,7 @@ export type ResearchArtifactTranslateRequest = {
 export type target_language = 'zh' | 'en';
 
 /**
- * 翻译产物文件的受理响应。
- *
- * ``status`` 为 ``cached`` 时 ``content`` 直接带回缓存译文，无需再走 SSE；
- * 为 ``translating`` 时表示已后台启动，需连 ``/artifacts/translate/stream``
- * 按 ``source_hash`` 拉取增量。
+ * 翻译受理响应：``cached`` 带全文；``translating`` 需连 SSE 拉增量。
  */
 export type ResearchArtifactTranslateResponse = {
     session_id: string;

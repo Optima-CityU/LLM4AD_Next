@@ -2657,19 +2657,12 @@ export class Llm4AdResearchService {
     
     /**
      * 翻译单个产物文件（带磁盘缓存，支持强制重译）
-     * 把产物文件译成目标语言，供前端展示英文产物的译文。
-     *
-     * - **缓存**：按源文件内容哈希键控，译文落 ``run_dir/.translations/``。源文件
-     * 没变（哈希一致）直接回读缓存，``status=cached`` 时 ``content`` 即完整译文，
-     * 无需再走 SSE。
-     * - **强制翻译**：``force=true`` 跳过缓存、重新翻译并覆盖缓存。
-     * - **流式**：未命中缓存时 ``status=translating``，后台已启动翻译，前端需连
-     * ``GET /artifacts/translate/stream?source_hash=<返回值>`` 实时接收增量，
-     * 完成后译文自动落盘缓存。
+     * 把产物文件译成目标语言：命中缓存回 ``cached``+全文，否则 ``translating``
+     * 并后台启动翻译，前端连 ``/artifacts/translate/stream?source_hash=<返回值>``
+     * 接收增量；``force=true`` 跳过缓存重译。
      *
      * Note:
-     * 必须是 ``async`` 路由：``translate_artifact`` 内部通过
-     * ``asyncio.create_task`` 提交后台翻译协程，需要运行在事件循环线程中；
+     * 必须是 ``async`` 路由：服务层用 ``asyncio.create_task`` 提交后台协程，
      * 同步路由会被丢进线程池，导致「no current event loop」。
      * @param data The data for the request.
      * @param data.sessionId
@@ -2698,11 +2691,10 @@ export class Llm4AdResearchService {
     
     /**
      * SSE：实时推送产物翻译增量
-     * 订阅指定产物翻译的 Redis Stream，持续推送增量译文。
+     * 订阅产物翻译的 Redis Stream，推送增量译文。
      *
-     * 键控段为 ``translate:<hash>:<lang>``，与 POST 触发时一致；断线可靠 SSE
-     * ``Last-Event-ID`` / 重连从流头重放（Redis 保留窗口 1h）。事件类型：
-     * ``chunk`` 增量、``done`` 完成、``error`` 失败、``cancelled`` 被新翻译取消。
+     * 键控 ``translate:<hash>:<lang>``；断线可重连从流头重放（Redis 保留 1h）。
+     * 事件：``chunk`` / ``done`` / ``error`` / ``cancelled``。
      * @param data The data for the request.
      * @param data.sessionId
      * @param data.sourceHash POST /translate 返回的源文件哈希

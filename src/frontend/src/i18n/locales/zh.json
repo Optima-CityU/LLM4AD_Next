@@ -22,6 +22,8 @@
     "name": "名称",
     "type": "类型",
     "status": "状态",
+    "yes": "是",
+    "no": "否",
     "role": "角色",
     "description": "描述",
     "createdTime": "创建时间",
@@ -2749,8 +2751,9 @@
     "gate": {
       "awaiting": "等待你的门控决策",
       "awaitingStage": "阶段 {{stage}} {{name}} · 等待决策",
-      "details": "详情",
-      "confirmHint": "请确认上方产物是否正确。正确则点「通过」进入下一步，有问题可在下方输入框说明后点「重做」或直接编辑产物，需要退出则点「结束运行」。"
+      "confirmHint": "确认产物无误即可「通过」；需要修改可直接编辑产物，或填写说明后「打回重做」。",
+      "abortTitle": "结束本次运行？",
+      "abortDesc": "将立即终止当前研究运行。已完成阶段的产物会保留，但未完成的流程需重新发起。"
     },
     "artifacts": {
       "title": "产物",
@@ -2792,7 +2795,32 @@
       "copyTranslationSuccess": "已复制译文",
       "copyFailed": "复制失败",
       "confirmTranslationTitle": "确认翻译",
-      "confirmTranslationMessage": "文本较长（{{chars}} 字符），翻译会消耗较多 token。确认继续？"
+      "confirmTranslationMessage": "文本较长（{{chars}} 字符），翻译会消耗较多 token。确认继续？",
+      "viewFriendly": "渲染",
+      "viewRaw": "原始",
+      "viewEdit": "编辑",
+      "unsaved": "有未保存修改",
+      "editableFile": "当前文件支持编辑与保存",
+      "readOnlyFile": "当前文件仅支持只读预览",
+      "decisionFields": {
+        "stageId": "阶段标识",
+        "runId": "运行 ID",
+        "status": "状态",
+        "decision": "决策",
+        "timestamp": "时间",
+        "nextStage": "下一阶段",
+        "error": "错误",
+        "outputArtifacts": "输出产物",
+        "evidenceRefs": "证据引用"
+      },
+      "hardwareFields": {
+        "hasGpu": "检测到 GPU",
+        "gpuType": "计算类型",
+        "gpuName": "设备名称",
+        "vram": "显存",
+        "tier": "硬件层级",
+        "warning": "环境提醒"
+      }
     },
     "state": {
       "taskInfo": "任务信息",

@@ -165,9 +165,11 @@
 :root:not(.dark) .arc-shell [class*="bg-background/"] {
   background-color: var(--background) !important;
 }
-/* 装饰性光晕层（radial-gradient + blur 的绝对定位光斑）浅色下隐藏 */
-:root:not(.dark) .arc-shell [class*="blur-2xl"],
-:root:not(.dark) .arc-shell [class*="blur-xl"],
+/* 装饰性光晕层（radial-gradient + blur 的绝对定位光斑）浅色下隐藏。
+   必须全部限定 .absolute，否则 [class*="blur-xl"] 会误伤内容卡片上的
+   backdrop-blur-xl（子串匹配），把整块内容 display:none 导致高度塌陷。 */
+:root:not(.dark) .arc-shell [class*="blur-2xl"].absolute,
+:root:not(.dark) .arc-shell [class*="blur-xl"].absolute,
 :root:not(.dark) .arc-shell [class*="blur-md"].absolute,
 :root:not(.dark) .arc-shell [class*="blur-sm"].absolute {
   display: none !important;

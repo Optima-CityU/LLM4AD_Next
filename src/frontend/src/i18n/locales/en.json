@@ -22,6 +22,8 @@
     "name": "Name",
     "type": "Type",
     "status": "Status",
+    "yes": "Yes",
+    "no": "No",
     "role": "Role",
     "description": "Description",
     "createdTime": "Created",
@@ -2828,8 +2830,9 @@
     "gate": {
       "awaiting": "Awaiting your gate decision",
       "awaitingStage": "Stage {{stage}} {{name}} · awaiting decision",
-      "details": "Details",
-      "confirmHint": "Please confirm the artifacts above are correct. If correct, click 'Approve' to proceed. If there are issues, describe them in the input below and click 'Reject' or directly edit the artifacts. To exit, click 'Abort'."
+      "confirmHint": "Approve if the artifacts look correct. To make changes, edit the artifacts directly, or add a note and Reject.",
+      "abortTitle": "End this run?",
+      "abortDesc": "This immediately terminates the current research run. Artifacts from completed stages are kept, but unfinished stages must be started over."
     },
     "artifacts": {
       "title": "Artifacts",
@@ -2871,7 +2874,32 @@
       "copyTranslationSuccess": "Translation copied",
       "copyFailed": "Copy failed",
       "confirmTranslationTitle": "Confirm Translation",
-      "confirmTranslationMessage": "The text is quite long ({{chars}} characters). Translation will consume a significant amount of tokens. Continue?"
+      "confirmTranslationMessage": "The text is quite long ({{chars}} characters). Translation will consume a significant amount of tokens. Continue?",
+      "viewFriendly": "Rendered",
+      "viewRaw": "Raw",
+      "viewEdit": "Edit",
+      "unsaved": "Unsaved changes",
+      "editableFile": "This file can be edited and saved",
+      "readOnlyFile": "This file is preview-only",
+      "decisionFields": {
+        "stageId": "Stage ID",
+        "runId": "Run ID",
+        "status": "Status",
+        "decision": "Decision",
+        "timestamp": "Timestamp",
+        "nextStage": "Next stage",
+        "error": "Error",
+        "outputArtifacts": "Output artifacts",
+        "evidenceRefs": "Evidence refs"
+      },
+      "hardwareFields": {
+        "hasGpu": "GPU detected",
+        "gpuType": "Compute type",
+        "gpuName": "Device name",
+        "vram": "VRAM",
+        "tier": "Hardware tier",
+        "warning": "Environment warning"
+      }
     },
     "state": {
       "taskInfo": "Task info",
