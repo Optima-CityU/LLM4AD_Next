@@ -3,21 +3,33 @@ import { Children, isValidElement, type ReactNode, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { Components } from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
+import rehypeKatex from "rehype-katex"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
 
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import useCustomToast from "@/hooks/useCustomToast"
 import { cn } from "@/lib/utils"
 
+// KaTeX stylesheet for LaTeX math rendering ($...$ and $$...$$). Bundled so
+// formulas render offline without a CDN. Applies to every markdown surface
+// that uses the shared plugin arrays below.
+import "katex/dist/katex.min.css"
+
 import { MermaidDiagram } from "./MermaidDiagram"
 
-/** GitHub-flavored markdown (tables, task lists, strikethrough, ...). */
-export const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
 /**
- * Syntax highlighting for fenced code blocks. Token colors are supplied by the
- * highlight.js theme stylesheet injected via `useHljsTheme()`.
+ * GitHub-flavored markdown (tables, task lists, strikethrough, ...) plus math
+ * parsing (`remark-math`) so `$inline$` and `$$block$$` LaTeX are recognized.
  */
-export const MARKDOWN_REHYPE_PLUGINS = [rehypeHighlight]
+export const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath]
+/**
+ * Syntax highlighting for fenced code blocks (`rehype-highlight`) and LaTeX math
+ * rendering (`rehype-katex`). Highlight token colors come from the highlight.js
+ * theme stylesheet injected via `useHljsTheme()`; math styling comes from the
+ * bundled KaTeX stylesheet imported above.
+ */
+export const MARKDOWN_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
 
 /**
  * Recursively flatten a React node tree to its plain text, used to recover the
