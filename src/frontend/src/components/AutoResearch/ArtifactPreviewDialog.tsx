@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   Check,
@@ -19,20 +20,20 @@ import {
   X,
 } from "lucide-react"
 import {
+  type ReactNode,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react"
 import { useTranslation } from "react-i18next"
 import Markdown from "react-markdown"
 import { toast } from "sonner"
 
 import {
-  Llm4AdResearchService,
   type FileTreeNode,
+  Llm4AdResearchService,
   type ResearchArtifactTreeNode,
 } from "@/client"
 import FileTreeView from "@/components/Evolution/TaskDetail/steps/FileTreeView"
@@ -47,22 +48,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
+import {
+  type ArtifactTranslationStatus,
+  useArtifactTranslation,
+} from "@/hooks/useArtifactTranslation"
 import {
   downloadResearchArtifact,
   fetchResearchArtifact,
   researchKeys,
   useResearchArtifactTree,
 } from "@/hooks/useAutoResearch"
-import {
-  useArtifactTranslation,
-  type ArtifactTranslationStatus,
-} from "@/hooks/useArtifactTranslation"
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { cn } from "@/lib/utils"
-import { useQueryClient } from "@tanstack/react-query"
-
 import ArtifactCodeEditor from "./ArtifactCodeEditor"
+import { hasNamedArtifactRenderer, renderNamedArtifact } from "./ArtifactViews"
 
 export interface PreviewFile {
   path: string
@@ -155,13 +155,7 @@ function isTranslatableFile(nameOrPath: string): boolean {
   return TRANSLATABLE_EXTS.has(ext)
 }
 
-type PreviewKind =
-  | "image"
-  | "pdf"
-  | "markdown"
-  | "text"
-  | "binary"
-  | "folder"
+type PreviewKind = "image" | "pdf" | "markdown" | "text" | "binary" | "folder"
 type ArtifactViewMode = "friendly" | "raw"
 type TranslationView = "source" | "translation"
 
@@ -301,13 +295,7 @@ function collectSizeMap(
 }
 
 function hasNamedFriendlyRenderer(path: string): boolean {
-  const fileName = lastSegment(path).toLowerCase()
-  return (
-    fileName === "decision.json" ||
-    fileName === "hardware_profile.json" ||
-    fileName === "stage_health.json" ||
-    fileName === "topic_evaluation.json"
-  )
+  return hasNamedArtifactRenderer(lastSegment(path))
 }
 
 function TranslationStatusBadge({
@@ -432,7 +420,11 @@ function TranslationSubBar({
         <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
           {t("autoResearch.artifacts.translationLabel")}
         </span>
-        <TranslationStatusBadge status={status} isStreaming={isStreaming} t={t} />
+        <TranslationStatusBadge
+          status={status}
+          isStreaming={isStreaming}
+          t={t}
+        />
         {isStreaming && charCount > 0 && (
           <span className="text-[11px] tabular-nums text-muted-foreground">
             {t("autoResearch.artifacts.translationChars", { chars: charCount })}
@@ -465,525 +457,6 @@ function TranslationSubBar({
   )
 }
 
-function safeParseJson(content: string): unknown {
-  try {
-    return JSON.parse(content)
-  } catch {
-    return null
-  }
-}
-
-interface DecisionArtifactData {
-  stage_id?: string | null
-  run_id?: string | null
-  status?: string | null
-  decision?: string | null
-  output_artifacts?: string[] | null
-  evidence_refs?: string[] | null
-  error?: string | null
-  ts?: string | null
-  next_stage?: number | null
-}
-
-function DecisionArtifactView({ data }: { data: DecisionArtifactData }) {
-  const { t } = useTranslation()
-
-  const rows = [
-    {
-      label: t("autoResearch.artifacts.decisionFields.stageId"),
-      value: data.stage_id || "—",
-    },
-    {
-      label: t("autoResearch.artifacts.decisionFields.runId"),
-      value: data.run_id || "—",
-      mono: true,
-    },
-    {
-      label: t("autoResearch.artifacts.decisionFields.status"),
-      value: data.status || "—",
-      pill: true,
-    },
-    {
-      label: t("autoResearch.artifacts.decisionFields.decision"),
-      value: data.decision || "—",
-      pill: true,
-      accent: data.decision === "proceed",
-    },
-    {
-      label: t("autoResearch.artifacts.decisionFields.timestamp"),
-      value: data.ts || "—",
-      mono: true,
-    },
-    {
-      label: t("autoResearch.artifacts.decisionFields.nextStage"),
-      value:
-        data.next_stage == null ? "—" : `#${String(data.next_stage)}`,
-    },
-    {
-      label: t("autoResearch.artifacts.decisionFields.error"),
-      value: data.error || "—",
-      destructive: !!data.error,
-    },
-  ]
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {rows.map((row) => (
-          <div
-            key={row.label}
-            className="rounded-lg border border-border/50 bg-background/70 px-3 py-2.5"
-          >
-            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              {row.label}
-            </div>
-            {row.pill ? (
-              <div className="mt-2">
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                    row.destructive
-                      ? "border-destructive/20 bg-destructive/10 text-destructive"
-                      : row.accent
-                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                        : "border-border/60 bg-muted/40 text-foreground/80",
-                  )}
-                >
-                  {row.value}
-                </span>
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "mt-1.5 text-sm text-foreground break-all",
-                  row.mono && "font-mono text-[12px]",
-                  row.destructive && "text-destructive",
-                )}
-              >
-                {row.value}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-3">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-            {t("autoResearch.artifacts.decisionFields.outputArtifacts")}
-          </div>
-          {data.output_artifacts?.length ? (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {data.output_artifacts.map((item) => (
-                <span
-                  key={item}
-                  className="inline-flex items-center rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-xs text-foreground/85"
-                >
-                  {item}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-2 text-sm text-muted-foreground">—</div>
-          )}
-        </div>
-
-        <div className="rounded-lg border border-border/50 bg-background/70 px-3 py-3">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-            {t("autoResearch.artifacts.decisionFields.evidenceRefs")}
-          </div>
-          {data.evidence_refs?.length ? (
-            <div className="mt-2 space-y-1.5">
-              {data.evidence_refs.map((item) => (
-                <div
-                  key={item}
-                  className="rounded-md bg-muted/40 px-2.5 py-1.5 font-mono text-[12px] text-foreground/85 break-all"
-                >
-                  {item}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-2 text-sm text-muted-foreground">—</div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface HardwareProfileArtifactData {
-  has_gpu?: boolean | null
-  gpu_type?: string | null
-  gpu_name?: string | null
-  vram_mb?: number | null
-  tier?: string | null
-  warning?: string | null
-}
-
-function HardwareProfileArtifactView({
-  data,
-}: {
-  data: HardwareProfileArtifactData
-}) {
-  const { t } = useTranslation()
-
-  const rows = [
-    {
-      label: t("autoResearch.artifacts.hardwareFields.hasGpu"),
-      value: data.has_gpu == null ? "—" : data.has_gpu ? t("common.yes") : t("common.no"),
-      pill: true,
-      accent: !!data.has_gpu,
-      muted: data.has_gpu === false,
-    },
-    {
-      label: t("autoResearch.artifacts.hardwareFields.gpuType"),
-      value: data.gpu_type || "—",
-      pill: true,
-    },
-    {
-      label: t("autoResearch.artifacts.hardwareFields.gpuName"),
-      value: data.gpu_name || "—",
-    },
-    {
-      label: t("autoResearch.artifacts.hardwareFields.vram"),
-      value:
-        data.vram_mb == null ? "—" : `${String(data.vram_mb)} MB`,
-      mono: true,
-    },
-    {
-      label: t("autoResearch.artifacts.hardwareFields.tier"),
-      value: data.tier || "—",
-      pill: true,
-      muted: data.tier === "cpu_only",
-    },
-  ]
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {rows.map((row) => (
-          <div
-            key={row.label}
-            className="rounded-lg border border-border/50 bg-background/70 px-3 py-2.5"
-          >
-            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              {row.label}
-            </div>
-            {row.pill ? (
-              <div className="mt-2">
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                    row.accent
-                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                      : row.muted
-                        ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                        : "border-border/60 bg-muted/40 text-foreground/80",
-                  )}
-                >
-                  {row.value}
-                </span>
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "mt-1.5 text-sm text-foreground break-all",
-                  row.mono && "font-mono text-[12px]",
-                )}
-              >
-                {row.value}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-amber-700/90 dark:text-amber-300/90">
-          {t("autoResearch.artifacts.hardwareFields.warning")}
-        </div>
-        <div className="mt-2 text-sm leading-relaxed text-foreground/85 whitespace-pre-wrap">
-          {data.warning || "—"}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface StageHealthArtifactData {
-  stage_id?: string | null
-  run_id?: string | null
-  duration_sec?: number | null
-  status?: string | null
-  artifacts_count?: number | null
-  error?: string | null
-  timestamp?: string | null
-}
-
-function StageHealthArtifactView({ data }: { data: StageHealthArtifactData }) {
-  const { t } = useTranslation()
-
-  // 状态语义：done/success 走绿色强调，failed/error 走红色，其余为中性。
-  const statusLower = (data.status ?? "").toLowerCase()
-  const statusOk = statusLower === "done" || statusLower === "success"
-  const statusFailed = statusLower === "failed" || statusLower === "error"
-
-  const rows = [
-    {
-      label: t("autoResearch.artifacts.stageHealthFields.stageId"),
-      value: data.stage_id || "—",
-      pill: true,
-    },
-    {
-      label: t("autoResearch.artifacts.stageHealthFields.runId"),
-      value: data.run_id || "—",
-      mono: true,
-    },
-    {
-      label: t("autoResearch.artifacts.stageHealthFields.status"),
-      value: data.status || "—",
-      pill: true,
-      accent: statusOk,
-      destructive: statusFailed,
-    },
-    {
-      label: t("autoResearch.artifacts.stageHealthFields.duration"),
-      value:
-        data.duration_sec == null
-          ? "—"
-          : t("autoResearch.artifacts.stageHealthFields.durationValue", {
-              seconds: data.duration_sec,
-            }),
-      mono: true,
-    },
-    {
-      label: t("autoResearch.artifacts.stageHealthFields.artifactsCount"),
-      value: data.artifacts_count == null ? "—" : String(data.artifacts_count),
-      mono: true,
-    },
-    {
-      label: t("autoResearch.artifacts.stageHealthFields.timestamp"),
-      value: data.timestamp || "—",
-      mono: true,
-    },
-  ]
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {rows.map((row) => (
-          <div
-            key={row.label}
-            className="rounded-lg border border-border/50 bg-background/70 px-3 py-2.5"
-          >
-            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              {row.label}
-            </div>
-            {row.pill ? (
-              <div className="mt-2">
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                    row.destructive
-                      ? "border-destructive/20 bg-destructive/10 text-destructive"
-                      : row.accent
-                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                        : "border-border/60 bg-muted/40 text-foreground/80",
-                  )}
-                >
-                  {row.value}
-                </span>
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "mt-1.5 text-sm text-foreground break-all",
-                  row.mono && "font-mono text-[12px]",
-                )}
-              >
-                {row.value}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div
-        className={cn(
-          "rounded-lg border px-4 py-3",
-          data.error
-            ? "border-destructive/20 bg-destructive/8"
-            : "border-emerald-500/20 bg-emerald-500/8",
-        )}
-      >
-        <div
-          className={cn(
-            "text-[11px] font-medium uppercase tracking-wider",
-            data.error
-              ? "text-destructive/90"
-              : "text-emerald-700/90 dark:text-emerald-300/90",
-          )}
-        >
-          {t("autoResearch.artifacts.stageHealthFields.error")}
-        </div>
-        <div
-          className={cn(
-            "mt-2 text-sm leading-relaxed whitespace-pre-wrap",
-            data.error ? "text-destructive" : "text-muted-foreground",
-          )}
-        >
-          {data.error || t("autoResearch.artifacts.stageHealthFields.noError")}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-interface TopicEvaluationArtifactData {
-  novelty?: number | null
-  specificity?: number | null
-  feasibility?: number | null
-  overall?: number | null
-  suggestion?: string | null
-}
-
-// 评分色阶：满分按 10 计，>=7 绿 / >=5 琥珀 / <5 红。用于分数徽章与进度条。
-function scoreTone(score: number | null | undefined): {
-  text: string
-  bar: string
-  border: string
-  bg: string
-} {
-  if (score == null) {
-    return {
-      text: "text-muted-foreground",
-      bar: "bg-muted-foreground/40",
-      border: "border-border/60",
-      bg: "bg-muted/40",
-    }
-  }
-  if (score >= 7) {
-    return {
-      text: "text-emerald-600 dark:text-emerald-400",
-      bar: "bg-emerald-500",
-      border: "border-emerald-500/20",
-      bg: "bg-emerald-500/10",
-    }
-  }
-  if (score >= 5) {
-    return {
-      text: "text-amber-600 dark:text-amber-400",
-      bar: "bg-amber-500",
-      border: "border-amber-500/20",
-      bg: "bg-amber-500/10",
-    }
-  }
-  return {
-    text: "text-destructive",
-    bar: "bg-destructive",
-    border: "border-destructive/20",
-    bg: "bg-destructive/10",
-  }
-}
-
-const TOPIC_EVAL_SCORE_MAX = 10
-
-function TopicEvaluationScoreCard({
-  label,
-  score,
-  highlight,
-}: {
-  label: string
-  score: number | null | undefined
-  highlight?: boolean
-}) {
-  const tone = scoreTone(score)
-  const pct =
-    score == null
-      ? 0
-      : Math.max(0, Math.min(100, (score / TOPIC_EVAL_SCORE_MAX) * 100))
-
-  return (
-    <div
-      className={cn(
-        "rounded-lg border px-3 py-2.5",
-        highlight ? cn(tone.border, tone.bg) : "border-border/50 bg-background/70",
-      )}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-          {label}
-        </span>
-        <span className={cn("text-sm font-semibold tabular-nums", tone.text)}>
-          {score == null ? "—" : score}
-          <span className="ml-0.5 text-[11px] font-normal text-muted-foreground/60">
-            /{TOPIC_EVAL_SCORE_MAX}
-          </span>
-        </span>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
-        <div
-          className={cn("h-full rounded-full transition-all", tone.bar)}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function TopicEvaluationArtifactView({
-  data,
-}: {
-  data: TopicEvaluationArtifactData
-}) {
-  const { t } = useTranslation()
-
-  const scores = [
-    {
-      label: t("autoResearch.artifacts.topicEvalFields.novelty"),
-      score: data.novelty,
-    },
-    {
-      label: t("autoResearch.artifacts.topicEvalFields.specificity"),
-      score: data.specificity,
-    },
-    {
-      label: t("autoResearch.artifacts.topicEvalFields.feasibility"),
-      score: data.feasibility,
-    },
-  ]
-
-  return (
-    <div className="p-4 space-y-4">
-      <TopicEvaluationScoreCard
-        label={t("autoResearch.artifacts.topicEvalFields.overall")}
-        score={data.overall}
-        highlight
-      />
-
-      <div className="grid gap-3 md:grid-cols-3">
-        {scores.map((s) => (
-          <TopicEvaluationScoreCard
-            key={s.label}
-            label={s.label}
-            score={s.score}
-          />
-        ))}
-      </div>
-
-      <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-primary/80">
-          {t("autoResearch.artifacts.topicEvalFields.suggestion")}
-        </div>
-        <div className="mt-2 text-sm leading-relaxed text-foreground/85 whitespace-pre-wrap">
-          {data.suggestion || "—"}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function ArtifactFriendlyContent({
   filePath,
   kind,
@@ -995,45 +468,12 @@ function ArtifactFriendlyContent({
   content: string
   mdId: string
 }) {
-  const fileName = lastSegment(filePath).toLowerCase()
+  const fileName = lastSegment(filePath)
 
-  if (fileName === "decision.json") {
-    const parsed = safeParseJson(content)
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return <DecisionArtifactView data={parsed as DecisionArtifactData} />
-    }
-  }
-
-  if (fileName === "hardware_profile.json") {
-    const parsed = safeParseJson(content)
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return (
-        <HardwareProfileArtifactView
-          data={parsed as HardwareProfileArtifactData}
-        />
-      )
-    }
-  }
-
-  if (fileName === "stage_health.json") {
-    const parsed = safeParseJson(content)
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return (
-        <StageHealthArtifactView data={parsed as StageHealthArtifactData} />
-      )
-    }
-  }
-
-  if (fileName === "topic_evaluation.json") {
-    const parsed = safeParseJson(content)
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return (
-        <TopicEvaluationArtifactView
-          data={parsed as TopicEvaluationArtifactData}
-        />
-      )
-    }
-  }
+  // 命中具名渲染器（decision / hardware_profile / … 等）时优先走专属视图，
+  // 解析失败则由下方通用分支兜底。
+  const named = renderNamedArtifact(fileName, content)
+  if (named) return named
 
   if (kind === "markdown") {
     return (
@@ -1094,7 +534,8 @@ function PreviewPane({
   const canFriendly = namedFriendly || kind === "markdown" || kind === "text"
   const canRaw = kind === "markdown" || kind === "text"
   const [viewMode, setViewMode] = useState<ArtifactViewMode>("friendly")
-  const [translationView, setTranslationView] = useState<TranslationView>("source")
+  const [translationView, setTranslationView] =
+    useState<TranslationView>("source")
   // 文件本身是否可编辑（不含视图因素），仅用于决定打开文件时的初始渲染模式。
   const baseCanEdit = editable && !readOnly && canRaw
   // 硬约束（最高优先级）：处于译文视图时绝不允许编辑——译文是 AI 产物的只读
@@ -1112,7 +553,8 @@ function PreviewPane({
   const error = state?.error ?? null
   const saving = state?.saving ?? false
   const dirty = !!state && state.loaded && state.saved !== state.draft
-  const tooLarge = !!file &&
+  const tooLarge =
+    !!file &&
     (kind === "text" || kind === "markdown") &&
     file.size != null &&
     file.size > TEXT_MAX
@@ -1181,7 +623,8 @@ function PreviewPane({
     } else {
       void handleTranslate(false)
     }
-  }, [translationView, canTranslate, file?.path])
+    // handleTranslate 在下方声明且引用稳定，故意排除以避免声明顺序问题。
+  }, [translationView, canTranslate, file?.path, text?.length])
 
   const triggerDownload = () => {
     if (!file) return
@@ -1204,7 +647,8 @@ function PreviewPane({
       })
     } catch (err) {
       toast.error(
-        (err as Error)?.message ?? t("autoResearch.artifacts.translationFailed"),
+        (err as Error)?.message ??
+          t("autoResearch.artifacts.translationFailed"),
       )
     }
   }
@@ -1382,7 +826,9 @@ function PreviewPane({
           <div className="flex h-full flex-col items-center justify-center gap-2 py-16 px-4 text-center text-sm text-destructive">
             <AlertTriangle className="size-6" />
             {t("autoResearch.artifacts.previewError")}
-            <span className="text-xs text-muted-foreground break-all">{error}</span>
+            <span className="text-xs text-muted-foreground break-all">
+              {error}
+            </span>
           </div>
         ) : tooLarge || kind === "binary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 py-16 px-4 text-center">
@@ -1401,9 +847,17 @@ function PreviewPane({
             </p>
           </div>
         ) : kind === "image" ? (
-          <ImagePreview sessionId={sessionId} path={file.path} alt={file.name} />
+          <ImagePreview
+            sessionId={sessionId}
+            path={file.path}
+            alt={file.name}
+          />
         ) : kind === "pdf" ? (
-          <PdfPreview sessionId={sessionId} path={file.path} title={file.name} />
+          <PdfPreview
+            sessionId={sessionId}
+            path={file.path}
+            title={file.name}
+          />
         ) : viewMode === "raw" && currentTextContent ? (
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex items-center gap-2 border-b border-border/50 bg-background/60 px-3 py-2">
@@ -1424,9 +878,7 @@ function PreviewPane({
                 value={canEdit ? (draft ?? "") : currentTextContent}
                 readOnly={!canEdit}
                 onChange={
-                  canEdit
-                    ? (next) => onDraftChange(file.path, next)
-                    : undefined
+                  canEdit ? (next) => onDraftChange(file.path, next) : undefined
                 }
               />
             </div>
@@ -1476,13 +928,12 @@ function PreviewPane({
               kind={kind}
               content={currentTextContent}
               mdId={
-                translationView === "translation"
-                  ? `${mdId}-translation`
-                  : mdId
+                translationView === "translation" ? `${mdId}-translation` : mdId
               }
             />
           </div>
-        ) : translationView === "translation" && translation.status === "failed" ? (
+        ) : translationView === "translation" &&
+          translation.status === "failed" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <AlertTriangle className="size-8 text-destructive" />
             <div className="space-y-1">
@@ -1496,7 +947,8 @@ function PreviewPane({
               )}
             </div>
           </div>
-        ) : translationView === "translation" && translation.status === "cancelled" ? (
+        ) : translationView === "translation" &&
+          translation.status === "cancelled" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <Square className="size-8 fill-current text-amber-500" />
             <div className="space-y-1">
@@ -1600,7 +1052,11 @@ function ImagePreview({
 
   return (
     <div className="flex h-full items-center justify-center p-4 overflow-auto">
-      <img src={url} alt={alt} className="max-w-full max-h-[64vh] object-contain" />
+      <img
+        src={url}
+        alt={alt}
+        className="max-w-full max-h-[64vh] object-contain"
+      />
     </div>
   )
 }
@@ -1695,6 +1151,8 @@ export default function ArtifactPreviewDialog({
   )
 
   const treeReady = !!root
+  // 仅在树就绪 / path 变化时重置选中文件；不依赖每次重算的 scope 对象，
+  // 避免 scope 为 null 时读取 scope.initialFile 崩溃。
   useEffect(() => {
     if (!path || !scope) {
       setSelected(null)
@@ -1762,11 +1220,12 @@ export default function ArtifactPreviewDialog({
     return () => {
       cancelled = true
     }
+    // 仅在选中文件 / 会话变化时加载；states/patch 有意排除以免重复拉取。
   }, [selected?.path, sessionId])
 
   const saveFile = async (filePath: string) => {
     const current = states[filePath]
-    if (!current || !current.loaded || current.saved === current.draft || current.saving)
+    if (!current?.loaded || current.saved === current.draft || current.saving)
       return
     patch(filePath, { saving: true })
     try {

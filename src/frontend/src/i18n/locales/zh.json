@@ -3004,8 +3004,9 @@
       "unsaved": "有未保存修改",
       "editableFile": "当前文件支持编辑与保存",
       "readOnlyFile": "当前文件仅支持只读预览",
+      "noData": "暂无数据",
       "decisionFields": {
-        "stageId": "阶段标识",
+        "stageId": "阶段决策",
         "runId": "运行 ID",
         "status": "状态",
         "decision": "决策",
@@ -3013,7 +3014,8 @@
         "nextStage": "下一阶段",
         "error": "错误",
         "outputArtifacts": "输出产物",
-        "evidenceRefs": "证据引用"
+        "evidenceRefs": "证据引用",
+        "heroSubtitle": "阶段决策结果"
       },
       "hardwareFields": {
         "hasGpu": "检测到 GPU",
@@ -3021,7 +3023,8 @@
         "gpuName": "设备名称",
         "vram": "显存",
         "tier": "硬件层级",
-        "warning": "环境提醒"
+        "warning": "环境提醒",
+        "heroTitle": "硬件环境"
       },
       "stageHealthFields": {
         "stageId": "阶段标识",
@@ -3032,7 +3035,9 @@
         "artifactsCount": "产物数量",
         "timestamp": "时间",
         "error": "错误",
-        "noError": "本阶段运行正常，无错误"
+        "noError": "本阶段运行正常，无错误",
+        "heroTitle": "阶段健康度",
+        "heroSubtitle": "阶段运行状态概览"
       },
       "topicEvalFields": {
         "overall": "综合评分",
@@ -3040,6 +3045,58 @@
         "specificity": "具体性",
         "feasibility": "可行性",
         "suggestion": "改进建议"
+      },
+      "noveltyFields": {
+        "heroTitle": "新颖性评估",
+        "noveltyScore": "新颖性得分",
+        "assessment": "评估等级",
+        "recommendation": "建议",
+        "similarPapersFound": "相似论文数",
+        "hypothesesChecked": "已核查假设",
+        "totalPapers": "检索论文总数",
+        "searchCoverage": "检索覆盖",
+        "similarityThreshold": "相似度阈值",
+        "searchQueries": "检索查询",
+        "similarPapers": "相似论文",
+        "noSimilarPapers": "未发现相似论文，主题新颖性高"
+      },
+      "queriesFields": {
+        "heroTitle": "检索查询",
+        "heroSubtitle": "共 {{count}} 条查询",
+        "queries": "查询列表",
+        "yearMin": "起始年份 {{year}}"
+      },
+      "searchMetaFields": {
+        "heroTitle": "检索元信息",
+        "heroSubtitle": "共 {{count}} 个候选",
+        "realSearch": "真实检索",
+        "totalCandidates": "候选总数",
+        "bibtexEntries": "BibTeX 条目",
+        "yearMin": "起始年份",
+        "timestamp": "时间",
+        "queriesUsed": "使用的查询",
+        "real": "真实检索",
+        "mock": "模拟数据"
+      },
+      "sourcesFields": {
+        "heroTitle": "数据源",
+        "availableCount": "{{available}} / {{total}} 可用",
+        "query": "查询",
+        "verifiedAt": "校验于"
+      },
+      "webSearchFields": {
+        "heroTitle": "网络检索结果",
+        "heroSubtitle": "共命中 {{count}} 条",
+        "webResults": "网页结果",
+        "scholarPapers": "学术论文",
+        "crawledPages": "抓取页面",
+        "pdfExtractions": "PDF 抽取",
+        "hasAnswer": "含摘要回答",
+        "elapsed": "耗时",
+        "elapsedValue": "{{seconds}} 秒",
+        "totalHits": "命中 {{count}} 条",
+        "noteTitle": "说明",
+        "emptyNote": "本次网络检索未返回任何结果，可能是查询过窄或数据源暂不可用。"
       }
     },
     "state": {

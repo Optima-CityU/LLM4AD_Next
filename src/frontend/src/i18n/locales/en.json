@@ -3134,8 +3134,9 @@
       "unsaved": "Unsaved changes",
       "editableFile": "This file can be edited and saved",
       "readOnlyFile": "This file is preview-only",
+      "noData": "No data",
       "decisionFields": {
-        "stageId": "Stage ID",
+        "stageId": "Stage decision",
         "runId": "Run ID",
         "status": "Status",
         "decision": "Decision",
@@ -3143,7 +3144,8 @@
         "nextStage": "Next stage",
         "error": "Error",
         "outputArtifacts": "Output artifacts",
-        "evidenceRefs": "Evidence refs"
+        "evidenceRefs": "Evidence refs",
+        "heroSubtitle": "Stage decision outcome"
       },
       "hardwareFields": {
         "hasGpu": "GPU detected",
@@ -3151,7 +3153,8 @@
         "gpuName": "Device name",
         "vram": "VRAM",
         "tier": "Hardware tier",
-        "warning": "Environment warning"
+        "warning": "Environment warning",
+        "heroTitle": "Hardware profile"
       },
       "stageHealthFields": {
         "stageId": "Stage ID",
@@ -3162,7 +3165,9 @@
         "artifactsCount": "Artifacts",
         "timestamp": "Timestamp",
         "error": "Error",
-        "noError": "Stage ran cleanly, no errors"
+        "noError": "Stage ran cleanly, no errors",
+        "heroTitle": "Stage health",
+        "heroSubtitle": "Stage runtime overview"
       },
       "topicEvalFields": {
         "overall": "Overall",
@@ -3170,6 +3175,58 @@
         "specificity": "Specificity",
         "feasibility": "Feasibility",
         "suggestion": "Suggestion"
+      },
+      "noveltyFields": {
+        "heroTitle": "Novelty assessment",
+        "noveltyScore": "Novelty score",
+        "assessment": "Assessment",
+        "recommendation": "Recommendation",
+        "similarPapersFound": "Similar papers",
+        "hypothesesChecked": "Hypotheses checked",
+        "totalPapers": "Papers retrieved",
+        "searchCoverage": "Search coverage",
+        "similarityThreshold": "Similarity threshold",
+        "searchQueries": "Search queries",
+        "similarPapers": "Similar papers",
+        "noSimilarPapers": "No similar papers found — highly novel"
+      },
+      "queriesFields": {
+        "heroTitle": "Search queries",
+        "heroSubtitle": "{{count}} queries",
+        "queries": "Query list",
+        "yearMin": "From {{year}}"
+      },
+      "searchMetaFields": {
+        "heroTitle": "Search metadata",
+        "heroSubtitle": "{{count}} candidates",
+        "realSearch": "Real search",
+        "totalCandidates": "Total candidates",
+        "bibtexEntries": "BibTeX entries",
+        "yearMin": "Min year",
+        "timestamp": "Timestamp",
+        "queriesUsed": "Queries used",
+        "real": "Real search",
+        "mock": "Mock data"
+      },
+      "sourcesFields": {
+        "heroTitle": "Data sources",
+        "availableCount": "{{available}} / {{total}} available",
+        "query": "Query",
+        "verifiedAt": "Verified at"
+      },
+      "webSearchFields": {
+        "heroTitle": "Web search results",
+        "heroSubtitle": "{{count}} total hits",
+        "webResults": "Web results",
+        "scholarPapers": "Scholar papers",
+        "crawledPages": "Crawled pages",
+        "pdfExtractions": "PDF extractions",
+        "hasAnswer": "Has answer",
+        "elapsed": "Elapsed",
+        "elapsedValue": "{{seconds}} s",
+        "totalHits": "{{count}} hits",
+        "noteTitle": "Note",
+        "emptyNote": "This web search returned no results — the query may be too narrow or the sources may be temporarily unavailable."
       }
     },
     "state": {
