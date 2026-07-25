@@ -32,6 +32,7 @@ from app.core.redis import (
 from app.schemas.research import (
     ResearchArtifactTranslateRequest,
     ResearchArtifactTranslateResponse,
+    ResearchArtifactTranslateStopResponse,
 )
 
 from ._common import _get_session
@@ -223,6 +224,52 @@ def get_translate_stream_type(
     """校验归属并返回翻译流的 ``report_type``（供 SSE 路由构造 Redis key）。"""
     _get_session(db, session_id, current_user)
     return _report_type(source_hash, target_language)
+
+
+def stop_translation(
+    db: Session,
+    session_id: uuid.UUID,
+    current_user: models.User,
+    source_hash: str,
+    target_language: str,
+) -> ResearchArtifactTranslateStopResponse:
+    """停止在跑的产物翻译：清 generation_id 让后台协程协作式退出。
+
+    复用 :func:`_run_translation` 已有的取消机制——每推 chunk 前比对 generation_id，
+    这里清掉后下一个 chunk 即 ``!= generation_id`` → 协程 return，且因 ``cancelled``
+    为真不落缓存。同时推一条 ``cancelled`` 帧让仍连着的 SSE 收到终止事件。
+
+    Args:
+        db: 数据库会话。
+        session_id: 目标会话 ID。
+        current_user: 当前认证用户（归属校验）。
+        source_hash: POST /translate 返回的源文件哈希。
+        target_language: 目标语言（'zh' / 'en'）。
+
+    Returns:
+        ``stopped`` 有在跑任务被中断；``idle`` 无任务可停（幂等，重复停不报错）。
+    """
+    _get_session(db, session_id, current_user)
+    sid = str(session_id)
+    rtype = _report_type(source_hash, target_language)
+
+    if not get_report_generation_id(sid, rtype):
+        return ResearchArtifactTranslateStopResponse(
+            session_id=session_id,
+            source_hash=source_hash,
+            target_language=target_language,
+            status="idle",
+        )
+
+    # 先通知 SSE（cancelled 是终止帧），再清 generation_id 触发协程退出。
+    push_report_chunk(sid, rtype, {"type": "cancelled"})
+    clear_report_generation_id(sid, rtype)
+    return ResearchArtifactTranslateStopResponse(
+        session_id=session_id,
+        source_hash=source_hash,
+        target_language=target_language,
+        status="stopped",
+    )
 
 
 async def _run_translation(

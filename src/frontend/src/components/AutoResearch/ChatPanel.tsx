@@ -131,6 +131,8 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // collab agent 流式回复的实时拼接文本（本轮内存，done 后由 messages 接管）。
   const [collabStreamText, setCollabStreamText] = useState("")
   const [collabToolHint, setCollabToolHint] = useState<string | null>(null)
+  // pipeline turn 的显式重连令牌：retry 复用同一 turn_id，需手动 bump 让 SSE 重连。
+  const [streamReconnectToken, setStreamReconnectToken] = useState(0)
 
   // 顶部常驻进度条的数据源（22 阶段快照）。SSE 实时推送，不需要轮询。
   const stateQ = useResearchState(session.id, {
@@ -240,12 +242,14 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // SSE connected 帧确认的 turn_id（可能多次 connected，始终取最新值）。
   // 用于 onEvent 归入正确分组，比 REST activeTurnId 更及时。
   const sseTurnIdRef = useRef<string | null>(null)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在切换 turn 时清空
+  // 切换 turn 或重试（streamReconnectToken 变化）时清空实时日志缓冲：重试复用同一
+  // turn_id，仅靠 activeTurnId 不会触发，需带上重连令牌，避免上一轮失败日志残留。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在切换 turn / 重试时清空
   useEffect(() => {
     setStreamLogs([])
     logSeqRef.current = 0
     sseTurnIdRef.current = null
-  }, [activeTurnId])
+  }, [activeTurnId, streamReconnectToken])
 
   // 按 turn 分组（仅非 log 消息；log 由各 turn 的 TurnLogPanel 懒加载）。Map 保序，
   // renderedMessages 已按 created_time:id 升序，故组顺序即 turn 时序，末组为最新轮。
@@ -272,9 +276,13 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   const lastTurnId = groupedMessages[groupedMessages.length - 1]?.turnId ?? null
 
   // ── SSE：关键事件到达时按类型分流失效相关查询 ─────────────────────────
+  // 订阅门槛用 turn 级状态（与 activeTurnId 同源自 detail query），而非 session.status
+  // 那个经 prop 透传、滞后刷新的字段——重试复用同一 turn_id 时 session.status 常慢一拍，
+  // 会导致 sseEnabled 迟迟不翻 true、SSE 不重连。turn 的 running / paused_gate 对应
+  // session 的 running / paused，语义一致且刷新时序与 turn_id 对齐。
   const sseEnabled =
     !!activeTurnId &&
-    (session.status === "running" || session.status === "paused")
+    (activeTurn?.status === "running" || activeTurn?.status === "paused_gate")
 
   // 去抖合并突发失效（evolution_step 在 stage 12 可能高频到达）。按需累积要
   // 失效的 query key 组，一个 tick 内合并成一次 invalidate。
@@ -476,7 +484,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         })
       },
     },
-    { enabled: sseEnabled },
+    { enabled: sseEnabled, reconnectToken: streamReconnectToken },
   )
 
   // ── collab agent 的 SSE：独立于 pipeline turn，订阅活跃 collab turn ──────
@@ -614,7 +622,12 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     if (!activeTurnId) return
     retryMut.mutate(
       { sessionId: session.id, turnId: activeTurnId, body: {} },
-      { onError: toastErr },
+      {
+        // 重试复用同一 turn_id：bump 重连令牌，强制 useResearchStream 断旧连、
+        // 从流头重连新一轮（否则 turnId 不变，SSE 不会自动重订）。
+        onSuccess: () => setStreamReconnectToken((n) => n + 1),
+        onError: toastErr,
+      },
     )
   }
 

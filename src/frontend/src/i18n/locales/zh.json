@@ -230,22 +230,176 @@
           }
         }
       },
-    "types": { "good_algorithm": "优秀算法经验", "error_reflection": "错误反思", "domain_knowledge": "领域知识", "general_insight": "通用经验" },
-    "stages": { "accepted": "正在连接 MindMemOS", "buffering": "正在接收输入", "chunking": "正在分析内容边界", "llm_extracting": "正在提取结构化记忆", "search_fielding": "正在生成检索线索", "memory_planning": "正在整理记忆结构", "embedding": "正在生成记忆向量", "relationship_building": "正在建立记忆关系", "ready_to_persist": "准备写入记忆", "persisting": "正在写入记忆", "finalizing": "正在整理记忆预览", "completed": "记忆提取完成" },
-    "onboarding": { "title": "稳定性优先", "content": "评估算法时优先比较稳定性、方差与失败率；单次最优结果不能替代重复实验结论。", "tags": { "stability": "稳定性", "evaluation": "评估" } },
-    "readonly": { "id": "记忆 ID", "source": "来源", "status": "状态", "entity": "实体", "property": "属性", "propertyTime": "属性时间", "updatedAt": "更新时间", "eventTime": "事件时间", "sourceTime": "来源时间" },
-    "errors": { "embeddingMissing": "MindMemOS 未配置系统级 Embedding，无法保存更新后的记忆。", "gatewayAuthInvalid": "MindMemOS 网关认证无效，请检查系统环境配置。", "dimensionMismatch": "MindMemOS 向量维度与当前绑定的 Embedding 模型不一致。请确认首次绑定的模型和维度，必要时重建本地 MindMemOS 向量数据。", "connectionInterrupted": "请求连接被中断，MindMemOS 可能仍在后台写入；请稍后刷新列表或重试。", "streamingUnsupported": "当前浏览器不支持流式响应" },
-    "messages": { "loadFailed": "加载记忆失败", "selectTaskMemory": "请先选择至少一条任务记忆", "deleteGeneratedFailed": "删除本次生成记忆失败", "cannotCancelPersisting": "记忆正在写入，当前阶段暂不可取消。", "addCancelled": "已取消新增记忆", "savingInProgress": "记忆正在保存，请等待当前操作完成。", "enterContent": "请先输入内容", "unavailable": "当前记忆管理不可用", "previewFailed": "生成记忆预览失败", "cancelled": "已取消", "noExtractedMemory": "MindMemOS 没有提取出可保存的记忆", "streamEnded": "MindMemOS 流式响应提前结束", "cancelledWithoutPreview": "已取消新增记忆，本次没有生成预览", "selectPreview": "请至少选择一条要保存的记忆", "enableSelectedFailed": "启用选中记忆失败", "selectedEnabled": "选中记忆已启用", "titleAndContentRequired": "标题和内容不能为空", "saveFailed": "保存记忆失败", "saved": "记忆已保存", "deleteFailed": "删除记忆失败", "deleted": "记忆已删除", "disabled": "已禁用记忆", "enabled": "已启用记忆" },
-    "actions": { "add": "新增记忆", "edit": "编辑记忆", "delete": "删除记忆", "refresh": "刷新记忆列表", "promote": "提升到项目记忆", "disableHint": "禁用：后续任务不会注入这条记忆", "enableHint": "启用：后续任务可检索并注入这条记忆", "disabling": "正在禁用记忆", "enabling": "正在启用记忆", "disable": "禁用记忆", "enable": "启用记忆", "select": "选择记忆：{{title}}", "cancelling": "取消中", "cancelGeneration": "取消生成", "saving": "保存中", "generatePreview": "生成预览", "generateProjectPreview": "生成项目预览", "enableSelected": "启用选中" },
-    "filters": { "searchPlaceholder": "搜索标题、内容或标签", "allTypes": "全部类型", "allStatuses": "全部状态" },
-    "status": { "injectable": "可注入", "disabled": "已禁用" }, "view": { "cards": "卡片视图", "list": "列表视图" }, "loading": "正在加载记忆...",
-    "pagination": { "page": "第 {{page}} 页", "total": "，共 {{total}} 条", "matches": "，本页匹配 {{count}} 条", "perPage": "每页", "previous": "上一页", "next": "下一页" },
-    "empty": { "title": "暂无记忆", "description": "新增记忆后继续查看", "filteredTitle": "暂无匹配记忆", "filteredDescription": "调整搜索或筛选条件后继续查看" },
-    "columns": { "selectionAndTitle": "选择与标题", "title": "标题", "type": "类型", "status": "状态", "tags": "标签", "actions": "操作" },
-    "preview": { "promoteTitle": "提升到项目记忆", "promoteGuideTitle": "将已选任务经验归纳为项目记忆", "promoteGuideDescription": "将使用 {{count}} 条已选任务记忆生成项目记忆预览。原始卡片不会被修改。", "stage": "阶段：{{stage}}", "logs": "处理记录", "emptyTitle": "本次没有生成可保存的记忆", "emptyDescription": "MindMemOS 已完成处理，但输入内容没有匹配到 LLM4AD 的记忆卡片结构。可以尝试补充更具体的算法经验、错误反思或领域知识。", "title": "提取结果预览", "projectTitle": "项目记忆预览", "description": "生成后已默认保存为已禁用记忆，启用后才会参与注入。", "projectDescription": "生成后已默认保存为已禁用项目记忆，启用后会在项目范围参与注入。", "selected": "{{selected}}/{{total}} 已选择" },
-    "close": { "title": "关闭新增记忆", "promoteTitle": "关闭项目记忆提升", "description": "本次生成的记忆已经保存为已禁用状态。可以保留它们继续在列表中管理，也可以删除本次生成的记忆。", "promoteDescription": "本次生成的项目记忆已经保存为已禁用状态。可以保留它们继续在项目记忆中管理，也可以删除本次生成的记忆。", "continueEditing": "继续编辑", "keepDisabled": "保留为已禁用", "deleteGenerated": "删除本次生成" },
-    "editor": { "addTitle": "新增记忆", "editTitle": "编辑记忆", "title": "标题", "titlePlaceholder": "简短、可扫描的记忆标题", "type": "类型", "tags": "标签", "tagsPlaceholder": "输入标签后回车，如 TSP、参数调优", "content": "内容", "contentPlaceholder": "写入可复用的经验、约束、反思或领域知识。建议使用清晰的短段落，方便后续检查和修改。", "systemInfo": "系统信息", "systemInfoDescription": "这些字段由 MindMemOS 管理，仅用于检查来源和时间，不会随编辑保存。", "saveChanges": "保存修改", "add": "添加记忆" },
-    "delete": { "title": "永久删除记忆", "description": "这会从 MindMemOS 中真正删除该记忆，删除后不会出现在管理页，也不能重新启用。", "confirm": "永久删除" }
+      "types": {
+        "good_algorithm": "优秀算法经验",
+        "error_reflection": "错误反思",
+        "domain_knowledge": "领域知识",
+        "general_insight": "通用经验"
+      },
+      "stages": {
+        "accepted": "正在连接 MindMemOS",
+        "buffering": "正在接收输入",
+        "chunking": "正在分析内容边界",
+        "llm_extracting": "正在提取结构化记忆",
+        "search_fielding": "正在生成检索线索",
+        "memory_planning": "正在整理记忆结构",
+        "embedding": "正在生成记忆向量",
+        "relationship_building": "正在建立记忆关系",
+        "ready_to_persist": "准备写入记忆",
+        "persisting": "正在写入记忆",
+        "finalizing": "正在整理记忆预览",
+        "completed": "记忆提取完成"
+      },
+      "onboarding": {
+        "title": "稳定性优先",
+        "content": "评估算法时优先比较稳定性、方差与失败率；单次最优结果不能替代重复实验结论。",
+        "tags": {
+          "stability": "稳定性",
+          "evaluation": "评估"
+        }
+      },
+      "readonly": {
+        "id": "记忆 ID",
+        "source": "来源",
+        "status": "状态",
+        "entity": "实体",
+        "property": "属性",
+        "propertyTime": "属性时间",
+        "updatedAt": "更新时间",
+        "eventTime": "事件时间",
+        "sourceTime": "来源时间"
+      },
+      "errors": {
+        "embeddingMissing": "MindMemOS 未配置系统级 Embedding，无法保存更新后的记忆。",
+        "gatewayAuthInvalid": "MindMemOS 网关认证无效，请检查系统环境配置。",
+        "dimensionMismatch": "MindMemOS 向量维度与当前绑定的 Embedding 模型不一致。请确认首次绑定的模型和维度，必要时重建本地 MindMemOS 向量数据。",
+        "connectionInterrupted": "请求连接被中断，MindMemOS 可能仍在后台写入；请稍后刷新列表或重试。",
+        "streamingUnsupported": "当前浏览器不支持流式响应"
+      },
+      "messages": {
+        "loadFailed": "加载记忆失败",
+        "selectTaskMemory": "请先选择至少一条任务记忆",
+        "deleteGeneratedFailed": "删除本次生成记忆失败",
+        "cannotCancelPersisting": "记忆正在写入，当前阶段暂不可取消。",
+        "addCancelled": "已取消新增记忆",
+        "savingInProgress": "记忆正在保存，请等待当前操作完成。",
+        "enterContent": "请先输入内容",
+        "unavailable": "当前记忆管理不可用",
+        "previewFailed": "生成记忆预览失败",
+        "cancelled": "已取消",
+        "noExtractedMemory": "MindMemOS 没有提取出可保存的记忆",
+        "streamEnded": "MindMemOS 流式响应提前结束",
+        "cancelledWithoutPreview": "已取消新增记忆，本次没有生成预览",
+        "selectPreview": "请至少选择一条要保存的记忆",
+        "enableSelectedFailed": "启用选中记忆失败",
+        "selectedEnabled": "选中记忆已启用",
+        "titleAndContentRequired": "标题和内容不能为空",
+        "saveFailed": "保存记忆失败",
+        "saved": "记忆已保存",
+        "deleteFailed": "删除记忆失败",
+        "deleted": "记忆已删除",
+        "disabled": "已禁用记忆",
+        "enabled": "已启用记忆"
+      },
+      "actions": {
+        "add": "新增记忆",
+        "edit": "编辑记忆",
+        "delete": "删除记忆",
+        "refresh": "刷新记忆列表",
+        "promote": "提升到项目记忆",
+        "disableHint": "禁用：后续任务不会注入这条记忆",
+        "enableHint": "启用：后续任务可检索并注入这条记忆",
+        "disabling": "正在禁用记忆",
+        "enabling": "正在启用记忆",
+        "disable": "禁用记忆",
+        "enable": "启用记忆",
+        "select": "选择记忆：{{title}}",
+        "cancelling": "取消中",
+        "cancelGeneration": "取消生成",
+        "saving": "保存中",
+        "generatePreview": "生成预览",
+        "generateProjectPreview": "生成项目预览",
+        "enableSelected": "启用选中"
+      },
+      "filters": {
+        "searchPlaceholder": "搜索标题、内容或标签",
+        "allTypes": "全部类型",
+        "allStatuses": "全部状态"
+      },
+      "status": {
+        "injectable": "可注入",
+        "disabled": "已禁用"
+      },
+      "view": {
+        "cards": "卡片视图",
+        "list": "列表视图"
+      },
+      "loading": "正在加载记忆...",
+      "pagination": {
+        "page": "第 {{page}} 页",
+        "total": "，共 {{total}} 条",
+        "matches": "，本页匹配 {{count}} 条",
+        "perPage": "每页",
+        "previous": "上一页",
+        "next": "下一页"
+      },
+      "empty": {
+        "title": "暂无记忆",
+        "description": "新增记忆后继续查看",
+        "filteredTitle": "暂无匹配记忆",
+        "filteredDescription": "调整搜索或筛选条件后继续查看"
+      },
+      "columns": {
+        "selectionAndTitle": "选择与标题",
+        "title": "标题",
+        "type": "类型",
+        "status": "状态",
+        "tags": "标签",
+        "actions": "操作"
+      },
+      "preview": {
+        "promoteTitle": "提升到项目记忆",
+        "promoteGuideTitle": "将已选任务经验归纳为项目记忆",
+        "promoteGuideDescription": "将使用 {{count}} 条已选任务记忆生成项目记忆预览。原始卡片不会被修改。",
+        "stage": "阶段：{{stage}}",
+        "logs": "处理记录",
+        "emptyTitle": "本次没有生成可保存的记忆",
+        "emptyDescription": "MindMemOS 已完成处理，但输入内容没有匹配到 LLM4AD 的记忆卡片结构。可以尝试补充更具体的算法经验、错误反思或领域知识。",
+        "title": "提取结果预览",
+        "projectTitle": "项目记忆预览",
+        "description": "生成后已默认保存为已禁用记忆，启用后才会参与注入。",
+        "projectDescription": "生成后已默认保存为已禁用项目记忆，启用后会在项目范围参与注入。",
+        "selected": "{{selected}}/{{total}} 已选择"
+      },
+      "close": {
+        "title": "关闭新增记忆",
+        "promoteTitle": "关闭项目记忆提升",
+        "description": "本次生成的记忆已经保存为已禁用状态。可以保留它们继续在列表中管理，也可以删除本次生成的记忆。",
+        "promoteDescription": "本次生成的项目记忆已经保存为已禁用状态。可以保留它们继续在项目记忆中管理，也可以删除本次生成的记忆。",
+        "continueEditing": "继续编辑",
+        "keepDisabled": "保留为已禁用",
+        "deleteGenerated": "删除本次生成"
+      },
+      "editor": {
+        "addTitle": "新增记忆",
+        "editTitle": "编辑记忆",
+        "title": "标题",
+        "titlePlaceholder": "简短、可扫描的记忆标题",
+        "type": "类型",
+        "tags": "标签",
+        "tagsPlaceholder": "输入标签后回车，如 TSP、参数调优",
+        "content": "内容",
+        "contentPlaceholder": "写入可复用的经验、约束、反思或领域知识。建议使用清晰的短段落，方便后续检查和修改。",
+        "systemInfo": "系统信息",
+        "systemInfoDescription": "这些字段由 MindMemOS 管理，仅用于检查来源和时间，不会随编辑保存。",
+        "saveChanges": "保存修改",
+        "add": "添加记忆"
+      },
+      "delete": {
+        "title": "永久删除记忆",
+        "description": "这会从 MindMemOS 中真正删除该记忆，删除后不会出现在管理页，也不能重新启用。",
+        "confirm": "永久删除"
+      }
     },
     "common": {
       "cancel": "取消",
@@ -305,16 +459,60 @@
       "runtimeUnavailable": "MindMemOS 服务或网关认证未就绪；当前任务会沿用旧记忆模块。",
       "modelsUnboundHint": "当前用户尚未绑定记忆抽取和检索模型。绑定后，新任务才会默认使用 MindMemOS。",
       "badges": {
-        "systemEnabled": "系统已启用", "systemDisabled": "系统未启用", "runtimeAvailable": "记忆可用", "legacyFallback": "沿用旧记忆", "gatewayConfigured": "网关认证已配置", "gatewayMissing": "网关认证未配置", "modelsBound": "模型已绑定", "modelsUnbound": "模型未绑定", "rerankConfigured": "Rerank 已配置", "rerankMissing": "Rerank 未配置", "rerankDisabled": "Rerank 未启用"
+        "systemEnabled": "系统已启用",
+        "systemDisabled": "系统未启用",
+        "runtimeAvailable": "记忆可用",
+        "legacyFallback": "沿用旧记忆",
+        "gatewayConfigured": "网关认证已配置",
+        "gatewayMissing": "网关认证未配置",
+        "modelsBound": "模型已绑定",
+        "modelsUnbound": "模型未绑定",
+        "rerankConfigured": "Rerank 已配置",
+        "rerankMissing": "Rerank 未配置",
+        "rerankDisabled": "Rerank 未启用"
       },
       "scopes": {
-        "user": { "label": "注入用户级记忆", "limitLabel": "用户级注入条数" },
-        "project": { "label": "注入项目级记忆", "limitLabel": "项目级注入条数" },
-        "task": { "label": "注入任务级记忆", "limitLabel": "任务级注入条数" }
+        "user": {
+          "label": "注入用户级记忆",
+          "limitLabel": "用户级注入条数"
+        },
+        "project": {
+          "label": "注入项目级记忆",
+          "limitLabel": "项目级注入条数"
+        },
+        "task": {
+          "label": "注入任务级记忆",
+          "limitLabel": "任务级注入条数"
+        }
       }
     },
     "page": {
-      "healthCheckFailed": "检测 MindMemOS 状态失败", "bindingLoadFailed": "绑定状态加载失败", "checking": "正在检测", "serviceHealthy": "记忆服务正常", "bindingError": "绑定状态异常", "modelsUnbound": "记忆模型未绑定", "serviceUnhealthy": "记忆服务异常", "serviceUnavailable": "MindMemOS 当前不可用", "title": "全局记忆", "description": "管理跨项目复用的长期经验。默认注入策略可在右侧设置中调整。", "recheck": "重新检测记忆服务", "defaultPolicy": "默认策略", "settingsTitle": "用户默认记忆策略", "settingsDescription": "控制新项目和新任务默认使用的记忆注入范围、数量和检索策略。", "defaultPolicyDescription": "这些设置会影响后续创建的新项目和新任务。", "bindingLoadDisabledReason": "记忆模型绑定状态加载失败，请重新检测服务状态后再配置默认注入策略。", "modelsUnboundDisabledReason": "当前用户尚未绑定记忆模型。请先在上方绑定 Chat 与 Embedding 模型，再配置默认注入策略。", "serviceUnavailableDisabledReason": "MindMemOS 当前不可用，无法配置默认注入策略。", "modelsUnboundAlertDescription": "请在右上角默认策略中绑定 Chat 与 Embedding 模型后再管理记忆。", "serviceUnavailableAlertDescription": "请检查系统环境配置或稍后重新检测。", "managerTitle": "用户全局记忆", "managerDescription": "跨项目复用的长期经验，适合通用算法经验、偏好和稳定约束。", "checkingDisabledReason": "正在检测 MindMemOS 服务状态。", "bindingLoadManagerDisabledReason": "记忆模型绑定状态加载失败，请重新检测服务状态。", "modelsUnboundManagerDisabledReason": "当前用户尚未绑定记忆模型，请先在默认策略中绑定 Chat 与 Embedding。", "serviceUnavailableManagerDisabledReason": "MindMemOS 当前不可用，无法管理远端记忆。"
+      "healthCheckFailed": "检测 MindMemOS 状态失败",
+      "bindingLoadFailed": "绑定状态加载失败",
+      "checking": "正在检测",
+      "serviceHealthy": "记忆服务正常",
+      "bindingError": "绑定状态异常",
+      "modelsUnbound": "记忆模型未绑定",
+      "serviceUnhealthy": "记忆服务异常",
+      "serviceUnavailable": "MindMemOS 当前不可用",
+      "title": "全局记忆",
+      "description": "管理跨项目复用的长期经验。默认注入策略可在右侧设置中调整。",
+      "recheck": "重新检测记忆服务",
+      "defaultPolicy": "默认策略",
+      "settingsTitle": "用户默认记忆策略",
+      "settingsDescription": "控制新项目和新任务默认使用的记忆注入范围、数量和检索策略。",
+      "defaultPolicyDescription": "这些设置会影响后续创建的新项目和新任务。",
+      "bindingLoadDisabledReason": "记忆模型绑定状态加载失败，请重新检测服务状态后再配置默认注入策略。",
+      "modelsUnboundDisabledReason": "当前用户尚未绑定记忆模型。请先在上方绑定 Chat 与 Embedding 模型，再配置默认注入策略。",
+      "serviceUnavailableDisabledReason": "MindMemOS 当前不可用，无法配置默认注入策略。",
+      "modelsUnboundAlertDescription": "请在右上角默认策略中绑定 Chat 与 Embedding 模型后再管理记忆。",
+      "serviceUnavailableAlertDescription": "请检查系统环境配置或稍后重新检测。",
+      "managerTitle": "用户全局记忆",
+      "managerDescription": "跨项目复用的长期经验，适合通用算法经验、偏好和稳定约束。",
+      "checkingDisabledReason": "正在检测 MindMemOS 服务状态。",
+      "bindingLoadManagerDisabledReason": "记忆模型绑定状态加载失败，请重新检测服务状态。",
+      "modelsUnboundManagerDisabledReason": "当前用户尚未绑定记忆模型，请先在默认策略中绑定 Chat 与 Embedding。",
+      "serviceUnavailableManagerDisabledReason": "MindMemOS 当前不可用，无法管理远端记忆。"
     },
     "projectDialog": {
       "trigger": "项目记忆",
@@ -2766,6 +2964,8 @@
       "collapseAll": "全部收起",
       "expandDir": "展开全部子项",
       "fileList": "文件列表",
+      "enterFullscreen": "全屏",
+      "exitFullscreen": "退出全屏",
       "selectFile": "请从左侧文件树中选择一个文件进行预览",
       "previewLoading": "加载预览中...",
       "previewError": "预览加载失败",
@@ -2782,6 +2982,8 @@
       "translationCached": "缓存命中",
       "translationStarting": "准备中...",
       "translationStreaming": "翻译中...",
+      "translationChars": "翻译中 {{chars}} 字",
+      "translationLabel": "AI 译文",
       "translationStreamingHint": "译文会随着流式返回逐步显示在这里。",
       "translationReady": "已完成",
       "translationFailed": "翻译失败",
@@ -2820,6 +3022,24 @@
         "vram": "显存",
         "tier": "硬件层级",
         "warning": "环境提醒"
+      },
+      "stageHealthFields": {
+        "stageId": "阶段标识",
+        "runId": "运行 ID",
+        "status": "状态",
+        "duration": "耗时",
+        "durationValue": "{{seconds}} 秒",
+        "artifactsCount": "产物数量",
+        "timestamp": "时间",
+        "error": "错误",
+        "noError": "本阶段运行正常，无错误"
+      },
+      "topicEvalFields": {
+        "overall": "综合评分",
+        "novelty": "新颖性",
+        "specificity": "具体性",
+        "feasibility": "可行性",
+        "suggestion": "改进建议"
       }
     },
     "state": {

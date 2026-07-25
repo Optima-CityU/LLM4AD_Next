@@ -42,7 +42,11 @@ from .sessions import (
     list_sessions,
     update_session,
 )
-from .translate import get_translate_stream_type, translate_artifact
+from .translate import (
+    get_translate_stream_type,
+    stop_translation,
+    translate_artifact,
+)
 from .turns import (
     get_stream_context,
     get_turn,
@@ -82,6 +86,7 @@ __all__ = [
     "start_collab_turn",
     "start_turn",
     "stop_analysis_report",
+    "stop_translation",
     "stop_turn",
     "translate_artifact",
     "update_folder",

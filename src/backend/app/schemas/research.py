@@ -529,6 +529,15 @@ class ResearchArtifactTranslateResponse(BaseModel):
     )
 
 
+class ResearchArtifactTranslateStopResponse(BaseModel):
+    """翻译停止响应：``stopped`` 已中断在跑任务；``idle`` 无任务可停。"""
+
+    session_id: uuid.UUID
+    source_hash: str = Field(description="源文件内容哈希；SSE 流按此键控")
+    target_language: str
+    status: Literal["stopped", "idle"]
+
+
 class ResearchArtifactTreeNode(BaseModel):
     """产物目录树节点。"""
 

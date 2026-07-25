@@ -23,6 +23,12 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}M`
+}
+
 function sortTree(nodes: FileTreeNode[]): FileTreeNode[] {
   return [...nodes]
     .sort((a, b) => {
@@ -50,6 +56,8 @@ interface FileTreeViewProps {
   onRenamingChange?: (path: string | null) => void
   onUpload?: () => void
   badgeCounts?: Record<string, number>
+  /** 文件相对路径 -> 字节数，用于在文件节点后显示大小 */
+  sizeMap?: Record<string, number>
 }
 
 export default function FileTreeView({
@@ -64,6 +72,7 @@ export default function FileTreeView({
   onRenamingChange,
   onUpload,
   badgeCounts,
+  sizeMap,
 }: FileTreeViewProps) {
   const { t } = useTranslation()
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -117,6 +126,7 @@ export default function FileTreeView({
           renamingPath={renamingPath}
           onRenamingChange={onRenamingChange}
           badgeCounts={badgeCounts}
+          sizeMap={sizeMap}
         />
       ))}
 
@@ -180,6 +190,7 @@ function TreeNode({
   renamingPath,
   onRenamingChange,
   badgeCounts,
+  sizeMap,
 }: {
   node: FileTreeNode
   depth: number
@@ -191,6 +202,7 @@ function TreeNode({
   renamingPath?: string | null
   onRenamingChange?: (path: string | null) => void
   badgeCounts?: Record<string, number>
+  sizeMap?: Record<string, number>
 }) {
   const [expanded, setExpanded] = useState(depth < 2)
   const isDir = node.type === "directory"
@@ -244,8 +256,9 @@ function TreeNode({
     <div>
       <div
         className={cn(
-          "group flex items-center gap-1 rounded px-1 py-0.5 cursor-pointer hover:bg-accent/50 transition-colors",
-          isSelected && "bg-accent text-accent-foreground",
+          "group relative flex items-center gap-1 rounded px-1 py-0.5 cursor-pointer hover:bg-accent/50 transition-colors",
+          isSelected &&
+            "bg-primary/10 text-primary font-medium hover:bg-primary/15 before:absolute before:inset-y-0.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary",
         )}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}
         onClick={handleClick}
@@ -295,6 +308,11 @@ function TreeNode({
             {badgeCounts[node.path]}
           </span>
         )}
+        {sizeMap && !isDir && sizeMap[node.path] != null && !isRenaming && (
+          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70 group-hover:text-muted-foreground">
+            {formatFileSize(sizeMap[node.path])}
+          </span>
+        )}
         {!isRenaming &&
           onRenamingChange &&
           !isTopLevelDir &&
@@ -342,6 +360,7 @@ function TreeNode({
               renamingPath={renamingPath}
               onRenamingChange={onRenamingChange}
               badgeCounts={badgeCounts}
+              sizeMap={sizeMap}
             />
           ))}
         </div>

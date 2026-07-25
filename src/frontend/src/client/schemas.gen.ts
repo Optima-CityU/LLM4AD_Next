@@ -6333,6 +6333,34 @@ export const ResearchArtifactTranslateResponseSchema = {
     description: '翻译受理响应：``cached`` 带全文；``translating`` 需连 SSE 拉增量。'
 } as const;
 
+export const ResearchArtifactTranslateStopResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        source_hash: {
+            type: 'string',
+            title: 'Source Hash',
+            description: '源文件内容哈希；SSE 流按此键控'
+        },
+        target_language: {
+            type: 'string',
+            title: 'Target Language'
+        },
+        status: {
+            type: 'string',
+            enum: ['stopped', 'idle'],
+            title: 'Status'
+        }
+    },
+    type: 'object',
+    required: ['session_id', 'source_hash', 'target_language', 'status'],
+    title: 'ResearchArtifactTranslateStopResponse',
+    description: '翻译停止响应：``stopped`` 已中断在跑任务；``idle`` 无任务可停。'
+} as const;
+
 export const ResearchArtifactTreeNodeSchema = {
     properties: {
         name: {

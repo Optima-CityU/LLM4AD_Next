@@ -472,6 +472,7 @@ export function useStopResearchTurn() {
 
 export function useRetryResearchTurn() {
   const inv = useInvalidator()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({
       sessionId,
@@ -488,6 +489,16 @@ export function useRetryResearchTurn() {
         requestBody: body ?? {},
       }),
     onSuccess: (resp: ResearchTurnStartResponse) => {
+      // 重试复用同一 turn_id：先用响应里的新 session/turn 同步 seed detail 缓存，
+      // 让 activeTurn.status 立刻变 running（不等异步 refetch 落地），SSE 订阅门槛
+      // (sseEnabled) 才能在同一 render 翻 true；再走常规失效补齐其余数据。
+      qc.setQueryData<ResearchSessionDetailResponse>(
+        researchKeys.sessionDetail(resp.session.id),
+        (prev) =>
+          prev
+            ? { ...prev, session: resp.session, active_turn: resp.turn }
+            : { session: resp.session, active_turn: resp.turn },
+      )
       inv.invalidateSessionDetail(resp.session.id)
       inv.invalidateSessions()
     },
@@ -706,6 +717,19 @@ export function translateResearchArtifact(
     sessionId,
     path,
     requestBody: body,
+  })
+}
+
+/** 停止在跑的产物翻译：清后端 generation_id，让翻译协程协作式退出、不落缓存。 */
+export function stopTranslateResearchArtifact(
+  sessionId: string,
+  sourceHash: string,
+  targetLanguage: string,
+): Promise<unknown> {
+  return Llm4AdResearchService.stopTranslateArtifact({
+    sessionId,
+    sourceHash,
+    targetLanguage,
   })
 }
 

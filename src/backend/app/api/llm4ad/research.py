@@ -24,6 +24,7 @@ from app.schemas.research import (
     ResearchArtifactListResponse,
     ResearchArtifactTranslateRequest,
     ResearchArtifactTranslateResponse,
+    ResearchArtifactTranslateStopResponse,
     ResearchArtifactTreeResponse,
     ResearchArtifactWriteRequest,
     ResearchArtifactWriteResponse,
@@ -452,13 +453,17 @@ def list_turn_messages(
 # ---- SSE 流 ----
 
 
-# 已经写完 done/error/failed/cancelled 的 turn 不需要真正开流；
-# paused_gate（命中门控、任务已结束等恢复）同样已发过 done，重连直接短路。
+# 已经写完 done/error 的 turn 不需要真正开流，重连直接短路发一条 done。
+#
+# 注意：PAUSED_GATE 不算终态。命中门控只是「本轮任务暂停等恢复」，其 Redis
+# stream 仍保留完整历史（含 waiting_for_input）。且 retry 复用同一 turn_id，
+# 若把 PAUSED_GATE 短路掉，会导致：刷新/重连时拿不到 connected、拿不到历史
+# 回放、拿不到 gate 表单——前端表现为「stream 打通了却什么都没返回」。故让
+# PAUSED_GATE 走真正的 redis_sse_stream，交由客户端按 last_id 回放。
 _TERMINAL_TURN_STATUSES = frozenset({
     ResearchTurnStatus.COMPLETED.value,
     ResearchTurnStatus.FAILED.value,
     ResearchTurnStatus.CANCELLED.value,
-    ResearchTurnStatus.PAUSED_GATE.value,
 })
 
 
@@ -516,6 +521,7 @@ async def stream_turn(
 
     **已终态短路**：如果 turn 已经 COMPLETED/FAILED/CANCELLED，直接返回一条
     ``done`` 帧关流，不订阅 Redis（避免客户端白等 30 分钟 idle timeout）。
+    PAUSED_GATE 不在此列——门控暂停的 turn 仍需回放历史与 gate 表单。
     """
     turn = research_service.get_stream_context(
         db, session_id, turn_id, current_user
@@ -642,6 +648,26 @@ async def translate_artifact(
     """
     return research_service.translate_artifact(
         db, session_id, current_user, path, request, token
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/artifacts/translate/stop",
+    response_model=ResearchArtifactTranslateStopResponse,
+    summary="停止在跑的产物翻译（协作式取消后台任务）",
+)
+async def stop_translate_artifact(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    source_hash: str = Query(..., description="POST /translate 返回的源文件哈希"),
+    target_language: str = Query("zh", description="目标语言：'zh' / 'en'"),
+):
+    """中断后台翻译协程：清 generation_id 让其协作式退出、不写缓存，并给
+    仍连着的 SSE 推一条 ``cancelled`` 终止帧。无在跑任务时返回 ``idle``（幂等）。
+    """
+    return research_service.stop_translation(
+        db, session_id, current_user, source_hash, target_language
     )
 
 

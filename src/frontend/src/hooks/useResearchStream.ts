@@ -74,14 +74,19 @@ const RECONNECT_DELAYS = [1000, 2000, 4000, 8000]
  *
  * 同一 (sessionId, turnId) 只会保持一条连接；参数变化时自动断开重连。
  * `enabled` 为 false 或参数缺失时不连接。
+ *
+ * `reconnectToken`：显式重连令牌。turn 级重试（``POST /turns/{id}/retry``）会复用
+ * 同一 ``turnId``，仅靠 ``turnId`` / ``enabled`` 变化无法可靠触发重连；调用方在重试
+ * 成功后自增此令牌，即可强制 effect 重跑、断开旧连接并从流头重连新一轮。
  */
 export function useResearchStream(
   sessionId: string | null,
   turnId: string | null,
   callbacks: ResearchStreamCallbacks,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; reconnectToken?: number | string },
 ) {
   const enabled = options?.enabled !== false
+  const reconnectToken = options?.reconnectToken ?? 0
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -219,7 +224,8 @@ export function useResearchStream(
       cancelled = true
       disconnect()
     }
-  }, [enabled, sessionId, turnId, disconnect, clearTimers])
+    // reconnectToken 参与依赖：重试复用同一 turnId 时，靠它强制重连。
+  }, [enabled, sessionId, turnId, reconnectToken, disconnect, clearTimers])
 
   return { isStreaming, disconnect }
 }

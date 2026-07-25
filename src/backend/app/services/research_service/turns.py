@@ -17,7 +17,11 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 
 from app import models
-from app.core.redis import check_research_rate_limit, clear_research_gate_reply
+from app.core.redis import (
+    check_research_rate_limit,
+    clear_research_gate_reply,
+    delete_research_stream,
+)
 from app.models.research import (
     ResearchMessage,
     ResearchMessageRole,
@@ -669,6 +673,11 @@ def retry_turn(
     # 清一下已锁定 gate reply（重试意味着重新走一遍），再据新 celery_task_id 派发。
     if turn.respond_to_message_id:
         clear_research_gate_reply(turn.session_id, turn.respond_to_message_id)
+    # retry 复用同一 turn_id → 同一 Redis stream key。旧流里残留着上一轮的
+    # done/error 终止帧；前端从 last_id=0-0 重放会立刻撞上旧 done 而秒关流，
+    # 永远等不到新一轮事件。故派发新任务前先删旧流，让新一轮从空流开始，
+    # 前端重放拿到的就是干净的新数据。
+    delete_research_stream(turn.session_id, turn.id)
     enqueue_research_turn(turn.session_id, turn.id, turn.celery_task_id)
 
     return ResearchTurnStartResponse(
