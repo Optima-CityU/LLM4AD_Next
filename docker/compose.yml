@@ -188,7 +188,19 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    command: celery -A app.core.celery worker --loglevel=info --concurrency=50
+    command: celery -A app.core.celery worker -Q evolution -n evo@%h --loglevel=info --concurrency=50
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
+
+  research-worker:
+    <<: *backend-common
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    # 科研/协作 worker：只消费 research 队列，交互式任务，独立并发池
+    command: celery -A app.core.celery worker -Q research -n research@%h --loglevel=info --concurrency=50
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}

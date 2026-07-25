@@ -26,4 +26,12 @@ celery_app.conf.update(
     task_time_limit=settings.TASK_TIME_LIMIT,  # 任务硬超时（默认 7 天），见 config.TASK_TIME_LIMIT
     task_soft_time_limit=settings.TASK_SOFT_TIME_LIMIT,  # 任务软超时（默认 1 天），超时抛 `SoftTimeLimitExceeded`
     result_expires=30 * 24 * 3600,  # 结果过期时间：30 天
+    task_default_queue="evolution",  # 未匹配路由的任务默认进 evolution 队列
 )
+
+# 队列路由：把不同类型任务拆到独立队列，配合多 worker 实现槽位硬隔离。
+celery_app.conf.task_routes = {
+    "app.tasks.evolution.*": {"queue": "evolution"},
+    "research.run_turn": {"queue": "research"},
+    "research.run_collab_turn": {"queue": "research"},
+}

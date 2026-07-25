@@ -32,6 +32,13 @@ services:
     environment:
       <<: *swr-env
 
+  research-worker:
+    image: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_BACKEND:-backend}:${TAG-latest}"
+    pull_policy: always
+    build: !reset null
+    environment:
+      <<: *swr-env
+
   flower:
     image: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_BACKEND:-backend}:${TAG-latest}"
     pull_policy: always
