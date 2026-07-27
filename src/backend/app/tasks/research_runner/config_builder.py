@@ -161,7 +161,45 @@ def resolve_provider_for_arc(
             "api_key_env": ARC_API_KEY_ENV,
             "primary_model": resolved_model or raw_model or "gpt-4o",
             "api_key": provider.api_key or provider.auth_token or "",
+            "auth_token": provider.auth_token or "",
         }
+
+
+def proxy_provider_for_arc(
+    provider_config: dict[str, Any],
+    *,
+    user_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> None:
+    """若 LLM_PROXY_ENABLE，将真实凭据换发为代理 token（原地修改）。
+
+    与演化任务的 _swap 逻辑一致：真实 api_key/base_url 存入 Redis（加密），
+    容器只持有不透明代理 token，经 /llmproxy 反向代理调用大模型，真实密钥
+    不进入容器。LLM_PROXY_ENABLE 为 False 时为空操作，不影响现有流程。
+
+    Args:
+        provider_config: resolve_provider_for_arc 返回的凭证字典，原地改写。
+        user_id: 归属用户 ID（审计用）。
+        task_id: 归属任务 ID（用于结束时批量吊销，此处传 turn_id）。
+    """
+    from app.core.config import settings
+    from app.services import credential_broker
+
+    if not settings.LLM_PROXY_ENABLE:
+        return
+    token = credential_broker.issue_token(
+        user_id=user_id,
+        task_id=task_id,
+        ttl=settings.LLM_PROXY_TOKEN_TTL,
+        provider_type=provider_config.get("provider", "openai-compatible"),
+        base_url=provider_config.get("base_url") or "",
+        api_key=provider_config.get("api_key") or "",
+        auth_token=provider_config.get("auth_token") or "",
+        model=provider_config.get("primary_model", ""),
+    )
+    provider_config["api_key"] = token
+    provider_config["auth_token"] = ""
+    provider_config["base_url"] = settings.LLM_PROXY_BASE_URL.rstrip("/")
 
 
 # ---- ARC config 主函数 ----

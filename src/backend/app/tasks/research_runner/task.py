@@ -38,6 +38,7 @@ from app.models.research import (
 from .config_builder import (
     _DEFAULT_HITL_MODE,
     build_arc_config,
+    proxy_provider_for_arc,
     resolve_provider_for_arc,
 )
 from .lifecycle import (
@@ -160,6 +161,7 @@ def _build_arc_config_dict(
         turn_snap.model_name or session_snap.model_name,
         user_id=session_snap.user_id,
     )
+    proxy_provider_for_arc(provider_config, user_id=session_snap.user_id, task_id=turn_snap.id)
     arc_config_dict = build_arc_config(
         session=session_snap,
         turn=turn_snap,

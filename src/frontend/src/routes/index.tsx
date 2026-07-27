@@ -488,7 +488,7 @@ function HeroSection() {
               <ArrowRight className="ml-2 size-5" />
             </Button>
           </Link>
-          <Link to={logged ? "/autoresearch" : "/login"}>
+          <Link to="/autoresearch">
             <Button
               variant="outline"
               size="lg"

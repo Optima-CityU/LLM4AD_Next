@@ -156,7 +156,7 @@ class ResearchSessionCreateRequest(BaseModel):
         min_length=1, max_length=20000, description="研究问题 / 主题"
     )
     profile: str = Field(
-        default="algorithm_design",
+        default="algorithm_evolution",
         max_length=64,
         description="ARC domain profile id",
     )

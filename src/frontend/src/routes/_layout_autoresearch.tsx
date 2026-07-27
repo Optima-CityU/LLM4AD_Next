@@ -29,9 +29,12 @@ import icon from "/assets/images/logo.svg"
 
 export const Route = createFileRoute("/_layout_autoresearch")({
   component: AutoResearchLayout,
-  beforeLoad: async () => {
+  beforeLoad: async ({ location }) => {
     if (!isLoggedIn()) {
-      throw redirect({ to: "/login" })
+      throw redirect({
+        to: "/login",
+        search: { redirect: location.pathname + (location.searchStr || "") },
+      })
     }
   },
 })

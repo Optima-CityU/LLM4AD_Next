@@ -34,7 +34,7 @@ from app.models.research import (
     ResearchTurnStatus,
 )
 
-from .config_builder import resolve_provider_for_arc
+from .config_builder import proxy_provider_for_arc, resolve_provider_for_arc
 from .snapshots import SessionSnapshot, resolve_run_dir, snap_session
 from .streaming import ResearchEventSink
 
@@ -317,6 +317,7 @@ def run_collab_turn(self, data: dict) -> dict:
             session_snap.model_name,
             user_id=session_snap.user_id,
         )
+        proxy_provider_for_arc(provider_config, user_id=session_snap.user_id, task_id=turn_id)
 
         on_event, on_stdout, result_holder = _build_collab_event_handler(sink, stage_num)
 
