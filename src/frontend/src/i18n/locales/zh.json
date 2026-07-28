@@ -1049,6 +1049,12 @@
       "generate": "生成报告",
       "regenerate": "重新生成",
       "generating": "正在生成报告...",
+      "progress": {
+        "prepare": "正在整理演化记录",
+        "summarize": "正在第 {{round}} 轮汇总（{{completed}}/{{total}}）",
+        "merge": "正在第 {{round}} 轮合并摘要（{{completed}}/{{total}}）",
+        "generate": "正在生成最终报告"
+      },
       "selectProvider": "选择模型供应商",
       "defaultProvider": "系统默认",
       "mockProvider": "模拟调用",

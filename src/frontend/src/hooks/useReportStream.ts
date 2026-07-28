@@ -10,7 +10,15 @@ interface UseReportStreamReturn {
   status: ReportStatus | null
   error: string | null
   isStreaming: boolean
+  progress: ReportProgress | null
   stop: () => void
+}
+
+export interface ReportProgress {
+  stage: "prepare" | "summarize" | "merge" | "generate"
+  round?: number
+  completed?: number
+  total?: number
 }
 
 const MAX_RETRIES = 2
@@ -27,6 +35,7 @@ export function useReportStream(
   const [status, setStatus] = useState<ReportStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
+  const [progress, setProgress] = useState<ReportProgress | null>(null)
   const contentBuffer = useRef("")
   const rafId = useRef<number>(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -37,6 +46,7 @@ export function useReportStream(
       setStatus(null)
       setError(null)
       setIsStreaming(false)
+      setProgress(null)
       contentBuffer.current = ""
       return
     }
@@ -45,6 +55,7 @@ export function useReportStream(
     setError(null)
     setContent("")
     setStatus("generating")
+    setProgress(null)
     contentBuffer.current = ""
 
     const abortController = new AbortController()
@@ -145,6 +156,13 @@ export function useReportStream(
                       if (parsed.type === "chunk" && parsed.content) {
                         contentBuffer.current += parsed.content
                         scheduleFlush()
+                      } else if (parsed.type === "progress") {
+                        setProgress({
+                          stage: parsed.stage,
+                          round: parsed.round,
+                          completed: parsed.completed,
+                          total: parsed.total,
+                        })
                       } else if (parsed.type === "done") {
                         if (!cancelled) {
                           setStatus("completed")
@@ -216,5 +234,5 @@ export function useReportStream(
     setStatus("cancelled")
   }, [])
 
-  return { content, status, error, isStreaming, stop }
+  return { content, status, error, isStreaming, progress, stop }
 }

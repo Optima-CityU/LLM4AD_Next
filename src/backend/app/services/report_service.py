@@ -9,6 +9,7 @@ import copy
 import json
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,6 +38,14 @@ from app.schemas.report import (
 )
 from app.services.report_prompts import build_prompts
 from app.services.task_service import get_task_with_auth
+
+SUMMARY_CHUNK_MAX_CHARS = 40_000
+INTERMEDIATE_SUMMARY_MAX_TOKENS = 4_096
+INTERMEDIATE_SUMMARY_MAX_CHARS = 16_000
+
+
+class _ReportGenerationCancelled(Exception):
+    """Raised when a report generation is superseded or explicitly stopped."""
 
 
 def generate_report(
@@ -82,12 +91,10 @@ def generate_report(
     )
 
     log_data = _extract_log_data(logs, request)
-    system_prompt, user_prompt = _build_prompts(request, log_data, task)
-
-    if request.prompt_template:
-        user_prompt = _render_custom_template(
-            request.prompt_template, request.report_type, log_data, task
-        )
+    background = (task.input_args or {}).get("background", "")
+    prompt: str | None = None
+    if request.report_type != ReportType.TECH_CHANGE:
+        prompt = _build_report_prompt(request, log_data, background)
 
     # Cancel previous generation: push cancelled event, delete old stream
     old_gen_id = get_report_generation_id(str(task_id), report_type)
@@ -120,8 +127,6 @@ def generate_report(
     db.add(task)
     db.commit()
 
-    prompt = f"{system_prompt}\n\n{user_prompt}"
-
     asyncio.get_event_loop().create_task(
         _run_report_generation(
             task_id=task_id,
@@ -129,6 +134,9 @@ def generate_report(
             provider_config=provider_config,
             prompt=prompt,
             generation_id=generation_id,
+            request=request,
+            log_data=log_data,
+            background=background,
         )
     )
 
@@ -225,8 +233,11 @@ async def _run_report_generation(
     task_id: uuid.UUID,
     report_type: str,
     provider_config: dict[str, Any],
-    prompt: str,
+    prompt: str | None,
     generation_id: str,
+    request: ReportGenerateRequest,
+    log_data: list[dict[str, Any]] | str,
+    background: str,
 ) -> None:
     """以协程方式后台流式拉取 LLM 输出并持久化最终结果。
 
@@ -249,6 +260,41 @@ async def _run_report_generation(
             provider_config["type"],
             config=provider_config,
         )
+        if request.report_type == ReportType.TECH_CHANGE:
+            push_report_chunk(
+                str(task_id),
+                report_type,
+                {"type": "progress", "stage": "prepare"},
+            )
+
+            def _is_cancelled() -> bool:
+                return get_report_generation_id(str(task_id), report_type) != generation_id
+
+            def _on_progress(progress: dict[str, Any]) -> None:
+                push_report_chunk(
+                    str(task_id),
+                    report_type,
+                    {"type": "progress", **progress},
+                )
+
+            summary = await _summarize_evolution_evidence(
+                provider,
+                log_data if isinstance(log_data, list) else [],
+                on_progress=_on_progress,
+                is_cancelled=_is_cancelled,
+                background=background,
+            )
+            if _is_cancelled():
+                raise _ReportGenerationCancelled
+            push_report_chunk(
+                str(task_id),
+                report_type,
+                {"type": "progress", "stage": "generate"},
+            )
+            prompt = _build_report_prompt(request, summary, background)
+
+        if prompt is None:
+            raise RuntimeError("Report prompt was not initialized")
         async for chunk in provider.generate_stream(prompt):
             current_id = get_report_generation_id(str(task_id), report_type)
             if current_id != generation_id:
@@ -260,7 +306,7 @@ async def _run_report_generation(
                     task_id,
                     report_type,
                     ReportStatus.CANCELLED,
-                    content_buffer or None,
+                    content_buffer,
                 )
                 return
 
@@ -278,6 +324,10 @@ async def _run_report_generation(
         )
 
         _persist_report(task_id, report_type, ReportStatus.COMPLETED, content_buffer)
+
+    except _ReportGenerationCancelled:
+        cancelled = True
+        _persist_report(task_id, report_type, ReportStatus.CANCELLED, content_buffer)
 
     except Exception as exc:
         if cancelled:
@@ -460,11 +510,11 @@ def _extract_log_data(logs: list[dict], request: ReportGenerateRequest) -> list[
     """根据报告类型抽取相关日志数据。
 
     Returns:
-        ``tech_change``：所有 generated 日志的字符串摘要；
+        ``tech_change``：用于分层总结的紧凑节点证据；
         其他类型：节点数据字典列表。
     """
     if request.report_type == ReportType.TECH_CHANGE:
-        return _build_evolution_summary(logs)
+        return _build_evolution_evidence(logs)
 
     if request.report_type == ReportType.NODE_COMPARISON:
         nodes = _extract_nodes_from_logs(logs, request.node_ids or [])
@@ -490,13 +540,12 @@ def _extract_log_data(logs: list[dict], request: ReportGenerateRequest) -> list[
     return []
 
 
-def _build_prompts(
+def _build_report_prompt(
     request: ReportGenerateRequest,
     log_data: list[dict] | str,
-    task: models.Task,
-) -> tuple[str, str]:
-    """根据报告类型构建 system 与 user Prompt。"""
-    background = (task.input_args or {}).get("background", "")
+    background: str,
+) -> str:
+    """构建最终报告 Prompt。"""
 
     system, user = build_prompts(request.report_type, log_data, background)
 
@@ -505,14 +554,19 @@ def _build_prompts(
     else:
         system += "\n\nIMPORTANT: You MUST write the entire report in English."
 
-    return system, user
+    if request.prompt_template:
+        user = _render_custom_template(
+            request.prompt_template, request.report_type, log_data, background
+        )
+
+    return f"{system}\n\n{user}"
 
 
 def _render_custom_template(
     template: str,
     report_type: ReportType,
     log_data: list[dict] | str,
-    task: models.Task,
+    background: str,
 ) -> str:
     """将自定义模板中的 {variable} 占位符替换为实际值。
 
@@ -529,7 +583,7 @@ def _render_custom_template(
     """
     from app.services.report_prompts import _serialize_nodes, _truncate
 
-    background = (task.input_args or {}).get("background", "") or "No additional background provided."
+    background = background or "No additional background provided."
 
     variables: dict[str, str] = {"background": background}
 
@@ -563,13 +617,177 @@ def _build_params_dict(request: ReportGenerateRequest) -> dict:
     return params
 
 
-def _build_evolution_summary(logs: list[dict]) -> str:
-    """为 tech_change 报告构建按时间排序的 generated 日志摘要。"""
-    generated = [e for e in logs if e.get("type") == "generated"]
-    if not generated:
-        all_logs = [e for e in logs if e.get("type") in ("log", "print")]
-        return json.dumps(all_logs[:200], ensure_ascii=False, indent=1, default=str)
-    return json.dumps(generated, ensure_ascii=False, indent=1, default=str)
+def _limit_text(value: Any, max_chars: int) -> str:
+    """Convert a value to bounded text while making truncation explicit."""
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    marker = "… [truncated]"
+    if max_chars <= len(marker):
+        return marker[:max_chars]
+    return f"{text[: max_chars - len(marker)]}{marker}"
+
+
+def _limit_json(value: Any, max_chars: int) -> Any:
+    """Keep structured values when compact, otherwise retain a bounded representation."""
+    if value is None:
+        return None
+    serialized = json.dumps(value, ensure_ascii=False, default=str)
+    if len(serialized) <= max_chars:
+        return value
+    return _limit_text(serialized, max_chars)
+
+
+def _build_evolution_evidence(logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Extract compact, report-relevant evidence from generated evolution events."""
+    evidence: list[dict[str, Any]] = []
+    for entry in logs:
+        if entry.get("type") != "generated":
+            continue
+        data = entry.get("data")
+        if not isinstance(data, dict):
+            continue
+
+        evaluation = data.get("evaluation")
+        evaluation = evaluation if isinstance(evaluation, dict) else {}
+        generation_meta = data.get("generation_meta")
+        generation_meta = generation_meta if isinstance(generation_meta, dict) else {}
+
+        item: dict[str, Any] = {
+            "node_id": str(data.get("id") or ""),
+            "generation": data.get("generation"),
+            "parent_ids": list(data.get("parent_ids") or []),
+            "name": _limit_text(data.get("name"), 400),
+            "description": _limit_text(data.get("description"), 1_200),
+            "key_innovations": [
+                _limit_text(innovation, 400)
+                for innovation in (data.get("key_innovations") or [])[:8]
+            ],
+            "score": evaluation.get("score", data.get("score")),
+            "metrics": _limit_json(
+                evaluation.get("metrics", data.get("metrics")), 1_200
+            ),
+            "operator": generation_meta.get(
+                "operator_name", generation_meta.get("operator", "")
+            ),
+            "change_description": _limit_text(
+                generation_meta.get("change_description", data.get("design_notes", "")),
+                1_000,
+            ),
+        }
+        error = evaluation.get("error", data.get("error"))
+        if error:
+            item["error"] = _limit_text(error, 800)
+        evidence.append(item)
+    if evidence:
+        return evidence
+
+    for entry in logs:
+        if entry.get("type") not in ("log", "print"):
+            continue
+        message = entry.get("message") or entry.get("data")
+        if not message:
+            continue
+        evidence.append(
+            {
+                "event_type": entry.get("type"),
+                "timestamp": entry.get("timestamp"),
+                "message": _limit_text(message, 1_200),
+            }
+        )
+    return evidence
+
+
+def _pack_summary_items(items: list[str], max_chars: int) -> list[str]:
+    """Pack ordered summary inputs into bounded chunks without splitting normal entries."""
+    chunks: list[str] = []
+    current: list[str] = []
+    current_length = 0
+    separator_length = 2
+
+    for item in items:
+        bounded_item = _limit_text(item, max_chars)
+        addition = len(bounded_item) + (separator_length if current else 0)
+        if current and current_length + addition > max_chars:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_length = 0
+        current.append(bounded_item)
+        current_length += len(bounded_item) + (separator_length if len(current) > 1 else 0)
+
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks
+
+
+def _build_intermediate_summary_prompt(
+    chunk: str,
+    round_number: int,
+    background: str,
+) -> str:
+    """Build the fixed prompt used to compress one hierarchy level of evidence."""
+    task_background = background or "No additional background provided."
+    return f"""You are compressing algorithm-evolution evidence for a later final report.
+
+Task background:
+{task_background}
+
+Evidence or prior summaries (round {round_number}):
+{chunk}
+
+Produce a high-fidelity factual summary. Preserve concrete node IDs, generations,
+scores, score changes, parent relationships, key techniques, failures, and trade-offs.
+Do not invent evidence. Focus on trends and representative changes that a later
+analyst needs; do not include source code or a preamble."""
+
+
+async def _summarize_evolution_evidence(
+    provider: Any,
+    evidence: list[dict[str, Any]],
+    *,
+    on_progress: Callable[[dict[str, Any]], None],
+    is_cancelled: Callable[[], bool] | None = None,
+    background: str = "",
+    max_chars: int = SUMMARY_CHUNK_MAX_CHARS,
+    max_tokens: int = INTERMEDIATE_SUMMARY_MAX_TOKENS,
+) -> str:
+    """Recursively summarize compact node evidence until one final summary remains."""
+    items = [json.dumps(item, ensure_ascii=False, default=str) for item in evidence]
+    if not items:
+        return "No generated evolution nodes were available for analysis."
+
+    round_number = 1
+    while True:
+        chunks = _pack_summary_items(items, max_chars)
+        summaries: list[str] = []
+        stage = "summarize" if round_number == 1 else "merge"
+
+        for index, chunk in enumerate(chunks, start=1):
+            if is_cancelled and is_cancelled():
+                raise _ReportGenerationCancelled
+            on_progress(
+                {
+                    "stage": stage,
+                    "round": round_number,
+                    "completed": index,
+                    "total": len(chunks),
+                }
+            )
+            result = await provider.generate(
+                _build_intermediate_summary_prompt(chunk, round_number, background),
+                max_tokens=max_tokens,
+            )
+            if is_cancelled and is_cancelled():
+                raise _ReportGenerationCancelled
+            text = _limit_text(result.text.strip(), INTERMEDIATE_SUMMARY_MAX_CHARS)
+            if not text:
+                raise RuntimeError("Intermediate evolution summary was empty")
+            summaries.append(text)
+
+        if len(summaries) == 1:
+            return summaries[0]
+        items = summaries
+        round_number += 1
 
 
 def _extract_nodes_from_logs(logs: list[dict], node_ids: list[str]) -> list[dict]:

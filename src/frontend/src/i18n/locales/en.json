@@ -1049,6 +1049,12 @@
       "generate": "Generate Report",
       "regenerate": "Regenerate",
       "generating": "Generating report...",
+      "progress": {
+        "prepare": "Preparing evolution evidence",
+        "summarize": "Summarizing round {{round}} ({{completed}}/{{total}})",
+        "merge": "Merging summaries in round {{round}} ({{completed}}/{{total}})",
+        "generate": "Generating final report"
+      },
       "selectProvider": "Select Provider",
       "defaultProvider": "System Default",
       "mockProvider": "Mock Call",

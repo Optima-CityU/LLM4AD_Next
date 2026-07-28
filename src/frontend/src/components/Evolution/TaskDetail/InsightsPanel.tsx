@@ -253,6 +253,7 @@ export default function InsightsPanel({ task }: InsightsPanelProps) {
     status: streamStatus,
     error: streamError,
     isStreaming,
+    progress: streamProgress,
     stop: stopStream,
   } = useReportStream(task.id, activeType, shouldStream)
 
@@ -447,6 +448,20 @@ export default function InsightsPanel({ task }: InsightsPanelProps) {
     : (currentReport?.status ?? null)
 
   const isCancelled = displayStatus === "cancelled"
+  const progressText = useMemo(() => {
+    if (!streamProgress) return t("evolution.insights.generating")
+    if (streamProgress.stage === "prepare") {
+      return t("evolution.insights.progress.prepare")
+    }
+    if (streamProgress.stage === "generate") {
+      return t("evolution.insights.progress.generate")
+    }
+    return t(`evolution.insights.progress.${streamProgress.stage}`, {
+      round: streamProgress.round ?? 1,
+      completed: streamProgress.completed ?? 0,
+      total: streamProgress.total ?? 0,
+    })
+  }, [streamProgress, t])
 
   return (
     <div className="flex flex-col h-full bg-card/50 overflow-hidden">
@@ -687,7 +702,7 @@ export default function InsightsPanel({ task }: InsightsPanelProps) {
         <div className="flex items-center gap-2 px-4 py-2 border-b border-primary/20 bg-primary/5 shrink-0">
           <Loader2 className="size-3.5 animate-spin text-primary" />
           <span className="text-xs text-primary">
-            {t("evolution.insights.generating")}
+            {progressText}
           </span>
           <button
             type="button"
