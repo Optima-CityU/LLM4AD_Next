@@ -103,7 +103,10 @@ def ensure_user_workspace(container_name: str, user_email: str, dark: bool = Tru
     os.makedirs(os.path.join(user_home, ".cache"), exist_ok=True)
     settings_dir = os.path.join(user_home, ".local", "share", "code-server", "User")
     os.makedirs(settings_dir, exist_ok=True)
-    settings_path = os.path.join(settings_dir, "settings.json")
+    # Keep this file path aligned with the bind mount in get_or_start_container.
+    # Docker creates a directory for a missing bind source, which makes a later
+    # file mount fail permanently for that user.
+    settings_path = os.path.join(user_home, ".env_code.json")
     vscode_settings = get_code_server_vscode_settings(dark=dark)
     with open(settings_path, "w", encoding="utf-8") as f:
         json.dump(vscode_settings, f, ensure_ascii=False)

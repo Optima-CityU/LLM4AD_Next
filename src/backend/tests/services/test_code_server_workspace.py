@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 import docker
@@ -53,6 +54,16 @@ def test_code_server_mount_paths_join_host_project_home_without_trailing_slash(m
     assert "/srv/llm4ad/app-data/code_user-123" in client.containers.volumes
     assert "/srv/llm4ad/app-data/code_user-123/.env_code.json" in client.containers.volumes
     assert "/srv/llm4ad/app-datacode_user-123/" not in client.containers.volumes
+
+
+def test_workspace_creates_the_file_used_by_the_code_server_mount(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "DOCKER_PROJECT_HOME", str(tmp_path))
+
+    code_server_service.ensure_user_workspace("code_user-123", "user@example.com")
+
+    settings_path = tmp_path / "code_user-123" / ".env_code.json"
+    assert settings_path.is_file()
+    assert json.loads(settings_path.read_text(encoding="utf-8"))["workbench.colorTheme"]
 
 
 def test_code_server_rejects_relative_host_project_home(monkeypatch):
