@@ -59,6 +59,19 @@ embedding:
   type: 'mock'
 
 # ==============================================================================
+# SECTION 2.5: Memory Configuration (记忆配置)
+# ==============================================================================
+# This example is intentionally fully offline.  Declaring memory explicitly is
+# important when it is launched as a web template: otherwise project defaults
+# can select the configured MindMemOS backend.
+memory:
+  enabled: false
+  type: "local_yaml"
+  persist: false
+  auto_extraction:
+    enabled: false
+
+# ==============================================================================
 # SECTION 3: Coder Configuration (代码生成器配置)
 # ==============================================================================
 coder:
