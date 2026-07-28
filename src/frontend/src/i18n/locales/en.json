@@ -3086,6 +3086,7 @@
       "awaiting": "Awaiting your gate decision",
       "awaitingStage": "Stage {{stage}} {{name}} · awaiting decision",
       "confirmHint": "Approve if the artifacts look correct. To make changes, edit the artifacts directly, or add a note and Reject.",
+      "rollbackHint": "Reject rolls back to #{{stage}} {{name}} and passes your note to that step.",
       "abortTitle": "End this run?",
       "abortDesc": "This immediately terminates the current research run. Artifacts from completed stages are kept, but unfinished stages must be started over."
     },

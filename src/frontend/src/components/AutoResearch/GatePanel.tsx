@@ -31,6 +31,8 @@ interface GateFormPayload {
   stage?: number
   stage_name?: string
   available_actions?: Array<string | { value: string; label?: string }>
+  rollback_default?: number | null
+  rollback_default_name?: string
 }
 
 const ACTION_ORDER = ["approve", "reject", "skip", "inject", "abort"]
@@ -243,6 +245,20 @@ export default function GatePanel({
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           {t("autoResearch.gate.confirmHint")}
         </p>
+
+        {/* 打回回退点提示：告知用户「打回」将回到哪一步重做（对齐原生 arc
+            GATE_ROLLBACK，回退目标由后端下发，不可修改）。 */}
+        {payload.rollback_default != null && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+            {t("autoResearch.gate.rollbackHint", {
+              stage: payload.rollback_default,
+              name:
+                stageNameByLang(payload.rollback_default, i18n.language) ||
+                payload.rollback_default_name ||
+                "",
+            })}
+          </p>
+        )}
       </div>
 
       {/* 输入框插槽：先写理由 */}

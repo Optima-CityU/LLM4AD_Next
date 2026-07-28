@@ -40,6 +40,7 @@ from app.schemas.research import (
     ResearchTurnStartResponse,
 )
 from app.tasks.research_runner import enqueue_research_turn, stage_display_name
+from app.tasks.research_runner.streaming import gate_rollback_default
 
 from ._common import (
     _find_turn_by_status,
@@ -204,7 +205,8 @@ def _compute_gate_resume(
     （字符串；abort 时为 None）：
 
     - approve/skip/未知 → ``N+1``（门控 stage 产物已在盘，无需重跑）；
-    - reject/pivot → ``rollback_to_stage`` 或回退到 ``N``（重跑本 stage）；
+    - reject/pivot → ``rollback_to_stage``；缺省时回退到 ARC ``GATE_ROLLBACK`` 的
+      上游目标（如 9→8、5→4、20→16），无映射则回落到 ``N``（重跑本 stage）；
     - edit/inject/collaborate → ``N``（带 guidance 重跑本 stage）；
     - abort → ``abort=True``，会话置 CANCELLED、不建新 turn。
 
@@ -228,8 +230,14 @@ def _compute_gate_resume(
                 raise HTTPException(
                     status_code=400, detail="invalid rollback_to_stage"
                 ) from exc
+            # 回退目标须落在门控 stage 上游（1 ≤ target < gate_stage）。
+            if gate_stage > 0 and not (1 <= target < gate_stage):
+                raise HTTPException(
+                    status_code=400, detail="rollback_to_stage out of range"
+                )
         else:
-            target = gate_stage
+            # 缺省对齐 ARC GATE_ROLLBACK（上游重做）；无映射回落重跑本 stage。
+            target = gate_rollback_default(gate_stage) or gate_stage
         return str(target), guidance, False
 
     if action in ("edit", "inject", "collaborate"):

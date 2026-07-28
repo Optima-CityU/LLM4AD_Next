@@ -64,6 +64,18 @@ def stage_display_name(stage_num: int) -> str:
     return _STAGE_NAMES.get(stage_num, f"stage-{stage_num}")
 
 
+# ARC GATE_ROLLBACK 快照(0.5.0)：门控 stage → reject/pivot 默认回退目标（上游重做）。
+# 与 _STAGE_NAMES 同为镜像：backend 不装 researchclaw，须随 ARC pipeline/stages.py 的
+# GATE_ROLLBACK 同步。5 SCREEN→4 COLLECT / 9 EXP_DESIGN→8 HYPOTHESIS /
+# 20 QUALITY→16 OUTLINE / 10 CODE_GEN→9（hep_ph profile 动态门控）。
+_GATE_ROLLBACK: dict[int, int] = {5: 4, 9: 8, 20: 16, 10: 9}
+
+
+def gate_rollback_default(gate_stage: int) -> int | None:
+    """门控 stage 的默认回退目标；非映射内 stage 返回 ``None``（回落=重跑本 stage）。"""
+    return _GATE_ROLLBACK.get(gate_stage)
+
+
 # ARC 流水线一句话总览 + 每阶段用途（供协作 agent system prompt）。与 _STAGE_NAMES
 # 同为 0.5.0 快照：ARC 升级调整阶段时需同步。描述只求「让 agent 懂这步在大局里干
 # 什么、上游给什么、下游要什么」，不追求逐字精确。
@@ -563,6 +575,9 @@ def persist_gate_pause(
     if stage_num > 0:
         _emit_stage_event(sink, stage_num, stage_name, status="blocked_approval")
 
+    # reject/pivot 的默认回退目标（对齐 ARC GATE_ROLLBACK）：下发给前端展示
+    # 「打回将回到哪一步」。None 表示无映射（回落=重跑本 stage）。
+    rollback_default = gate_rollback_default(stage_num)
     form_payload = {
         "kind": "form",
         "message_id": str(message_id),
@@ -572,6 +587,10 @@ def persist_gate_pause(
         "available_actions": actions,
         "context_summary": context_summary,
         "output_files": files,
+        "rollback_default": rollback_default,
+        "rollback_default_name": (
+            stage_display_name(rollback_default) if rollback_default else ""
+        ),
     }
 
     # 1. DB: 落 form 消息（turn_status = PAUSED_GATE），event_key 用 message_id 幂等
