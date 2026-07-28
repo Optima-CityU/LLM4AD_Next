@@ -1585,7 +1585,7 @@ export default function IslandGAVisualization() {
           if (event.type === "wheel") return true
           if (
             event.type === "mousedown" &&
-            (event as MouseEvent).button === 1
+            (event as MouseEvent).button === 0
           ) {
             event.preventDefault()
             return true
@@ -1605,7 +1605,7 @@ export default function IslandGAVisualization() {
 
       svg.on("contextmenu", (event: Event) => event.preventDefault())
       svg.on("mousedown", (event: MouseEvent) => {
-        if (event.button === 1) event.preventDefault()
+        if (event.button === 0) event.preventDefault()
       })
     }
 
