@@ -28,6 +28,11 @@ interface Props {
   runnableStages?: Set<number>
   /** 从指定阶段运行（等价于底部设好起始阶段再点运行）。 */
   onRunFromStage?: (stage: number) => void
+  /**
+   * 隐藏 LLM4AD 标识：ml_vision 画像下 9-13 阶段不接 LLM4AD 演化引擎，
+   * 去掉分组的 LLM4AD 徽章 / 专属样式，浮层来源提示也改为 ARC 原生。
+   */
+  hideLlm4ad?: boolean
 }
 
 /** 接入本项目 llm4ad 的分组 key（实验设计 + 实验执行）——其余步骤走 ARC。 */
@@ -100,6 +105,7 @@ export default function StageGroupRail({
   canRunFromStage,
   runnableStages,
   onRunFromStage,
+  hideLlm4ad,
 }: Props) {
   const { t } = useTranslation()
   const byStage = new Map(cells.map((c) => [c.stage, c]))
@@ -120,7 +126,7 @@ export default function StageGroupRail({
         {groups.map(({ g, present, info }, gi) => {
           const isActivePhase =
             activeStage != null && activeStage >= g.from && activeStage <= g.to
-          const isLlm4ad = LLM4AD_GROUPS.has(g.key)
+          const isLlm4ad = !hideLlm4ad && LLM4AD_GROUPS.has(g.key)
 
           return (
             <Fragment key={g.key}>
@@ -189,6 +195,7 @@ export default function StageGroupRail({
                     present={present}
                     activeStage={activeStage}
                     isLlm4ad={isLlm4ad}
+                    hideLlm4ad={hideLlm4ad}
                     onSelect={onSelect}
                     canRunFromStage={canRunFromStage}
                     runnableStages={runnableStages}
@@ -381,6 +388,7 @@ function PhaseTimeline({
   present,
   activeStage,
   isLlm4ad,
+  hideLlm4ad,
   onSelect,
   canRunFromStage,
   runnableStages,
@@ -392,6 +400,7 @@ function PhaseTimeline({
   present: StageCell[]
   activeStage: number | null
   isLlm4ad?: boolean
+  hideLlm4ad?: boolean
   onSelect: (cell: StageCell) => void
   canRunFromStage?: boolean
   runnableStages?: Set<number>
@@ -465,6 +474,7 @@ function PhaseTimeline({
             cell={cell}
             isActive={activeStage != null && cell.stage === activeStage}
             last={i === present.length - 1}
+            hideLlm4ad={hideLlm4ad}
             onSelect={onSelect}
             canRunFromStage={canRunFromStage}
             runnableStages={runnableStages}
@@ -487,6 +497,7 @@ function TimelineRow({
   cell,
   isActive,
   last,
+  hideLlm4ad,
   onSelect,
   canRunFromStage,
   runnableStages,
@@ -495,6 +506,7 @@ function TimelineRow({
   cell: StageCell
   isActive: boolean
   last: boolean
+  hideLlm4ad?: boolean
   onSelect: (cell: StageCell) => void
   canRunFromStage?: boolean
   runnableStages?: Set<number>
@@ -503,7 +515,13 @@ function TimelineRow({
   const { t, i18n } = useTranslation()
   const isGate = GATE_STAGES.has(cell.stage)
   const label = stageNameByLang(cell.stage, i18n.language) || cell.name
-  const description = t(`autoResearch.stages.descriptions.${cell.stage}`, "")
+  // ml_vision 画像下 9-13/15 步骤改用不含 LLM4AD 文字的 ARC 原生描述；
+  // 无对应覆盖（返回空串）时回退到默认描述。
+  const mlVisionDesc = hideLlm4ad
+    ? t(`autoResearch.stages.descriptionsMlVision.${cell.stage}`, "")
+    : ""
+  const description =
+    mlVisionDesc || t(`autoResearch.stages.descriptions.${cell.stage}`, "")
   const dot = statusDot(cell.status)
   // 「从此步运行」按钮：显示逻辑与底部起始阶段选择器一致（终态可重跑时才出现），
   // 且仅对「允许作为起点」的阶段（真实快照阶段）显示；点击等价于把起始阶段设为该步再点运行。

@@ -20,3 +20,15 @@ export const MODE_OPTIONS: ResearchMode[] = [
   "full-auto",
   "co-pilot",
 ]
+
+/**
+ * ARC domain profile（领域画像）。决定 9-13 阶段由哪套引擎驱动：
+ *   - ``algorithm_evolution``：LLM4AD 演化引擎（实验设计 + 执行走本项目）
+ *   - ``ml_vision``：AutoResearchClaw 原生（不接 LLM4AD 演化）
+ */
+export const PROFILE_OPTIONS = ["algorithm_evolution", "ml_vision"] as const
+
+export type ResearchProfile = (typeof PROFILE_OPTIONS)[number]
+
+/** ml_vision 画像：9-13 阶段不接 LLM4AD 演化引擎，改由 ARC 原生驱动。 */
+export const ML_VISION_PROFILE = "ml_vision"

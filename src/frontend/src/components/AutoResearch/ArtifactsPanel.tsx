@@ -44,6 +44,7 @@ import ArtifactPreviewDialog, {
 import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
 import { PlaceholderTab } from "./PlaceholderTab"
+import { ML_VISION_PROFILE } from "./shared"
 import { SectionLabel, StatusPill } from "./tech"
 
 interface Props {
@@ -83,11 +84,14 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
   })
   const treeQ = useResearchArtifactTree(session.id)
   const root = treeQ.data?.root ?? null
+  // ml_vision 画像不接 LLM4AD 演化引擎：隐藏「实验」区，也不再拉 generated 数据。
+  const hideExperiment = session.profile === ML_VISION_PROFILE
   // 与 ExperimentPanel 共享同一 query（按 key 去重，不产生额外请求），
   // 仅为把实验区刷新按钮提到区域标题行、保持与产物区一致。
   const genQ = useResearchGenerated(
     session.id,
     session.status === "running" || session.status === "paused",
+    !hideExperiment,
   )
   // 产物预览弹框：只保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
   const [previewPath, setPreviewPath] = useState<string | null>(null)
@@ -213,37 +217,41 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         </div>
       </CollapsibleSection>
 
-      {/* llm4ad 实验：视图切换在左，全屏按钮在最右侧 */}
-      <CollapsibleSection
-        icon={FlaskConical}
-        title={t("autoResearch.experiment.title")}
-        right={
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={() => void genQ.refetch()}
-              disabled={genQ.isFetching}
-              title={t("autoResearch.artifacts.refresh")}
-              className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw
-                className={cn("size-3.5", genQ.isFetching && "animate-spin")}
+      {/* llm4ad 实验：视图切换在左，全屏按钮在最右侧（ml_vision 画像下隐藏） */}
+      {!hideExperiment && (
+        <CollapsibleSection
+          icon={FlaskConical}
+          title={t("autoResearch.experiment.title")}
+          right={
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => void genQ.refetch()}
+                disabled={genQ.isFetching}
+                title={t("autoResearch.artifacts.refresh")}
+                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={cn("size-3.5", genQ.isFetching && "animate-spin")}
+                />
+              </button>
+              <ExperimentFullscreenDialog
+                sessionId={session.id}
+                running={
+                  session.status === "running" || session.status === "paused"
+                }
               />
-            </button>
-            <ExperimentFullscreenDialog
-              sessionId={session.id}
-              running={
-                session.status === "running" || session.status === "paused"
-              }
-            />
-          </div>
-        }
-      >
-        <ExperimentPanel
-          sessionId={session.id}
-          running={session.status === "running" || session.status === "paused"}
-        />
-      </CollapsibleSection>
+            </div>
+          }
+        >
+          <ExperimentPanel
+            sessionId={session.id}
+            running={
+              session.status === "running" || session.status === "paused"
+            }
+          />
+        </CollapsibleSection>
+      )}
 
       {/* 2. 产物文件树（中间）：占剩余空间并内部滚动；「全部收起」放标题行右侧 */}
       <CollapsibleSection

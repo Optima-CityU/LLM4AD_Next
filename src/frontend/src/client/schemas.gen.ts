@@ -7219,7 +7219,7 @@ export const ResearchSessionCreateRequestSchema = {
             maxLength: 64,
             title: 'Profile',
             description: 'ARC domain profile id',
-            default: 'algorithm_design'
+            default: 'algorithm_evolution'
         },
         mode: {
             '$ref': '#/components/schemas/ResearchMode',
@@ -7588,6 +7588,19 @@ export const ResearchSessionUpdateRequestSchema = {
             ],
             title: 'Topic',
             description: '研究主题/问题'
+        },
+        profile: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Profile',
+            description: 'ARC domain profile id（如 ml_vision）；未提供不变'
         },
         folder_id: {
             anyOf: [

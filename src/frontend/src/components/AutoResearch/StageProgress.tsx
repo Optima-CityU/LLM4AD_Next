@@ -18,6 +18,8 @@ interface BarProps {
   runnableStages?: Set<number>
   /** 从指定阶段运行（等价于设好起始阶段再点运行）。 */
   onRunFromStage?: (stage: number) => void
+  /** ml_vision 画像下隐藏 9-13 阶段的 LLM4AD 标识（徽章 + 来源提示）。 */
+  hideLlm4ad?: boolean
 }
 
 /**
@@ -34,6 +36,7 @@ export function StageProgressBar({
   canRunFromStage,
   runnableStages,
   onRunFromStage,
+  hideLlm4ad,
 }: BarProps) {
   const [guideStage, setGuideStage] = useState<StageCell | null>(null)
 
@@ -61,12 +64,14 @@ export function StageProgressBar({
         canRunFromStage={canRunFromStage}
         runnableStages={runnableStages}
         onRunFromStage={onRunFromStage}
+        hideLlm4ad={hideLlm4ad}
       />
 
       <StageDetailDrawer
         sessionId={sessionId}
         cell={guideStage}
         stages={stages}
+        hideLlm4ad={hideLlm4ad}
         onClose={() => setGuideStage(null)}
       />
     </div>

@@ -40,6 +40,8 @@ interface Props {
   cell: StageCell | null
   /** 后端阶段快照数组，用于取该阶段的真实时间 / 错误信息。 */
   stages: ResearchStageSnapshot[]
+  /** ml_vision 画像下 9-13/15 步骤改用不含 LLM4AD 文字的 ARC 原生描述。 */
+  hideLlm4ad?: boolean
   onClose: () => void
 }
 
@@ -55,6 +57,7 @@ export default function StageDetailDrawer({
   sessionId,
   cell,
   stages,
+  hideLlm4ad,
   onClose,
 }: Props) {
   const { t } = useTranslation()
@@ -158,7 +161,12 @@ export default function StageDetailDrawer({
                 {cell && (
                   <Section title={t("common.description", "描述")}>
                     <p className="text-xs leading-relaxed text-foreground/80">
-                      {t(`autoResearch.stages.descriptions.${cell.stage}`, "")}
+                      {(hideLlm4ad &&
+                        t(
+                          `autoResearch.stages.descriptionsMlVision.${cell.stage}`,
+                          "",
+                        )) ||
+                        t(`autoResearch.stages.descriptions.${cell.stage}`, "")}
                     </p>
                   </Section>
                 )}

@@ -2235,7 +2235,7 @@ export class Llm4AdResearchService {
     }
     
     /**
-     * 改会话（改名 / 移分组 / 改默认 mode/provider/model）
+     * 改会话（改名 / 移分组 / 改默认 mode/provider/model / 改 profile）
      * ``folder_id`` 显式传 null 表示移到未分组，未提供则不改。
      * @param data The data for the request.
      * @param data.sessionId
@@ -2528,6 +2528,7 @@ export class Llm4AdResearchService {
      *
      * **已终态短路**：如果 turn 已经 COMPLETED/FAILED/CANCELLED，直接返回一条
      * ``done`` 帧关流，不订阅 Redis（避免客户端白等 30 分钟 idle timeout）。
+     * PAUSED_GATE 不在此列——门控暂停的 turn 仍需回放历史与 gate 表单。
      * @param data The data for the request.
      * @param data.sessionId
      * @param data.turnId

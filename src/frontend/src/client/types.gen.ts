@@ -2651,6 +2651,10 @@ export type ResearchSessionUpdateRequest = {
      */
     topic?: (string | null);
     /**
+     * ARC domain profile id（如 ml_vision）；未提供不变
+     */
+    profile?: (string | null);
+    /**
      * 传 None 且请求体显式包含该键时移到未分组；未提供不变
      */
     folder_id?: (string | null);

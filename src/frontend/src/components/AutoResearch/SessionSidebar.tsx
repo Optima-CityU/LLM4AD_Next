@@ -1,17 +1,20 @@
 import {
   ChevronDown,
   ChevronRight,
+  DownloadCloud,
   FolderPlus,
   ListFilter,
   Loader2,
   MoreHorizontal,
   Plus,
+  Repeat,
   Search,
   Sparkles,
   X,
 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
 import type {
   ResearchFolderItem,
@@ -32,6 +35,7 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -48,11 +52,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
+  downloadResearchArtifactsArchive,
   useInfiniteFolderSessions,
   useInfiniteSearchSessions,
 } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
 
+import { PROFILE_OPTIONS } from "./shared"
 import { SectionLabel, sessionDotClasses } from "./tech"
 
 interface Props {
@@ -81,6 +87,8 @@ interface Props {
   onRenameSession: (id: string, title: string) => Promise<void> | void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onDeleteSession: (id: string) => Promise<void> | void
+  /** 切换会话 profile（实验类型），会清空第 9 步之后的产物。 */
+  onSwitchProfile: (id: string, profile: string) => Promise<void> | void
 }
 
 /** 可筛选的会话状态（枚举子集，覆盖用户会关注的运行态）。 */
@@ -118,6 +126,7 @@ export default function SessionSidebar({
   onRenameSession,
   onMoveSession,
   onDeleteSession,
+  onSwitchProfile,
 }: Props) {
   const { t } = useTranslation()
   const [createFolderOpen, setCreateFolderOpen] = useState(false)
@@ -134,6 +143,13 @@ export default function SessionSidebar({
   const [renameSessionTitle, setRenameSessionTitle] = useState("")
   const [deleteSession, setDeleteSession] =
     useState<ResearchSessionItem | null>(null)
+  // 切换实验类型：待确认的会话 + 目标 profile（null=对话框关闭）+ 产物打包下载中标记 + 切换提交中标记。
+  const [switchTarget, setSwitchTarget] = useState<{
+    session: ResearchSessionItem
+    profile: string
+  } | null>(null)
+  const [switchDownloading, setSwitchDownloading] = useState(false)
+  const [switching, setSwitching] = useState(false)
 
   // 拖放：正在拖的会话 + 当前悬停的放置目标分组 key（null=未分组假分组用 "__ungrouped__"）。
   const [dragSession, setDragSession] = useState<{
@@ -342,6 +358,9 @@ export default function SessionSidebar({
               setRenameSession(s)
             }}
             onMoveSession={onMoveSession}
+            onSwitchProfile={(s, target) =>
+              setSwitchTarget({ session: s, profile: target })
+            }
             onClearFilters={() => {
               onSearchChange("")
               onClearStatus()
@@ -378,6 +397,9 @@ export default function SessionSidebar({
               setRenameSession(s)
             }}
             onMoveSession={onMoveSession}
+            onSwitchProfile={(s, target) =>
+              setSwitchTarget({ session: s, profile: target })
+            }
             expanded={expanded.has("__ungrouped__")}
             onToggle={() => toggleExpanded("__ungrouped__")}
             dragSession={dragSession}
@@ -420,6 +442,9 @@ export default function SessionSidebar({
                 setRenameSession(s)
               }}
               onMoveSession={onMoveSession}
+              onSwitchProfile={(s, target) =>
+              setSwitchTarget({ session: s, profile: target })
+            }
               expanded={expanded.has(folder.id)}
               onToggle={() => toggleExpanded(folder.id)}
               dragSession={dragSession}
@@ -637,6 +662,92 @@ export default function SessionSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 切换实验类型确认：警告将清空第 9 步之后产物，提供打包下载入口 */}
+      <Dialog
+        open={!!switchTarget}
+        onOpenChange={(open) => {
+          if (!open && !switching) setSwitchTarget(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]" preventOutsideClose>
+          <DialogHeader>
+            <DialogTitle>
+              {t("autoResearch.sidebar.switchProfileTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed">
+              {switchTarget &&
+                t("autoResearch.sidebar.switchProfileConfirm", {
+                  target: t(`autoResearch.profile.${switchTarget.profile}`),
+                })}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* 产物打包下载：与右侧「打包下载全部」同一接口 */}
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] p-3 space-y-2">
+            <p className="text-xs text-amber-600 dark:text-amber-300/90 leading-relaxed">
+              {t("autoResearch.sidebar.switchProfileDownloadHint")}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-1.5"
+              disabled={switchDownloading}
+              onClick={() => {
+                if (!switchTarget || switchDownloading) return
+                setSwitchDownloading(true)
+                void downloadResearchArtifactsArchive(switchTarget.session.id)
+                  .catch((err: unknown) =>
+                    toast.error((err as Error)?.message ?? "download failed"),
+                  )
+                  .finally(() => setSwitchDownloading(false))
+              }}
+            >
+              {switchDownloading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <DownloadCloud className="size-3.5" />
+              )}
+              {t("autoResearch.artifacts.downloadAll")}
+            </Button>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={switching}
+              onClick={() => setSwitchTarget(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={switching}
+              onClick={async () => {
+                if (!switchTarget) return
+                setSwitching(true)
+                try {
+                  await onSwitchProfile(
+                    switchTarget.session.id,
+                    switchTarget.profile,
+                  )
+                  setSwitchTarget(null)
+                } catch (_) {
+                  /* 父层已 toast，保持对话框打开 */
+                } finally {
+                  setSwitching(false)
+                }
+              }}
+            >
+              {switching ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Repeat className="size-3.5" />
+              )}
+              {t("common.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }
@@ -653,6 +764,7 @@ interface FolderGroupProps {
   onDeleteSession: (s: ResearchSessionItem) => void
   onRenameSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
+  onSwitchProfile: (s: ResearchSessionItem, target: string) => void
   headerActions?: React.ReactNode
   /** 是否展开（受控，父层用已展开集判定）。 */
   expanded: boolean
@@ -679,6 +791,7 @@ function FolderSessionGroup({
   onDeleteSession,
   onRenameSession,
   onMoveSession,
+  onSwitchProfile,
   headerActions,
   expanded,
   onToggle,
@@ -784,6 +897,7 @@ function FolderSessionGroup({
               onRename={onRenameSession}
               onMove={onMoveSession}
               onDelete={onDeleteSession}
+              onSwitchProfile={onSwitchProfile}
             />
           ))}
           {query.hasNextPage && (
@@ -833,6 +947,7 @@ interface SearchResultsProps {
   onDeleteSession: (s: ResearchSessionItem) => void
   onRenameSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
+  onSwitchProfile: (s: ResearchSessionItem, target: string) => void
   onClearFilters: () => void
 }
 
@@ -846,6 +961,7 @@ function SearchResults({
   onDeleteSession,
   onRenameSession,
   onMoveSession,
+  onSwitchProfile,
   onClearFilters,
 }: SearchResultsProps) {
   const { t } = useTranslation()
@@ -898,6 +1014,7 @@ function SearchResults({
             onRename={onRenameSession}
             onMove={onMoveSession}
             onDelete={onDeleteSession}
+            onSwitchProfile={onSwitchProfile}
           />
         ))}
         {query.hasNextPage && (
@@ -926,6 +1043,7 @@ interface SessionRowProps {
   onRename: (s: ResearchSessionItem) => void
   onMove: (id: string, folderId: string | null) => Promise<void> | void
   onDelete: (s: ResearchSessionItem) => void
+  onSwitchProfile: (s: ResearchSessionItem, target: string) => void
 }
 
 function statusDot(status: string) {
@@ -945,6 +1063,7 @@ function SessionRow({
   onRename,
   onMove,
   onDelete,
+  onSwitchProfile,
 }: SessionRowProps) {
   const { t } = useTranslation()
   return (
@@ -1011,6 +1130,23 @@ function SessionRow({
           <DropdownMenuItem onSelect={() => onRename(session)}>
             {t("autoResearch.sidebar.renameSession")}
           </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Repeat className="size-3.5 mr-2" />
+              {t("autoResearch.sidebar.switchProfile")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-44">
+              {PROFILE_OPTIONS.map((p) => (
+                <DropdownMenuItem
+                  key={p}
+                  disabled={p === session.profile}
+                  onSelect={() => onSwitchProfile(session, p)}
+                >
+                  {t(`autoResearch.profile.${p}`)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               {t("autoResearch.sidebar.moveTo")}

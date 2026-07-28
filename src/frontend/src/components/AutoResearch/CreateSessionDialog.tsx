@@ -31,7 +31,7 @@ import {
 } from "@/hooks/useAutoResearch"
 
 import ProviderModelPicker from "./ProviderModelPicker"
-import { MODE_OPTIONS } from "./shared"
+import { MODE_OPTIONS, PROFILE_OPTIONS, type ResearchProfile } from "./shared"
 import { SectionLabel } from "./tech"
 
 interface Props {
@@ -59,6 +59,7 @@ export default function CreateSessionDialog({
   const [providerId, setProviderId] = useState("default")
   const [modelName, setModelName] = useState("")
   const [mode, setMode] = useState<ResearchMode>("co-pilot")
+  const [profile, setProfile] = useState<ResearchProfile>("algorithm_evolution")
   const [autoStart, setAutoStart] = useState(false)
   const [topicError, setTopicError] = useState("")
 
@@ -84,6 +85,7 @@ export default function CreateSessionDialog({
     setProviderId("default")
     setModelName("")
     setMode("co-pilot")
+    setProfile("algorithm_evolution")
     setAutoStart(false)
     setTopicError("")
     createdRef.current = null
@@ -121,6 +123,7 @@ export default function CreateSessionDialog({
           provider_id: providerId.trim() || null,
           model_name: modelName.trim() || null,
           mode,
+          profile,
         } as ResearchSessionCreateRequest))
       createdRef.current = created
 
@@ -208,6 +211,24 @@ export default function CreateSessionDialog({
               onChange={(e) => setTitle(e.target.value)}
               placeholder={t("autoResearch.create.titlePlaceholder")}
             />
+          </Field>
+
+          <Field label={t("autoResearch.create.profileLabel")}>
+            <Select
+              value={profile}
+              onValueChange={(v) => setProfile(v as ResearchProfile)}
+            >
+              <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROFILE_OPTIONS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {t(`autoResearch.profile.${p}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
