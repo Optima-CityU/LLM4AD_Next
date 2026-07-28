@@ -3002,6 +3002,7 @@
       "noTurns": "No turns yet",
       "llm4adFinal": "LLM4AD final state received",
       "stagePrefix": "Stage {{stage}} · {{name}}",
+      "stageError": "Error",
       "systemEvent": "System event",
       "streamLogs": {
         "title": "Live logs",
@@ -3257,6 +3258,7 @@
       "title": "LLM4AD Experiment",
       "simulation": "Evolution sim",
       "trend": "Trend",
+      "fullscreen": "View fullscreen",
       "demoData": "Demo data",
       "empty": "No evolution data for this session yet",
       "noScored": "No evaluated individuals yet",

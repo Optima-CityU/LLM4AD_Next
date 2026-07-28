@@ -16,10 +16,37 @@ tail 后转发到 Redis/DB：
 本模块**不依赖** Redis 与数据库，只依赖 researchclaw + 同目录的 task_config_crypto。
 """
 
-import json
-import logging
+# ============================================================================
+# 在导入任何第三方库之前，先禁用所有可能的颜色输出
+# 这样可以防止 researchclaw / llm4ad 内部的 loguru 输出 ANSI 颜色码
+# ============================================================================
 import os
 import sys
+
+os.environ["NO_COLOR"] = "1"
+os.environ["LOGURU_COLORIZE"] = "false"
+os.environ["FORCE_COLOR"] = "0"
+os.environ["TERM"] = "dumb"
+os.environ["CLICOLOR"] = "0"
+os.environ["ANSI_COLORS_DISABLED"] = "1"
+
+# 如果 loguru 已经被导入（例如在 researchclaw 中），重新配置它
+try:
+    from loguru import logger as loguru_logger
+    # 移除默认 handler 并添加一个无颜色的 handler
+    loguru_logger.remove()
+    loguru_logger.add(
+        sys.stderr,
+        format="{level: <8} {time:YYYY-MM-DD HH:mm:ss.SSS} | {name}:{function}:{line} - {message}",
+        level="INFO",
+        colorize=False,
+    )
+except ImportError:
+    pass  # loguru 未安装，跳过
+# ============================================================================
+
+import json
+import logging
 import threading
 import traceback
 from pathlib import Path

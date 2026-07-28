@@ -2872,6 +2872,7 @@
       "noTurns": "还没有轮次",
       "llm4adFinal": "已收到 LLM4AD 最终状态",
       "stagePrefix": "阶段 {{stage}} · {{name}}",
+      "stageError": "错误",
       "systemEvent": "系统事件",
       "streamLogs": {
         "title": "实时日志",
@@ -3127,6 +3128,7 @@
       "title": "llm4ad 实验",
       "simulation": "演化仿真",
       "trend": "趋势分析",
+      "fullscreen": "全屏查看",
       "demoData": "示例数据",
       "empty": "该会话尚无演化数据",
       "noScored": "尚无已评估的个体",

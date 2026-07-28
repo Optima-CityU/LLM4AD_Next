@@ -41,6 +41,7 @@ import ArtifactPreviewDialog, {
   FileKindIcon,
   formatSize,
 } from "./ArtifactPreviewDialog"
+import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
 import { PlaceholderTab } from "./PlaceholderTab"
 import { SectionLabel, StatusPill } from "./tech"
@@ -212,22 +213,30 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         </div>
       </CollapsibleSection>
 
-      {/* llm4ad 实验：视图切换控件已下放到内容区顶部 */}
+      {/* llm4ad 实验：视图切换在左，全屏按钮在最右侧 */}
       <CollapsibleSection
         icon={FlaskConical}
         title={t("autoResearch.experiment.title")}
         right={
-          <button
-            type="button"
-            onClick={() => void genQ.refetch()}
-            disabled={genQ.isFetching}
-            title={t("autoResearch.artifacts.refresh")}
-            className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw
-              className={cn("size-3.5", genQ.isFetching && "animate-spin")}
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => void genQ.refetch()}
+              disabled={genQ.isFetching}
+              title={t("autoResearch.artifacts.refresh")}
+              className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw
+                className={cn("size-3.5", genQ.isFetching && "animate-spin")}
+              />
+            </button>
+            <ExperimentFullscreenDialog
+              sessionId={session.id}
+              running={
+                session.status === "running" || session.status === "paused"
+              }
             />
-          </button>
+          </div>
         }
       >
         <ExperimentPanel
@@ -252,10 +261,7 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
                 className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
               >
                 <RefreshCw
-                  className={cn(
-                    "size-3.5",
-                    treeQ.isFetching && "animate-spin",
-                  )}
+                  className={cn("size-3.5", treeQ.isFetching && "animate-spin")}
                 />
               </button>
               <button

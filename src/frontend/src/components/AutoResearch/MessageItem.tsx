@@ -155,6 +155,12 @@ function SystemEventRow({ message }: { message: ResearchMessageItem }) {
       stage,
       name: stageName || `stage-${stage}`,
     })
+    // 失败时把后端返回的错误原因展示出来（优先 payload.error，回退 message.error），
+    // 否则用户只能看到一个红色「失败」胶囊，无法定位到底缺了什么。
+    const errorText =
+      status === "failed"
+        ? (payload.error as string | undefined) || message.error || ""
+        : ""
     return (
       <div className="px-6 py-0.5">
         <div className="flex max-w-fit items-center gap-2 rounded-full bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground/80">
@@ -178,6 +184,17 @@ function SystemEventRow({ message }: { message: ResearchMessageItem }) {
           )}
           <span className="text-[10px] opacity-50 shrink-0">{time}</span>
         </div>
+        {errorText && (
+          <div className="mt-1 ml-2 flex max-w-2xl items-start gap-1.5 rounded-md border border-red-500/25 bg-red-500/5 px-2.5 py-1.5 text-[11px] text-red-600 dark:text-red-400">
+            <AlertTriangle className="mt-px size-3.5 shrink-0" />
+            <div className="min-w-0 whitespace-pre-wrap break-words">
+              <span className="mr-1 font-semibold uppercase tracking-wide opacity-80">
+                {t("autoResearch.chat.stageError")}
+              </span>
+              {errorText}
+            </div>
+          </div>
+        )}
       </div>
     )
   }

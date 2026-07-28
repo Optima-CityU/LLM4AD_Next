@@ -485,5 +485,81 @@ class ResearchMessage(SQLModel, TimeMixin, table=True):
         max_length=128,
         sa_column=Column(Text, nullable=False, server_default=""),
     )
+    # per-turn 递增序列号，保证事件严格顺序（解决同一微秒内多事件的排序问题）
+    seq: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
 
     session: ResearchSession | None = Relationship(back_populates="messages")
+
+
+class ResearchLog(SQLModel, TimeMixin, table=True):
+    """研究日志表（从 ResearchMessage 中拆分出来的 log 类型事件）。
+
+    日志约占总消息的 90-95%，拆分后可显著提升查询性能。
+    包含容器、ARC、bridge、collab 等各个来源的日志输出。
+
+    字段说明：
+    - ``level``：日志级别（INFO/WARNING/ERROR/DEBUG）
+    - ``message``：日志消息文本
+    - ``source``：日志来源（arc/container/bridge/collab）
+    - ``module``：可选的模块名
+    - ``event_key``：幂等键，与 ResearchMessage 保持一致的约定
+    - ``turn_status``：记录日志时的轮次状态
+    - ``stage``：可选的 ARC pipeline 阶段号 (1-23)
+    - ``ts``：可选的原始时间戳（从事件 payload 中提取）
+    """
+
+    __tablename__ = "research_log"
+    __table_args__ = (
+        # 查询热路径：按 session + turn + 时间排序
+        Index(
+            "ix_research_log_session_turn_time",
+            "session_id",
+            "turn_id",
+            "created_time",
+            "id",
+        ),
+        # 会话级日志查询
+        Index(
+            "ix_research_log_session_time",
+            "session_id",
+            "created_time",
+            "id",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(
+        foreign_key="research_session.id",
+        ondelete="CASCADE",
+        index=True,
+    )
+    turn_id: uuid.UUID = Field(
+        foreign_key="research_turn.id",
+        ondelete="CASCADE",
+        index=True,
+    )
+    level: str = Field(max_length=16)
+    message: str = Field(sa_column=Column(Text, nullable=False))
+    source: str = Field(max_length=32)
+    module: str | None = Field(default=None, max_length=128)
+    event_key: str = Field(max_length=128)
+    turn_status: str = Field(
+        sa_column=Column(
+            SAEnum(
+                ResearchTurnStatus,
+                name="researchturnstatus",
+                native_enum=False,
+                length=20,
+                values_callable=lambda e: [m.value for m in e],
+                create_type=False,
+            ),
+            nullable=False,
+        ),
+    )
+    stage: int | None = Field(default=None, sa_column=Column(Integer, nullable=True))
+    ts: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    # per-turn 递增序列号，保证事件严格顺序（解决同一微秒内多事件的排序问题）
+    seq: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))

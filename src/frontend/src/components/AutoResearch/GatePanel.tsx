@@ -1,4 +1,4 @@
-import { Download, FileText, FlaskConical, Pencil, X } from "lucide-react"
+import { ChevronDown, Cpu, Download, FileText, FlaskConical, Pencil, X } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -15,10 +15,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { downloadResearchArtifact } from "@/hooks/useAutoResearch"
+import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { cn } from "@/lib/utils"
 
 import ArtifactPreviewDialog from "./ArtifactPreviewDialog"
+import ProviderModelPicker from "./ProviderModelPicker"
 import { MODE_OPTIONS } from "./shared"
 import { stageNameByLang } from "./tech"
 
@@ -58,6 +65,10 @@ interface Props {
   onAction: (value: string) => void
   /** 输入框插槽：渲染在「上下文/产物」与「决策按钮」之间——先写理由，再点决策。 */
   children?: ReactNode
+  /** 模型配置 */
+  provider: string
+  model: string
+  onProviderModelChange: (provider: string, model: string) => void
 }
 
 /**
@@ -74,11 +85,36 @@ export default function GatePanel({
   onModeChange,
   onAction,
   children,
+  provider,
+  model,
+  onProviderModelChange,
 }: Props) {
   const { t, i18n } = useTranslation()
   const payload = (message.payload ?? {}) as GateFormPayload
 
   const [preview, setPreview] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // 模型选择器数据
+  const { data: providersData } = useProviders()
+  const { data: defaultModels } = useUserDefaultModels()
+
+  const providerList = providersData?.items ?? []
+  const selectedProvider = providerList.find((p) => p.id === provider)
+  const defaultProviderName = defaultModels?.planner_provider_name || t("autoResearch.provider.default")
+  const defaultModelName = defaultModels?.planner_model_name || ""
+
+  const providerLabel = (() => {
+    if (!provider || provider === "default") {
+      const label = defaultProviderName
+      return defaultModelName ? `${label} / ${defaultModelName}` : label
+    }
+    if (provider === "mock") {
+      return t("autoResearch.provider.mock")
+    }
+    const label = selectedProvider?.name || provider
+    return model ? `${label} / ${model}` : label
+  })()
 
   // 一次 memo 算出 actions（排序、去隐藏）与 canEdit，键在 payload.available_actions
   // 上而非每次 render 新建的中间数组，避免无谓重算。
@@ -264,9 +300,10 @@ export default function GatePanel({
       {/* 输入框插槽：先写理由 */}
       {children}
 
-      {/* 决策行：左侧模式开关（全自动/协作两态分段），主决策按钮相对整行居中
-          （开关绝对定位靠左，不占居中计算）；结束运行已上移为右上角 X。 */}
+      {/* 决策行：左侧模式开关（全自动/协作两态分段），主决策按钮相对整行居中，
+          右侧模型选择器（左右开关绝对定位，不占居中计算）；结束运行已上移为右上角 X。 */}
       <div className="relative flex items-center px-3.5 pt-2 pb-2.5">
+        {/* 模式开关：绝对定位靠左 */}
         <div
           role="group"
           aria-label={t("autoResearch.create.modeLabel")}
@@ -289,6 +326,8 @@ export default function GatePanel({
             </button>
           ))}
         </div>
+
+        {/* 决策按钮：整行居中 */}
         <div className="flex flex-1 flex-wrap items-center justify-center gap-2">
           {actions
             .filter((v) => v !== "abort")
@@ -306,6 +345,43 @@ export default function GatePanel({
                 {t(`autoResearch.form.actions.${v}`, v)}
               </button>
             ))}
+        </div>
+
+        {/* 模型选择器：绝对定位靠右 */}
+        <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+          <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                disabled={disabled}
+                className={cn(
+                  "inline-flex h-6 items-center gap-1 px-1.5 rounded-md text-[11px] font-medium transition-colors disabled:opacity-60",
+                  provider && provider !== "default"
+                    ? "text-primary hover:bg-primary/10"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/60",
+                )}
+              >
+                <Cpu className="size-3 shrink-0" />
+                <span className="max-w-[160px] truncate">{providerLabel}</span>
+                <ChevronDown className="size-3 shrink-0 opacity-60" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-[420px] p-3"
+              align="end"
+              side="top"
+              sideOffset={8}
+            >
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 px-0.5">
+                {t("autoResearch.create.providerLabel")} / Model
+              </p>
+              <ProviderModelPicker
+                provider={provider}
+                model={model}
+                onChange={onProviderModelChange}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 

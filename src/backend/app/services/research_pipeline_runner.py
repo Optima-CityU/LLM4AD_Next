@@ -60,6 +60,14 @@ def _build_spec(turn_id: str, run_dir: str, config_key: str) -> ContainerJobSpec
         "PYTHONUNBUFFERED": "1",
         "NO_COLOR": "1",
         "LOGURU_COLORIZE": "false",
+        "LOGURU_FORMAT": "{level: <8} {time:YYYY-MM-DD HH:mm:ss.SSS} | {message}",  # 纯文本格式，无颜色标签
+        "TERM": "dumb",  # 禁用终端颜色和特殊字符
+        "FORCE_COLOR": "0",  # 强制禁用颜色（某些库检查此变量）
+        "COLORTERM": "",  # 清空颜色终端标识
+        "CLICOLOR": "0",  # CLI 颜色标准
+        "CLICOLOR_FORCE": "0",  # 强制禁用 CLI 颜色
+        "PY_COLORS": "0",  # Python 颜色输出
+        "ANSI_COLORS_DISABLED": "1",  # 禁用 ANSI 颜色
         "RESEARCH_CONFIG_KEY": config_key,
         RESEARCH_EVENTS_FILENAME_ENV: events_name,
     }

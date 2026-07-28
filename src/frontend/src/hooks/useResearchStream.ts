@@ -26,6 +26,10 @@ export interface ResearchStreamEvent {
   message?: string
   level?: string
   ts?: string
+  /** 业务幂等键（event_key），用于去重（向后兼容）。 */
+  event_key?: string
+  /** DB 主键（message_id），后端在 SSE 中回填，优先使用它做精确去重。 */
+  message_id?: string
   /** 本帧的 Redis Stream ID（来自 SSE `id:` 行），断线续传时回传。 */
   _streamId?: string
   // 允许透传后端未来新增字段

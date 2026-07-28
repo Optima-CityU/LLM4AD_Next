@@ -21,6 +21,7 @@ from sqlmodel import Session, or_, select, tuple_
 
 from app import models
 from app.models.research import (
+    ResearchLog,
     ResearchMessage,
     ResearchMessageRole,
     ResearchTurnStatus,
@@ -132,6 +133,72 @@ def inject_stage_guidance(
     )
 
 
+def _log_to_message_dict(log: ResearchLog) -> dict:
+    """将 ResearchLog 转换为 ResearchMessageItem 兼容的字典。
+
+    ResearchLog 缺少 role/content/payload 等字段，需要映射：
+    - level → payload.level
+    - message → content
+    - source/module → payload
+    """
+    return {
+        "id": log.id,
+        "session_id": log.session_id,
+        "turn_id": log.turn_id,
+        "role": ResearchMessageRole.SYSTEM,  # 日志都是 system 角色
+        "content": log.message,
+        "turn_status": log.turn_status,
+        "error": None,
+        "payload": {
+            "type": "log",
+            "level": log.level,
+            "message": log.message,
+            "source": log.source,
+            "module": log.module,
+            "ts": log.ts.isoformat() if log.ts else None,
+        },
+        "payload_locked": False,
+        "payload_locked_at": None,
+        "payload_submission": None,
+        "stage": log.stage,
+        "event_type": "log",
+        "event_key": log.event_key,
+        "created_time": log.created_time,
+        "updated_time": log.updated_time,
+        "seq": log.seq,
+    }
+
+
+def _list_turn_logs(
+    db: Session,
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    cursor: str | None,
+    limit: int,
+) -> tuple[list[ResearchLog], str | None, bool]:
+    """从 research_log 表查询单轮日志，返回 (items, next_cursor, has_more)。"""
+    stmt = (
+        select(ResearchLog)
+        .where(ResearchLog.session_id == session_id)
+        .where(ResearchLog.turn_id == turn_id)
+    )
+    if cursor:
+        cursor_ts = _parse_cursor(cursor)
+        stmt = stmt.where(ResearchLog.created_time > cursor_ts)
+
+    page = max(1, min(limit, 500))
+    rows = db.exec(
+        stmt.order_by(ResearchLog.created_time.asc(), ResearchLog.seq.asc())
+        .limit(page + 1)
+    ).all()
+    has_more = len(rows) > page
+    items = rows[:page]
+    next_cursor: str | None = None
+    if has_more and items:
+        next_cursor = items[-1].created_time.isoformat()
+    return items, next_cursor, has_more
+
+
 def list_turn_messages(
     db: Session,
     session_id: uuid.UUID,
@@ -158,6 +225,18 @@ def list_turn_messages(
     """
     session, turn = _get_session_and_turn(db, session_id, turn_id, user)
 
+    # 如果只查询 log，路由到 research_log 表
+    if event_type == ["log"] and role is None:
+        items, next_cursor, has_more = _list_turn_logs(
+            db, session.id, turn.id, cursor, limit
+        )
+        return ResearchMessageListResponse(
+            items=[ResearchMessageItem.model_validate(_log_to_message_dict(log)) for log in items],
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
+    # 否则查询 research_message 表（不含 log）
     stmt = (
         select(ResearchMessage)
         .where(ResearchMessage.session_id == session.id)
@@ -174,7 +253,7 @@ def list_turn_messages(
     # 多取一条判断 has_more；硬上限 500 防误刷。
     page = max(1, min(limit, 500))
     rows = db.exec(
-        stmt.order_by(ResearchMessage.created_time.asc(), ResearchMessage.id.asc())
+        stmt.order_by(ResearchMessage.created_time.asc(), ResearchMessage.seq.asc())
         .limit(page + 1)
     ).all()
     has_more = len(rows) > page
@@ -187,6 +266,43 @@ def list_turn_messages(
         next_cursor=next_cursor,
         has_more=has_more,
     )
+
+
+def _list_session_logs(
+    db: Session,
+    session_id: uuid.UUID,
+    before: uuid.UUID | None,
+    limit: int,
+) -> tuple[list[ResearchLog], bool]:
+    """从 research_log 表查询会话日志，返回 (items, has_more)。"""
+    stmt = select(ResearchLog).where(ResearchLog.session_id == session_id)
+
+    if before is not None:
+        anchor = db.get(ResearchLog, before)
+        if anchor and anchor.session_id == session_id:
+            # 复合游标 (created_time, seq, id)：seq 仍是主排序键（保证同 turn 内
+            # 严格顺序），但会话级是跨 turn 分页，而 seq 是 per-turn 递增（每轮 sink
+            # 从 0 重开）——跨 turn 不唯一。尤其 Windows 下 created_time 精度粗，同批
+            # flush 的日志常拿到相同 created_time，此时两个 turn 的 (created_time, seq)
+            # 会撞键，仅用二元组游标会漏行、甚至提前 has_more=False。追加全局唯一的
+            # id 作最终 tiebreaker，给出全序且无缝的翻页边界。
+            stmt = stmt.where(
+                tuple_(ResearchLog.created_time, ResearchLog.seq, ResearchLog.id)
+                < (anchor.created_time, anchor.seq, anchor.id)
+            )
+
+    page = max(1, min(limit, 2000))
+    rows = db.exec(
+        stmt.order_by(
+            ResearchLog.created_time.desc(),
+            ResearchLog.seq.desc(),
+            ResearchLog.id.desc(),
+        ).limit(page + 1)
+    ).all()
+    has_more = len(rows) > page
+    # 倒序取一页后反转成升序（最旧在前），与详情端点一致，前端拼接逻辑不变。
+    log_rows = list(reversed(rows[:page]))
+    return log_rows, has_more
 
 
 def list_session_messages(
@@ -219,6 +335,15 @@ def list_session_messages(
     """
     session = _get_session(db, session_id, user)
 
+    # 如果只查询 log（白名单 = ["log"]），路由到 research_log 表
+    if event_type == ["log"]:
+        log_rows, has_more = _list_session_logs(db, session.id, before, limit)
+        return ResearchSessionMessagesResponse(
+            messages=[ResearchMessageItem.model_validate(_log_to_message_dict(log)) for log in log_rows],
+            has_more=has_more,
+        )
+
+    # 否则查询 research_message 表（不含 log）
     stmt = select(ResearchMessage).where(
         ResearchMessage.session_id == session.id
     )
@@ -237,17 +362,26 @@ def list_session_messages(
     if before is not None:
         anchor = db.get(ResearchMessage, before)
         if anchor and anchor.session_id == session.id:
-            # 复合游标 (created_time, id)：日志批量写入常同一微秒，仅按
-            # created_time 严格小于会漏掉与锚点同时间戳的行，带 id 次级键杜绝。
+            # 复合游标 (created_time, seq, id)：日志批量写入常同一微秒，仅按
+            # created_time 严格小于会漏掉与锚点同时间戳的行，故带 seq 次级键。但
+            # 会话级是跨 turn 分页，seq 是 per-turn 递增（每轮从 0 重开）跨 turn 不
+            # 唯一——同 created_time 下两个 turn 的 seq 会撞键，二元组游标仍会漏行/
+            # 提前 has_more=False。追加全局唯一的 id 作最终 tiebreaker 杜绝。
             stmt = stmt.where(
-                tuple_(ResearchMessage.created_time, ResearchMessage.id)
-                < (anchor.created_time, anchor.id)
+                tuple_(
+                    ResearchMessage.created_time,
+                    ResearchMessage.seq,
+                    ResearchMessage.id,
+                )
+                < (anchor.created_time, anchor.seq, anchor.id)
             )
 
     page = max(1, min(limit, 2000))
     rows = db.exec(
         stmt.order_by(
-            ResearchMessage.created_time.desc(), ResearchMessage.id.desc()
+            ResearchMessage.created_time.desc(),
+            ResearchMessage.seq.desc(),
+            ResearchMessage.id.desc(),
         ).limit(page + 1)
     ).all()
     has_more = len(rows) > page

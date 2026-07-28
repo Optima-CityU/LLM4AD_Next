@@ -393,6 +393,9 @@ export default function BottomComposer({
               mode={mode}
               onModeChange={onModeChange}
               onAction={handleGateAction}
+              provider={provider}
+              model={model}
+              onProviderModelChange={onProviderModelChange}
             >
               {composerRow}
             </GatePanel>

@@ -27,6 +27,7 @@ import {
   useResearchSessionDetail,
   useResearchSessionMessages,
   useResearchState,
+  useResearchTurns,
   useRetryResearchTurn,
   useStartCollab,
   useStartResearchTurn,
@@ -134,6 +135,32 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // pipeline turn 的显式重连令牌：retry 复用同一 turn_id，需手动 bump 让 SSE 重连。
   const [streamReconnectToken, setStreamReconnectToken] = useState(0)
 
+  // 查询 turns 列表，用于刷新页面后恢复 collaborating turn
+  // 关闭自动刷新，仅在页面加载时查询一次，避免协作完成后的循环刷新
+  const turnsQ = useResearchTurns(session.id, 10)
+
+  // 页面加载/会话切换时，自动恢复正在进行的 collaborating turn
+  // 使用 ref 记录是否已经初始化过，避免后续查询刷新重复设置
+  const collabInitializedRef = useRef(false)
+  useEffect(() => {
+    if (!turnsQ.data?.items || collabInitializedRef.current) return
+
+    // 查找状态为 collaborating 的 turn
+    const collaboratingTurn = turnsQ.data.items.find(
+      (t) => t.status === "collaborating"
+    )
+
+    if (collaboratingTurn) {
+      setCollabTurnId(collaboratingTurn.id)
+      collabInitializedRef.current = true
+    }
+  }, [turnsQ.data?.items])
+
+  // 会话切换时重置初始化标记
+  useEffect(() => {
+    collabInitializedRef.current = false
+  }, [session.id])
+
   // 顶部常驻进度条的数据源（22 阶段快照）。SSE 实时推送，不需要轮询。
   const stateQ = useResearchState(session.id, {
     refetchInterval: false,
@@ -194,27 +221,23 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 
   const messages = useMemo(() => {
     const pages = msgQ.data?.pages ?? []
-    // pages[0] 最新页、pages[n] 更旧页；反转后拼接 = 升序全量
+    // pages[0] 最新页、pages[n] 更旧页；反转后拼接 = 升序全量（后端已排序）
     const flat: ResearchMessageItem[] = []
     for (let i = pages.length - 1; i >= 0; i--) {
       for (const m of pages[i].messages ?? []) flat.push(m)
     }
+    // 去重策略：用 message_id（DB 主键）去重。
+    // SSE 推送的事件在后端已回填 message_id（streaming.py:226），与 DB 记录保持一致。
     const messageMap = new Map<string, ResearchMessageItem>()
     for (const message of flat) {
-      const key = message.event_key
-        ? `${message.turn_id}:${message.event_key}`
-        : `${message.turn_id}:id:${message.id}`
-      messageMap.set(key, message)
+      messageMap.set(message.id, message)
     }
+    // SSE 实时数据追加到末尾（覆盖已有的，或添加新的）
     for (const liveMsg of liveMessages) {
-      const key = liveMsg.event_key
-        ? `${liveMsg.turn_id}:${liveMsg.event_key}`
-        : `${liveMsg.turn_id}:id:${liveMsg.id}`
-      messageMap.set(key, { ...messageMap.get(key), ...liveMsg })
+      messageMap.set(liveMsg.id, { ...messageMap.get(liveMsg.id), ...liveMsg })
     }
-    return [...messageMap.values()].sort((a, b) =>
-      `${a.created_time}:${a.id}`.localeCompare(`${b.created_time}:${b.id}`),
-    )
+    // 信任后端排序：REST 数据已升序排列，SSE 数据是最新的，按插入顺序返回即可
+    return [...messageMap.values()]
   }, [msgQ.data, liveMessages])
 
   // 当前待回复的门控 form 消息：paused 时最后一条未锁定的 form。移到底部
@@ -436,14 +459,21 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           const nowIso = evt.ts ?? new Date().toISOString()
           const eventPayload = { ...evt }
           delete eventPayload._streamId
+
+          // 特殊处理：waiting_for_input 事件需要在 payload 中添加 kind: "form"
+          // 以便 gateMessage 判断逻辑能找到门控表单
+          if (evt.type === "waiting_for_input") {
+            eventPayload.kind = "form"
+          }
+
+          // 后端已在 SSE data 中回填 message_id（streaming.py:226），优先使用它作为
+          // DB 主键；未提供时回退到 event_key 合成临时 ID（向后兼容）。
+          const messageId =
+            (evt.message_id as string | undefined) ?? `live:${currentTurnId}:${evt.event_key}`
           setLiveMessages((prev) => {
-            const key = `${currentTurnId}:${evt.event_key}`
-            const existing = prev.find(
-              (message) =>
-                `${message.turn_id}:${message.event_key}` === key,
-            )
+            const existing = prev.find((message) => message.id === messageId)
             const liveMessage: ResearchMessageItem = {
-              id: existing?.id ?? `live:${key}`,
+              id: messageId,
               session_id: session.id,
               turn_id: currentTurnId,
               role: "system",
@@ -488,11 +518,17 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   )
 
   // ── collab agent 的 SSE：独立于 pipeline turn，订阅活跃 collab turn ──────
+  // 使用 ref 防止 onDone 重复调用（SSE 会发送两次 done：type="done" 消息帧 + event:done 流结束帧）
+  const collabDoneRef = useRef(false)
   useResearchStream(
     session.id,
     collabTurnId,
     {
       onDone: () => {
+        // 防止重复调用（SSE 的 type="done" 和 event:done 都会触发 onDone）
+        if (collabDoneRef.current) return
+        collabDoneRef.current = true
+
         setCollabTurnId(null)
         setCollabStreamText("")
         setCollabToolHint(null)
@@ -528,19 +564,26 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     { enabled: !!collabTurnId },
   )
 
+  // collabTurnId 变化时重置 done 标记
+  useEffect(() => {
+    collabDoneRef.current = false
+  }, [collabTurnId])
+
   // ── 滚动锚点：最新消息 id 变化或 collab 流式输出增长时，若用户已贴近底部则滚动到底 ─
   const scrollAnchor = useRef<HTMLDivElement | null>(null)
   const scrollBox = useRef<HTMLDivElement | null>(null)
   const lastId = messages[messages.length - 1]?.id
+  const collabBusy = !!collabTurnId || collabMut.isPending
   // biome-ignore lint/correctness/useExhaustiveDependencies: 消息 id 或 collab 流式文本变化时触发
   useEffect(() => {
     const box = scrollBox.current
     // 运行中用户上滚回看历史时不强行拽回底部；离底部超过 ~120px 就不自动跟随。
-    if (box && box.scrollHeight - box.scrollTop - box.clientHeight > 120) {
+    // 但如果 collabBusy 刚变为 true（刚发送消息），则强制滚动到底部
+    if (box && box.scrollHeight - box.scrollTop - box.clientHeight > 120 && !collabBusy) {
       return
     }
     scrollAnchor.current?.scrollIntoView({ behavior: "smooth" })
-  }, [lastId, collabStreamText])
+  }, [lastId, collabStreamText, collabBusy])
 
   // 切换 session 或初次加载完成时强制滚到底部。
   // biome-ignore lint/correctness/useExhaustiveDependencies: session 切换或加载完成时触发
@@ -659,13 +702,14 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           respond_to_message_id: messageId,
           submission,
           mode: runMode,
+          provider_id: runProvider.trim() || undefined,
+          model_name: runModel.trim() || undefined,
         } as never,
       },
       { onError: toastErr },
     )
   }
 
-  const collabBusy = !!collabTurnId || collabMut.isPending
   const busy = startMut.isPending || retryMut.isPending
   const canRetry =
     !!activeTurnId &&

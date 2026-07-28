@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"
  * 数据来自 `listGenerated`（按 stage 分组，因为一个会话里演化可能在多个 stage
  * 跑多次）。图表数据转换逻辑对齐 evolution 页面：score 取 `evaluation.score`，
  * 散点用 min-max 归一化着色，趋势按 generation 累积算 max/avg（用原始分）。
- * Tab 受控——切换控件（`ExperimentTabToggle`）由外层放到区域标题行。
+ * 这里显示简化的小图，点击全屏按钮查看完整功能。
  */
 
 const MAX_COLOR = "#00d4ff"
@@ -101,7 +101,6 @@ function buildExpData(items: ResearchGeneratedItem[]): ExpData {
 
   const all = [...scored, ...unscored]
   const islandCount = new Set(all.map((n) => n.island)).size || 1
-  // 用循环求 max/best，避免 Math.max(...bigArray) 在大种群下爆栈。
   let maxGeneration = 0
   for (const n of all) {
     if (n.generation > maxGeneration) maxGeneration = n.generation
@@ -112,7 +111,6 @@ function buildExpData(items: ResearchGeneratedItem[]): ExpData {
   }
 
   // 趋势：按 generation 分组，累积算 max/avg（用原始分，保证 max 线单调）。
-  // 维护 running max + running sum，避免每代对整个累积数组 spread/reduce（O(n²)）。
   const genMap = new Map<number, number[]>()
   for (const n of scored) {
     if (!genMap.has(n.generation)) genMap.set(n.generation, [])
@@ -156,18 +154,17 @@ export function ExperimentTabToggle({
   onChange: (v: ExperimentTab) => void
 }) {
   const { t } = useTranslation()
-  // 趋势分析在前（默认项），演化仿真在后。
   const items: { key: ExperimentTab; icon: typeof Activity; label: string }[] =
     [
-      {
-        key: "trend",
-        icon: TrendingUp,
-        label: t("autoResearch.experiment.trend"),
-      },
       {
         key: "simulation",
         icon: Activity,
         label: t("autoResearch.experiment.simulation"),
+      },
+      {
+        key: "trend",
+        icon: TrendingUp,
+        label: t("autoResearch.experiment.trend"),
       },
     ]
   return (
@@ -202,8 +199,7 @@ export default function ExperimentPanel({
 }) {
   const { t } = useTranslation()
   const genQ = useResearchGenerated(sessionId, running)
-  // 趋势分析 / 演化仿真切换：控件下放到内容区顶部，避免挤压区域标题导致换行。
-  const [tab, setTab] = useState<ExperimentTab>("trend")
+  const [tab, setTab] = useState<ExperimentTab>("simulation")
 
   // 只保留有个体的 stage 分组。
   const groups = useMemo(
@@ -212,7 +208,6 @@ export default function ExperimentPanel({
   )
 
   const [stage, setStage] = useState<number | null>(null)
-  // 默认选中最后一个（最新）有数据的 stage。
   useEffect(() => {
     if (groups.length === 0) return
     const stages = groups.map((g) => g.stage ?? -1)
@@ -223,8 +218,6 @@ export default function ExperimentPanel({
 
   const activeGroup =
     groups.find((g) => (g.stage ?? -1) === stage) ?? groups[groups.length - 1]
-  // 依赖 items 而非 activeGroup 对象身份：轮询刷新每次都 new 出 group 对象，
-  // 挂在对象身份上会让 buildExpData 每次白跑一遍。
   const data = useMemo(
     () => buildExpData(activeGroup?.items ?? []),
     [activeGroup?.items],
@@ -249,11 +242,11 @@ export default function ExperimentPanel({
 
   return (
     <div>
-      {/* 视图切换（趋势分析 / 演化仿真）：置于内容区顶部 */}
-      <div className="mb-2 flex justify-end">
+      {/* 视图切换（演化仿真在左 / 趋势分析在右） */}
+      <div className="mb-2 flex items-center gap-1">
         <ExperimentTabToggle value={tab} onChange={setTab} />
       </div>
-      {/* stage 选择：演化在多个 stage 跑过时切换查看 */}
+      {/* stage 选择 */}
       {groups.length > 1 && (
         <div className="mb-2 flex items-center gap-1.5">
           <span className="text-[10px] text-muted-foreground">
@@ -273,10 +266,10 @@ export default function ExperimentPanel({
         </div>
       )}
 
-      {tab === "trend" ? (
-        <TrendView data={data} />
-      ) : (
+      {tab === "simulation" ? (
         <SimulationView data={data} />
+      ) : (
+        <TrendView data={data} />
       )}
 
       <p className="mt-1.5 text-[10px] text-muted-foreground/50">
@@ -287,10 +280,7 @@ export default function ExperimentPanel({
 }
 
 /**
- * 演化仿真：关键指标 + 岛屿泳道图（神似 evolution）。
- *
- * 每个 island 一条横向泳道，x=代数；同 (代,岛) 的个体在泳道内纵向堆叠；父子
- * 之间画淡连线；最优个体高亮，未评估个体灰显。轻量 SVG，适配窄面板。
+ * 演化仿真简化视图：关键指标 + 小型岛屿泳道图。
  */
 function SimulationView({ data }: { data: ExpData }) {
   const { t } = useTranslation()
@@ -300,7 +290,6 @@ function SimulationView({ data }: { data: ExpData }) {
     [data.scored, data.unscored],
   )
 
-  // 布局：泳道 + 节点位置 + 父子连线（全部在一个 memo 里算）。
   const layout = useMemo(() => {
     const islands = [...new Set(all.map((n) => n.island))].sort((a, b) => a - b)
     const islandIdx = new Map(islands.map((is, i) => [is, i]))
@@ -319,7 +308,6 @@ function SimulationView({ data }: { data: ExpData }) {
     const laneTop = (is: number) => PAD_T + (islandIdx.get(is) ?? 0) * LANE_H
     const laneCenter = (is: number) => laneTop(is) + LANE_H / 2
 
-    // 同 (gen, island) 堆叠
     const groups = new Map<string, EvoNode[]>()
     for (const n of all) {
       const k = `${n.generation}-${n.island}`
@@ -341,7 +329,6 @@ function SimulationView({ data }: { data: ExpData }) {
       })
     }
 
-    // 父子连线（父必须在本组能找到）
     const links: { x1: number; y1: number; x2: number; y2: number }[] = []
     for (const n of all) {
       const cp = pos.get(n.id)
@@ -407,7 +394,6 @@ function SimulationView({ data }: { data: ExpData }) {
           aria-label="island evolution graph"
         >
           <title>island evolution</title>
-          {/* 泳道：交替底色 + island 号 */}
           {layout.islands.map((is, i) => (
             <g key={is}>
               <rect
@@ -431,10 +417,9 @@ function SimulationView({ data }: { data: ExpData }) {
               </text>
             </g>
           ))}
-          {/* 父子连线 */}
-          {layout.links.map((l) => (
+          {layout.links.map((l, idx) => (
             <line
-              key={`${l.x1}-${l.y1}-${l.x2}-${l.y2}`}
+              key={idx}
               x1={l.x1}
               y1={l.y1}
               x2={l.x2}
@@ -444,7 +429,6 @@ function SimulationView({ data }: { data: ExpData }) {
               className="text-muted-foreground/30"
             />
           ))}
-          {/* 未评估个体：灰点 */}
           {data.unscored.map((n) => {
             const p = layout.pos.get(n.id)
             if (!p) return null
@@ -458,7 +442,6 @@ function SimulationView({ data }: { data: ExpData }) {
               />
             )
           })}
-          {/* 有分数个体：按 island 上色，最优点高亮 */}
           {data.scored.map((n) => {
             const p = layout.pos.get(n.id)
             if (!p) return null
@@ -482,7 +465,7 @@ function SimulationView({ data }: { data: ExpData }) {
   )
 }
 
-/** 趋势分析：最高分 / 平均分随代数变化的折线（用原始分）。 */
+/** 趋势分析简化视图 */
 function TrendView({ data }: { data: ExpData }) {
   const { t } = useTranslation()
   const gid = useId()
@@ -499,7 +482,6 @@ function TrendView({ data }: { data: ExpData }) {
   const vals = data.gens.flatMap((d) => [d.max, d.avg])
   const rawMin = vals.length ? Math.min(...vals) : 0
   const rawMax = vals.length ? Math.max(...vals) : 1
-  // 整齐坐标域 + 刻度（避免 -22.93 这类带小数尾巴的原始刻度）。
   const {
     niceMin: yMin,
     niceMax: yMax,
@@ -510,7 +492,6 @@ function TrendView({ data }: { data: ExpData }) {
   const yOf = (v: number) => PT + (1 - (v - yMin) / yRange) * ih
   const maxPts = data.gens.map((d) => `${xOf(d.g)},${yOf(d.max)}`).join(" ")
   const avgPts = data.gens.map((d) => `${xOf(d.g)},${yOf(d.avg)}`).join(" ")
-  // X 轴代数刻度：均匀挑最多 4 个（含首尾），标出横轴代表「代数」。
   const xTickIdx = pickIndices(data.gens.length, 4)
 
   if (data.gens.length === 0) {
@@ -553,7 +534,6 @@ function TrendView({ data }: { data: ExpData }) {
             </text>
           </g>
         ))}
-        {/* X 轴代数刻度（含首尾），标注横轴为「代数」。 */}
         {xTickIdx.map((i) => {
           const g = data.gens[i].g
           const anchor =
@@ -624,7 +604,6 @@ function TrendView({ data }: { data: ExpData }) {
   )
 }
 
-/** 紧凑数值格式：大数用千分位缩写，小数保留 2 位。 */
 function fmt(v: number): string {
   if (!Number.isFinite(v)) return "—"
   const abs = Math.abs(v)
@@ -633,7 +612,6 @@ function fmt(v: number): string {
   return v.toFixed(2)
 }
 
-/** 「nice number」：把区间/步长圆整到 1/2/5×10ⁿ，让坐标轴刻度落在整齐值上。 */
 function niceNum(range: number, round: boolean): number {
   const exp = Math.floor(Math.log10(range || 1))
   const frac = (range || 1) / 10 ** exp
@@ -646,10 +624,6 @@ function niceNum(range: number, round: boolean): number {
   return nf * 10 ** exp
 }
 
-/**
- * 计算整齐的坐标轴域与刻度：把 [min,max] 外扩到圆整边界，并生成等步长刻度，
- * 取代「min / (min+max)/2 / max」那种带小数尾巴的原始刻度（如 -22.93）。
- */
 function niceScale(
   min: number,
   max: number,
@@ -670,7 +644,6 @@ function niceScale(
   return { niceMin, niceMax, ticks }
 }
 
-/** 从代数序列里挑最多 n 个大致均匀的刻度下标（含首尾）。 */
 function pickIndices(len: number, n: number): number[] {
   if (len <= n) return Array.from({ length: len }, (_, i) => i)
   const out: number[] = []

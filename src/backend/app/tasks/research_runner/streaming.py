@@ -32,6 +32,7 @@ from app.core.redis import (
     push_research_event,
 )
 from app.models.research import (
+    ResearchLog,
     ResearchMessage,
     ResearchMessageRole,
     ResearchSession,
@@ -183,15 +184,23 @@ class ResearchEventSink:
         self.turn_id = turn_id
         self._seq = 0
         self._seq_lock = threading.Lock()
-        # DB 写入队列：flusher 线程从这里 pull 出 row dict 做批 commit
+        # DB 写入队列：分别用于 research_message 和 research_log 表
         self._db_queue: queue.Queue = queue.Queue(maxsize=_DB_QUEUE_MAXSIZE)
+        self._log_queue: queue.Queue = queue.Queue(maxsize=_DB_QUEUE_MAXSIZE)
         self._closed = False
+        # 启动两个 flusher 线程：一个处理消息，一个处理日志
         self._flusher = threading.Thread(
             target=self._flush_loop,
             daemon=True,
             name=f"research-sink-flush-{turn_id.hex[:8]}",
         )
+        self._log_flusher = threading.Thread(
+            target=self._flush_log_loop,
+            daemon=True,
+            name=f"research-sink-log-flush-{turn_id.hex[:8]}",
+        )
         self._flusher.start()
+        self._log_flusher.start()
 
     def emit(
         self,
@@ -202,6 +211,7 @@ class ResearchEventSink:
         persist_role: ResearchMessageRole = ResearchMessageRole.SYSTEM,
         persist_content: str | None = None,
         persist_payload: dict[str, Any] | None = None,
+        message_id: uuid.UUID | None = None,
     ) -> None:
         """Redis 同步推 + DB 异步入队。
 
@@ -213,17 +223,30 @@ class ResearchEventSink:
         ``persist=False``：只走 Redis/SSE，不落 DB。用于高频、纯 UI、且已有权威
         DB 记录兜底的流式增量（如 collab 逐 chunk 文本——完整文本另由
         ``collab-reply:<turn_id>`` 那条落库）。避免每个小 delta 独占一行造成写放大。
+
+        ``message_id``：可选的预分配消息 ID。提供时会回填到 event payload 的
+        ``message_id`` 字段，推送到 SSE；前端可据此做精确去重（优于 event_key，
+        因为 message_id 是 DB 主键，messages 接口返回的历史数据也带这个 ID）。
         """
         event.setdefault("ts", datetime.now(UTC).isoformat())
 
-        # 落 DB 的事件：先解析出最终 event_key 并回填进 event payload，让 SSE 帧与
-        # DB 行携带**同一个** event_key。前端刷新时 /messages 快照与 SSE 重放的重叠
-        # 区可据此去重（按 event_key upsert）。瞬态事件（persist=False）无 DB 行、
-        # 无幂等键语义，不回填。
+        # 落 DB 的事件：先解析出最终 event_key 和 message_id，回填进 event payload，
+        # 让 SSE 帧与 DB 行携带**同一个** event_key 和 message_id。前端刷新时
+        # /messages 快照与 SSE 重放的重叠区可据此去重（按 message_id 或 event_key）。
+        # 瞬态事件（persist=False）无 DB 行、无幂等键语义，不回填。
         resolved_key: str | None = None
+        resolved_id: uuid.UUID | None = None
+        resolved_seq: int = 0
         if persist:
             resolved_key = self._resolve_event_key(event, event_key)
             event["event_key"] = resolved_key
+            # 预分配 message_id（如 gate form）或自动生成，回填到 event 供 SSE 推送
+            resolved_id = message_id if message_id is not None else uuid.uuid4()
+            event["message_id"] = str(resolved_id)
+            # 分配 seq：per-turn 单调递增，保证事件严格顺序
+            with self._seq_lock:
+                self._seq += 1
+                resolved_seq = self._seq
 
         try:
             push_research_event(self.session_id, self.turn_id, event)
@@ -238,27 +261,41 @@ class ResearchEventSink:
         if not persist:
             return
 
-        row = self._build_row(
-            event,
-            event_key=resolved_key,
-            role=persist_role,
-            content=persist_content,
-            payload=persist_payload,
-        )
+        # 根据 event type 路由到不同的表/队列
+        event_type = event.get("type")
+        if event_type == "log":
+            # 日志事件：构建 log row 并入队到 research_log 表
+            row = self._build_log_row(
+                event, event_key=resolved_key, message_id=resolved_id, seq=resolved_seq
+            )
+            target_queue = self._log_queue
+        else:
+            # 其他事件：构建 message row 并入队到 research_message 表
+            row = self._build_row(
+                event,
+                event_key=resolved_key,
+                role=persist_role,
+                content=persist_content,
+                payload=persist_payload,
+                message_id=resolved_id,
+                seq=resolved_seq,
+            )
+            target_queue = self._db_queue
+
         # close() 后 flusher 已退出，再入队的 row 无人 drain → 只丢 DB 一路
         # （Redis 上面已推）。显式跳过并 warning，避免静默丢失误判为已落库。
         if self._closed:
             logger.warning(
                 f"sink emit after close turn={self.turn_id} "
-                f"etype={row['event_type']}—db drop (redis ok)"
+                f"etype={row.get('event_type', event_type)}—db drop (redis ok)"
             )
             return
         try:
-            self._db_queue.put_nowait(row)
+            target_queue.put_nowait(row)
         except queue.Full:
             # 队列满了直接丢；Redis Stream 那路仍在，SSE 不受影响。
             logger.warning(
-                f"sink db queue full turn={self.turn_id} etype={row['event_type']}—dropping"
+                f"sink db queue full turn={self.turn_id} etype={row.get('event_type', event_type)}—dropping"
             )
 
     def close(self, timeout: float = 10.0) -> None:
@@ -267,12 +304,20 @@ class ResearchEventSink:
             return
         self._closed = True
         try:
-            # sentinel：通知 flusher drain 后退出。1s 超时 + queue.Full 兜底。
+            # sentinel：通知 message flusher drain 后退出。1s 超时 + queue.Full 兜底。
             self._db_queue.put(_FLUSH_STOP, timeout=1.0)
         except queue.Full:
             # 极端情况：队列已经堵满。仍等 flusher 消化到位。
             pass
-        self._flusher.join(timeout=timeout)
+        try:
+            # 同样通知 log flusher
+            self._log_queue.put(_FLUSH_STOP, timeout=1.0)
+        except queue.Full:
+            pass
+
+        # 等待两个 flusher 线程都结束
+        self._flusher.join(timeout=timeout / 2)
+        self._log_flusher.join(timeout=timeout / 2)
 
     # ---- internal ----
 
@@ -299,16 +344,23 @@ class ResearchEventSink:
         role: ResearchMessageRole,
         content: str | None,
         payload: dict[str, Any] | None,
+        message_id: uuid.UUID | None = None,
+        seq: int = 0,
     ) -> dict[str, Any]:
         """把 event 打包成待插入的 row dict（不入库，由 flusher 反序列化）。
 
         ``event_key`` 由 :meth:`emit` 经 :meth:`_resolve_event_key` 预解析后传入
         （已回填进 event payload），此处不再自增 seq，避免 SSE 帧与 DB 行的键错位。
+
+        ``message_id`` 若提供则使用（如 gate form 预分配的 UUID），否则自动生成。
+        ``seq`` 为 per-turn 递增序列号，保证事件严格顺序。
         """
         etype = str(event.get("type") or "unknown")[:32]
         key = event_key if event_key is not None else self._resolve_event_key(event, None)
         raw_stage = event.get("stage")
+        msg_id = message_id if message_id is not None else uuid.uuid4()
         return {
+            "id": msg_id,
             "session_id": self.session_id,
             "turn_id": self.turn_id,
             "role": role,
@@ -318,6 +370,45 @@ class ResearchEventSink:
             "event_key": key[:128],  # varchar(128) 硬截
             "stage": raw_stage if isinstance(raw_stage, int) else None,
             "turn_status": ResearchTurnStatus.RUNNING.value,
+            "seq": seq,
+        }
+
+    def _build_log_row(
+        self,
+        event: dict[str, Any],
+        *,
+        event_key: str | None,
+        message_id: uuid.UUID | None = None,
+        seq: int = 0,
+    ) -> dict[str, Any]:
+        """把 log event 打包成待插入 research_log 表的 row dict。
+
+        log 事件结构：
+        - level: INFO/WARNING/ERROR/DEBUG
+        - message: 日志消息文本
+        - source: arc/container/bridge/collab
+        - module: 可选的模块名
+        - stage: 可选的阶段号
+        - ts: 可选的原始时间戳
+        - seq: per-turn 递增序列号，保证事件严格顺序
+        """
+        key = event_key if event_key is not None else self._resolve_event_key(event, None)
+        raw_stage = event.get("stage")
+        msg_id = message_id if message_id is not None else uuid.uuid4()
+
+        return {
+            "id": msg_id,
+            "session_id": self.session_id,
+            "turn_id": self.turn_id,
+            "level": str(event.get("level", "INFO"))[:16],
+            "message": str(event.get("message") or ""),
+            "source": str(event.get("source", "unknown"))[:32],
+            "module": str(event.get("module"))[:128] if event.get("module") else None,
+            "event_key": key[:128],
+            "turn_status": ResearchTurnStatus.RUNNING.value,
+            "stage": raw_stage if isinstance(raw_stage, int) else None,
+            "ts": event.get("ts"),  # ISO8601 字符串或 None，flusher 会转 datetime
+            "seq": seq,
         }
 
     def _flush_loop(self) -> None:
@@ -399,6 +490,93 @@ class ResearchEventSink:
                     db.rollback()
                     logger.warning(
                         f"sink row commit failed etype={row.get('event_type')}",
+                        exc_info=True,
+                    )
+
+    def _flush_log_loop(self) -> None:
+        """后台线程：拉 log queue，批量 commit ResearchLog。
+
+        与 _flush_loop 类似的批量提交逻辑，但写入 research_log 表。
+        """
+        batch: list[dict[str, Any]] = []
+        while True:
+            timeout = _FLUSH_INTERVAL if batch else None
+            try:
+                row = self._log_queue.get(timeout=timeout)
+            except queue.Empty:
+                self._commit_log_batch(batch)
+                batch.clear()
+                continue
+            if row is _FLUSH_STOP:
+                self._commit_log_batch(batch)
+                # drain 剩余的
+                remaining: list[dict[str, Any]] = []
+                while True:
+                    try:
+                        r = self._log_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if r is _FLUSH_STOP:
+                        continue
+                    remaining.append(r)
+                self._commit_log_batch(remaining)
+                return
+            batch.append(row)
+            if len(batch) >= _FLUSH_BATCH_SIZE:
+                self._commit_log_batch(batch)
+                batch.clear()
+
+    def _commit_log_batch(self, batch: list[dict[str, Any]]) -> None:
+        """把一批 log row 提交到 research_log 表。"""
+        if not batch:
+            return
+        try:
+            with get_db_session() as db:
+                try:
+                    for row in batch:
+                        # 转换 ts 字段从 ISO8601 字符串到 datetime
+                        if row.get("ts") and isinstance(row["ts"], str):
+                            try:
+                                row["ts"] = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+                            except Exception:
+                                row["ts"] = None
+                        db.add(ResearchLog(**row))
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    self._commit_log_one_by_one(batch)
+                except Exception:
+                    db.rollback()
+                    logger.warning(
+                        f"sink._commit_log_batch failed turn={self.turn_id} size={len(batch)}",
+                        exc_info=True,
+                    )
+        except Exception:
+            logger.warning(
+                f"sink._commit_log_batch: cannot open db session turn={self.turn_id}",
+                exc_info=True,
+            )
+
+    def _commit_log_one_by_one(self, batch: list[dict[str, Any]]) -> None:
+        """整批 commit 失败后的兜底：逐条 commit log，跳过 IntegrityError。"""
+        with get_db_session() as db:
+            for row in batch:
+                try:
+                    # 转换 ts 字段
+                    if row.get("ts") and isinstance(row["ts"], str):
+                        try:
+                            row["ts"] = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+                        except Exception:
+                            row["ts"] = None
+                    db.add(ResearchLog(**row))
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    logger.debug(f"sink log dup event_key={row.get('event_key')} — skip")
+                except Exception:
+                    db.rollback()
+                    logger.warning(
+                        f"sink log row commit failed level={row.get('level')}",
                         exc_info=True,
                     )
 
