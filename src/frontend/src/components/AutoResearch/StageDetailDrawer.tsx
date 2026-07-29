@@ -2,7 +2,7 @@ import {
   Check,
   CircleDot,
   Clock,
-  FileText,
+  Download,
   Loader2,
   MessageSquarePlus,
   X,
@@ -225,7 +225,7 @@ export default function StageDetailDrawer({
                             title={t("autoResearch.artifacts.download")}
                             className="shrink-0 text-muted-foreground/50 opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
                           >
-                            <FileText className="size-3" />
+                            <Download className="size-3" />
                           </button>
                         </li>
                       ))}

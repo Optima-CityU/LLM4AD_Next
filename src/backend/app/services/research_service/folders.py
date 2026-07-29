@@ -156,7 +156,9 @@ def _would_create_cycle(
             return False
         cursor = db.get(ResearchFolder, cursor.parent_id)
         depth += 1
-    return False
+    # 走到深度上限仍没触底：父链要么已损坏、要么本就藏着环。此时放行移动会把新环
+    # 焊死，故保守判为「会成环」拒绝——正常层级远不及 64 层，命中上限即异常。
+    return True
 
 
 def reorder_folders(

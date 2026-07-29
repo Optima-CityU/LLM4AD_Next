@@ -149,9 +149,9 @@ export default function HistoryLogDrawer({
                   title={t("autoResearch.chat.scrollToTop", {
                     defaultValue: "回到顶部",
                   })}
-                  className="size-8 grid place-items-center rounded-full bg-background/90 backdrop-blur border border-border shadow-lg hover:bg-primary/10 hover:border-primary transition-colors"
+                  className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md hover:bg-background/90 hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
-                  <ArrowUp className="size-4" />
+                  <ArrowUp className="size-3.5" />
                 </button>
                 <button
                   type="button"
@@ -159,9 +159,9 @@ export default function HistoryLogDrawer({
                   title={t("autoResearch.chat.scrollToBottom", {
                     defaultValue: "回到底部",
                   })}
-                  className="size-8 grid place-items-center rounded-full bg-background/90 backdrop-blur border border-border shadow-lg hover:bg-primary/10 hover:border-primary transition-colors"
+                  className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md hover:bg-background/90 hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
-                  <ArrowDown className="size-4" />
+                  <ArrowDown className="size-3.5" />
                 </button>
               </div>
             )}
@@ -212,24 +212,30 @@ function TurnRow({ turn, index }: { turn: ResearchTurnItem; index: number }) {
   return (
     <TechCard className="px-3 py-2.5 text-xs">
       <div className="flex items-center gap-2">
-        <span className="font-mono text-primary/80">#{index}</span>
+        <span className="font-mono text-primary/80 tabular-nums">#{index}</span>
         <TurnStatusBadge status={turn.status} />
         {turn.mode && (
-          <span className="text-[10px] text-muted-foreground">{turn.mode}</span>
+          <span className="text-[10px] text-muted-foreground">
+            {t(`autoResearch.mode.${turn.mode}`, turn.mode)}
+          </span>
         )}
-        <span className="ml-auto text-[10px] text-muted-foreground/60">
+        <span className="ml-auto text-[10px] text-muted-foreground/60 tabular-nums">
           {new Date(turn.created_time).toLocaleString()}
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
         {(turn.from_stage || turn.to_stage) && (
-          <span>
-            stage {turn.from_stage ?? "?"} → {turn.to_stage ?? "?"}
+          <span className="tabular-nums">
+            {t("autoResearch.chat.stageFlow", {
+              from: turn.from_stage ?? "?",
+              to: turn.to_stage ?? "?",
+            })}
           </span>
         )}
         {duration != null && (
-          <span>
-            {t("autoResearch.chat.duration")}: {duration}s
+          <span className="tabular-nums">
+            {t("autoResearch.chat.duration")}:{" "}
+            {t("autoResearch.chat.durationSeconds", { seconds: duration })}
           </span>
         )}
         {turn.user_input && (
@@ -261,13 +267,22 @@ function TurnStatusBadge({ status }: { status: string }) {
             : status === "failed"
               ? "text-red-500"
               : "text-muted-foreground"
+  // 进行中的轮次（running / collaborating）状态字加脉冲，让「还在跑」在历史列表里
+  // 一眼可辨——与侧栏状态点、右上角状态徽章的「进行中必有动效」保持一致。
+  const live = status === "running" || status === "collaborating"
   return (
     <span
       className={cn(
-        "text-[10px] uppercase tracking-wider font-semibold",
+        "inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold",
         color,
       )}
     >
+      {live && (
+        <span className="relative inline-flex size-1.5">
+          <span className="absolute inset-0 rounded-full bg-current opacity-60 animate-ping" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-current" />
+        </span>
+      )}
       {t(`autoResearch.turnStatus.${status}`, status)}
     </span>
   )

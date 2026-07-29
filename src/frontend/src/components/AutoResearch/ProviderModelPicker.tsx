@@ -8,7 +8,7 @@
  * 后端 `provider_id` 接受 `'default'` / `'mock'` / UUID。
  */
 
-import { Check, ChevronsUpDown } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -148,7 +148,7 @@ export default function ProviderModelPicker({
   className,
 }: Props) {
   const { t } = useTranslation()
-  const { data } = useProviders()
+  const { data, isLoading, isError } = useProviders()
   const { data: defaultModels } = useUserDefaultModels()
   const providers: ProviderResponse[] = data?.items ?? []
 
@@ -220,6 +220,23 @@ export default function ProviderModelPicker({
               </div>
             </SelectItem>
             {providers.length > 0 && <SelectSeparator />}
+            {/* 用户自定义供应商的加载/失败态：default/mock 始终可用，故这里只在
+                自定义列表区给出轻量反馈，不阻断整个选择器。 */}
+            {isLoading && (
+              <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground/60">
+                <Loader2 className="size-3 animate-spin" />
+                {t("autoResearch.provider.loading", {
+                  defaultValue: "加载供应商...",
+                })}
+              </div>
+            )}
+            {isError && !isLoading && (
+              <div className="px-2 py-1.5 text-[11px] text-destructive/80">
+                {t("autoResearch.provider.loadError", {
+                  defaultValue: "供应商加载失败",
+                })}
+              </div>
+            )}
             {providers.map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 <div className="flex items-center gap-2">

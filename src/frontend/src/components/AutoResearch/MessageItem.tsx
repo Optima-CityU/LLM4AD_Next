@@ -13,7 +13,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react"
-import { useId, useState } from "react"
+import { memo, useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import Markdown from "react-markdown"
 import { toast } from "sonner"
@@ -29,6 +29,7 @@ import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { cn } from "@/lib/utils"
 
 import ArtifactPreviewDialog from "./ArtifactPreviewDialog"
+import { stageNameByLang } from "./tech"
 
 /** 聊天气泡内的 markdown 渲染（GFM + 代码高亮 + mermaid）。 */
 function MessageMarkdown({ content }: { content: string }) {
@@ -60,19 +61,26 @@ interface Props {
  * - ASSISTANT + kind==form/choice：门控历史只读回显。
  * - ASSISTANT 其它：左对齐气泡。
  * - SYSTEM：紧凑事件行。
+ *
+ * memo 化：长会话消息列表在 SSE 高频更新（liveMessages / streamLogs）时会频繁
+ * 重渲父组件，而历史消息的 props（message 引用、sessionId、stale）保持稳定，
+ * 浅比较即可跳过其重渲，避免大量 Markdown 节点无谓重算。
  */
-export default function MessageItem({ message, sessionId, stale }: Props) {
-  if (message.role === "system") {
-    return <SystemEventRow message={message} />
-  }
-  if (message.role === "user") {
-    return <UserRow message={message} />
-  }
+function MessageItem({ message, sessionId, stale }: Props) {
+  // 门控 form/choice 优先分派：这类消息可能是 role="system"（waiting_for_input
+  // 事件），若先按 role 走 SystemEventRow 就会丢掉 context_summary/output_files
+  // 等门控卡片数据，只剩一行纯文本。故在 role 分派之前先认 payload.kind。
   const kind = (message.payload as { kind?: string } | null)?.kind
   if (kind === "form" || kind === "choice") {
     return (
       <AssistantFormRow message={message} sessionId={sessionId} stale={stale} />
     )
+  }
+  if (message.role === "system") {
+    return <SystemEventRow message={message} />
+  }
+  if (message.role === "user") {
+    return <UserRow message={message} />
   }
 
   // 如果是 assistant 消息且没有 content，隐藏（避免永久 loading 或空白气泡）
@@ -101,6 +109,8 @@ export default function MessageItem({ message, sessionId, stale }: Props) {
     </div>
   )
 }
+
+export default memo(MessageItem)
 
 // ---- User row (incl. gate_reply echo) ----
 
@@ -136,18 +146,23 @@ function UserRow({ message }: { message: ResearchMessageItem }) {
 // ---- System event row ----
 
 function SystemEventRow({ message }: { message: ResearchMessageItem }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const eventType = message.event_type ?? "log"
   const payload = (message.payload ?? {}) as Record<string, unknown>
   const stage = message.stage ?? (payload.stage as number | undefined) ?? null
+  // 阶段名优先用本地化短名（对齐顶部进度轨），回退到后端下发的英文枚举名，
+  // 避免「顶部中文 / 正文英文」割裂（如 KNOWLEDGE_EXTRACT ↔ 知识综合）。
   const stageName =
-    (payload.name as string | undefined) ??
-    (payload.stage_name as string | undefined) ??
+    (stage != null ? stageNameByLang(stage, i18n.language) : "") ||
+    (payload.name as string | undefined) ||
+    (payload.stage_name as string | undefined) ||
     ""
   const time = new Date(message.created_time).toLocaleTimeString()
 
-  // 阶段转场：阶段名走文本，状态（running/done/…）走带色胶囊 + 状态图标，
-  // 让「进行中 / 已完成 / 失败」在长列表里一眼可辨（纯文本时几乎分不出）。
+  // 阶段转场：阶段名走文本，状态（running/done/…）走带色状态胶囊 + 状态图标。
+  // 「开始运行 / 完成」等所有历史行共用同一低饱和底样式，仅靠图标色与状态胶囊
+  // 颜色区分，保证长列表风格统一、不晃眼（此前 running 行带描边 + 呼吸动画，
+  // 而每个「开始运行」都是历史事件常驻，导致整屏发光闪烁）。
   if (eventType === "stage_transition" && stage != null) {
     const status = String(payload.status ?? "")
     const v = stageTransitionVisual(status)
@@ -211,17 +226,17 @@ function SystemEventRow({ message }: { message: ResearchMessageItem }) {
         return {
           Icon: FlaskConical,
           color: "text-emerald-500",
-          text: `evolution · score=${payload.score ?? "?"}${
-            payload.file_name ? ` · ${payload.file_name as string}` : ""
-          }`,
+          text: `${t("autoResearch.chat.evolutionStep", {
+            score: payload.score ?? "?",
+          })}${payload.file_name ? ` · ${payload.file_name as string}` : ""}`,
         }
       case "artifact_ready":
         return {
           Icon: FileText,
           color: "text-primary",
-          text: `artifact · ${(payload.kind as string) ?? ""} · ${
-            (payload.path as string) ?? ""
-          }`,
+          text: `${t("autoResearch.chat.artifactReady", {
+            kind: (payload.kind as string) ?? "?",
+          })}${payload.path ? ` · ${payload.path as string}` : ""}`,
         }
       case "llm4ad_final_state":
         return {
@@ -339,7 +354,7 @@ function AssistantFormRow({
   sessionId?: string
   stale?: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const payload = (message.payload ?? {
     kind: "form",
   }) as unknown as FormPayload
@@ -369,15 +384,25 @@ function AssistantFormRow({
   return (
     <div className="flex justify-start px-4 py-1.5">
       <div className="w-full rounded-2xl rounded-tl-sm border border-border/50 bg-card/50 px-4 py-3 text-sm backdrop-blur-sm">
-        {payload.stage != null && (
-          <div className="mb-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-            <FlaskConical className="size-3" />
-            {t("autoResearch.chat.stagePrefix", {
-              stage: payload.stage,
-              name: "",
-            })}
-          </div>
-        )}
+        {payload.stage != null &&
+          (() => {
+            // 门控卡片的阶段标签：优先中文短名，缺名时退化为「阶段 N」（不带
+            // 悬空的「· 」分隔符），与消息流里的阶段行保持同一套本地化命名。
+            const nm = stageNameByLang(payload.stage, i18n.language)
+            return (
+              <div className="mb-1.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                <FlaskConical className="size-3" />
+                {nm
+                  ? t("autoResearch.chat.stagePrefix", {
+                      stage: payload.stage,
+                      name: nm,
+                    })
+                  : t("autoResearch.chat.stagePrefixBare", {
+                      stage: payload.stage,
+                    })}
+              </div>
+            )
+          })()}
 
         {(payload.prompt || payload.reason || message.content) && (
           <p className="text-foreground/80 mb-2 whitespace-pre-wrap">

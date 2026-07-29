@@ -1,8 +1,21 @@
-import { Activity, Loader2, TrendingUp } from "lucide-react"
+import {
+  Activity,
+  GitBranch,
+  Layers,
+  Loader2,
+  Trophy,
+  TrendingUp,
+  Users,
+} from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ResearchGeneratedItem } from "@/client"
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
 import { useResearchGenerated } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
 
@@ -349,41 +362,84 @@ function SimulationView({ data }: { data: ExpData }) {
     return best?.id ?? null
   }, [data.scored])
 
-  const metrics = [
+  const metrics: {
+    key: string
+    icon: typeof Activity
+    label: string
+    value: string
+    full: string
+  }[] = [
     {
+      key: "current",
+      icon: GitBranch,
       label: t("autoResearch.experiment.current"),
       value: `${data.maxGeneration}`,
+      full: `${data.maxGeneration}`,
     },
     {
+      key: "population",
+      icon: Users,
       label: t("autoResearch.experiment.population"),
       value: `${data.population}`,
+      full: `${data.population}`,
     },
     {
+      key: "islands",
+      icon: Layers,
       label: t("autoResearch.experiment.islands"),
       value: `${data.islandCount}`,
+      full: `${data.islandCount}`,
     },
     {
+      key: "best",
+      icon: Trophy,
       label: t("autoResearch.experiment.best"),
+      // 行内显示保留两位小数；hover 详情给出完整不四舍五入的分数。
       value: data.bestScore != null ? fmt(data.bestScore) : "—",
+      full: data.bestScore != null ? String(data.bestScore) : "—",
     },
   ]
 
   return (
     <div className="space-y-2">
+      {/* 关键指标：单行紧凑显示——图标 + 数字，hover 在左侧弹出详情（含完整分数）。 */}
       <div className="grid grid-cols-4 gap-1.5">
-        {metrics.map((m) => (
-          <div
-            key={m.label}
-            className="rounded-md border border-border/60 bg-card dark:border-border/50 dark:bg-card/40 px-1.5 py-1 text-center"
-          >
-            <div className="text-sm font-bold tabular-nums text-foreground/90 truncate">
-              {m.value}
-            </div>
-            <div className="text-[10px] text-muted-foreground truncate">
-              {m.label}
-            </div>
-          </div>
-        ))}
+        {metrics.map((m) => {
+          const Icon = m.icon
+          const rounded = m.key === "best" && m.value !== m.full
+          return (
+            <HoverCard key={m.key} openDelay={120} closeDelay={60}>
+              <HoverCardTrigger asChild>
+                <div className="flex items-center justify-center gap-1 rounded-md border border-border/60 bg-card dark:border-border/50 dark:bg-card/40 px-1 py-1.5 cursor-default">
+                  <Icon className="size-3 shrink-0 text-primary/70" />
+                  <span className="text-xs font-bold tabular-nums text-foreground/90 truncate">
+                    {m.value}
+                  </span>
+                </div>
+              </HoverCardTrigger>
+              <HoverCardContent
+                side="left"
+                align="center"
+                className="w-auto min-w-32 max-w-64 p-2.5"
+              >
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                  <Icon className="size-3.5 shrink-0 text-primary/80" />
+                  {m.label}
+                </div>
+                <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground break-all">
+                  {m.full}
+                </div>
+                {rounded && (
+                  <div className="mt-0.5 text-[10px] text-muted-foreground/60">
+                    {t("autoResearch.experiment.fullValueHint", {
+                      defaultValue: "完整值（未四舍五入）",
+                    })}
+                  </div>
+                )}
+              </HoverCardContent>
+            </HoverCard>
+          )
+        })}
       </div>
 
       <div className="rounded-md border border-border/60 bg-card dark:border-border/50 dark:bg-card/30 p-1.5">

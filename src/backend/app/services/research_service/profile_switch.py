@@ -100,11 +100,15 @@ def purge_stage_data(
     session_id: uuid.UUID,
     from_stage: int = _RESET_FROM_STAGE,
 ) -> None:
-    """删除 DB 里 stage >= from_stage 的 message/log 行并重置 session 进度字段。
+    """删除 DB 里 stage > from_stage 的 message/log 行并重置 session 进度字段。
 
-    - ``ResearchMessage`` / ``ResearchLog`` 中 ``stage`` 非空且 >= from_stage 的行
-      被删除（``stage IS NULL`` 的对话 / guidance / collab 消息不受影响）；删后
-      :func:`sessions.get_state` 回放出的 stages 列表只剩 < from_stage 的阶段。
+    - ``ResearchMessage`` / ``ResearchLog`` 中 ``stage`` 非空且 **> from_stage** 的行
+      被删除（``stage IS NULL`` 的对话 / guidance / collab 消息不受影响）。注意边界是
+      **严格大于**：``from_stage``（第 9 步 EXPERIMENT_DESIGN）自身的行**刻意保留**，
+      使 :func:`sessions.get_state` 的 stages 数组仍能重建出第 9 步的原有状态
+      （该数组只由 stage 非空的 ``stage_transition`` 消息回放）。磁盘产物则由
+      :func:`purge_stage_artifacts` 从 from_stage（含第 9 步）起全部清除，两者边界
+      不同：产物按新实验类型必须重做，但第 9 步的进度状态在时间线上保留。
     - 重置 session 的 ``active_stage`` / ``active_stage_name`` / ``best_objective`` /
       ``best_code_sha256``（这些反映的是被清掉的后段进度）。
 
@@ -117,18 +121,20 @@ def purge_stage_data(
         from_stage: 清理下界（含）；默认 :data:`_RESET_FROM_STAGE`。
     """
     try:
+        # 严格大于：保留 from_stage（第 9 步）自身的行，其 stage_transition 消息
+        # 供 get_state 回放出第 9 步原有状态；只清 from_stage 之后的阶段。
         db.exec(
             delete(ResearchMessage).where(
                 ResearchMessage.session_id == session_id,
                 ResearchMessage.stage.is_not(None),
-                ResearchMessage.stage >= from_stage,
+                ResearchMessage.stage > from_stage,
             )
         )
         db.exec(
             delete(ResearchLog).where(
                 ResearchLog.session_id == session_id,
                 ResearchLog.stage.is_not(None),
-                ResearchLog.stage >= from_stage,
+                ResearchLog.stage > from_stage,
             )
         )
         session = db.get(ResearchSession, session_id)

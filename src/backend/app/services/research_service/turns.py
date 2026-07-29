@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 
@@ -578,6 +579,19 @@ def stop_turn(
         )
     else:
         _finalize_collab(turn_id=turn.id, turn_status=ResearchTurnStatus.CANCELLED)
+
+    # 4. 主动吊销本轮发放的 LLM 代理 token（按 task_id=turn_id 归集）。worker 的
+    #    finally 也会吊销，但 stop 是用户主动收权动作，此处立即吊销尽早收紧（与
+    #    演化 stop_task 一致）。幂等：无 token / LLM_PROXY 关闭时 no-op。
+    try:
+        from app.services.credential_broker import revoke_task_tokens
+
+        revoke_task_tokens(str(turn.id))
+    except Exception:
+        logger.opt(exception=True).warning(
+            f"revoke proxy tokens on stop failed turn={turn.id}"
+        )
+
     db.refresh(turn)
     return ResearchTurnItem.model_validate(turn)
 

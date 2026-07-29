@@ -306,6 +306,8 @@ function AutoResearchPage() {
             <SessionSidebar
               folders={folders}
               loading={foldersQ.isLoading}
+              foldersError={foldersQ.isError}
+              onRetryFolders={() => foldersQ.refetch()}
               ungroupedCount={ungroupedCount}
               activeFolderId={activeFolderId}
               debouncedSearch={debouncedQ}
@@ -357,8 +359,8 @@ function AutoResearchPage() {
         onMouseDown={handleRightControlMouseDown}
         aria-label={
           rightCollapsed
-            ? t("autoResearch.tabs.artifacts")
-            : t("autoResearch.tabs.artifacts")
+            ? t("evolution.expandPanel")
+            : t("evolution.collapsePanel")
         }
         title={
           rightCollapsed

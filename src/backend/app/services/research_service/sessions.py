@@ -39,7 +39,12 @@ from app.schemas.research import (
 )
 from app.tasks.research_runner import cleanup_run_dir, stage_display_name
 
-from ._common import _get_folder, _get_session, _parse_cursor
+from ._common import (
+    _encode_reverse_cursor,
+    _get_folder,
+    _get_session,
+    _parse_reverse_cursor,
+)
 from .profile_switch import (
     is_cross_type_switch,
     purge_stage_artifacts,
@@ -106,19 +111,26 @@ def update_session(
     """
     session = _get_session(db, session_id, user)
     provided = request.model_fields_set
-    if request.title is not None:
-        # 与 create 一致：strip + 截断；strip 后为空则保留原值不覆盖。
-        stripped = request.title.strip()
-        if stripped:
-            session.title = stripped[:_TITLE_MAX]
-    if request.topic is not None:
-        # topic 也支持更新：strip 后保留，允许空字符串（清空 topic）
-        session.topic = request.topic.strip()
+
+    # ---- 先做全部校验（任何删除/提交之前），保证「校验失败 → 零副作用」----
+    # folder 归属校验（可能 404）必须前置：旧实现放在 purge 之后，一旦这里 404，
+    # 磁盘/DB 已被清空却又回滚 profile，留下「清了盘但没切成」的损坏态。
+    folder_change: tuple[bool, uuid.UUID | None] = (False, None)
+    if "folder_id" in provided:
+        if request.folder_id is not None:
+            _get_folder(db, request.folder_id, user)
+            folder_change = (True, request.folder_id)
+        else:
+            folder_change = (True, None)
+
+    # 跨类 profile 切换：判定是否需要清盘 + 运行态守卫（都在删除动作之前）。
+    new_profile: str | None = None
+    needs_purge = False
     if request.profile is not None and request.profile.strip():
         # profile 不校验合法值（交由容器内 ARC 判定）；strip 后为空则不覆盖
-        new_profile = request.profile.strip()
-        if new_profile != session.profile and is_cross_type_switch(
-            session.profile, new_profile
+        candidate = request.profile.strip()
+        if candidate != session.profile and is_cross_type_switch(
+            session.profile, candidate
         ):
             # sandbox ↔ 非 sandbox 跨类切换：第 9 步后的产物按旧类型生成，与新
             # 类型不兼容，须清空。运行中不允许切换（与 delete_session 同款守卫）。
@@ -130,15 +142,22 @@ def update_session(
                     status_code=409,
                     detail="session is running; stop it before switching profile type",
                 )
-            purge_stage_artifacts(session.run_dir)
-            purge_stage_data(db, session.id)
+            needs_purge = True
+        new_profile = candidate
+
+    # ---- 校验全过，开始改写字段 ----
+    if request.title is not None:
+        # 与 create 一致：strip + 截断；strip 后为空则保留原值不覆盖。
+        stripped = request.title.strip()
+        if stripped:
+            session.title = stripped[:_TITLE_MAX]
+    if request.topic is not None:
+        # topic 也支持更新：strip 后保留，允许空字符串（清空 topic）
+        session.topic = request.topic.strip()
+    if new_profile is not None:
         session.profile = new_profile
-    if "folder_id" in provided:
-        if request.folder_id is not None:
-            _get_folder(db, request.folder_id, user)
-            session.folder_id = request.folder_id
-        else:
-            session.folder_id = None
+    if folder_change[0]:
+        session.folder_id = folder_change[1]
     if request.mode is not None:
         session.mode = request.mode.value
     if request.provider_id is not None:
@@ -146,8 +165,17 @@ def update_session(
     if request.model_name is not None:
         session.model_name = request.model_name
     session.updated_time = datetime.now(UTC)
+    run_dir_snapshot = session.run_dir
     db.add(session)
     db.commit()
+
+    # ---- 清盘放到 profile 落库成功之后（best-effort）----
+    # profile 切换是权威结果；磁盘删除不可逆、purge_stage_data 自带 commit，放在主
+    # 提交之后执行：即便清理失败，切换已生效，残留旧产物下一轮启动前会被覆盖/忽略。
+    if needs_purge:
+        purge_stage_artifacts(run_dir_snapshot)
+        purge_stage_data(db, session.id)
+
     db.refresh(session)
     return ResearchSessionItem.model_validate(session)
 
@@ -189,8 +217,17 @@ def list_sessions(
             )
         )
     if cursor:
-        cursor_ts = _parse_cursor(cursor)
-        query = query.where(ResearchSession.updated_time < cursor_ts)
+        # 复合游标 (updated_time, id)：仅按 updated_time 严格小于时，多条会话同一
+        # updated_time 且恰好跨页边界会被整体跳过而丢失。带 id 次级键给出全序边界。
+        cur_ts, cur_id = _parse_reverse_cursor(cursor)
+        if cur_id is not None:
+            query = query.where(
+                tuple_(ResearchSession.updated_time, ResearchSession.id)
+                < (cur_ts, cur_id)
+            )
+        else:
+            # 旧版纯 ISO 游标兜底：仅时间戳比较（切换期短暂，可能少量重复不丢数据）。
+            query = query.where(ResearchSession.updated_time < cur_ts)
 
     page = max(1, min(limit, 200))
     rows = db.exec(
@@ -201,7 +238,11 @@ def list_sessions(
     ).all()
     has_more = len(rows) > page
     items = rows[:page]
-    next_cursor = items[-1].updated_time.isoformat() if has_more and items else None
+    next_cursor = (
+        _encode_reverse_cursor(items[-1].updated_time, items[-1].id)
+        if has_more and items
+        else None
+    )
     return ResearchSessionListResponse(
         items=[ResearchSessionItem.model_validate(s) for s in items],
         next_cursor=next_cursor,
@@ -278,14 +319,18 @@ def delete_session(
         )
     deleted_session_id = session.id
     run_dir = session.run_dir
-    active_turn_id = session.active_turn_id
+    # 收集本会话全部 turn id：一个 session 跨多轮，每轮可能有独立 Redis Stream。
+    # 只清 active_turn 会漏掉历史轮的 stream，造成 Redis key 泄漏，故先全量取出。
+    turn_ids = db.exec(
+        select(ResearchTurn.id).where(ResearchTurn.session_id == session.id)
+    ).all()
     db.delete(session)
     db.commit()
     # DB 删除已是权威结果；文件 / Redis 清理失败不应再翻成 500，记日志即可。
     try:
         cleanup_run_dir(run_dir)
-        if active_turn_id:
-            delete_research_stream(deleted_session_id, active_turn_id)
+        for tid in turn_ids:
+            delete_research_stream(deleted_session_id, tid)
     except Exception:
         logger.opt(exception=True).warning(
             f"post-delete cleanup failed session={deleted_session_id}"
@@ -323,6 +368,9 @@ def get_state(
         if status in ("running", "retrying"):
             entry.status = "running"
             entry.started_at = entry.started_at or row.created_time
+            # REFINE/回跳会让已 done/failed 的 stage 重新进入 running：清掉上一轮的
+            # ended_at，否则前端会渲染出「正在运行却已有结束时间」的矛盾态。
+            entry.ended_at = None
         elif status == "done":
             entry.status = "done"
             entry.ended_at = row.created_time

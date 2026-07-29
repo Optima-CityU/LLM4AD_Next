@@ -613,7 +613,12 @@ def run_container_job(
     return ContainerJob(spec, callbacks, client=client).run(poll_interval=poll_interval)
 
 
-def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = None) -> int:
+def cleanup_orphaned_containers(
+    client=None,
+    *,
+    extra_filters: dict | None = None,
+    exclude_names: set[str] | None = None,
+) -> int:
     """按管理标签清理本模块创建的遗留容器。
 
     供进程/worker 重启时调用，回收上次异常退出后未及 ``stop()`` 的孤儿容器。
@@ -623,6 +628,8 @@ def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = Non
         client: 可选 Docker 客户端（测试注入）；省略时使用共享单例。
         extra_filters: 追加的 Docker 过滤条件（与管理标签合并），用于缩小范围，
             例如 ``{"label": "run_id=xxx"}``。
+        exclude_names: 需保留的容器名集合（不清理）。多 worker 部署时，别的活
+            worker 正在跑的容器名会传进来，避免 worker 启动误杀在跑的容器。
 
     Returns:
         成功移除的容器数量。
@@ -648,6 +655,9 @@ def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = Non
     removed = 0
     for container in containers:
         identifier = getattr(container, "name", None) or getattr(container, "id", "?")
+        if exclude_names and getattr(container, "name", None) in exclude_names:
+            # 别的活 worker 正在跑的容器：跳过，不误杀。
+            continue
         try:
             container.remove(force=True, v=True)
             removed += 1

@@ -79,6 +79,30 @@ def _read_json(root: Path, rel: str) -> Any | None:
         return None
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """把任意 JSON 值宽松转 float；None/非数字字符串等 → default（不抛）。
+
+    stage_health.json 由容器内 LLM 管线写，字段类型不受后端约束——``duration_sec``
+    偶尔会是 ``"n/a"`` 之类的字符串，直接 ``float()`` 会 ValueError 崩整个聚合端点。
+    """
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """把任意 JSON 值宽松转 int；None/非数字 → default（不抛）。见 :func:`_safe_float`。"""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # 回跳版本目录后缀：``stage-10_v2`` / ``stage-10.v1`` / ``stage-10-v3``。
 _VERSION_SUFFIX = re.compile(r"[_.\-]v\d+$", re.IGNORECASE)
 
@@ -111,10 +135,12 @@ def _collect_stages(root: Path) -> list[ResearchAnalysisStageItem]:
         num = _stage_num(child.name)
         if num is None:
             continue
-        health = _read_json(child, "stage_health.json") or {}
-        decision = _read_json(child, "decision.json") or {}
-        bucket = buckets.setdefault(num, {"versions": {}, "meta": None, "base": None})
-        dur = float(health.get("duration_sec") or 0.0)
+        health_raw = _read_json(child, "stage_health.json")
+        health = health_raw if isinstance(health_raw, dict) else {}
+        decision_raw = _read_json(child, "decision.json")
+        decision = decision_raw if isinstance(decision_raw, dict) else {}
+        bucket = buckets.setdefault(num, {"versions": {}, "base": None})
+        dur = _safe_float(health.get("duration_sec"))
         bucket["versions"][child.name] = dur
         entry = {
             "name": (decision.get("stage_id") or health.get("stage_id") or "")
@@ -124,7 +150,7 @@ def _collect_stages(root: Path) -> list[ResearchAnalysisStageItem]:
             "status": health.get("status") or decision.get("status") or "pending",
             "decision": decision.get("decision"),
             "next_stage": decision.get("next_stage"),
-            "artifacts_count": int(health.get("artifacts_count") or 0),
+            "artifacts_count": _safe_int(health.get("artifacts_count")),
             "error": health.get("error") or decision.get("error"),
         }
         # 无 _vN 版本后缀的目录视为最终态（如 stage-12_EXPERIMENT_RUN）；
@@ -180,8 +206,13 @@ def get_analysis_data(
     if not root or not root.is_dir():
         return ResearchAnalysisData(session_id=session_id, run_dir=session.run_dir)
 
-    summary = _read_json(root, "pipeline_summary.json") or {}
-    checkpoint = _read_json(root, "checkpoint.json") or {}
+    # _read_json 返回的是原样解析结果，可能是 dict / list / 标量。下面按 dict 解构、
+    # 按 list 迭代，若文件内容形状不符（如 summary 是 JSON 数组）会 TypeError 崩端点。
+    # 故按预期类型做窄化：非 dict 的当空 dict、非 list 的当空 list，静默降级不抛。
+    summary_raw = _read_json(root, "pipeline_summary.json")
+    summary = summary_raw if isinstance(summary_raw, dict) else {}
+    checkpoint_raw = _read_json(root, "checkpoint.json")
+    checkpoint = checkpoint_raw if isinstance(checkpoint_raw, dict) else {}
     overview: dict[str, Any] = {**summary}
     if checkpoint:
         overview["checkpoint"] = {
@@ -190,7 +221,8 @@ def get_analysis_data(
             "hitl": checkpoint.get("hitl"),
         }
 
-    decisions_raw = _read_json(root, "decision_history.json") or []
+    decisions_raw = _read_json(root, "decision_history.json")
+    decisions_list = decisions_raw if isinstance(decisions_raw, list) else []
     decisions = [
         ResearchAnalysisDecisionItem(
             decision=str(d.get("decision", "")),
@@ -199,7 +231,7 @@ def get_analysis_data(
             attempt=d.get("attempt"),
             timestamp=d.get("timestamp"),
         )
-        for d in decisions_raw
+        for d in decisions_list
         if isinstance(d, dict)
     ]
 

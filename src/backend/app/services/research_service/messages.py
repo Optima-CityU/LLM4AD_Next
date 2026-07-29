@@ -39,7 +39,12 @@ from app.tasks.research_runner import (
     write_stage_guidance,
 )
 
-from ._common import _get_session, _get_session_and_turn, _parse_cursor
+from ._common import (
+    _encode_forward_cursor,
+    _get_session,
+    _get_session_and_turn,
+    _parse_forward_cursor,
+)
 
 
 def inject_stage_guidance(
@@ -122,7 +127,10 @@ def inject_stage_guidance(
                 ))
             db.commit()
     except Exception:
-        logger.opt(exception=True).debug("guidance message persist skipped")
+        # guidance 文件已成功落盘（真正驱动 ARC 的是那份 .md），这条 system message
+        # 仅用于历史回看，失败不阻断主流程；但它意味着前端历史缺一条，属可观测异常，
+        # 用 warning 而非 debug，便于在日志里发现。
+        logger.opt(exception=True).warning("guidance message persist skipped")
         db.rollback()
 
     return ResearchStageGuideResponse(
@@ -183,19 +191,32 @@ def _list_turn_logs(
         .where(ResearchLog.turn_id == turn_id)
     )
     if cursor:
-        cursor_ts = _parse_cursor(cursor)
-        stmt = stmt.where(ResearchLog.created_time > cursor_ts)
+        # 复合游标 (created_time, seq, id) 严格大于，杜绝同时间戳批量日志翻页丢行。
+        cur_ts, cur_seq, cur_id = _parse_forward_cursor(cursor)
+        if cur_seq is not None and cur_id is not None:
+            stmt = stmt.where(
+                tuple_(ResearchLog.created_time, ResearchLog.seq, ResearchLog.id)
+                > (cur_ts, cur_seq, cur_id)
+            )
+        else:
+            # 旧版纯 ISO 游标兜底：仅时间戳比较（切换期短暂，不丢数据）。
+            stmt = stmt.where(ResearchLog.created_time > cur_ts)
 
     page = max(1, min(limit, 500))
     rows = db.exec(
-        stmt.order_by(ResearchLog.created_time.asc(), ResearchLog.seq.asc())
+        stmt.order_by(
+            ResearchLog.created_time.asc(),
+            ResearchLog.seq.asc(),
+            ResearchLog.id.asc(),
+        )
         .limit(page + 1)
     ).all()
     has_more = len(rows) > page
     items = rows[:page]
     next_cursor: str | None = None
     if has_more and items:
-        next_cursor = items[-1].created_time.isoformat()
+        last = items[-1]
+        next_cursor = _encode_forward_cursor(last.created_time, last.seq, last.id)
     return items, next_cursor, has_more
 
 
@@ -236,6 +257,16 @@ def list_turn_messages(
             has_more=has_more,
         )
 
+    # log 存在独立的 research_log 表，只有精确 ["log"] 才路由过去。混合请求
+    # （如 ["log", "stage_transition"]）落到下面的 research_message 查询，而该表
+    # **不含** log 行——log 会被静默丢弃。跨两表合并 + 统一游标分页改动过大，
+    # 这里先把静默降级为显式告警，便于定位（前端应对 log 与其他类型分开各调一次）。
+    if event_type and "log" in event_type:
+        logger.warning(
+            f"list_turn_messages: mixed event_type {event_type} includes 'log'; "
+            "logs live in research_log and are dropped — query 'log' separately"
+        )
+
     # 否则查询 research_message 表（不含 log）
     stmt = (
         select(ResearchMessage)
@@ -243,8 +274,19 @@ def list_turn_messages(
         .where(ResearchMessage.turn_id == turn.id)
     )
     if cursor:
-        cursor_ts = _parse_cursor(cursor)
-        stmt = stmt.where(ResearchMessage.created_time > cursor_ts)
+        # 复合游标 (created_time, seq, id) 严格大于，杜绝同时间戳批量消息翻页丢行。
+        cur_ts, cur_seq, cur_id = _parse_forward_cursor(cursor)
+        if cur_seq is not None and cur_id is not None:
+            stmt = stmt.where(
+                tuple_(
+                    ResearchMessage.created_time,
+                    ResearchMessage.seq,
+                    ResearchMessage.id,
+                )
+                > (cur_ts, cur_seq, cur_id)
+            )
+        else:
+            stmt = stmt.where(ResearchMessage.created_time > cur_ts)
     if event_type:
         stmt = stmt.where(ResearchMessage.event_type.in_(event_type))
     if role is not None:
@@ -253,14 +295,19 @@ def list_turn_messages(
     # 多取一条判断 has_more；硬上限 500 防误刷。
     page = max(1, min(limit, 500))
     rows = db.exec(
-        stmt.order_by(ResearchMessage.created_time.asc(), ResearchMessage.seq.asc())
+        stmt.order_by(
+            ResearchMessage.created_time.asc(),
+            ResearchMessage.seq.asc(),
+            ResearchMessage.id.asc(),
+        )
         .limit(page + 1)
     ).all()
     has_more = len(rows) > page
     items = rows[:page]
     next_cursor: str | None = None
     if has_more and items:
-        next_cursor = items[-1].created_time.isoformat()
+        last = items[-1]
+        next_cursor = _encode_forward_cursor(last.created_time, last.seq, last.id)
     return ResearchMessageListResponse(
         items=[ResearchMessageItem.model_validate(m) for m in items],
         next_cursor=next_cursor,
@@ -341,6 +388,14 @@ def list_session_messages(
         return ResearchSessionMessagesResponse(
             messages=[ResearchMessageItem.model_validate(_log_to_message_dict(log)) for log in log_rows],
             has_more=has_more,
+        )
+
+    # 与 list_turn_messages 同理：混合白名单里带 'log' 会静默丢掉日志行
+    # （research_message 表不含 log），显式告警便于定位。
+    if event_type and "log" in event_type:
+        logger.warning(
+            f"list_session_messages: mixed event_type {event_type} includes 'log'; "
+            "logs live in research_log and are dropped — query 'log' separately"
         )
 
     # 否则查询 research_message 表（不含 log）

@@ -2758,6 +2758,7 @@
       "dragOrClick": "Drag to resize · click to collapse",
       "noSessions": "No sessions yet. Create one from the top-right.",
       "sessionOptions": "Session options",
+      "folderOptions": "Folder options",
       "deleteSession": "Delete session",
       "deleteSessionConfirm": "Delete session “{{title}}”? Its on-disk artifacts will be removed too.",
       "renameSession": "Rename session",
@@ -2766,8 +2767,12 @@
       "switchProfileConfirm": "Switching to \"{{target}}\" will clear all artifacts after step 9 of this session, and this cannot be undone. Please download and save any artifacts you need before continuing.",
       "switchProfileDownloadHint": "We recommend downloading all artifacts first to avoid losing them after switching.",
       "loading": "Loading...",
+      "loadError": "Failed to load sessions",
       "folderExists": "A folder with the same name already exists",
       "sessionRunning": "Session is running; stop it first"
+    },
+    "switcher": {
+      "emptyFolder": "No sessions"
     },
     "status": {
       "pending": "Pending",
@@ -2797,15 +2802,21 @@
       "learning": "Learning"
     },
     "profile": {
-      "algorithm_evolution": "llm4ad experiment",
-      "ml_vision": "autoresearch experiment"
+      "algorithm_evolution": "llm4ad",
+      "ml_vision": "autoresearch"
+    },
+    "profileDesc": {
+      "algorithm_evolution": "Integrates llm4ad's experiment design and execution modules",
+      "ml_vision": "Native AutoResearchClaw"
     },
     "provider": {
       "inherit": "Session default",
       "default": "Default",
       "mock": "Mock",
       "noModelNeeded": "No model needed",
-      "yours": "Your providers"
+      "yours": "Your providers",
+      "loading": "Loading providers...",
+      "loadError": "Failed to load providers"
     },
     "tabs": {
       "progress": "Progress",
@@ -3019,6 +3030,11 @@
       "noTurns": "No turns yet",
       "llm4adFinal": "LLM4AD final state received",
       "stagePrefix": "Stage {{stage}} · {{name}}",
+      "stagePrefixBare": "Stage {{stage}}",
+      "stageFlow": "Stage {{from}} → {{to}}",
+      "durationSeconds": "{{seconds}}s",
+      "evolutionStep": "Evolution · score {{score}}",
+      "artifactReady": "Artifact · {{kind}}",
       "stageError": "Error",
       "systemEvent": "System event",
       "streamLogs": {
@@ -3285,7 +3301,8 @@
       "best": "Best",
       "avg": "Avg",
       "generation": "Generation",
-      "score": "Score"
+      "score": "Score",
+      "fullValueHint": "Full value (not rounded)"
     }
   }
 }

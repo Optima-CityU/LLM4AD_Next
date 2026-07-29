@@ -124,12 +124,55 @@ def cleanup_run_dir(run_dir: str | None) -> None:
 # ---- Worker 启动时孤儿 turn 清理 ----
 
 
+def _live_celery_task_ids() -> set[str] | None:
+    """查询所有活 worker 上正在执行/预留的 Celery task_id 集合。
+
+    多 worker / 滚动重启场景下，一个新 worker 启动时，别的活 worker 可能正跑着
+    RUNNING 的 turn。若无差别地把所有 RUNNING turn 标 FAILED、删所有研究容器，
+    就会误杀这些健康的在跑任务。这里用 Celery ``inspect`` 汇总全集群在跑的
+    task_id，调用方据此把「有活 worker 在跑」的 turn 排除在清理之外。
+
+    Returns:
+        - task_id 集合（可能为空集，表示确实没有任何在跑任务）；
+        - ``None``：inspect 不可用（broker 不支持 / 超时 / 异常）。调用方遇 None
+          应退回「不排除」的旧行为，保证单 worker 部署下清理仍然生效。
+    """
+    try:
+        from app.core.celery import celery_app
+
+        inspector = celery_app.control.inspect(timeout=2.0)
+        live: set[str] = set()
+        found_any = False
+        for source in (inspector.active(), inspector.reserved()):
+            if not source:
+                continue
+            found_any = True
+            for _worker, tasks in source.items():
+                for task in tasks or []:
+                    tid = task.get("id")
+                    if tid:
+                        live.add(str(tid))
+        if not found_any:
+            # 所有 inspect 回包都为 None：无 worker 应答（或 broker 不支持）。
+            # 无法区分「真没任务」与「问不到」，保守返回 None 走旧行为。
+            return None
+        return live
+    except Exception:
+        logger.opt(exception=True).warning("inspect live celery tasks failed")
+        return None
+
+
 def sweep_orphan_running_turns() -> int:
-    """Worker 启动时把所有 RUNNING 的 turn 一次性标记为 FAILED。
+    """Worker 启动时把**孤儿** RUNNING 的 turn 标记为 FAILED。
 
     场景：worker 上次因 SIGKILL/OOM 崩溃时，正在跑的 turn 状态卡在 RUNNING
     再没人推进；新 worker 起来后这些行会永远漂着。此函数由
     :func:`@signals.worker_init` 触发，把它们收敛到 FAILED，同时同步 session 状态。
+
+    **多 worker 安全**：先经 :func:`_live_celery_task_ids` 查全集群在跑的 task_id，
+    把「仍有活 worker 在跑」的 turn（其 ``celery_task_id`` 命中）排除，只清真正的
+    孤儿——避免新 worker 启动误杀别的 worker 正跑的健康任务。inspect 不可用时退回
+    「全部 RUNNING 视为孤儿」的旧行为（单 worker 部署无回归）。
 
     因为 :func:`finalize_turn` 是幂等的，多个 worker 同时启动也不会互相干扰
     （SQL 层 ``WHERE status NOT IN (terminal)`` 只让第一个胜出）。
@@ -139,12 +182,16 @@ def sweep_orphan_running_turns() -> int:
     """
     cleaned = 0
     try:
+        live_task_ids = _live_celery_task_ids()
         with get_db_session() as db:
             stmt = select(ResearchTurn).where(
                 ResearchTurn.status == ResearchTurnStatus.RUNNING.value,
             )
             orphans = db.exec(stmt).all()
         for turn in orphans:
+            # 有活 worker 在跑这一轮 → 不是孤儿，跳过。
+            if live_task_ids is not None and turn.celery_task_id in live_task_ids:
+                continue
             if finalize_turn(
                 session_id=turn.session_id,
                 turn_id=turn.id,
@@ -159,17 +206,19 @@ def sweep_orphan_running_turns() -> int:
         # 协作孤儿单独收敛：worker 崩溃时在跑的 COLLABORATING turn 标 FAILED，但
         # **不把 session 标 FAILED**——协作断了不代表会话失败，会话仍暂停在 gate，
         # 故把 session 复位回 PAUSED（若它当时是 RUNNING）。
-        cleaned += _sweep_orphan_collab_turns()
+        cleaned += _sweep_orphan_collab_turns(live_task_ids)
     except Exception:
         logger.opt(exception=True).warning("sweep_orphan_running_turns failed")
     return cleaned
 
 
-def _sweep_orphan_collab_turns() -> int:
+def _sweep_orphan_collab_turns(live_task_ids: set[str] | None = None) -> int:
     """把孤儿 COLLABORATING turn 标 FAILED。
 
     协作是叠加层、从不改 session 主状态，故这里只需收敛 turn 自身——session 状态
     （pending/paused/终态）本就没被协作动过，无需复位。
+
+    ``live_task_ids`` 非 None 时，命中的 turn 表示仍有活 worker 在跑，跳过不清。
     """
     cleaned = 0
     now = datetime.now(UTC)
@@ -181,6 +230,11 @@ def _sweep_orphan_collab_turns() -> int:
                 )
             ).all()
             for turn in orphans:
+                if (
+                    live_task_ids is not None
+                    and turn.celery_task_id in live_task_ids
+                ):
+                    continue
                 won = (db.execute(
                     update(ResearchTurn)
                     .where(ResearchTurn.id == turn.id)

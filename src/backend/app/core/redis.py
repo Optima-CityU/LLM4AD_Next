@@ -338,7 +338,7 @@ RESEARCH_GEN_TTL = 3600
 RESEARCH_STREAM_PREFIX = "research_stream:"
 RESEARCH_STREAM_TTL = 7200  # 2 小时，比调参长；科研 pipeline 更慢
 RESEARCH_STREAM_MAXLEN = 20000
-# gate 唤醒：桥接 worker 订阅 pub/sub channel 等用户 reply（见 save_research_gate_reply）。
+# gate 唤醒：key 存在 = 该 gate 已被用户回复过（见 research_gate_reply_key）。
 RESEARCH_GATE_REPLY_PREFIX = "research_gate:"
 RESEARCH_GATE_REPLY_TTL = 86400  # 24h，覆盖用户离开后再回来的情况
 
@@ -366,11 +366,6 @@ def research_gate_reply_key(
     key 存在 = 该 gate 已被用户回复过。
     """
     return f"{RESEARCH_GATE_REPLY_PREFIX}{session_id}:{message_id}"
-
-
-def research_gate_channel(session_id: str | uuid.UUID) -> str:
-    """pub/sub channel：用户 reply 到达时 PUBLISH 到此，桥接 worker 订阅。"""
-    return f"research_gate_channel:{session_id}"
 
 
 def set_research_generation_id(
@@ -434,53 +429,6 @@ def delete_research_stream(
     """删除指定科研轮次的 Stream key。"""
     r = get_sync_redis()
     r.delete(research_stream_key(session_id, turn_id))
-
-
-def save_research_gate_reply(
-    session_id: str | uuid.UUID,
-    message_id: str | uuid.UUID,
-    submission: dict,
-) -> None:
-    """记录一次 gate 回填并 PUBLISH 唤醒桥接 worker。
-
-    两个步骤：先把 submission 落到 Redis（key 存在 = 已回填），再 PUBLISH
-    到会话级 channel。桥接 worker 收到 PUBLISH 后按 message_id 拿走
-    submission 继续 subprocess。
-    """
-    r = get_sync_redis()
-    key = research_gate_reply_key(session_id, message_id)
-    r.set(
-        key,
-        json.dumps(
-            {
-                "message_id": str(message_id),
-                "submission": submission,
-            },
-            ensure_ascii=False,
-            default=str,
-        ),
-        ex=RESEARCH_GATE_REPLY_TTL,
-    )
-    r.publish(
-        research_gate_channel(session_id),
-        json.dumps(
-            {"message_id": str(message_id)}, ensure_ascii=False
-        ),
-    )
-
-
-def read_research_gate_reply(
-    session_id: str | uuid.UUID, message_id: str | uuid.UUID
-) -> dict | None:
-    """读取一次 gate 回填载荷；未设置时返回 None。"""
-    r = get_sync_redis()
-    raw = r.get(research_gate_reply_key(session_id, message_id))
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
-        return None
 
 
 def clear_research_gate_reply(

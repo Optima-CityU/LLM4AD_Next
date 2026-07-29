@@ -82,8 +82,12 @@ class EventsSink:
             try:
                 self._fp.write(line)
                 self._fp.flush()
-            except Exception:
-                pass
+            except Exception as exc:
+                # 事件文件写失败若静默吞掉，宿主永远收不到 __result__ 终态，只能退回
+                # 据 exit_code 兜底猜测（见 task._marker_from_container_status）。至少把
+                # 失败打到 stderr——宿主 on_stdout 会捕获，便于定位是哪个事件丢了。
+                etype = event.get("type", "?")
+                print(f"[EventsSink] emit failed type={etype}: {exc}", file=sys.stderr, flush=True)  # noqa: T201 - 容器入口，logger 会经 handler 回灌 sink 造成递归
 
     def close(self) -> None:
         with self._lock:

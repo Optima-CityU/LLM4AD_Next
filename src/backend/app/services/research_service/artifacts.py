@@ -62,8 +62,10 @@ def _classify_artifact(path: Path) -> str:
         return "config"
     if name.endswith((".json", ".csv", ".tsv", ".parquet", ".jsonl")):
         return "data"
-    if name.endswith((".log", ".txt", ".md")):
-        return "log" if name.endswith(".log") else "other"
+    if name.endswith(".log"):
+        return "log"
+    if name.endswith((".txt", ".md")):
+        return "other"
     return "other"
 
 
@@ -219,7 +221,7 @@ def get_artifact_tree(
             session_id=session.id, run_dir=session.run_dir, root=None
         )
 
-    def build(path: Path, rel: str) -> ResearchArtifactTreeNode:
+    def build(path: Path, rel: str, depth: int = 0) -> ResearchArtifactTreeNode:
         try:
             stat = path.stat()
             size = stat.st_size if path.is_file() else None
@@ -234,12 +236,14 @@ def get_artifact_tree(
             size=size,
             mtime=mtime,
         )
-        if path.is_dir():
+        # 只下钻真实目录，跳过符号链接目录：软链指回祖先会让递归无限打转。深度上限
+        # 64 作二重保险（正常产物层级远不及此），命中即停止下钻。
+        if path.is_dir() and not path.is_symlink() and depth < 64:
             for child in sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
                 if child.name.startswith("."):
                     continue  # 隐藏 .events-*.jsonl / .app_config.json 等内部文件
                 child_rel = f"{rel}/{child.name}" if rel else child.name
-                node.children.append(build(child, child_rel))
+                node.children.append(build(child, child_rel, depth + 1))
         return node
 
     return ResearchArtifactTreeResponse(
@@ -284,17 +288,24 @@ def create_artifacts_archive(
     fd, tmp = tempfile.mkstemp(prefix=f"research-{session_id}-", suffix=".zip")
     os.close(fd)  # 只借文件名，交给 ZipFile 自行开写
     zip_path = Path(tmp)
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            rel = str(path.relative_to(root)).replace("\\", "/")
-            if any(part.startswith(".") for part in rel.split("/")):
-                continue
-            try:
-                zf.write(path, arcname=rel)
-            except OSError:
-                logger.opt(exception=True).warning(f"skip zip entry: {rel}")
+    # zip 落盘后由调用方（路由）在响应后 BackgroundTask 删除；但打包途中若抛异常，
+    # 那份 BackgroundTask 从未挂上，临时文件会永久泄漏在 temp 目录。故此处兜底：
+    # 失败即就地删除临时文件再向上抛。
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                rel = str(path.relative_to(root)).replace("\\", "/")
+                if any(part.startswith(".") for part in rel.split("/")):
+                    continue
+                try:
+                    zf.write(path, arcname=rel)
+                except OSError:
+                    logger.opt(exception=True).warning(f"skip zip entry: {rel}")
+    except Exception:
+        zip_path.unlink(missing_ok=True)
+        raise
 
     safe_title = "".join(
         c if c.isalnum() or c in ("-", "_") else "_" for c in (session.title or "")
@@ -321,6 +332,13 @@ def write_artifact(
     续跑即用改后内容，无需重跑本 stage。
     """
     session = _get_session(db, session_id, user)   # user 归属校验（跨用户 404）
+
+    # resolve_artifact_path 只防穿越 + 认已存在文件，但不挡 `.` 开头的内部点文件
+    # （.app_config.json / .events-<turn>.jsonl 等容器契约中转文件）。门控编辑绝不该
+    # 覆写它们——改坏会污染下一轮容器输入。与 list/tree/zip 的隐藏口径一致，拒之。
+    if any(part.startswith(".") for part in relative.replace("\\", "/").split("/")):
+        raise HTTPException(status_code=400, detail="cannot edit internal dotfiles")
+
     target = resolve_artifact_path(db, session_id, user, relative)  # 防穿越 + 只认已存在文件
 
     # 备份原文到 run_dir/hitl/snapshots/（run_dir 内，随 session 天然隔离）。相对
@@ -331,7 +349,9 @@ def write_artifact(
         flat = relative.replace("\\", "/").replace("/", "__")
         backup = snapshots_dir / f"{flat}.orig"
         if not backup.exists():
-            backup.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+            # 二进制产物 read_text 会抛 UnicodeDecodeError（ValueError 子类，非 OSError），
+            # 旧实现只 except OSError 会漏网并 500。按字节备份，编解码无关，稳收所有产物。
+            backup.write_bytes(target.read_bytes())
     except OSError:
         logger.opt(exception=True).warning(f"backup before edit failed: {relative}")
 

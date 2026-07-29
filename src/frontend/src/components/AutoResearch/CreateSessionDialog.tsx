@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -29,6 +30,7 @@ import {
   useCreateResearchSession,
   useStartResearchTurn,
 } from "@/hooks/useAutoResearch"
+import { cn } from "@/lib/utils"
 
 import ProviderModelPicker from "./ProviderModelPicker"
 import { MODE_OPTIONS, PROFILE_OPTIONS, type ResearchProfile } from "./shared"
@@ -62,9 +64,11 @@ export default function CreateSessionDialog({
   const [profile, setProfile] = useState<ResearchProfile>("algorithm_evolution")
   const [autoStart, setAutoStart] = useState(false)
   const [topicError, setTopicError] = useState("")
+  const [titleError, setTitleError] = useState("")
 
   const TOPIC_MIN = 1
   const TOPIC_MAX = 500
+  const TITLE_MAX = 255
 
   const createMut = useCreateResearchSession()
   const startMut = useStartResearchTurn()
@@ -88,6 +92,7 @@ export default function CreateSessionDialog({
     setProfile("algorithm_evolution")
     setAutoStart(false)
     setTopicError("")
+    setTitleError("")
     createdRef.current = null
   }
 
@@ -107,6 +112,17 @@ export default function CreateSessionDialog({
         t("autoResearch.chat.topicTooLong", {
           defaultValue: "主题最多 {{max}} 个字符",
           max: TOPIC_MAX,
+        }),
+      )
+      return
+    }
+
+    const trimmedTitle = title.trim()
+    if (trimmedTitle.length > TITLE_MAX) {
+      setTitleError(
+        t("autoResearch.chat.titleTooLong", {
+          defaultValue: "标题最多 {{max}} 个字符",
+          max: TITLE_MAX,
         }),
       )
       return
@@ -205,30 +221,91 @@ export default function CreateSessionDialog({
             </div>
           </Field>
 
-          <Field label={t("autoResearch.create.titleLabel")}>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t("autoResearch.create.titlePlaceholder")}
-            />
+          <Field label={t("autoResearch.create.titleLabel")} error={titleError}>
+            <div className="relative">
+              <Input
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value)
+                  if (titleError) setTitleError("")
+                }}
+                placeholder={t("autoResearch.create.titlePlaceholder")}
+                maxLength={TITLE_MAX}
+                className={
+                  titleError
+                    ? "border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30"
+                    : ""
+                }
+              />
+              {/* 字数统计 */}
+              {title.length > 0 && (
+                <div
+                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
+                    title.length > TITLE_MAX
+                      ? "bg-destructive/90 text-destructive-foreground"
+                      : title.length > TITLE_MAX * 0.9
+                        ? "bg-amber-500/90 text-white"
+                        : "bg-muted/80 text-muted-foreground"
+                  }`}
+                >
+                  {title.length} / {TITLE_MAX}
+                </div>
+              )}
+            </div>
           </Field>
 
           <Field label={t("autoResearch.create.profileLabel")}>
-            <Select
-              value={profile}
-              onValueChange={(v) => setProfile(v as ResearchProfile)}
-            >
-              <SelectTrigger size="sm" className="w-full text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROFILE_OPTIONS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {t(`autoResearch.profile.${p}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-2 gap-3">
+              {PROFILE_OPTIONS.map((p) => {
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setProfile(p as ResearchProfile)}
+                    className={cn(
+                      "group relative rounded-lg px-4 py-3 text-left transition-all",
+                      "border-l border-r border-border/60",
+                      profile === p
+                        ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
+                        : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      {/* 选中指示器 */}
+                      <div
+                        className={cn(
+                          "mt-0.5 size-4 shrink-0 rounded-full border-2 transition-all",
+                          profile === p
+                            ? "border-primary bg-primary"
+                            : "border-muted-foreground/40 bg-background",
+                        )}
+                      >
+                        {profile === p && (
+                          <div className="size-full flex items-center justify-center">
+                            <div className="size-1.5 rounded-full bg-primary-foreground" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div
+                          className={cn(
+                            "text-sm font-medium transition-colors",
+                            profile === p
+                              ? "text-foreground"
+                              : "text-foreground/80 group-hover:text-foreground",
+                          )}
+                        >
+                          {t(`autoResearch.profile.${p}`)}
+                        </div>
+                        <div className="text-[11px] leading-relaxed text-muted-foreground">
+                          {t(`autoResearch.profileDesc.${p}`)}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
@@ -306,6 +383,7 @@ export default function CreateSessionDialog({
             onClick={() => void handleSubmit()}
             disabled={submitting || !topic.trim()}
           >
+            {submitting && <Loader2 className="size-4 animate-spin" />}
             {submitting
               ? t("autoResearch.create.creating")
               : autoStart

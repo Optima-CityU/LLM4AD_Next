@@ -2628,6 +2628,7 @@
       "dragOrClick": "拖动调整宽度 · 点击收起",
       "noSessions": "还没有会话，点击右上角新建",
       "sessionOptions": "会话操作",
+      "folderOptions": "分组操作",
       "deleteSession": "删除会话",
       "deleteSessionConfirm": "删除会话「{{title}}」？其落盘产物也会一并删除。",
       "renameSession": "重命名",
@@ -2636,8 +2637,12 @@
       "switchProfileConfirm": "切换到「{{target}}」后，将清空当前会话第 9 步之后的所有产物，且不可恢复。请先下载并妥善保存需要的产物再继续。",
       "switchProfileDownloadHint": "建议先打包下载全部产物，避免切换后丢失。",
       "loading": "加载中",
+      "loadError": "会话列表加载失败",
       "folderExists": "同名分组已存在",
       "sessionRunning": "会话正在运行，请先停止"
+    },
+    "switcher": {
+      "emptyFolder": "暂无会话"
     },
     "status": {
       "pending": "待运行",
@@ -2667,15 +2672,21 @@
       "learning": "教学模式"
     },
     "profile": {
-      "algorithm_evolution": "llm4ad实验",
-      "ml_vision": "autoresearch实验"
+      "algorithm_evolution": "llm4ad",
+      "ml_vision": "autoresearch"
+    },
+    "profileDesc": {
+      "algorithm_evolution": "集成了llm4ad的实验设计部分和实验执行部分",
+      "ml_vision": "原生的AutoResearchClaw"
     },
     "provider": {
       "inherit": "跟随会话默认",
       "default": "默认",
       "mock": "Mock",
       "noModelNeeded": "无需模型",
-      "yours": "你的供应商"
+      "yours": "你的供应商",
+      "loading": "加载供应商...",
+      "loadError": "供应商加载失败"
     },
     "tabs": {
       "progress": "进度",
@@ -2889,6 +2900,11 @@
       "noTurns": "还没有轮次",
       "llm4adFinal": "已收到 LLM4AD 最终状态",
       "stagePrefix": "阶段 {{stage}} · {{name}}",
+      "stagePrefixBare": "阶段 {{stage}}",
+      "stageFlow": "阶段 {{from}} → {{to}}",
+      "durationSeconds": "{{seconds}} 秒",
+      "evolutionStep": "演化 · 得分 {{score}}",
+      "artifactReady": "产物 · {{kind}}",
       "stageError": "错误",
       "systemEvent": "系统事件",
       "streamLogs": {
@@ -3155,7 +3171,8 @@
       "best": "最高分",
       "avg": "平均分",
       "generation": "代数",
-      "score": "得分"
+      "score": "得分",
+      "fullValueHint": "完整值（未四舍五入）"
     }
   },
   "liveCode": {

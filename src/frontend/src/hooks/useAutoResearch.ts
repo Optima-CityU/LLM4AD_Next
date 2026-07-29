@@ -8,6 +8,7 @@
  */
 
 import {
+  type QueryClient,
   type UseQueryOptions,
   useInfiniteQuery,
   useMutation,
@@ -88,12 +89,30 @@ export const researchKeys = {
 
 // ---- 通用 helpers ----
 
-/** 让 mutation 后广义失效相关缓存。 */
+/**
+ * 失效所有会话列表相关缓存（文件夹分页 / 搜索分页 / 旧的扁平 sessions），
+ * 并刷新文件夹计数。用于新建 / 删除 / 移动会话、turn 结束后同步侧栏。
+ *
+ * 用前缀匹配一次性覆盖所有 folderSessions/searchSessions 分页 key，避免逐个文件夹
+ * 精确失效。React Query 默认按 key 前缀模糊匹配。
+ *
+ * 关键：只失效「列表 + 文件夹计数」，**不**碰当前打开会话的 messages / state /
+ * turns / detail。否则在侧栏对其它会话重命名/移动/删除、或任意 turn 生命周期变更时，
+ * 会连带把正在浏览的会话多页消息流全部 refetch，造成滚动跳动与网络放大。
+ */
+function invalidateSessionListsOn(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: [...researchKeys.all, "folderSessions"] })
+  qc.invalidateQueries({ queryKey: [...researchKeys.all, "searchSessions"] })
+  qc.invalidateQueries({ queryKey: [...researchKeys.all, "sessions"] })
+  qc.invalidateQueries({ queryKey: researchKeys.folders() })
+}
+
+/** 让 mutation 后失效相关缓存。 */
 function useInvalidator() {
   const qc = useQueryClient()
   return {
-    invalidateSessions: () =>
-      qc.invalidateQueries({ queryKey: researchKeys.all }),
+    // 仅失效会话列表 + 文件夹计数（不牵连当前会话的消息流 / state / 详情）。
+    invalidateSessions: () => invalidateSessionListsOn(qc),
     invalidateSessionDetail: (sessionId: string) => {
       qc.invalidateQueries({ queryKey: researchKeys.sessionDetail(sessionId) })
       qc.invalidateQueries({ queryKey: researchKeys.state(sessionId) })
@@ -108,20 +127,12 @@ function useInvalidator() {
 }
 
 /**
- * 失效所有会话列表相关缓存（文件夹分页 / 搜索分页 / 旧的扁平 sessions），
- * 并刷新文件夹计数。用于新建 / 删除 / 移动会话、turn 结束后同步侧栏。
- *
- * 用前缀匹配一次性覆盖所有 folderSessions/searchSessions 分页 key，避免逐个文件夹
- * 精确失效。React Query 默认按 key 前缀模糊匹配。
+ * 失效会话列表相关缓存的独立 hook（供页面级 handler 直接调用）。
+ * 与 {@link useInvalidator} 的 `invalidateSessions` 同实现。
  */
 export function useInvalidateSessionLists() {
   const qc = useQueryClient()
-  return useCallback(() => {
-    qc.invalidateQueries({ queryKey: [...researchKeys.all, "folderSessions"] })
-    qc.invalidateQueries({ queryKey: [...researchKeys.all, "searchSessions"] })
-    qc.invalidateQueries({ queryKey: [...researchKeys.all, "sessions"] })
-    qc.invalidateQueries({ queryKey: researchKeys.folders() })
-  }, [qc])
+  return useCallback(() => invalidateSessionListsOn(qc), [qc])
 }
 
 // ---- Folders ----

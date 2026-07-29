@@ -246,7 +246,11 @@ export function useAnalysisStream(
               }
             }
           }
-          return
+          // 流干净关闭却未收到任何终态帧（done/timeout/error/cancelled）：
+          // 收到终态帧的分支都在 switch 内直接 return，能走到这里说明连接被
+          // 意外掐断。抛错交给下方 catch 的 retry/failed 兜底，避免永久卡在
+          // “生成中”。
+          throw new Error("analysis stream ended unexpectedly")
         } catch (err: unknown) {
           if (cancelled || (err as Error).name === "AbortError") return
           if (attempt < MAX_RETRIES) {

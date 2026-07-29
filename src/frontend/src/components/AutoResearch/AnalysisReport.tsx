@@ -43,7 +43,7 @@ import {
 import { cn } from "@/lib/utils"
 
 import ProviderModelPicker from "./ProviderModelPicker"
-import { stageNameByLang } from "./tech"
+import { QUALITY_GATE_STAGE, stageNameByLang, TOTAL_STAGES } from "./tech"
 
 interface Props {
   sessionId: string
@@ -367,7 +367,7 @@ function OverviewSection({ analysis }: { analysis: ResearchAnalysisData }) {
           {stagesRun}
           <span className="text-xs text-muted-foreground font-medium">
             {" "}
-            / 23
+            / {TOTAL_STAGES}
           </span>
         </Tile>
         <Tile
@@ -532,7 +532,7 @@ function GanttRow({
   const hot = total >= HOT_THRESHOLD
   const isDeg =
     (stage.decision ?? "").toLowerCase().includes("degrad") ||
-    stage.stage === 20
+    stage.stage === QUALITY_GATE_STAGE
   const name = stageNameByLang(stage.stage, lang) || stage.name
 
   return (

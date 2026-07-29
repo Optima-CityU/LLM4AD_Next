@@ -253,6 +253,13 @@ function SwitcherFolder({
               {t("autoResearch.sidebar.loading")}
             </div>
           )}
+          {!query.isLoading && sessions.length === 0 && (
+            <div className="px-2 py-1.5 text-[11px] text-muted-foreground/40">
+              {t("autoResearch.switcher.emptyFolder", {
+                defaultValue: "暂无会话",
+              })}
+            </div>
+          )}
           {sessions.map((s) => (
             <SwitcherRow
               key={s.id}

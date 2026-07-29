@@ -21,6 +21,8 @@ from typing import Any
 import celery.contrib.abortable
 from celery import signals
 from loguru import logger
+from sqlalchemy import update
+from sqlmodel import select
 
 from app.core.celery import celery_app
 from app.core.db import get_db_session
@@ -42,6 +44,7 @@ from .config_builder import (
     resolve_provider_for_arc,
 )
 from .lifecycle import (
+    _TERMINAL_TURN_STATUSES,
     finalize_turn,
     sweep_orphan_running_turns,
 )
@@ -71,6 +74,11 @@ def _on_research_task_prerun(sender=None, task_id=None, args=None, **kwargs):  #
     放 task_prerun 而非任务体：worker 在任务体首行前 crash（如 import 失败）时，
     仍能靠 :func:`sweep_orphan_running_turns` 在下次 worker_init 兜底。session 指针
     在 server 层已设，此处重复设只作幂等兜底。
+
+    **终态守卫**：用 ``WHERE status NOT IN (terminal)`` 的 rowcount 写 RUNNING。
+    否则用户在任务入队后、worker 拉起前点 stop（turn 已被写成 CANCELLED）时，
+    这里的裸写会把已取消的 turn 复活成 RUNNING，抹掉终态。命中终态则整体跳过
+    （连 session 指针也不动），任务体首行 ``self.is_aborted()`` 会兜底短路。
     """
     if sender is None or getattr(sender, "name", None) != _TASK_NAME:
         return
@@ -83,19 +91,30 @@ def _on_research_task_prerun(sender=None, task_id=None, args=None, **kwargs):  #
     except (KeyError, ValueError, TypeError):
         return
     try:
+        now = datetime.now(UTC)
         with get_db_session() as db:
-            turn = db.get(ResearchTurn, turn_id)
-            session = db.get(ResearchSession, session_id)
-            if not turn or not session:
-                return
-            turn.started_at = datetime.now(UTC)
-            turn.status = ResearchTurnStatus.RUNNING.value
-            turn.updated_time = datetime.now(UTC)
-            session.status = ResearchSessionStatus.RUNNING.value
-            session.active_turn_id = turn_id
-            session.updated_time = datetime.now(UTC)
-            db.add(turn)
-            db.add(session)
+            # 终态守卫：只有当 turn 仍非终态时才写 RUNNING。rowcount==0 说明已被
+            # stop 等路径终态化，此时不碰 turn / session。
+            won = (db.execute(
+                update(ResearchTurn)
+                .where(ResearchTurn.id == turn_id)
+                .where(ResearchTurn.status.notin_(_TERMINAL_TURN_STATUSES))
+                .values(
+                    status=ResearchTurnStatus.RUNNING.value,
+                    started_at=now,
+                    updated_time=now,
+                )
+            ).rowcount or 0) > 0
+            if won:
+                db.execute(
+                    update(ResearchSession)
+                    .where(ResearchSession.id == session_id)
+                    .values(
+                        status=ResearchSessionStatus.RUNNING.value,
+                        active_turn_id=turn_id,
+                        updated_time=now,
+                    )
+                )
             db.commit()
     except Exception:
         logger.opt(exception=True).warning(
@@ -107,8 +126,11 @@ def _on_research_task_prerun(sender=None, task_id=None, args=None, **kwargs):  #
 def _on_research_worker_init(**kwargs):  # noqa: ARG001
     """Worker 启动时清理孤儿 RUNNING turn + 孤儿研究容器。
 
-    多 worker 并发启动也无害：finalize_turn 是幂等的。容器清理只按 ``turn_id``
-    标签过滤，只回收本模块起的研究容器（不误伤演化/调参容器）。
+    **多 worker 安全**：孤儿判定经 Celery ``inspect`` 排除仍有活 worker 在跑的
+    turn（见 :func:`sweep_orphan_running_turns`）；容器清理同样保留这些在跑 turn
+    对应的容器名，避免新 worker 启动误杀别的 worker 正跑的容器。inspect 不可用时
+    退回旧的「全清」行为（单 worker 部署无回归）。容器清理只按 ``turn_id`` 标签
+    过滤，只回收本模块起的研究容器（不误伤演化/调参容器）。
     """
     try:
         sweep_orphan_running_turns()
@@ -116,11 +138,47 @@ def _on_research_worker_init(**kwargs):  # noqa: ARG001
         logger.opt(exception=True).warning("research worker_init sweep failed")
     try:
         from app.services.container_runtime import cleanup_orphaned_containers
-        cleanup_orphaned_containers(extra_filters={"label": "turn_id"})
+
+        cleanup_orphaned_containers(
+            extra_filters={"label": "turn_id"},
+            exclude_names=_live_research_container_names(),
+        )
     except Exception:
         logger.opt(exception=True).warning(
             "research worker_init container cleanup failed"
         )
+
+
+def _live_research_container_names() -> set[str]:
+    """仍有活 worker 在跑的 pipeline / collab 容器名集合（用于清理排除）。
+
+    据全集群在跑的 Celery task_id（即在跑 turn 的 ``celery_task_id``）反查对应
+    turn，生成其研究/协作容器名。inspect 不可用（返回 None）时给出空集——退回
+    「不排除」的旧全清行为，与 :func:`sweep_orphan_running_turns` 的兜底一致。
+    """
+    from app.services.container_service import (
+        research_collab_container_name,
+        research_container_name,
+    )
+    from app.tasks.research_runner.lifecycle import _live_celery_task_ids
+
+    live_ids = _live_celery_task_ids()
+    if not live_ids:
+        return set()
+    names: set[str] = set()
+    try:
+        with get_db_session() as db:
+            turns = db.exec(
+                select(ResearchTurn).where(
+                    ResearchTurn.celery_task_id.in_(live_ids)
+                )
+            ).all()
+        for turn in turns:
+            names.add(research_container_name(str(turn.id)))
+            names.add(research_collab_container_name(str(turn.id)))
+    except Exception:
+        logger.opt(exception=True).warning("resolve live container names failed")
+    return names
 
 
 # ---- Phase helpers（把 run_research_turn 主体拆开）----
@@ -183,7 +241,13 @@ def _persist_config_snapshot(
 ) -> None:
     """脱敏后把 arc_config 快照到 session.latest_config，同步 run_dir 字段。"""
     redacted = deepcopy(arc_config_dict)
+    # 凭据分散在两处：llm.api_key（inline 注入）与 experiment.llm4ad_agent.build_api_key
+    # （build 阶段复用同一凭证，见 config_builder.build_arc_config）。两处都要抹掉，
+    # 否则 build_api_key 会带着明文密钥落进 session.latest_config。
     redacted.get("llm", {}).pop("api_key", None)
+    _agent_cfg = redacted.get("experiment", {}).get("llm4ad_agent")
+    if isinstance(_agent_cfg, dict):
+        _agent_cfg.pop("build_api_key", None)
     try:
         with get_db_session() as db:
             session = db.get(ResearchSession, session_id)
@@ -209,7 +273,14 @@ def _marker_from_container_status(result: Any, status_enum: Any) -> dict[str, An
     if result.status is status_enum.CANCELLED:
         return {"outcome": "cancelled"}
     if result.status is status_enum.COMPLETED and result.exit_code == 0:
-        return {"outcome": "done", "stages_done": 0, "stages_failed": 0}
+        # 容器干净退出（exit 0）却没发 __result__：本函数只在无 marker 时被调用，
+        # 故此分支意味着 pipeline 从未回传终态。健康的容器入口一定会发 __result__，
+        # 这里 exit 0 + 无 marker 是静默契约违约（入口早退 / 崩在发事件前），当作
+        # 失败而非合成 stages_done=0 的假成功——否则用户看到"完成"但实际一无所产。
+        return {
+            "outcome": "failed",
+            "error": "研究容器已退出但未回传终态结果（pipeline 可能未执行）",
+        }
     if result.status is status_enum.OOM:
         return {
             "outcome": "failed",
@@ -405,6 +476,19 @@ def run_research_turn(self, data: dict) -> dict:
     set_research_generation_id(session_id, turn_id, self.request.id)
 
     try:
+        # 终态短路：turn 在入队后、worker 拉起前可能已被 stop 写成 CANCELLED（此时
+        # task_prerun 的终态守卫已跳过 RUNNING 写入）。这里提前判掉，避免为一个已
+        # 取消的 turn 白跑一趟容器。既有 CANCELLED 态由 finalize 守卫保住，此处不再
+        # 重复 finalize，只发终态事件并走 finally 收尾。
+        try:
+            _already_aborted = bool(self.is_aborted())
+        except Exception:
+            _already_aborted = False
+        if _already_aborted:
+            sink.emit({"type": "done", "status": "cancelled",
+                       "stages_done": 0, "stages_failed": 0})
+            return {"status": "cancelled", "stages_done": 0, "stages_failed": 0}
+
         # 1. Bootstrap
         session_snap, turn_snap, run_dir = _bootstrap(session_id, turn_id)
         hitl_mode = turn_snap.mode or session_snap.mode
@@ -471,6 +555,17 @@ def run_research_turn(self, data: dict) -> dict:
         # sink.close 会 drain flusher queue，把最后一批 log 落库
         sink.close(timeout=10.0)
         clear_research_generation_id(session_id, turn_id)
+        # 吊销本轮发放的 LLM 代理 token（token 按 task_id=turn_id 归集）。TTL 也会
+        # 兜底失效，此处主动吊销尽早收紧权限，避免任务结束后仍可经代理调用大模型。
+        # 幂等：LLM_PROXY 关闭 / 无 token 时返回 0，无副作用。与 evolution 对齐。
+        try:
+            from app.services.credential_broker import revoke_task_tokens
+
+            revoke_task_tokens(str(turn_id))
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"revoke proxy tokens failed turn={turn_id}"
+            )
         # Redis Stream 保留一段时间由 TTL 兜底清理，不在这里删除以便 SSE 端点做 replay
 
 

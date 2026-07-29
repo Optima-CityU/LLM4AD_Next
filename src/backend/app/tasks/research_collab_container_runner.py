@@ -52,8 +52,11 @@ class EventsSink:
             try:
                 self._fp.write(line)
                 self._fp.flush()
-            except Exception:
-                pass
+            except Exception as exc:
+                # 静默吞掉会让宿主收不到 __collab_text__/__result__，退回 exit_code 兜底。
+                # 至少打到 stderr（宿主 on_stdout 捕获），便于定位丢了哪个事件。
+                etype = event.get("type", "?")
+                print(f"[EventsSink] emit failed type={etype}: {exc}", file=sys.stderr, flush=True)  # noqa: T201 - 容器入口，stderr 由宿主 on_stdout 捕获
 
     def close(self) -> None:
         with self._lock:

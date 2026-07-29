@@ -79,6 +79,7 @@ def _build_spec(turn_id: str, run_dir: str, config_key: str) -> ContainerJobSpec
         env=env,
         mem_limit=settings.RESEARCH_CONTAINER_MEMORY_LIMIT,
         nano_cpus=int(settings.RESEARCH_CONTAINER_CPU_LIMIT * 1e9),
+        timeout=settings.RESEARCH_CONTAINER_TIMEOUT,
         events_file=os.path.join(run_dir, events_name),
         labels={"turn_id": turn_id},
     )

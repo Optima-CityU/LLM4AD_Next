@@ -1,4 +1,4 @@
-import { Check, Cpu, Play, X } from "lucide-react"
+import { Check, Cpu, Lightbulb, Play, X } from "lucide-react"
 import { Fragment } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -143,7 +143,7 @@ export default function StageGroupRail({
                 <HoverCardTrigger asChild>
                   <button
                     type="button"
-                    className="group relative flex shrink-0 flex-col items-center gap-1 w-[68px]"
+                    className="group relative flex shrink-0 flex-col items-center gap-1 w-17 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <StepNode
                       phase={g.phase}
@@ -484,8 +484,9 @@ function PhaseTimeline({
       </ul>
 
       <div className="px-3 pb-2 pt-0.5 border-t border-border/30 bg-muted/10">
-        <span className="text-[10px] text-muted-foreground/60">
-          💡 {t("autoResearch.stages.clickToInject", "点击阶段可注入引导文本")}
+        <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/60">
+          <Lightbulb className="size-3 shrink-0" />
+          {t("autoResearch.stages.clickToInject", "点击阶段可注入引导文本")}
         </span>
       </div>
     </div>

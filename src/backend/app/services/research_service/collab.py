@@ -14,6 +14,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
+from loguru import logger
 from sqlmodel import Session, select
 
 from app import models
@@ -127,7 +128,32 @@ def start_collab_turn(
     db.refresh(turn)
     db.refresh(user_msg)
 
-    enqueue_collab_turn(session.id, turn.id, turn.celery_task_id)
+    # 入队失败补偿：turn 已落库为 COLLABORATING，若 enqueue 抛异常（broker 不可达等），
+    # 这一轮永远没 worker 认领、卡在 COLLABORATING——而并发守卫（上面的 409）据此把
+    # **后续所有**协作请求也一并拒掉，直到 worker 重启 sweep。故此处补偿：把本 turn
+    # 就地标 FAILED（协作是叠加层，不动 session 主状态），再向上抛 503 让前端可重试。
+    try:
+        enqueue_collab_turn(session.id, turn.id, turn.celery_task_id)
+    except Exception as exc:
+        logger.opt(exception=True).error(
+            f"enqueue_collab_turn failed turn={turn.id}; marking FAILED"
+        )
+        try:
+            turn.status = ResearchTurnStatus.FAILED.value
+            turn.error = "failed to enqueue collaboration task"
+            turn.ended_at = datetime.now(UTC)
+            turn.updated_time = datetime.now(UTC)
+            db.add(turn)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.opt(exception=True).warning(
+                f"compensating FAILED write failed turn={turn.id}"
+            )
+        raise HTTPException(
+            status_code=503,
+            detail="failed to enqueue collaboration task; please retry",
+        ) from exc
 
     return ResearchCollabStartResponse(
         session=ResearchSessionItem.model_validate(session),

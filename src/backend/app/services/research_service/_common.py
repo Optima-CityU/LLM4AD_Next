@@ -29,6 +29,76 @@ def _parse_cursor(cursor: str) -> datetime:
         raise HTTPException(status_code=400, detail="invalid cursor") from exc
 
 
+# ---- 复合正序游标 (created_time, seq, id) ----
+#
+# turn 级消息/日志正序分页若只用 created_time 做严格大于，会在同一 created_time
+# 的批量写入处丢数据（Windows 下时间戳精度粗，同批 flush 常撞同一时间戳）：一页
+# 取满后 next_cursor=该时间戳，下一页 created_time > 该值 命中 0 行、提前
+# has_more=False，剩余同时间戳行永久漏掉。故 next_cursor 携带三元组，翻页用
+# (created_time, seq, id) > (...) 元组比较给出全序、无缝的边界。
+#
+# 游标编码为不透明字符串 ``{iso}|{seq}|{id}``（ISO 时间戳不含 '|'，可安全分隔），
+# 前端原样回传。兼容旧版纯 ISO 游标（无 '|'）：退化为仅按时间戳严格大于——可能在
+# 部署切换瞬间对同时间戳行少量重复返回，但不丢数据。
+_CURSOR_SEP = "|"
+
+
+def _encode_forward_cursor(created_time: datetime, seq: int, row_id: uuid.UUID) -> str:
+    """把一行的 (created_time, seq, id) 编码成不透明正序游标字符串。"""
+    return f"{created_time.isoformat()}{_CURSOR_SEP}{seq}{_CURSOR_SEP}{row_id}"
+
+
+def _parse_forward_cursor(
+    cursor: str,
+) -> tuple[datetime, int | None, uuid.UUID | None]:
+    """解析正序复合游标；返回 (created_time, seq, id)。
+
+    - 新版 ``{iso}|{seq}|{id}`` → 三元组齐全；
+    - 旧版纯 ISO（无分隔符）→ (ts, None, None)，调用方退化为仅时间戳比较。
+
+    非法值 → 400。
+    """
+    parts = cursor.split(_CURSOR_SEP)
+    try:
+        ts = datetime.fromisoformat(parts[0])
+    except (ValueError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail="invalid cursor") from exc
+    if len(parts) < 3:
+        return ts, None, None
+    try:
+        seq = int(parts[1])
+        row_id = uuid.UUID(parts[2])
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid cursor") from exc
+    return ts, seq, row_id
+
+
+def _encode_reverse_cursor(ts: datetime, row_id: uuid.UUID) -> str:
+    """把一行的 (updated_time, id) 编码成不透明倒序游标字符串。"""
+    return f"{ts.isoformat()}{_CURSOR_SEP}{row_id}"
+
+
+def _parse_reverse_cursor(cursor: str) -> tuple[datetime, uuid.UUID | None]:
+    """解析倒序复合游标；返回 (ts, id)。
+
+    - 新版 ``{iso}|{id}`` → 二元组齐全；
+    - 旧版纯 ISO（无分隔符）→ (ts, None)，调用方退化为仅时间戳比较。
+
+    非法值 → 400。
+    """
+    parts = cursor.split(_CURSOR_SEP)
+    try:
+        ts = datetime.fromisoformat(parts[0])
+    except (ValueError, IndexError) as exc:
+        raise HTTPException(status_code=400, detail="invalid cursor") from exc
+    if len(parts) < 2:
+        return ts, None
+    try:
+        return ts, uuid.UUID(parts[1])
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid cursor") from exc
+
+
 def _get_folder(
     db: Session, folder_id: uuid.UUID, user: models.User
 ) -> ResearchFolder:

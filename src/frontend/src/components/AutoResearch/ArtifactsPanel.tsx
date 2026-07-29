@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -46,7 +47,7 @@ import ArtifactPreviewDialog, {
 import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
 import { ML_VISION_PROFILE } from "./shared"
-import { SectionLabel, StatusPill } from "./tech"
+import { SectionLabel, StatusPill, stageNameByLang } from "./tech"
 
 // 重启 IDE 冷却：与 evolution 的 InitializedView 保持一致，防止连点。
 const IDE_REFRESH_COOLDOWN_MS = 3000
@@ -81,7 +82,7 @@ export default function ArtifactsPanel({ session }: Props) {
 }
 
 function PanelInner({ session }: { session: ResearchSessionItem }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const state = useResearchState(session.id, {
     // SSE 实时推送，不需要轮询
     refetchInterval: false,
@@ -128,8 +129,24 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
   // 任务信息取最新态：state 查询比 session prop 更实时，缺失时回退 session。
   const status = state.data?.status ?? session.status
   const activeStageNum = state.data?.active_stage ?? session.active_stage
+  // 当前阶段名优先本地化短名（对齐顶部进度轨与消息流），回退后端英文枚举名，
+  // 避免任务信息区出现 CODE_GENERATION 这类原始枚举。
   const activeStageName =
-    state.data?.active_stage_name ?? session.active_stage_name
+    (activeStageNum != null
+      ? stageNameByLang(activeStageNum, i18n.language)
+      : "") ||
+    state.data?.active_stage_name ||
+    session.active_stage_name
+
+  // 运行中每秒 tick，驱动进行中会话的运行时长实时走秒（fmtDuration 无 end 时
+  // 用 Date.now() 计算，不 tick 就会定格在首帧）。非进行中不启用，避免空转。
+  const isRunning = status === "running" || status === "paused"
+  const [, forceDurationTick] = useState(0)
+  useEffect(() => {
+    if (!isRunning) return
+    const id = setInterval(() => forceDurationTick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [isRunning])
 
   // 报告分析 / IDE 弹层（点击弹出全屏；IDE 内嵌 code-server iframe）。
   const [tool, setTool] = useState<"report" | "ide" | null>(null)
@@ -142,16 +159,23 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
   const [ideError, setIdeError] = useState<string>("")
   const [iframeKey, setIframeKey] = useState(0)
   const [ideRefreshing, setIdeRefreshing] = useState(false)
+  // 请求代次：每次发起 loadCodeToken 领一个号，回调里只认最新号。
+  // 弹层关闭时递增此值，作废所有在途 promise，避免其 setState 覆盖复位后的 idle 态
+  // （否则下次打开时 ideState 非 idle，自动加载 effect 不触发，显示上次的陈旧 iframe）。
+  const ideReqRef = useRef(0)
   const loadCodeToken = useCallback(() => {
+    const reqId = ++ideReqRef.current
     setIdeState("loading")
     return UtilsCodeServerService.getCodeToken({
       dark: resolvedTheme === "dark",
     })
       .then(() => {
+        if (ideReqRef.current !== reqId) return
         setIdeState("success")
         setIframeKey((k) => k + 1)
       })
       .catch((err: unknown) => {
+        if (ideReqRef.current !== reqId) return
         setIdeState("error")
         const e = err as { body?: { detail?: string }; message?: string }
         setIdeError(
@@ -199,29 +223,6 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         right={<StatusPill status={status} />}
       >
         <div className="space-y-3">
-          {/* 操作入口：报告分析 / 打开 IDE（并排实心按钮） */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setTool("report")}
-              className="group flex-1 inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-border/70 bg-card/60 text-xs font-medium text-foreground/80 shadow-sm hover:text-primary hover:border-primary/50 hover:bg-primary/10 active:scale-[0.98] transition-all"
-            >
-              <FileBarChart className="size-4 shrink-0" />
-              {t("autoResearch.mainTabs.report")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool("ide")}
-              className="group flex-1 inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-border/70 bg-card/60 text-xs font-medium text-foreground/80 shadow-sm hover:text-primary hover:border-primary/50 hover:bg-primary/10 active:scale-[0.98] transition-all"
-            >
-              <Code className="size-4 shrink-0" />
-              {t("autoResearch.mainTabs.ide")}
-            </button>
-          </div>
-
-          {/* 分隔线：操作区 ↕ 信息区 */}
-          <div className="border-t border-border/40" />
-
           {/* 研究主题：直接显示内容，无 label、无嵌套面板 */}
           <p
             className="text-[13px] font-semibold text-foreground leading-relaxed line-clamp-3"
@@ -253,7 +254,7 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
 
           {/* 错误信息（仅失败时） */}
           {session.error && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/[0.06] p-3 space-y-1.5">
+            <div className="rounded-lg border border-red-500/40 bg-red-500/6 p-3 space-y-1.5">
               <SectionLabel className="block text-red-500">
                 {t("autoResearch.state.error")}
               </SectionLabel>
@@ -301,48 +302,76 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         </CollapsibleSection>
       )}
 
-      {/* 2. 产物文件树（中间）：占剩余空间并内部滚动；「全部收起」放标题行右侧 */}
+      {/* 2. 产物文件树（中间）：占剩余空间并内部滚动；报告/IDE 入口置于内容顶部，
+          打包下载 / 刷新 / 全部收起放标题行右侧 */}
       <CollapsibleSection
         icon={FolderTree}
         title={t("autoResearch.tabs.artifacts")}
         grow
         right={
-          root ? (
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                onClick={() => void treeQ.refetch()}
-                disabled={treeQ.isFetching}
-                title={t("autoResearch.artifacts.refresh")}
-                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw
-                  className={cn("size-3.5", treeQ.isFetching && "animate-spin")}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadAll}
-                disabled={zipping}
-                title={t("autoResearch.artifacts.downloadAll")}
-                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-              >
-                {zipping ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <DownloadCloud className="size-3.5" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setTreeExpanded(new Set())}
-                title={t("autoResearch.artifacts.collapseAll")}
-                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              >
-                <ChevronsDownUp className="size-3.5" />
-              </button>
-            </div>
-          ) : undefined
+          <div className="flex items-center gap-0.5">
+            {/* 打包下载：始终可用（不依赖产物树） */}
+            <button
+              type="button"
+              onClick={handleDownloadAll}
+              disabled={zipping}
+              title={t("autoResearch.artifacts.downloadAll")}
+              className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+            >
+              {zipping ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <DownloadCloud className="size-3.5" />
+              )}
+            </button>
+            {root && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void treeQ.refetch()}
+                  disabled={treeQ.isFetching}
+                  title={t("autoResearch.artifacts.refresh")}
+                  className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={cn(
+                      "size-3.5",
+                      treeQ.isFetching && "animate-spin",
+                    )}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTreeExpanded(new Set())}
+                  title={t("autoResearch.artifacts.collapseAll")}
+                  className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <ChevronsDownUp className="size-3.5" />
+                </button>
+              </>
+            )}
+          </div>
+        }
+        stickyTop={
+          // 报告分析 / 打开 IDE：小尺寸带文字按钮，一行两等分，固定不随目录树滚动
+          <div className="flex items-center gap-1.5 pt-0.5 pb-2 mb-1 border-b border-border/40">
+            <button
+              type="button"
+              onClick={() => setTool("report")}
+              className="flex-1 inline-flex items-center justify-center gap-1 h-7 rounded-md border border-border/70 bg-card/60 text-[11px] font-medium text-foreground/80 shadow-sm hover:text-primary hover:border-primary/50 hover:bg-primary/10 active:scale-[0.98] transition-all"
+            >
+              <FileBarChart className="size-3.5 shrink-0" />
+              {t("autoResearch.mainTabs.report")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool("ide")}
+              className="flex-1 inline-flex items-center justify-center gap-1 h-7 rounded-md border border-border/70 bg-card/60 text-[11px] font-medium text-foreground/80 shadow-sm hover:text-primary hover:border-primary/50 hover:bg-primary/10 active:scale-[0.98] transition-all"
+            >
+              <Code className="size-3.5 shrink-0" />
+              {t("autoResearch.mainTabs.ide")}
+            </button>
+          </div>
         }
       >
         {treeQ.isLoading ? (
@@ -384,7 +413,9 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         onOpenChange={(o) => {
           if (!o) {
             setTool(null)
-            // 关闭后复位 IDE，下次打开重新拉 token。
+            // 关闭后复位 IDE，下次打开重新拉 token。递增代次作废在途请求，
+            // 避免其迟到的 setState 把状态从 idle 又改回 success/error。
+            ideReqRef.current++
             setIdeState("idle")
             setIdeError("")
           }
@@ -408,21 +439,35 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
             <div className="flex items-center gap-1">
               {/* 重启服务：仅 IDE 弹层显示，放在关闭按钮左侧（同 evolution 逻辑） */}
               {tool === "ide" && (
-                <button
-                  type="button"
-                  aria-label={t("evolution.ideRefresh.label")}
-                  aria-disabled={ideRefreshing}
-                  onClick={handleRestartIde}
-                  title={t("evolution.ideRefresh.tooltip")}
-                  className={cn(
-                    "inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
-                    ideRefreshing && "cursor-not-allowed",
-                  )}
-                >
-                  <RefreshCw
-                    className={cn("size-3", ideRefreshing && "animate-spin")}
-                  />
-                </button>
+                <>
+                  {/* 打包下载全部产物：逻辑同产物区的下载按钮，放在重启按钮左侧 */}
+                  <button
+                    type="button"
+                    aria-label={t("autoResearch.artifacts.downloadAll")}
+                    disabled={zipping}
+                    onClick={handleDownloadAll}
+                    title={t("autoResearch.artifacts.downloadAll")}
+                    className="inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {zipping ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <DownloadCloud className="size-3" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("evolution.ideRefresh.label")}
+                    disabled={ideRefreshing}
+                    onClick={handleRestartIde}
+                    title={t("evolution.ideRefresh.tooltip")}
+                    className="inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw
+                      className={cn("size-3", ideRefreshing && "animate-spin")}
+                    />
+                  </button>
+                </>
               )}
               <DialogClose asChild>
                 <button
@@ -449,13 +494,17 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
                   </div>
                 )}
                 {ideState === "error" && (
-                  <div className="h-full flex flex-col items-center justify-center gap-3 rounded-lg border border-destructive bg-card/50">
-                    <p className="text-destructive">{ideError}</p>
+                  <div className="h-full flex flex-col items-center justify-center gap-3 rounded-lg border border-destructive/50 bg-card/50">
+                    <AlertTriangle className="size-8 text-destructive/70" />
+                    <p className="max-w-md px-4 text-center text-sm text-destructive">
+                      {ideError}
+                    </p>
                     <button
                       type="button"
-                      className="text-sm text-primary underline"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20"
                       onClick={() => setIdeState("idle")}
                     >
+                      <RefreshCw className="size-3.5" />
                       {t("common.retry")}
                     </button>
                   </div>
@@ -551,6 +600,7 @@ function CollapsibleSection({
   defaultOpen = true,
   grow = false,
   right,
+  stickyTop,
   children,
 }: {
   icon: typeof FlaskConical
@@ -558,6 +608,8 @@ function CollapsibleSection({
   defaultOpen?: boolean
   grow?: boolean
   right?: ReactNode
+  /** 固定在标题行下方、可滚动内容上方的区域（不随内容滚动）。 */
+  stickyTop?: ReactNode
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -573,7 +625,7 @@ function CollapsibleSection({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex-1 min-w-0 flex items-center gap-2 px-3 h-full hover:bg-primary/[0.06] transition-colors"
+          className="flex-1 min-w-0 flex items-center gap-2 px-3 h-full hover:bg-primary/6 transition-colors"
         >
           {open ? (
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
@@ -587,6 +639,8 @@ function CollapsibleSection({
         </button>
         {open && right && <div className="shrink-0 pl-1">{right}</div>}
       </div>
+      {/* 固定区：位于标题行与滚动内容之间，不随内容一起滚动 */}
+      {open && stickyTop && <div className="px-3 shrink-0">{stickyTop}</div>}
       {open && (
         <div
           className={cn(
@@ -654,7 +708,7 @@ function TreeNode({
         {/* 目录行：整行点击折叠；右侧「递归展开」按钮（hover 显示） */}
         <div
           style={pad}
-          className="group flex items-center gap-1 py-1 pr-1 rounded hover:bg-primary/[0.06] text-xs text-foreground/80"
+          className="group flex items-center gap-1 py-1 pr-1 rounded hover:bg-primary/6 text-xs text-foreground/80"
         >
           <button
             type="button"
@@ -687,7 +741,7 @@ function TreeNode({
             {/* 层级引导线：绝对定位、不占布局，对齐父级图标处 */}
             <span
               aria-hidden
-              className="pointer-events-none absolute inset-y-0 w-px bg-border/60 dark:bg-border/40"
+              className="pointer-events-none absolute inset-y-0 w-px bg-border dark:bg-border/70"
               style={{ left: `${depth * 12 + 11}px` }}
             />
             {node.children?.map((c) => (
@@ -713,7 +767,7 @@ function TreeNode({
       {/* 文件行：点文件名预览，点下载图标下载 */}
       <div
         style={pad}
-        className="group flex items-center gap-1 py-1 pr-1 rounded hover:bg-primary/[0.06] text-xs"
+        className="group flex items-center gap-1 py-1 pr-1 rounded hover:bg-primary/6 text-xs"
       >
         <button
           type="button"

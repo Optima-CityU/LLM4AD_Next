@@ -170,7 +170,7 @@ export default function GatePanel({
   }
 
   return (
-    <div className="bg-amber-500/[0.06]">
+    <div className="bg-amber-500/6">
       <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5">
         <FlaskConical className="size-3.5 shrink-0 text-amber-500" />
         <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
@@ -248,7 +248,7 @@ export default function GatePanel({
                   className="inline-flex items-center gap-1 min-w-0 hover:text-primary transition-colors"
                 >
                   <FileText className="size-3 shrink-0" />
-                  <span className="truncate max-w-[160px]">{f}</span>
+                  <span className="truncate max-w-40">{f}</span>
                 </button>
                 {/* 目录无下载端点，隐藏下载按钮避免 404。 */}
                 {!isFolderEntry(f) && (
@@ -362,12 +362,12 @@ export default function GatePanel({
                 )}
               >
                 <Cpu className="size-3 shrink-0" />
-                <span className="max-w-[160px] truncate">{providerLabel}</span>
+                <span className="max-w-40 truncate">{providerLabel}</span>
                 <ChevronDown className="size-3 shrink-0 opacity-60" />
               </button>
             </PopoverTrigger>
             <PopoverContent
-              className="w-[420px] p-3"
+              className="w-105 p-3"
               align="end"
               side="top"
               sideOffset={8}

@@ -13,6 +13,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react"
+import type { ReactNode } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -40,12 +41,21 @@ import {
   useResearchStream,
 } from "@/hooks/useResearchStream"
 import { cn } from "@/lib/utils"
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
 
 import BottomComposer, { type RunOverrides } from "./BottomComposer"
 import MessageItem from "./MessageItem"
 import { ML_VISION_PROFILE } from "./shared"
 import { StageProgressBar } from "./StageProgress"
 import type { StreamLogEntry } from "./StreamLogConsole"
+import StageTimeline, {
+  type StageEntry,
+  type StageStatus,
+} from "./StageTimeline"
 import TurnLogPanel from "./TurnLogPanel"
 
 interface Props {
@@ -55,6 +65,104 @@ interface Props {
 
 /** 稳定空数组：非活跃轮的 liveLogs，避免每次 render 生成新引用触发子组件重算。 */
 const EMPTY_LOGS: StreamLogEntry[] = []
+
+/** 实时消息叠加层上限：更旧的实时事件由 REST 分页兜底，防止长跑内存膨胀。 */
+const LIVE_MSG_CAP = 300
+
+/**
+ * 消息流渲染项：普通消息，或「一次阶段访问的时间轴条目」（含叠加的多个状态）。
+ */
+type RenderItem =
+  | { kind: "msg"; message: ResearchMessageItem }
+  | { kind: "stage"; entry: StageEntry }
+
+/** 从消息中取阶段号（message.stage 优先，回退 payload.stage）。 */
+function stageOf(m: ResearchMessageItem): number | null {
+  const p = (m.payload ?? {}) as { stage?: number }
+  return m.stage ?? p.stage ?? null
+}
+
+/** 阶段事件的状态串（running/waiting/done/failed）。 */
+function statusOf(m: ResearchMessageItem): string {
+  return String((m.payload as { status?: unknown })?.status ?? "")
+}
+
+/**
+ * 折叠某一轮内**相邻且同阶段**的 stage_transition 为一个时间轴条目，多个状态
+ * （如 running→done）按时序叠加进 `statuses`；右侧即可展示各状态发生的时刻。
+ *
+ * 合并规则「仅相邻」（后端已保证去重后时序正确）：
+ * - `阶段1开始 → 阶段1结束`（紧邻）→ 合并成一条，statuses=[running, done]。
+ * - `阶段1开始 → 阶段2开始 → 阶段1结束`→ 不合并（中间隔了阶段2），三条独立。
+ * - 任何非 stage_transition 事件（assistant 文本 / evolution_step 等）也会打断
+ *   相邻性：其后的同阶段事件另起一条。
+ */
+function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
+  const items: RenderItem[] = []
+  let lastStage: number | null = null
+  let lastIdx = -1
+  for (const m of messages) {
+    const eventType = m.event_type ?? "log"
+    const stage = stageOf(m)
+    if (eventType !== "stage_transition" || stage == null) {
+      items.push({ kind: "msg", message: m })
+      lastStage = null // 非阶段事件打断相邻性
+      continue
+    }
+    const st: StageStatus = {
+      status: statusOf(m),
+      time: m.created_time,
+      error:
+        (m.payload as { error?: string } | null)?.error ?? m.error ?? undefined,
+    }
+    if (stage === lastStage && lastIdx >= 0) {
+      // 与上一条同阶段且紧邻 → 状态叠加
+      ;(items[lastIdx] as Extract<RenderItem, { kind: "stage" }>).entry.statuses.push(
+        st,
+      )
+    } else {
+      items.push({
+        kind: "stage",
+        entry: { id: `stage:${m.id}`, stage, statuses: [st] },
+      })
+      lastStage = stage
+      lastIdx = items.length - 1
+    }
+  }
+  return items
+}
+
+/**
+ * 把一轮的渲染项铺开：连续的 stage 条目合并成一个 `StageTimeline`（竖向时间轴），
+ * 普通消息用 `MessageItem`。这样阶段流不再是一堆独立胶囊，而是一条连贯时间轴，
+ * 被非阶段消息打断处自然分段。
+ */
+function renderTurnItems(items: RenderItem[], sessionId: string): ReactNode[] {
+  const out: ReactNode[] = []
+  let run: StageEntry[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    out.push(<StageTimeline key={`tl:${run[0].id}`} entries={run} />)
+    run = []
+  }
+  for (const it of items) {
+    if (it.kind === "stage") {
+      run.push(it.entry)
+    } else {
+      flush()
+      out.push(
+        <MessageItem
+          key={it.message.id}
+          message={it.message}
+          sessionId={sessionId}
+          stale
+        />,
+      )
+    }
+  }
+  flush()
+  return out
+}
 
 /**
  * 会话主区：Header（会话元信息 + 运行控制）+ 消息列表 + 实时日志 + 输入框。
@@ -233,9 +341,13 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     for (const message of flat) {
       messageMap.set(message.id, message)
     }
-    // SSE 实时数据追加到末尾（覆盖已有的，或添加新的）
+    // SSE 实时数据：仅补充 REST 尚未包含的新事件。
+    // 注意 REST 是权威源——一旦某 message_id 已由 REST 返回（后端已回填
+    // message_id，见上），就不能再用 live 的合成字段覆盖它：live 消息里的
+    // payload_locked/turn_status/content/error 都是硬编码近似值（见 upsert 处），
+    // 反向覆盖会导致已 locked 的门控表单被误判为「待回填」、里程碑内容显示不全。
     for (const liveMsg of liveMessages) {
-      messageMap.set(liveMsg.id, { ...messageMap.get(liveMsg.id), ...liveMsg })
+      if (!messageMap.has(liveMsg.id)) messageMap.set(liveMsg.id, liveMsg)
     }
     // 信任后端排序：REST 数据已升序排列，SSE 数据是最新的，按插入顺序返回即可
     return [...messageMap.values()]
@@ -294,7 +406,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     if (activeTurnId && !groups.has(activeTurnId)) {
       groups.set(activeTurnId, { turnId: activeTurnId, messages: [] })
     }
-    return [...groups.values()]
+    // 每轮内独立折叠：相邻同阶段状态叠加成一个时间轴条目（重跑会新起 turn）。
+    return [...groups.values()].map((g) => ({
+      turnId: g.turnId,
+      items: collapseTurn(g.messages),
+    }))
   }, [activeTurnId, renderedMessages])
 
   const lastTurnId = groupedMessages[groupedMessages.length - 1]?.turnId ?? null
@@ -495,7 +611,10 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
               ? prev.map((message) =>
                   message.id === existing.id ? liveMessage : message,
                 )
-              : [...prev, liveMessage]
+              : // 追加新事件时封顶：evolution_step 等高频事件的 event_key 各不相同，
+                // 长跑会让 liveMessages 无上限膨胀。只保留最近 LIVE_MSG_CAP 条，
+                // 更旧的实时事件由 REST 分页（msgQ）兜底承载。
+                [...prev, liveMessage].slice(-LIVE_MSG_CAP)
           })
         }
         if (evt.type !== "log") return
@@ -590,7 +709,10 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: session 切换或加载完成时触发
   useEffect(() => {
     if (msgQ.isLoading) return
-    scrollAnchor.current?.scrollIntoView({ behavior: "instant" })
+    // 延迟滚动，确保消息和 TurnLogPanel 都渲染完成
+    setTimeout(() => {
+      scrollAnchor.current?.scrollIntoView({ behavior: "instant" })
+    }, 150)
   }, [session.id, msgQ.isLoading])
 
   // ── 运行控制 ────────────────────────────────────────────────────────
@@ -614,7 +736,10 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           from_stage: overrides.from_stage ?? null,
         } as never,
       },
-      { onError: toastErr },
+      {
+        onError: toastErr,
+        onSuccess: scrollToBottomDelayed,
+      },
     )
   }
 
@@ -636,7 +761,10 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     collabMut.mutate(
       { sessionId: session.id, body: { message } },
       {
-        onSuccess: (resp) => setCollabTurnId(resp.turn.id),
+        onSuccess: (resp) => {
+          setCollabTurnId(resp.turn.id)
+          scrollToBottomDelayed()
+        },
         onError: toastErr,
       },
     )
@@ -691,6 +819,14 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     }
   }
 
+  // 延迟滚动到底部（等待 DOM 更新后再滚动）
+  const scrollToBottomDelayed = useCallback(() => {
+    // 使用 setTimeout 确保在 React 重新渲染后执行
+    setTimeout(() => {
+      scrollAnchor.current?.scrollIntoView({ behavior: "smooth" })
+    }, 100)
+  }, [])
+
   const handleFormSubmit = (
     messageId: string,
     submission: Record<string, unknown>,
@@ -707,7 +843,10 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           model_name: runModel.trim() || undefined,
         } as never,
       },
-      { onError: toastErr },
+      {
+        onError: toastErr,
+        onSuccess: scrollToBottomDelayed,
+      },
     )
   }
 
@@ -732,15 +871,25 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在标题变化时更新
   useEffect(() => {
     setHeaderCenter(
-      <span
-        className="text-sm font-semibold truncate max-w-[420px] text-foreground/90"
-        title={session.title}
-      >
-        {session.title}
-      </span>,
+      <HoverCard openDelay={300} closeDelay={100}>
+        <HoverCardTrigger asChild>
+          <span className="text-sm font-semibold truncate max-w-[420px] text-foreground/90 cursor-default">
+            {session.title}
+          </span>
+        </HoverCardTrigger>
+        <HoverCardContent
+          side="bottom"
+          align="center"
+          className="max-w-[min(48rem,90vw)] p-4 text-[13px] leading-relaxed"
+        >
+          <div className="whitespace-pre-wrap break-words text-foreground/90">
+            {session.topic || session.title}
+          </div>
+        </HoverCardContent>
+      </HoverCard>,
     )
     return () => setHeaderCenter(null)
-  }, [session.title])
+  }, [session.title, session.topic])
 
   // ── 合并显示数据 ──
   // 顶部进度条：始终使用 state 接口的权威数据，不使用 SSE 实时叠加层
@@ -790,31 +939,27 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
             ) : messages.length === 0 ? (
               <EmptyState session={session} onRun={handleRun} running={busy} />
             ) : (
-              <div className="py-3 space-y-1">
+              <div className={cn(
+                "py-3 space-y-1",
+                // 运行中或协作中时，添加底部内边距，确保内容不被遮挡
+                (busy || collabBusy) && "pb-24"
+              )}>
                 {groupedMessages.map((group) => (
                   <div
                     key={group.turnId}
-                    className="group/turn relative pl-3 before:content-[''] before:absolute before:left-0 before:top-0 before:w-1.5 before:h-[2px] before:bg-border/20 before:transition-colors hover:before:bg-primary/50 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-1.5 after:h-[2px] after:bg-border/20 after:transition-colors hover:after:bg-primary/50"
+                    className="group/turn relative pl-3"
                   >
-                    {/* 左侧竖线：hover 时主色 + 流光从上而下 */}
+                    {/* 左侧竖线：hover 时高亮 */}
                     <span
                       aria-hidden
-                      className="absolute left-0 top-0 bottom-0 w-[2px] bg-border/20 group-hover/turn:bg-primary/40 transition-colors overflow-hidden"
-                    >
-                      <span className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-transparent via-primary/70 to-transparent opacity-0 group-hover/turn:opacity-100 group-hover/turn:[animation:flow-down_10s_ease-in-out_infinite]" />
-                    </span>
-                    {group.messages.map((m) => (
-                      <MessageItem
-                        key={m.id}
-                        message={m}
-                        sessionId={session.id}
-                        stale
-                      />
-                    ))}
+                      className="absolute left-0 top-0 bottom-0 w-0.5 rounded-full bg-border/30 transition-all duration-300 group-hover/turn:w-[3px] group-hover/turn:bg-primary/60 group-hover/turn:shadow-[0_0_8px_0] group-hover/turn:shadow-primary/30"
+                    />
+                    {/* 渲染：相邻的阶段条目成组画成竖向时间轴，普通消息按原样。 */}
+                    {renderTurnItems(group.items, session.id)}
                     <TurnLogPanel
                       sessionId={session.id}
                       turnId={group.turnId}
-                      defaultOpen={group.turnId === lastTurnId}
+                      defaultOpen={group.turnId === lastTurnId || group.turnId === activeTurnId}
                       liveLogs={
                         group.turnId === activeTurnId ? streamLogs : EMPTY_LOGS
                       }
@@ -842,9 +987,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
             )}
 
             {session.status === "failed" && session.error && (
-              <div className="mx-4 my-2 px-3 py-2 border border-destructive/40 bg-destructive/10 text-destructive text-xs rounded-md">
-                <AlertTriangle className="size-3 inline mr-1" />
-                {session.error}
+              <div className="mx-4 my-2 flex items-start gap-1.5 px-3 py-2 border border-destructive/40 bg-destructive/10 text-destructive text-xs rounded-md">
+                <AlertTriangle className="mt-px size-3 shrink-0" />
+                <span className="min-w-0 break-words whitespace-pre-wrap">
+                  {session.error}
+                </span>
               </div>
             )}
           </div>
@@ -859,7 +1006,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
               title={t("autoResearch.chat.scrollToTop", {
                 defaultValue: "回到顶部",
               })}
-              className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md hover:bg-background/90 hover:border-primary/50 transition-all pointer-events-auto"
+              className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md hover:bg-background/90 hover:border-primary/50 transition-all pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <ArrowUp className="size-3.5" />
             </button>
@@ -869,7 +1016,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
               title={t("autoResearch.chat.scrollToBottom", {
                 defaultValue: "回到底部",
               })}
-              className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md hover:bg-background/90 hover:border-primary/50 transition-all pointer-events-auto"
+              className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md hover:bg-background/90 hover:border-primary/50 transition-all pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <ArrowDown className="size-3.5" />
             </button>

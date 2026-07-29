@@ -59,8 +59,13 @@ const KEY_EVENT_TYPES = new Set([
   "llm4ad_final_state",
 ])
 
-/** 网络意外断开后的重连退避（毫秒）。达到终态 / 主动断开不会重连。 */
-const RECONNECT_DELAYS = [1000, 2000, 4000, 8000]
+/**
+ * 网络意外断开后的重连退避（毫秒）。达到终态 / 主动断开不会重连。
+ * 封顶后不再放弃，而是按最后一档（30s）持续重连——后端对已终态 turn 会立即
+ * 回 `done` 短路，所以持续重连是自愈的：一旦重连成功收到 done 即停，或 turn
+ * 结束使 `enabled` 变 false 时停。避免长会话在 4 次失败后永久静默冻结。
+ */
+const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000]
 
 /**
  * 科研 SSE 连接 hook。
@@ -150,6 +155,12 @@ export function useResearchStream(
           if (!resp.ok) {
             cbRef.current.onError?.(`HTTP ${resp.status}`)
             setIsStreaming(false)
+            // 4xx（turn 不存在 / 无权限等）是永久性错误：标记终止不再重连，
+            // 否则封顶无限重连会每 30s 死循环打后端。5xx 视为瞬时故障照常重连。
+            if (resp.status >= 400 && resp.status < 500) {
+              terminatedRef.current = true
+              return
+            }
             scheduleReconnect()
             return
           }
@@ -210,14 +221,15 @@ export function useResearchStream(
       })()
     }
 
-    // 意外断开时按退避重连；达到上限后放弃（由外层兜底轮询接管）。
-    // 已收到终止信号（done/error/timeout）则不再重连，避免对已终态 turn 反复短路。
+    // 意外断开时按退避重连；封顶后维持最大间隔持续重连（不放弃），
+    // 靠后端对终态 turn 的 done 短路自愈。已收到终止信号（done/error/timeout）
+    // 则不再重连，避免对已终态 turn 反复短路。
     const scheduleReconnect = () => {
       if (cancelled || terminatedRef.current) return
       const attempt = attemptRef.current
-      if (attempt >= RECONNECT_DELAYS.length) return
+      const delay =
+        RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)]
       attemptRef.current = attempt + 1
-      const delay = RECONNECT_DELAYS[attempt]
       clearTimers()
       retryTimerRef.current = setTimeout(connect, delay)
     }

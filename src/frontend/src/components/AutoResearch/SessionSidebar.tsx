@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
   DownloadCloud,
@@ -65,6 +66,10 @@ interface Props {
   folders: ResearchFolderItem[]
   /** 文件夹列表加载中（仅影响首屏骨架）。会话分页各分组内部自管。 */
   loading: boolean
+  /** 文件夹列表加载失败：首屏展示错误态 + 重试，避免请求失败时静默空白。 */
+  foldersError?: boolean
+  /** 重新拉取文件夹列表（错误态重试按钮触发）。 */
+  onRetryFolders?: () => void
   /** 未分组会话总数（来自 folders 响应的 ungrouped_session_count）。 */
   ungroupedCount: number
   /** 激活会话所属文件夹 id：该文件夹默认展开（刷新后自动加载它的第一页）。 */
@@ -109,6 +114,8 @@ const STATUS_FILTERS: ResearchSessionStatus[] = [
 export default function SessionSidebar({
   folders,
   loading,
+  foldersError,
+  onRetryFolders,
   ungroupedCount,
   activeFolderId,
   debouncedSearch,
@@ -143,6 +150,10 @@ export default function SessionSidebar({
   const [renameSessionTitle, setRenameSessionTitle] = useState("")
   const [deleteSession, setDeleteSession] =
     useState<ResearchSessionItem | null>(null)
+  // 异步操作提交中标记：给对话框主按钮上 loading/disabled，避免慢网络下重复提交
+  // （重复建文件夹/重复删除），并给出「正在进行」的可见反馈。
+  const [folderBusy, setFolderBusy] = useState(false)
+  const [sessionBusy, setSessionBusy] = useState(false)
   // 切换实验类型：待确认的会话 + 目标 profile（null=对话框关闭）+ 产物打包下载中标记 + 切换提交中标记。
   const [switchTarget, setSwitchTarget] = useState<{
     session: ResearchSessionItem
@@ -211,37 +222,46 @@ export default function SessionSidebar({
 
   const handleCreateFolder = async () => {
     const name = newFolderName.trim()
-    if (!name) return
+    if (!name || folderBusy) return
+    setFolderBusy(true)
     try {
       await onCreateFolder(name)
       setNewFolderName("")
       setCreateFolderOpen(false)
     } catch (_) {
       // 由父层通过 mutation.onError 报错；这里保持对话框打开
+    } finally {
+      setFolderBusy(false)
     }
   }
 
   const handleRenameFolder = async () => {
-    if (!renameFolder) return
+    if (!renameFolder || folderBusy) return
     const name = renameFolderName.trim()
     if (!name) return
+    setFolderBusy(true)
     try {
       await onRenameFolder(renameFolder.id, name)
       setRenameFolder(null)
     } catch (_) {
       /* keep dialog */
+    } finally {
+      setFolderBusy(false)
     }
   }
 
   const handleRenameSession = async () => {
-    if (!renameSession) return
+    if (!renameSession || sessionBusy) return
     const title = renameSessionTitle.trim()
     if (!title) return
+    setSessionBusy(true)
     try {
       await onRenameSession(renameSession.id, title)
       setRenameSession(null)
     } catch (_) {
       /* keep dialog */
+    } finally {
+      setSessionBusy(false)
     }
   }
 
@@ -315,10 +335,10 @@ export default function SessionSidebar({
               type="button"
               onClick={() => onToggleStatus(s)}
               className={cn(
-                "shrink-0 rounded-full border px-1.5 py-0.5 text-xs leading-none transition-all duration-200",
+                "shrink-0 rounded-full border px-1.5 py-0.5 text-xs leading-none transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
                 on
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "border-border/60 text-muted-foreground hover:border-primary/40",
+                  ? "border-primary bg-primary/20 text-primary font-semibold shadow-sm shadow-primary/20"
+                  : "border-border/60 text-muted-foreground hover:border-primary/40 hover:text-foreground",
               )}
             >
               {t(`autoResearch.status.${s}`)}
@@ -344,8 +364,28 @@ export default function SessionSidebar({
           </div>
         )}
 
+        {/* 文件夹列表加载失败：错误态 + 重试，避免请求失败时静默空白 */}
+        {!loading && foldersError && (
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <AlertTriangle className="size-5 text-destructive/70" />
+            <p className="text-[11px] text-muted-foreground/70">
+              {t("autoResearch.sidebar.loadError")}
+            </p>
+            {onRetryFolders && (
+              <button
+                type="button"
+                onClick={onRetryFolders}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-border/60 text-[11px] text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors"
+              >
+                <Repeat className="size-3" />
+                {t("common.retry")}
+              </button>
+            )}
+          </div>
+        )}
+
         {/* 检索 / 筛选态：扁平跨文件夹分页，不按分组分桶 */}
-        {!loading && hasFilter && (
+        {!loading && !foldersError && hasFilter && (
           <SearchResults
             sessions={searchSessions}
             query={searchQ}
@@ -369,6 +409,7 @@ export default function SessionSidebar({
         )}
 
         {!loading &&
+          !foldersError &&
           !hasFilter &&
           ungroupedCount === 0 &&
           folders.length === 0 && (
@@ -383,7 +424,7 @@ export default function SessionSidebar({
           )}
 
         {/* Ungrouped：有未分组会话时才渲染，内部按需分页 */}
-        {!hasFilter && ungroupedCount > 0 && (
+        {!foldersError && !hasFilter && ungroupedCount > 0 && (
           <FolderSessionGroup
             folderId={null}
             label={t("autoResearch.sidebar.ungrouped")}
@@ -426,7 +467,8 @@ export default function SessionSidebar({
         )}
 
         {/* Folders */}
-        {!hasFilter &&
+        {!foldersError &&
+          !hasFilter &&
           folders.map((folder) => (
             <FolderSessionGroup
               key={folder.id}
@@ -463,6 +505,8 @@ export default function SessionSidebar({
                       variant="ghost"
                       size="icon-sm"
                       className="size-6 text-muted-foreground hover:text-primary"
+                      title={t("autoResearch.sidebar.folderOptions")}
+                      aria-label={t("autoResearch.sidebar.folderOptions")}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreHorizontal className="size-3" />
@@ -517,6 +561,7 @@ export default function SessionSidebar({
           <DialogFooter>
             <Button
               variant="outline"
+              disabled={folderBusy}
               onClick={() => {
                 setNewFolderName("")
                 setCreateFolderOpen(false)
@@ -526,8 +571,9 @@ export default function SessionSidebar({
             </Button>
             <Button
               onClick={() => void handleCreateFolder()}
-              disabled={!newFolderName.trim()}
+              disabled={!newFolderName.trim() || folderBusy}
             >
+              {folderBusy && <Loader2 className="size-4 animate-spin" />}
               {t("autoResearch.sidebar.createFolder")}
             </Button>
           </DialogFooter>
@@ -554,13 +600,18 @@ export default function SessionSidebar({
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameFolder(null)}>
+            <Button
+              variant="outline"
+              disabled={folderBusy}
+              onClick={() => setRenameFolder(null)}
+            >
               {t("common.cancel")}
             </Button>
             <Button
               onClick={() => void handleRenameFolder()}
-              disabled={!renameFolderName.trim()}
+              disabled={!renameFolderName.trim() || folderBusy}
             >
+              {folderBusy && <Loader2 className="size-4 animate-spin" />}
               {t("common.save")}
             </Button>
           </DialogFooter>
@@ -585,14 +636,26 @@ export default function SessionSidebar({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={folderBusy}>
+              {t("common.cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async () => {
-                if (deleteFolder) await onDeleteFolder(deleteFolder.id)
-                setDeleteFolder(null)
+              disabled={folderBusy}
+              onClick={async (e) => {
+                // 阻止 AlertDialog 默认的「点击即关闭」，删除完成前保持打开并显示 loading。
+                e.preventDefault()
+                if (!deleteFolder || folderBusy) return
+                setFolderBusy(true)
+                try {
+                  await onDeleteFolder(deleteFolder.id)
+                  setDeleteFolder(null)
+                } finally {
+                  setFolderBusy(false)
+                }
               }}
             >
+              {folderBusy && <Loader2 className="size-4 animate-spin" />}
               {t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -609,23 +672,45 @@ export default function SessionSidebar({
             <DialogTitle>{t("autoResearch.sidebar.renameSession")}</DialogTitle>
           </DialogHeader>
           <div className="py-3">
-            <Input
-              value={renameSessionTitle}
-              onChange={(e) => setRenameSessionTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void handleRenameSession()
-              }}
-              autoFocus
-            />
+            <div className="relative">
+              <Input
+                value={renameSessionTitle}
+                onChange={(e) => setRenameSessionTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleRenameSession()
+                }}
+                maxLength={255}
+                autoFocus
+              />
+              {/* 字数统计 */}
+              {renameSessionTitle.length > 0 && (
+                <div
+                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
+                    renameSessionTitle.length > 255
+                      ? "bg-destructive/90 text-destructive-foreground"
+                      : renameSessionTitle.length > 229
+                        ? "bg-amber-500/90 text-white"
+                        : "bg-muted/80 text-muted-foreground"
+                  }`}
+                >
+                  {renameSessionTitle.length} / 255
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameSession(null)}>
+            <Button
+              variant="outline"
+              disabled={sessionBusy}
+              onClick={() => setRenameSession(null)}
+            >
               {t("common.cancel")}
             </Button>
             <Button
               onClick={() => void handleRenameSession()}
-              disabled={!renameSessionTitle.trim()}
+              disabled={!renameSessionTitle.trim() || sessionBusy}
             >
+              {sessionBusy && <Loader2 className="size-4 animate-spin" />}
               {t("common.save")}
             </Button>
           </DialogFooter>
@@ -649,14 +734,25 @@ export default function SessionSidebar({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel disabled={sessionBusy}>
+              {t("common.cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async () => {
-                if (deleteSession) await onDeleteSession(deleteSession.id)
-                setDeleteSession(null)
+              disabled={sessionBusy}
+              onClick={async (e) => {
+                e.preventDefault()
+                if (!deleteSession || sessionBusy) return
+                setSessionBusy(true)
+                try {
+                  await onDeleteSession(deleteSession.id)
+                  setDeleteSession(null)
+                } finally {
+                  setSessionBusy(false)
+                }
               }}
             >
+              {sessionBusy && <Loader2 className="size-4 animate-spin" />}
               {t("common.delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -858,7 +954,7 @@ function FolderSessionGroup({
           <SectionLabel className="truncate flex-1 text-left">
             {label}
           </SectionLabel>
-          <span className="text-[10px] text-muted-foreground/50 shrink-0">
+          <span className="ml-1 shrink-0 rounded-full bg-muted/50 px-1.5 py-px text-[10px] tabular-nums text-muted-foreground/70">
             {totalCount}
           </span>
         </button>
@@ -971,6 +1067,23 @@ function SearchResults({
       <div className="flex items-center justify-center gap-1.5 py-8 text-[11px] text-muted-foreground/60">
         <Loader2 className="size-4 animate-spin" />
         {t("autoResearch.sidebar.loading")}
+      </div>
+    )
+  }
+
+  if (query.isError) {
+    return (
+      <div className="flex flex-col items-center gap-2 px-4 py-8 text-center text-[11px] text-muted-foreground/70">
+        <AlertTriangle className="size-5 text-destructive/70" />
+        {t("autoResearch.sidebar.loadError")}
+        <button
+          type="button"
+          onClick={() => void query.refetch()}
+          className="inline-flex items-center gap-1 text-primary hover:underline"
+        >
+          <Repeat className="size-3" />
+          {t("common.retry")}
+        </button>
       </div>
     )
   }
@@ -1121,6 +1234,8 @@ function SessionRow({
             variant="ghost"
             size="icon-sm"
             className="size-6 opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-primary"
+            title={t("autoResearch.sidebar.sessionOptions")}
+            aria-label={t("autoResearch.sidebar.sessionOptions")}
             onClick={(e) => e.stopPropagation()}
           >
             <MoreHorizontal className="size-3.5" />
@@ -1130,23 +1245,6 @@ function SessionRow({
           <DropdownMenuItem onSelect={() => onRename(session)}>
             {t("autoResearch.sidebar.renameSession")}
           </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <Repeat className="size-3.5 mr-2" />
-              {t("autoResearch.sidebar.switchProfile")}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-44">
-              {PROFILE_OPTIONS.map((p) => (
-                <DropdownMenuItem
-                  key={p}
-                  disabled={p === session.profile}
-                  onSelect={() => onSwitchProfile(session, p)}
-                >
-                  {t(`autoResearch.profile.${p}`)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               {t("autoResearch.sidebar.moveTo")}
@@ -1166,6 +1264,23 @@ function SessionRow({
                   onSelect={() => onMove(session.id, folder.id)}
                 >
                   {folder.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Repeat className="size-3.5 mr-2" />
+              {t("autoResearch.sidebar.switchProfile")}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-44">
+              {PROFILE_OPTIONS.map((p) => (
+                <DropdownMenuItem
+                  key={p}
+                  disabled={p === session.profile}
+                  onSelect={() => onSwitchProfile(session, p)}
+                >
+                  {t(`autoResearch.profile.${p}`)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuSubContent>

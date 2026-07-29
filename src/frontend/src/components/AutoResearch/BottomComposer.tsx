@@ -198,7 +198,7 @@ export default function BottomComposer({
   // running：整条只留停止。
   if (running) {
     return (
-      <div className="border-t border-border/40 bg-primary/[0.04] backdrop-blur px-4 py-3 flex items-center gap-3">
+      <div className="border-t border-border/40 bg-primary/4 backdrop-blur px-4 py-3 flex items-center gap-3">
         <span className="flex items-center gap-2 text-xs text-muted-foreground flex-1 min-w-0">
           <Loader2 className="size-3.5 animate-spin shrink-0 text-primary" />
           <span className="truncate">
@@ -439,14 +439,14 @@ export default function BottomComposer({
                     )}
                   >
                     <Cpu className="size-3 shrink-0" />
-                    <span className="max-w-[160px] truncate">
+                    <span className="max-w-40 truncate">
                       {providerLabel}
                     </span>
                     <ChevronDown className="size-3 shrink-0 opacity-60" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent
-                  className="w-[420px] p-3"
+                  className="w-105 p-3"
                   align="start"
                   side="top"
                   sideOffset={8}

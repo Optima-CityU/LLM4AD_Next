@@ -50,6 +50,9 @@ export const STAGE_GROUPS: StageGroup[] = [
 /** GATE 阶段（HITL 强制暂停点）：文献筛选 / 实验设计 / 质量门。 */
 export const GATE_STAGES = new Set([5, 9, 20])
 
+/** 质量门阶段号（收尾阶段起点，也是 degraded 决策的落点）。 */
+export const QUALITY_GATE_STAGE = 20
+
 export const TOTAL_STAGES = 23
 
 /**
@@ -320,6 +323,9 @@ export function StatusPill({
   className?: string
 }) {
   const { t } = useTranslation()
+  // running/paused 是「活着」的态，胶囊内嵌一颗脉冲点，让状态徽章有实时呼吸感
+  // （对齐 iOS 那种「进行中一定有动态反馈」的细节）；其余静态态不加，避免噪声。
+  const pulse = status === "running" || status === "paused"
   return (
     <span
       className={cn(
@@ -328,6 +334,12 @@ export function StatusPill({
         className,
       )}
     >
+      {pulse && (
+        <span className="relative inline-flex size-1.5">
+          <span className="absolute inset-0 rounded-full bg-current opacity-60 animate-ping" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-current" />
+        </span>
+      )}
       {t(`autoResearch.status.${status}`, status)}
     </span>
   )

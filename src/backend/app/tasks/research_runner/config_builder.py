@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -36,20 +35,17 @@ _SANDBOX_PROFILES = {"ml_vision"}
 
 
 def _detect_sandbox_python_path() -> str:
-    """探测 sandbox 用的 venv python 相对路径（容器内可用）。
+    """返回 sandbox 用的 venv python 相对路径（容器内可用）。
 
-    「两者结合」策略：优先看宿主 ``sys.executable`` 的结构判定平台（Windows 的
-    ``Scripts`` 布局 vs POSIX 的 ``bin`` 布局），但始终返回**相对容器工作目录**的
-    相对路径——pipeline 实际跑在隔离容器里，宿主绝对路径在容器 Linux 下无效。
+    pipeline / sandbox 实际**永远**跑在 Linux 容器里，故固定返回 POSIX 布局的
+    ``.venv/bin/python3``。曾据宿主 ``sys.executable`` 猜平台，但那会让 Windows
+    宿主注入 ``.venv/Scripts/python.exe``——Linux 容器里根本没有该解释器，sandbox
+    直接找不到 python 而失败。返回相对容器工作目录的相对路径（宿主绝对路径在容器
+    Linux 下无效）。
 
     Returns:
-        容器内相对路径，Windows 布局为 ``.venv/Scripts/python.exe``，
-        否则 ``.venv/bin/python3``。
+        容器内相对路径 ``.venv/bin/python3``。
     """
-    exe = Path(sys.executable)
-    parts = {p.lower() for p in exe.parts}
-    if "scripts" in parts or exe.name.lower().endswith(".exe"):
-        return ".venv/Scripts/python.exe"
     return ".venv/bin/python3"
 
 
@@ -307,6 +303,7 @@ def build_arc_config(
                 "build_model": provider_config["primary_model"],
             },
             "figure_agent": {"use_docker": False},
+            "opencode": {"enabled": False},
         },
         "prompts": {},
     }

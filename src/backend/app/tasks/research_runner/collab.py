@@ -370,12 +370,25 @@ def run_collab_turn(self, data: dict) -> dict:
         # agent 用 run_pipeline 表达了推进流水线的意图 → 宿主据 target 推进
         # （门控中经 _reply_to_gate，非门控经 start_pipeline_turn）。agent 只提供
         # target + message，鉴权/建轮全在服务层。
+        #
+        # 此时 collab turn 已 COMPLETED、outcome="done" 落定。dispatch 是叠加副作用，
+        # 其失败不应把本已成功的协作轮翻成 failed（否则 DB=COMPLETED 而返回=failed
+        # 自相矛盾）。故单独 try 兜住，dispatch 失败只记日志并 emit 一条 warning。
         pipeline_target = marker.get("pipeline_target")
         if pipeline_target:
-            _dispatch_pipeline_intent(
-                session_id, gate_msg_id, str(pipeline_target),
-                str(marker.get("pipeline_message") or ""), sink,
-            )
+            try:
+                _dispatch_pipeline_intent(
+                    session_id, gate_msg_id, str(pipeline_target),
+                    str(marker.get("pipeline_message") or ""), sink,
+                )
+            except Exception as exc:
+                logger.opt(exception=True).error(
+                    f"dispatch pipeline intent failed turn={turn_id}: {exc}"
+                )
+                sink.emit({
+                    "type": "log", "level": "WARNING", "source": "bridge",
+                    "message": f"collaboration succeeded but pipeline dispatch failed: {exc}",
+                })
         return {"outcome": outcome}
 
     except Exception as exc:
@@ -394,6 +407,16 @@ def run_collab_turn(self, data: dict) -> dict:
         except Exception:
             logger.debug("collab done emit failed", exc_info=True)
         sink.close()
+        # 吊销本轮发放的 LLM 代理 token（按 task_id=turn_id 归集）。幂等，与
+        # pipeline turn / evolution 对齐；LLM_PROXY 关闭时为 no-op。
+        try:
+            from app.services.credential_broker import revoke_task_tokens
+
+            revoke_task_tokens(str(turn_id))
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"revoke collab proxy tokens failed turn={turn_id}"
+            )
 
 
 def _persist_collab_reply(
