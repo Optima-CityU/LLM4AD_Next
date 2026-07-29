@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils"
 
 import BottomComposer, { type RunOverrides } from "./BottomComposer"
 import MessageItem from "./MessageItem"
+import { ML_VISION_PROFILE } from "./shared"
 import { StageProgressBar } from "./StageProgress"
 import type { StreamLogEntry } from "./StreamLogConsole"
 import TurnLogPanel from "./TurnLogPanel"
@@ -755,6 +756,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         canRunFromStage={terminal && !busy}
         runnableStages={runnableStages}
         onRunFromStage={handleRunFromStage}
+        hideLlm4ad={session.profile === ML_VISION_PROFILE}
       />
 
       {/* Messages：relative 容器包裹滚动区，滚动按钮悬浮其上（不随内容滚动） */}

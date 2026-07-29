@@ -265,7 +265,7 @@ def list_session_messages(
 @router.patch(
     "/sessions/{session_id}",
     response_model=ResearchSessionItem,
-    summary="改会话（改名 / 移分组 / 改默认 mode/provider/model）",
+    summary="改会话（改名 / 移分组 / 改默认 mode/provider/model / 改 profile）",
 )
 def update_session(
     session_id: uuid.UUID,

@@ -181,6 +181,11 @@ class ResearchSessionUpdateRequest(BaseModel):
 
     title: str | None = Field(default=None, max_length=255)
     topic: str | None = Field(default=None, max_length=2000, description="研究主题/问题")
+    profile: str | None = Field(
+        default=None,
+        max_length=64,
+        description="ARC domain profile id（如 ml_vision）；未提供不变",
+    )
     folder_id: uuid.UUID | None = Field(
         default=None,
         description="传 None 且请求体显式包含该键时移到未分组；未提供不变",

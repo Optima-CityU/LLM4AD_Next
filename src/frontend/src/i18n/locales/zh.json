@@ -2631,6 +2631,10 @@
       "deleteSession": "删除会话",
       "deleteSessionConfirm": "删除会话「{{title}}」？其落盘产物也会一并删除。",
       "renameSession": "重命名",
+      "switchProfile": "切换模式",
+      "switchProfileTitle": "切换实验类型",
+      "switchProfileConfirm": "切换到「{{target}}」后，将清空当前会话第 9 步之后的所有产物，且不可恢复。请先下载并妥善保存需要的产物再继续。",
+      "switchProfileDownloadHint": "建议先打包下载全部产物，避免切换后丢失。",
       "loading": "加载中",
       "folderExists": "同名分组已存在",
       "sessionRunning": "会话正在运行，请先停止"
@@ -2661,6 +2665,10 @@
       "express": "关键三点",
       "thorough": "深度审阅",
       "learning": "教学模式"
+    },
+    "profile": {
+      "algorithm_evolution": "llm4ad实验",
+      "ml_vision": "autoresearch实验"
     },
     "provider": {
       "inherit": "跟随会话默认",
@@ -2804,6 +2812,14 @@
         "21": "将本轮研究的经验教训、可复现性说明与后续方向归档保存。",
         "22": "执行数据真实性消毒，生成会议格式 LaTeX 论文、BibTeX 参考文献与可复现代码包。",
         "23": "通过多源 API 核验每条引用的真实性，标注幻觉引用并计算文献完整性分数。"
+      },
+      "descriptionsMlVision": {
+        "9": "设计实验方案（基线 / 消融 / 指标 / 实验协议），产出实验计划；Gate 在此审核实验设计质量，不合格则回退。[Gate]",
+        "10": "由 LLM 生成多文件 Python 实验代码，执行静态检查并自动修复。",
+        "11": "由 LLM 估算实验所需的 GPU 与时间资源，生成调度计划。",
+        "12": "在沙箱 / Docker / 远程环境中运行实验代码，采集指标与结果。",
+        "13": "多轮「改代码 → 重跑 → 比指标」迭代精化实验代码，保存最佳版本。",
+        "15": "判断实验结果是否满足要求：proceed（写论文）/ refine（重跑实验）/ pivot（重写假设，最多 2 次）。"
       }
     },
     "stageGroups": {
@@ -2838,6 +2854,7 @@
       "modelLabel": "模型",
       "modelPlaceholder": "留空使用供应商默认模型",
       "modeLabel": "运行模式",
+      "profileLabel": "实验类型",
       "workspaceLabel": "LLM4AD workspace（可选）",
       "subtitle": "填写研究主题、选择运行模式即可创建会话。",
       "workspaceTaskRef": "引用调参任务",

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,28 @@ from .snapshots import SessionSnapshot, TurnSnapshot
 # ARC 要求 llm.api_key_env 非空，但密钥实际走 config.llm.api_key inline 字段
 # （调用方另填）；从不真设这个 env（worker concurrency>1 会串号泄漏）——纯占位符。
 ARC_API_KEY_ENV = "RESEARCH_ARC_API_KEY"
+
+# profile → experiment.mode=sandbox 的域集合。这些域的实验在容器内以 sandbox
+# 直跑（而非 llm4ad_agent 演化），需额外注入顶层 sandbox 配置块。
+_SANDBOX_PROFILES = {"ml_vision"}
+
+
+def _detect_sandbox_python_path() -> str:
+    """探测 sandbox 用的 venv python 相对路径（容器内可用）。
+
+    「两者结合」策略：优先看宿主 ``sys.executable`` 的结构判定平台（Windows 的
+    ``Scripts`` 布局 vs POSIX 的 ``bin`` 布局），但始终返回**相对容器工作目录**的
+    相对路径——pipeline 实际跑在隔离容器里，宿主绝对路径在容器 Linux 下无效。
+
+    Returns:
+        容器内相对路径，Windows 布局为 ``.venv/Scripts/python.exe``，
+        否则 ``.venv/bin/python3``。
+    """
+    exe = Path(sys.executable)
+    parts = {p.lower() for p in exe.parts}
+    if "scripts" in parts or exe.name.lower().endswith(".exe"):
+        return ".venv/Scripts/python.exe"
+    return ".venv/bin/python3"
 
 
 # ---- Stage guidance 写（inject_stage_guidance 端点用）----
@@ -222,7 +245,7 @@ def build_arc_config(
     """
     project_mode = _to_arc_project_mode(turn.mode or session.mode)
 
-    return {
+    config: dict[str, Any] = {
         "project": {
             "name": (session.title or "research")[:200],
             "mode": project_mode,
@@ -287,3 +310,15 @@ def build_arc_config(
         },
         "prompts": {},
     }
+
+    # ml_vision 等域走 sandbox 直跑：改 experiment.mode 并注入顶层 sandbox 块。
+    # python_path 自动探测（相对容器工作目录），其余按需求固定。
+    if session.profile in _SANDBOX_PROFILES:
+        config["experiment"]["mode"] = "sandbox"
+        config["sandbox"] = {
+            "python_path": _detect_sandbox_python_path(),
+            "gpu_required": False,
+            "max_memory_mb": 4096,
+        }
+
+    return config

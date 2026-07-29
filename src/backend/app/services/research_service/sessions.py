@@ -40,6 +40,11 @@ from app.schemas.research import (
 from app.tasks.research_runner import cleanup_run_dir, stage_display_name
 
 from ._common import _get_folder, _get_session, _parse_cursor
+from .profile_switch import (
+    is_cross_type_switch,
+    purge_stage_artifacts,
+    purge_stage_data,
+)
 
 # 会话 title 兜底策略：优先用户传的 title；否则从 topic 截取，超长加省略号。
 _TITLE_MAX = 60
@@ -109,6 +114,25 @@ def update_session(
     if request.topic is not None:
         # topic 也支持更新：strip 后保留，允许空字符串（清空 topic）
         session.topic = request.topic.strip()
+    if request.profile is not None and request.profile.strip():
+        # profile 不校验合法值（交由容器内 ARC 判定）；strip 后为空则不覆盖
+        new_profile = request.profile.strip()
+        if new_profile != session.profile and is_cross_type_switch(
+            session.profile, new_profile
+        ):
+            # sandbox ↔ 非 sandbox 跨类切换：第 9 步后的产物按旧类型生成，与新
+            # 类型不兼容，须清空。运行中不允许切换（与 delete_session 同款守卫）。
+            if session.status in (
+                ResearchSessionStatus.RUNNING.value,
+                ResearchSessionStatus.PAUSED.value,
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="session is running; stop it before switching profile type",
+                )
+            purge_stage_artifacts(session.run_dir)
+            purge_stage_data(db, session.id)
+        session.profile = new_profile
     if "folder_id" in provided:
         if request.folder_id is not None:
             _get_folder(db, request.folder_id, user)

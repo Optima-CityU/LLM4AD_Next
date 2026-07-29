@@ -2761,6 +2761,10 @@
       "deleteSession": "Delete session",
       "deleteSessionConfirm": "Delete session “{{title}}”? Its on-disk artifacts will be removed too.",
       "renameSession": "Rename session",
+      "switchProfile": "Switch mode",
+      "switchProfileTitle": "Switch experiment type",
+      "switchProfileConfirm": "Switching to \"{{target}}\" will clear all artifacts after step 9 of this session, and this cannot be undone. Please download and save any artifacts you need before continuing.",
+      "switchProfileDownloadHint": "We recommend downloading all artifacts first to avoid losing them after switching.",
       "loading": "Loading...",
       "folderExists": "A folder with the same name already exists",
       "sessionRunning": "Session is running; stop it first"
@@ -2791,6 +2795,10 @@
       "express": "Express",
       "thorough": "Thorough",
       "learning": "Learning"
+    },
+    "profile": {
+      "algorithm_evolution": "llm4ad experiment",
+      "ml_vision": "autoresearch experiment"
     },
     "provider": {
       "inherit": "Session default",
@@ -2934,6 +2942,14 @@
         "21": "Archive lessons learned, reproducibility notes, and future directions from this research cycle.",
         "22": "Perform data authenticity sanitization, generate conference-format LaTeX paper, BibTeX references, and reproducible code package.",
         "23": "Verify each citation's authenticity through multi-source APIs, flag hallucinated citations and calculate bibliography integrity score."
+      },
+      "descriptionsMlVision": {
+        "9": "Design experiment plan (baselines/ablations/metrics/protocol), producing the experiment plan; Gate reviews design quality here and rolls back if unqualified. [Gate]",
+        "10": "LLM generates multi-file Python experiment code with static checks and auto-fix.",
+        "11": "LLM estimates the required GPU and time resources, generating a scheduling plan.",
+        "12": "Run experiment code in a sandbox/Docker/remote environment, collecting metrics and results.",
+        "13": "Iteratively refine experiment code through \"modify code → re-run → compare metrics\" loops, saving the best version.",
+        "15": "Judge if experiment results meet requirements: proceed (write paper) / refine (re-run experiment) / pivot (rewrite hypothesis, max 2 times)."
       }
     },
     "stageGroups": {
@@ -2968,6 +2984,7 @@
       "modelLabel": "Model",
       "modelPlaceholder": "Leave empty to use provider default",
       "modeLabel": "Mode",
+      "profileLabel": "Experiment type",
       "workspaceLabel": "LLM4AD workspace (optional)",
       "subtitle": "Enter a research topic and pick a run mode to create the session.",
       "workspaceTaskRef": "Task ref",

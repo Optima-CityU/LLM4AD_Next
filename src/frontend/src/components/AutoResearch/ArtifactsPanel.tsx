@@ -21,6 +21,8 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { ResearchArtifactTreeNode, ResearchSessionItem } from "@/client"
+import { UtilsCodeServerService } from "@/client"
+import { useTheme } from "@/components/theme-provider"
 import {
   Dialog,
   DialogClose,
@@ -43,8 +45,11 @@ import ArtifactPreviewDialog, {
 } from "./ArtifactPreviewDialog"
 import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
-import { PlaceholderTab } from "./PlaceholderTab"
+import { ML_VISION_PROFILE } from "./shared"
 import { SectionLabel, StatusPill } from "./tech"
+
+// 重启 IDE 冷却：与 evolution 的 InitializedView 保持一致，防止连点。
+const IDE_REFRESH_COOLDOWN_MS = 3000
 
 interface Props {
   session: ResearchSessionItem | null
@@ -83,11 +88,14 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
   })
   const treeQ = useResearchArtifactTree(session.id)
   const root = treeQ.data?.root ?? null
+  // ml_vision 画像不接 LLM4AD 演化引擎：隐藏「实验」区，也不再拉 generated 数据。
+  const hideExperiment = session.profile === ML_VISION_PROFILE
   // 与 ExperimentPanel 共享同一 query（按 key 去重，不产生额外请求），
   // 仅为把实验区刷新按钮提到区域标题行、保持与产物区一致。
   const genQ = useResearchGenerated(
     session.id,
     session.status === "running" || session.status === "paused",
+    !hideExperiment,
   )
   // 产物预览弹框：只保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
   const [previewPath, setPreviewPath] = useState<string | null>(null)
@@ -123,8 +131,52 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
   const activeStageName =
     state.data?.active_stage_name ?? session.active_stage_name
 
-  // 报告分析 / IDE 弹层（原顶部 tab 迁移至此，点击弹出占位页）。
+  // 报告分析 / IDE 弹层（点击弹出全屏；IDE 内嵌 code-server iframe）。
   const [tool, setTool] = useState<"report" | "ide" | null>(null)
+
+  // IDE：与 evolution 一致，先拿 code token 启动容器，再加载 iframe。
+  const { resolvedTheme } = useTheme()
+  const [ideState, setIdeState] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle")
+  const [ideError, setIdeError] = useState<string>("")
+  const [iframeKey, setIframeKey] = useState(0)
+  const [ideRefreshing, setIdeRefreshing] = useState(false)
+  const loadCodeToken = useCallback(() => {
+    setIdeState("loading")
+    return UtilsCodeServerService.getCodeToken({
+      dark: resolvedTheme === "dark",
+    })
+      .then(() => {
+        setIdeState("success")
+        setIframeKey((k) => k + 1)
+      })
+      .catch((err: unknown) => {
+        setIdeState("error")
+        const e = err as { body?: { detail?: string }; message?: string }
+        setIdeError(
+          e?.body?.detail ||
+            e?.message ||
+            t("evolution.getCodeTokenFailed"),
+        )
+      })
+  }, [resolvedTheme, t])
+
+  // 打开 IDE 弹层时（且尚未加载过）自动拉起 code token。
+  useEffect(() => {
+    if (tool === "ide" && ideState === "idle") {
+      void loadCodeToken()
+    }
+  }, [tool, ideState, loadCodeToken])
+
+  // 重启 IDE：重新拉 token 并重载 iframe，带冷却防连点（同 evolution）。
+  const handleRestartIde = useCallback(() => {
+    if (ideRefreshing) return
+    setIdeRefreshing(true)
+    void loadCodeToken().finally(() => {
+      setTimeout(() => setIdeRefreshing(false), IDE_REFRESH_COOLDOWN_MS)
+    })
+  }, [ideRefreshing, loadCodeToken])
 
   // 打包下载全部产物：进行中禁用按钮，失败 toast。
   const [zipping, setZipping] = useState(false)
@@ -213,37 +265,41 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         </div>
       </CollapsibleSection>
 
-      {/* llm4ad 实验：视图切换在左，全屏按钮在最右侧 */}
-      <CollapsibleSection
-        icon={FlaskConical}
-        title={t("autoResearch.experiment.title")}
-        right={
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={() => void genQ.refetch()}
-              disabled={genQ.isFetching}
-              title={t("autoResearch.artifacts.refresh")}
-              className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw
-                className={cn("size-3.5", genQ.isFetching && "animate-spin")}
+      {/* llm4ad 实验：视图切换在左，全屏按钮在最右侧（ml_vision 画像下隐藏） */}
+      {!hideExperiment && (
+        <CollapsibleSection
+          icon={FlaskConical}
+          title={t("autoResearch.experiment.title")}
+          right={
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => void genQ.refetch()}
+                disabled={genQ.isFetching}
+                title={t("autoResearch.artifacts.refresh")}
+                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={cn("size-3.5", genQ.isFetching && "animate-spin")}
+                />
+              </button>
+              <ExperimentFullscreenDialog
+                sessionId={session.id}
+                running={
+                  session.status === "running" || session.status === "paused"
+                }
               />
-            </button>
-            <ExperimentFullscreenDialog
-              sessionId={session.id}
-              running={
-                session.status === "running" || session.status === "paused"
-              }
-            />
-          </div>
-        }
-      >
-        <ExperimentPanel
-          sessionId={session.id}
-          running={session.status === "running" || session.status === "paused"}
-        />
-      </CollapsibleSection>
+            </div>
+          }
+        >
+          <ExperimentPanel
+            sessionId={session.id}
+            running={
+              session.status === "running" || session.status === "paused"
+            }
+          />
+        </CollapsibleSection>
+      )}
 
       {/* 2. 产物文件树（中间）：占剩余空间并内部滚动；「全部收起」放标题行右侧 */}
       <CollapsibleSection
@@ -322,8 +378,18 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
         onClose={() => setPreviewPath(null)}
       />
 
-      {/* 报告分析 / IDE 弹层（全屏，占位） */}
-      <Dialog open={tool !== null} onOpenChange={(o) => !o && setTool(null)}>
+      {/* 报告分析 / IDE 弹层（全屏） */}
+      <Dialog
+        open={tool !== null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setTool(null)
+            // 关闭后复位 IDE，下次打开重新拉 token。
+            setIdeState("idle")
+            setIdeError("")
+          }
+        }}
+      >
         <DialogContent
           showCloseButton={false}
           className="max-w-none w-screen h-screen sm:max-w-none translate-x-0 translate-y-0 top-0 left-0 rounded-none border-0 p-0 gap-0 grid-rows-[auto_minmax(0,1fr)] bg-background/95 backdrop-blur"
@@ -339,26 +405,75 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
                 ? t("autoResearch.mainTabs.ide")
                 : t("autoResearch.mainTabs.report")}
             </DialogTitle>
-            <DialogClose asChild>
-              <button
-                type="button"
-                aria-label={t("common.close")}
-                className="grid place-items-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-              >
-                <X className="size-4" />
-              </button>
-            </DialogClose>
+            <div className="flex items-center gap-1">
+              {/* 重启服务：仅 IDE 弹层显示，放在关闭按钮左侧（同 evolution 逻辑） */}
+              {tool === "ide" && (
+                <button
+                  type="button"
+                  aria-label={t("evolution.ideRefresh.label")}
+                  aria-disabled={ideRefreshing}
+                  onClick={handleRestartIde}
+                  title={t("evolution.ideRefresh.tooltip")}
+                  className={cn(
+                    "inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                    ideRefreshing && "cursor-not-allowed",
+                  )}
+                >
+                  <RefreshCw
+                    className={cn("size-3", ideRefreshing && "animate-spin")}
+                  />
+                </button>
+              )}
+              <DialogClose asChild>
+                <button
+                  type="button"
+                  aria-label={t("common.close")}
+                  className="grid place-items-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                >
+                  <X className="size-4" />
+                </button>
+              </DialogClose>
+            </div>
           </DialogHeader>
           <div className="min-h-0 overflow-hidden">
             {tool === "report" ? (
               <AnalysisReport sessionId={session.id} />
-            ) : (
-              tool && (
-                <div className="h-full overflow-y-auto grid place-items-center">
-                  <PlaceholderTab kind={tool} />
-                </div>
-              )
-            )}
+            ) : tool === "ide" ? (
+              <div className="h-full p-4">
+                {ideState === "loading" && (
+                  <div className="h-full flex items-center justify-center rounded-lg border border-dashed bg-card/50">
+                    <Loader2 className="mr-2 size-5 animate-spin" />
+                    <span className="text-muted-foreground">
+                      {t("evolution.startingIDE")}
+                    </span>
+                  </div>
+                )}
+                {ideState === "error" && (
+                  <div className="h-full flex flex-col items-center justify-center gap-3 rounded-lg border border-destructive bg-card/50">
+                    <p className="text-destructive">{ideError}</p>
+                    <button
+                      type="button"
+                      className="text-sm text-primary underline"
+                      onClick={() => setIdeState("idle")}
+                    >
+                      {t("common.retry")}
+                    </button>
+                  </div>
+                )}
+                {ideState === "success" && (
+                  <iframe
+                    key={iframeKey}
+                    id="autoresearchVscodeFrame"
+                    className="w-full h-full border rounded-lg"
+                    src={`${import.meta.env.VITE_CODE_SERVER_URL || "/code_ide"}/?folder=/data/project_home/research/${session.id}/`}
+                    title={t("evolution.vsCodeTitle")}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals allow-downloads allow-presentation"
+                    loading="lazy"
+                  />
+                )}
+              </div>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

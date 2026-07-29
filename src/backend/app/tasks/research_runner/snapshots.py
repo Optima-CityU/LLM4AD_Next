@@ -75,13 +75,17 @@ def resolve_run_dir(session: SessionSnapshot) -> Path:
     """决定 ARC run_dir 落地路径。
 
     优先级：``session.run_dir`` 已有 > 环境变量 ``RESEARCH_DATA_ROOT`` >
-    默认 ``{DOCKER_PROJECT_HOME}/research``。
+    默认 ``{DOCKER_PROJECT_HOME}``。
 
-    布局 ``research/{user_id}/{session_id}/``：
+    布局 ``code_user-{user_id}/research/{session_id}/``：
 
-    - 单独的 ``research/`` 子树，与 code-server 的 ``code_user-*``、任务的
-      ``code_user-*/{task_id}`` 等隔开，避免顶层目录混杂；
-    - 其下按 ``user_id`` 分层做物理隔离，配合 API 层 ``user_id`` 过滤堵住跨用户访问；
+    - 落在该用户的 code-server 工作空间根 ``code_user-{user_id}/`` 之下。code-server
+      容器正是把宿主的 ``{HOST_PROJECT_HOME}/code_user-{user_id}/`` 挂到容器内
+      ``/data/project_home/``（见 :func:`services.code_server_service.get_or_start_container`），
+      故产物写进这里后用户能在 code-server 里直接以 ``research/{session_id}/`` 浏览、
+      编辑；旧布局 ``research/{user_id}/`` 落在该挂载点之外，code-server 挂不到、看不见；
+    - 与任务产物 ``code_user-{user_id}/{task_id}`` 同处一个用户空间，物理隔离由
+      ``code_user-{user_id}`` 这层保证，配合 API 层 ``user_id`` 过滤堵住跨用户访问；
     - 容器部署时 ``DOCKER_PROJECT_HOME`` 是挂载卷（重启不丢）。
 
     注：文献检索缓存 ``.researchclaw_cache/`` 由 researchclaw 按**运行时 CWD** 落盘；
@@ -93,4 +97,4 @@ def resolve_run_dir(session: SessionSnapshot) -> Path:
     if session.run_dir:
         return Path(session.run_dir)
     root = os.environ.get("RESEARCH_DATA_ROOT") or settings.DOCKER_PROJECT_HOME
-    return Path(root) / "research" / str(session.user_id) / str(session.id)
+    return Path(root) / f"code_user-{session.user_id}" / "research" / str(session.id)

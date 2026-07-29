@@ -172,6 +172,20 @@ function AutoResearchPage() {
     }
   }
 
+  const handleSwitchProfile = async (id: string, profile: string) => {
+    try {
+      await updateSessionMut.mutateAsync({
+        sessionId: id,
+        body: { profile },
+      })
+    } catch (err: unknown) {
+      const detail =
+        (err as { body?: { detail?: string } })?.body?.detail ?? "error"
+      toast.error(detail)
+      throw err
+    }
+  }
+
   const handleDeleteSession = async (id: string) => {
     try {
       await deleteSessionMut.mutateAsync(id)
@@ -309,6 +323,7 @@ function AutoResearchPage() {
               onRenameSession={handleRenameSession}
               onMoveSession={handleMoveSession}
               onDeleteSession={handleDeleteSession}
+              onSwitchProfile={handleSwitchProfile}
             />
           </TechPanel>
         </div>

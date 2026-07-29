@@ -637,14 +637,18 @@ export function useResearchArtifactTree(sessionId: string | null) {
  * 一次拿全 ``generated*.json`` 解（后端已剥离大字段），供实验面板画演化仿真 /
  * 趋势图。running/paused 时可传 ``poll`` 兜底轮询新解。
  */
-export function useResearchGenerated(sessionId: string | null, poll = false) {
+export function useResearchGenerated(
+  sessionId: string | null,
+  poll = false,
+  enabled = true,
+) {
   return useQuery({
     queryKey: sessionId ? researchKeys.generated(sessionId) : researchKeys.all,
     queryFn: () =>
       Llm4AdResearchService.listGenerated({
         sessionId: sessionId as string,
       }),
-    enabled: !!sessionId,
+    enabled: !!sessionId && enabled,
     staleTime: 15_000,
     refetchInterval: poll ? 15_000 : false,
   })
