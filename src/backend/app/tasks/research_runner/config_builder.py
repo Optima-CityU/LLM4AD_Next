@@ -46,7 +46,7 @@ def _detect_sandbox_python_path() -> str:
     Returns:
         容器内相对路径 ``.venv/bin/python3``。
     """
-    return ".venv/bin/python3"
+    return "/app/backend/.venv/bin/python3"
 
 
 # ---- Stage guidance 写（inject_stage_guidance 端点用）----
@@ -312,7 +312,7 @@ def build_arc_config(
     # python_path 自动探测（相对容器工作目录），其余按需求固定。
     if session.profile in _SANDBOX_PROFILES:
         config["experiment"]["mode"] = "sandbox"
-        config["sandbox"] = {
+        config["experiment"]["sandbox"] = {
             "python_path": _detect_sandbox_python_path(),
             "gpu_required": False,
             "max_memory_mb": 4096,
