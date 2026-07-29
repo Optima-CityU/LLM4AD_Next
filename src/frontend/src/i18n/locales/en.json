@@ -1127,8 +1127,8 @@
       "trend": {
         "globalTrend": "Global Trend",
         "instanceTrend": "Instance Trend",
-        "highestScore": "Highest Score",
-        "averageScore": "Average Score",
+        "highestScore": "Global Best",
+        "genMaxScore": "Current Gen Best",
         "generation": "Gen",
         "score": "Score",
         "selectNodes": "Select Nodes",

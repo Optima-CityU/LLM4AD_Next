@@ -1127,8 +1127,8 @@
       "trend": {
         "globalTrend": "全局趋势",
         "instanceTrend": "实例级趋势",
-        "highestScore": "最高分",
-        "averageScore": "平均分",
+        "highestScore": "全局最优",
+        "genMaxScore": "当代最优",
         "generation": "代",
         "score": "分数",
         "selectNodes": "选择节点",
