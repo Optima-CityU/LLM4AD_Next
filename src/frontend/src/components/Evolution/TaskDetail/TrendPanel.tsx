@@ -19,7 +19,7 @@ type ViewMode = "global" | "instance"
 interface GenerationStats {
   generation: number
   maxScore: number
-  avgScore: number
+  genMaxScore: number
 }
 
 interface NodeNameInfo {
@@ -36,7 +36,7 @@ interface InstanceTrendLine {
 
 const MARGIN = { top: 28, right: 20, bottom: 36, left: 54 }
 const MAX_COLOR = "#00d4ff"
-const AVG_COLOR = "#a66cff"
+const GEN_MAX_COLOR = "#a66cff"
 
 /**
  * Compute a left margin wide enough to fit the y-axis tick labels without
@@ -124,16 +124,18 @@ export default function TrendPanel() {
     }
     const generations = Array.from(genMap.keys()).sort((a, b) => a - b)
     const result: GenerationStats[] = []
-    // Accumulate scores up to and including each generation so that max/avg
-    // are computed over all individuals from the first generation through the
-    // current one (cumulative), preventing the max line from decreasing.
+    // maxScore is cumulative (best individual seen from the first generation
+    // through the current one), which keeps that line monotonically
+    // non-decreasing. genMaxScore is the best individual within each single
+    // generation, so it reflects per-generation population quality.
     const cumulative: number[] = []
     for (const gen of generations) {
-      cumulative.push(...genMap.get(gen)!)
+      const genScores = genMap.get(gen)!
+      cumulative.push(...genScores)
       result.push({
         generation: gen,
         maxScore: Math.max(...cumulative),
-        avgScore: cumulative.reduce((a, b) => a + b, 0) / cumulative.length,
+        genMaxScore: Math.max(...genScores),
       })
     }
     return result
@@ -218,7 +220,7 @@ export default function TrendPanel() {
     const innerH = height - MARGIN.top - MARGIN.bottom
     if (innerH <= 0) return
 
-    const allScores = globalTrendData.flatMap((d) => [d.maxScore, d.avgScore])
+    const allScores = globalTrendData.flatMap((d) => [d.maxScore, d.genMaxScore])
     const yMin = Math.min(...allScores)
     const yMax = Math.max(...allScores)
     const yPad = (yMax - yMin) * 0.08 || 1
@@ -303,20 +305,20 @@ export default function TrendPanel() {
       .attr("stroke-width", 2)
       .attr("d", maxLine)
 
-    // avg line (dashed)
-    const avgLine = d3
+    // per-generation max line (dashed)
+    const genMaxLine = d3
       .line<GenerationStats>()
       .x((d) => xScale(d.generation))
-      .y((d) => yScale(d.avgScore))
+      .y((d) => yScale(d.genMaxScore))
       .curve(d3.curveMonotoneX)
 
     g.append("path")
       .datum(globalTrendData)
       .attr("fill", "none")
-      .attr("stroke", AVG_COLOR)
+      .attr("stroke", GEN_MAX_COLOR)
       .attr("stroke-width", 1.5)
       .attr("stroke-dasharray", "6,3")
-      .attr("d", avgLine)
+      .attr("d", genMaxLine)
 
     // data points
     g.selectAll(".dot-max")
@@ -327,13 +329,13 @@ export default function TrendPanel() {
       .attr("r", 3)
       .attr("fill", MAX_COLOR)
 
-    g.selectAll(".dot-avg")
+    g.selectAll(".dot-gen-max")
       .data(globalTrendData)
       .join("circle")
       .attr("cx", (d) => xScale(d.generation))
-      .attr("cy", (d) => yScale(d.avgScore))
+      .attr("cy", (d) => yScale(d.genMaxScore))
       .attr("r", 2.5)
-      .attr("fill", AVG_COLOR)
+      .attr("fill", GEN_MAX_COLOR)
 
     // legend
     const legend = g
@@ -358,20 +360,20 @@ export default function TrendPanel() {
 
     legend
       .append("line")
-      .attr("x1", 80)
-      .attr("x2", 96)
+      .attr("x1", 92)
+      .attr("x2", 108)
       .attr("y1", 0)
       .attr("y2", 0)
-      .attr("stroke", AVG_COLOR)
+      .attr("stroke", GEN_MAX_COLOR)
       .attr("stroke-width", 1.5)
       .attr("stroke-dasharray", "6,3")
     legend
       .append("text")
-      .attr("x", 100)
+      .attr("x", 112)
       .attr("y", 4)
       .attr("class", "fill-muted-foreground")
       .style("font-size", "10px")
-      .text(t("evolution.panel.trend.averageScore"))
+      .text(t("evolution.panel.trend.genMaxScore"))
 
     // tooltip
     const tooltipLine = g
@@ -422,7 +424,7 @@ export default function TrendPanel() {
         .style("display", null)
 
       const maxLabel = `${t("evolution.panel.trend.highestScore")}: ${formatScore(d.maxScore)}`
-      const avgLabel = `${t("evolution.panel.trend.averageScore")}: ${formatScore(d.avgScore)}`
+      const genMaxLabel = `${t("evolution.panel.trend.genMaxScore")}: ${formatScore(d.genMaxScore)}`
       const genLabel = `${t("evolution.panel.trend.generation")} ${d.generation}`
 
       tooltipText.selectAll("tspan").remove()
@@ -433,7 +435,7 @@ export default function TrendPanel() {
         .style("font-weight", "600")
         .text(genLabel)
       tooltipText.append("tspan").attr("x", 8).attr("dy", 14).text(maxLabel)
-      tooltipText.append("tspan").attr("x", 8).attr("dy", 14).text(avgLabel)
+      tooltipText.append("tspan").attr("x", 8).attr("dy", 14).text(genMaxLabel)
 
       const bbox = tooltipText.node()!.getBBox()
       tooltipG
