@@ -33,7 +33,7 @@ x-backend-common: &backend-common
     network: host
     args:
       UV_INDEX_URL: ${UV_INDEX_URL:-}
-      GITHUB_PROXY: ${GITHUB_PROXY:-}
+      GITHUB_PROXY: ${GITHUB_PROXY-https://gh-proxy.org}
   env_file:
     - .env
   environment:
@@ -226,7 +226,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
-        GITHUB_PROXY: ${GITHUB_PROXY:-}
+        GITHUB_PROXY: ${GITHUB_PROXY-https://gh-proxy.org}
     restart: "no"
     entrypoint: ["true"]
 

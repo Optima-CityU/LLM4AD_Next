@@ -50,7 +50,7 @@ x-backend-common: &backend-common
     dockerfile: src/backend/Dockerfile
     args:
       UV_INDEX_URL: ${UV_INDEX_URL:-}
-      GITHUB_PROXY: ${GITHUB_PROXY:-}
+      GITHUB_PROXY: ${GITHUB_PROXY-https://gh-proxy.org}
     ulimits: *build-ulimits
   env_file:
     - .env
@@ -242,7 +242,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
-        GITHUB_PROXY: ${GITHUB_PROXY:-}
+        GITHUB_PROXY: ${GITHUB_PROXY-https://gh-proxy.org}
       ulimits: *build-ulimits
     restart: "no"
     entrypoint: [ "true" ]

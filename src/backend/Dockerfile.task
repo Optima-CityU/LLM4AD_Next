@@ -63,7 +63,7 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 # ---------- 安装依赖（含 research extra，不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
-ARG GITHUB_PROXY=""
+ARG GITHUB_PROXY="https://gh-proxy.org"
 RUN if [ -n "$GITHUB_PROXY" ]; then \
       git config --global url."${GITHUB_PROXY%/}/https://github.com/".insteadOf "https://github.com/"; \
     fi

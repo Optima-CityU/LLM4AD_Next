@@ -57,7 +57,7 @@ torch = [{ index = "pytorch-cpu" }]
 # CPU-only torch wheels; explicit = only torch resolves here, rest stays on PyPI.
 [[tool.uv.index]]
 name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+url = "https://mirrors.nju.edu.cn/pytorch/whl/cpu"
 explicit = true
 
 [build-system]
