@@ -103,6 +103,118 @@ defaults where the user has no preference):
    re-run. Not done until both run cleanly. If no provider credentials are available,
    say so — a missing-credential failure of `debug_run.py` is not a package defect.
 
+## Automated algorithm design methods (reference — only when the user asks)
+
+Always build new task packages with the default **Island GA** method. Do NOT
+proactively suggest switching to another method — let the user bring it up.
+
+When the user asks about methods or explicitly requests a switch, help them
+using the reference below. After applying a switch, ask whether they want to
+continue adjusting parameters or are satisfied.
+
+Each method requires a matching pair of `evolution.type` + `planner.type`.
+Switching methods means **replacing the entire `evolution` section` (parameters
+differ per method) and updating `planner.type`. A fresh run is required — you
+cannot resume a prior run after changing the evolution type.
+
+---
+
+**Island GA** (default — use this for all new builds)
+
+```yaml
+evolution:
+  type: "island_ga"
+  max_generations: 50
+  num_islands: 5              # number of parallel populations
+  island_population_size: 20  # individuals per island
+  mutation_rate: 0.3
+  crossover_rate: 0.5
+  tournament_size: 3
+  early_stop_patience: 10
+  migration_interval: 5       # gens between cross-island exchanges
+  migration_rate: 0.1         # fraction of individuals migrated
+  migration_strategy: "best"  # best | random | elite | worst
+  migration_topology: "ring"  # ring | fully_connected | hierarchical | mesh
+  parallel_islands: true      # run islands concurrently
+planner:
+  type: "llm_evolution"
+```
+
+**EoH** — Evolution of Heuristics *(ICML 2024)*  
+Single-objective, rank-based truncation. Runs E1 (and optionally E2/M1/M2)
+operators each generation.
+
+```yaml
+evolution:
+  type: "eoh"
+  max_generations: 50
+  population_size: 5          # top-k individuals kept after truncation
+  selection_num: 2            # parents selected per E1/E2 crossover
+  max_sample_nums: 100        # LLM call budget cap for the run
+  num_samplers: 1             # parallel candidates per operator per gen
+  use_e2_operator: true       # enable E2 (backbone-motivated crossover)
+  use_m1_operator: true       # enable M1 (structural mutation)
+  use_m2_operator: true       # enable M2 (parameter mutation)
+  seed_path: null             # optional path to a seed heuristic file
+planner:
+  type: "eoh_evolution"
+```
+
+**ReEvo** — Reflective Evolution *(NeurIPS 2024)*  
+Adds two reflection signals to genetic search: short-term (comparing worse/better
+parent pairs → better crossover) and long-term (accumulated history → better
+elite mutation).
+
+```yaml
+evolution:
+  type: "reevo"
+  max_generations: 50
+  population_size: 8          # individuals in the population
+  mutation_rate: 0.5          # fraction of pop used for elite mutations per gen
+  max_sample_nums: 100        # LLM call budget cap for the run
+  num_samplers: 1             # parallel crossover candidates per step
+  seed_path: null             # optional path to a seed heuristic file
+planner:
+  type: "reevo_evolution"
+```
+
+**MCTS-AHD** — Monte Carlo Tree Search for AHD *(ICML 2025)*  
+Tree search over algorithm space: selects nodes via UCT, expands with
+e1/e2/m1/m2/s1 operators. Not generational; `max_generations` is interpreted
+as MCTS iterations.
+
+```yaml
+evolution:
+  type: "mcts_ahd"
+  max_generations: 1000       # MCTS iterations (not generations)
+  init_size: 4                # initial child nodes expanded under root
+  population_size: 10         # active algorithm pool size
+  selection_num: 2            # parents per e1/e2 operator
+  max_sample_nums: 100        # LLM call budget cap for the search
+  alpha: 0.5                  # UCT progressive-widening parameter
+  lambda_0: 0.1               # UCT exploration constant (decays with budget)
+  max_depth: 10               # maximum tree depth
+  seed_path: null             # optional path to a seed heuristic file
+planner:
+  type: "mcts_ahd_evolution"
+```
+
+### Switching checklist (only when the user actively requests it)
+
+1. **Replace `evolution` section** — remove the old method's specific params,
+   write the new method's complete section from the templates above. Do NOT
+   carry over params that don't exist in the new method's schema (e.g.
+   `num_islands` is IGA-only).
+2. **Update `planner.type`** — must match the new method.
+3. **Keep everything else** — `providers`, `evaluator`, `coder`, `dataset`,
+   `version_control` stay unchanged.
+4. **Warn the user** — switching evolution type means a fresh run; you cannot
+   resume an old checkpoint under a different method.
+5. **Re-verify** — after editing `config.yaml`, re-run `debug_run.py` to
+   confirm the new method loads correctly.
+6. **Ask whether to continue** — after the switch is applied and verified, ask
+   the user if they want to adjust any parameters further or are satisfied.
+
 <!-- PLATFORM-USAGE-DRAFT: 以下"如何在平台上使用"为草稿，待产品同学修订 -->
 ## How the package is used on the LLM4AD platform
 
@@ -146,3 +258,12 @@ the provider `model`, and `evaluator.timeout`.
 The package is done only when `test_evaluator.py` loads the evaluator AND
 `debug_run.py` runs without raising. Then summarize what was built (files + the
 7 decisions) and the verification result.
+
+After a successful build, always close by conveying this message (translate to the
+user's language; do NOT proactively recommend a specific method — just mention
+that the option exists):
+
+> The task package has been built and verified. I can help you choose the
+> evolution method (such as EoH, ReEvo, or MCTS-AHD), and adjust evolution
+> parameters (such as max_generations, population size, etc.), or feel free
+> to let me know if you have other needs!

@@ -1499,8 +1499,8 @@ def upsert_memory_provider_binding(
     payload = _memory_provider_binding_payload(current_user, routers)
     project_id = _mindmemos_project_id(current_user)
     # MindMemOS POST is an upsert for this user's deterministic binding scope.
-    # Use it for explicit rebinding because PATCH rejects an embedding identity
-    # left stale by a prior model configuration.
+        # Use it when a prior binding has a stale embedding identity because PATCH
+        # rejects embedding identity changes.
     data = _mindmemos_post(
         current_user,
         f"/internal/v1/projects/{project_id}/provider-bindings",

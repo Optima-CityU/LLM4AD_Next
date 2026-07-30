@@ -11,6 +11,7 @@ import {
   ScrollText,
   ServerCog,
   Shield,
+  Sparkles,
   Users,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -37,6 +38,8 @@ type Item = {
   title: string
   path?: string
   href?: string
+  /** Optional badge label shown inline (e.g. "Beta"). */
+  badge?: string
 }
 
 function NavItems({ items }: { items: Item[] }) {
@@ -79,6 +82,11 @@ function NavItems({ items }: { items: Item[] }) {
               <RouterLink to={item.path!} onClick={handleMenuClick}>
                 <item.icon />
                 <span>{item.title}</span>
+                {item.badge && (
+                  <span className="ml-auto text-[9px] font-semibold px-1 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 leading-none shrink-0">
+                    {item.badge}
+                  </span>
+                )}
               </RouterLink>
             )}
           </SidebarMenuButton>
@@ -97,6 +105,12 @@ export function AppSidebar() {
       icon: FolderKanban,
       title: t("sidebar.projectManagement"),
       path: "/projects",
+    },
+    {
+      icon: Sparkles,
+      title: t("sidebar.autoResearch"),
+      path: "/autoresearch",
+      badge: "Beta",
     },
   ]
 

@@ -158,6 +158,13 @@ def delete_task_logs(task_id: str | uuid.UUID) -> None:
 REPORT_GEN_PREFIX = "report_gen:"
 REPORT_GEN_TTL = 600  # 10 minutes safety TTL
 
+_CLEAR_REPORT_GENERATION_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
 REPORT_STREAM_PREFIX = "report_stream:"
 REPORT_STREAM_TTL = 3600  # 1 hour
 REPORT_STREAM_MAXLEN = 10000
@@ -189,10 +196,24 @@ def get_report_generation_id(task_id: str | uuid.UUID, report_type: str) -> str 
     return r.get(report_gen_key(task_id, report_type))
 
 
-def clear_report_generation_id(task_id: str | uuid.UUID, report_type: str) -> None:
-    """清除当前报告生成 ID。"""
+def clear_report_generation_id(
+    task_id: str | uuid.UUID,
+    report_type: str,
+    generation_id: str | None = None,
+) -> bool:
+    """清除报告生成 ID；传入 generation ID 时仅清除调用者自己的值。"""
     r = get_sync_redis()
-    r.delete(report_gen_key(task_id, report_type))
+    key = report_gen_key(task_id, report_type)
+    if generation_id is None:
+        return bool(r.delete(key))
+    return bool(
+        r.eval(
+            _CLEAR_REPORT_GENERATION_SCRIPT,
+            1,
+            key,
+            generation_id,
+        )
+    )
 
 
 def push_report_chunk(task_id: str | uuid.UUID, report_type: str, entry: dict) -> None:
@@ -328,6 +349,128 @@ def check_chat_tune_rate_limit(session_id: str | uuid.UUID) -> bool:
     r = get_sync_redis()
     key = f"{CHAT_TUNE_RATE_LIMIT_PREFIX}{session_id}"
     acquired = r.set(key, "1", nx=True, ex=CHAT_TUNE_RATE_LIMIT_COOLDOWN)
+    return bool(acquired)
+
+
+# ---- Research (auto-research pipeline) ----
+
+RESEARCH_GEN_PREFIX = "research_gen:"
+RESEARCH_GEN_TTL = 3600
+RESEARCH_STREAM_PREFIX = "research_stream:"
+RESEARCH_STREAM_TTL = 7200  # 2 小时，比调参长；科研 pipeline 更慢
+RESEARCH_STREAM_MAXLEN = 20000
+# gate 唤醒：key 存在 = 该 gate 已被用户回复过（见 research_gate_reply_key）。
+RESEARCH_GATE_REPLY_PREFIX = "research_gate:"
+RESEARCH_GATE_REPLY_TTL = 86400  # 24h，覆盖用户离开后再回来的情况
+
+
+def research_gen_key(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> str:
+    """构造科研生成 ID 在 Redis 中的 key。"""
+    return f"{RESEARCH_GEN_PREFIX}{session_id}:{turn_id}"
+
+
+def research_stream_key(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> str:
+    """构造科研 SSE Stream 在 Redis 中的 key。"""
+    return f"{RESEARCH_STREAM_PREFIX}{session_id}:{turn_id}"
+
+
+def research_gate_reply_key(
+    session_id: str | uuid.UUID, message_id: str | uuid.UUID
+) -> str:
+    """构造 gate 唤醒（用户回填表单）的 Redis 键。
+
+    键内容是 JSON 字符串：``{"submission": {...}, "message_id": "..."}``；
+    key 存在 = 该 gate 已被用户回复过。
+    """
+    return f"{RESEARCH_GATE_REPLY_PREFIX}{session_id}:{message_id}"
+
+
+def set_research_generation_id(
+    session_id: str | uuid.UUID,
+    turn_id: str | uuid.UUID,
+    generation_id: str,
+) -> None:
+    """记录当前活跃生成 ID，用于识别并发触发时哪次输出有效。"""
+    r = get_sync_redis()
+    r.set(
+        research_gen_key(session_id, turn_id),
+        generation_id,
+        ex=RESEARCH_GEN_TTL,
+    )
+
+
+def clear_research_generation_id(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> None:
+    """清除当前生成 ID。"""
+    r = get_sync_redis()
+    r.delete(research_gen_key(session_id, turn_id))
+
+
+def push_research_event(
+    session_id: str | uuid.UUID,
+    turn_id: str | uuid.UUID,
+    entry: dict,
+) -> None:
+    """向科研 Stream 追加一条事件（XADD）。
+
+    近似 MAXLEN 限流，首次写入时设置 TTL。失败仅记录日志，避免影响主流程。
+    entry 至少要包含 ``type`` 字段供前端分派渲染。
+    """
+    try:
+        r = get_sync_redis()
+        key = research_stream_key(session_id, turn_id)
+        payload = json.dumps(entry, ensure_ascii=False, default=str)
+        r.xadd(
+            key,
+            {"data": payload},
+            maxlen=RESEARCH_STREAM_MAXLEN,
+            approximate=True,
+        )
+        if r.ttl(key) == -1:
+            r.expire(key, RESEARCH_STREAM_TTL)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Push research event to Redis failed, session_id=%s, turn_id=%s",
+            session_id,
+            turn_id,
+            exc_info=True,
+        )
+
+
+def delete_research_stream(
+    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
+) -> None:
+    """删除指定科研轮次的 Stream key。"""
+    r = get_sync_redis()
+    r.delete(research_stream_key(session_id, turn_id))
+
+
+def clear_research_gate_reply(
+    session_id: str | uuid.UUID, message_id: str | uuid.UUID
+) -> None:
+    """清除某条 gate 回填载荷。"""
+    r = get_sync_redis()
+    r.delete(research_gate_reply_key(session_id, message_id))
+
+
+# ---- Research rate limit ----
+
+RESEARCH_RATE_LIMIT_PREFIX = "research_rl:"
+RESEARCH_RATE_LIMIT_COOLDOWN = 3  # 秒
+
+
+def check_research_rate_limit(session_id: str | uuid.UUID) -> bool:
+    """科研触发速率限制：3s 内不允许同一会话再次 POST /turns。"""
+    r = get_sync_redis()
+    key = f"{RESEARCH_RATE_LIMIT_PREFIX}{session_id}"
+    acquired = r.set(key, "1", nx=True, ex=RESEARCH_RATE_LIMIT_COOLDOWN)
     return bool(acquired)
 
 

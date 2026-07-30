@@ -196,7 +196,7 @@ class Settings(BaseSettings):
         """Celery 任务队列数据库"""
         return self.REDIS_BASE_URL + "/0"
 
-    @computed_field  # typrop-decorator]
+    @computed_field
     @property
     def CELERY_BACKEND(self) -> str:
         """Celery 结果后端数据库"""
@@ -261,6 +261,19 @@ class Settings(BaseSettings):
     TASK_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 任务运行镜像名称
     TASK_CONTAINER_MEMORY_LIMIT: str = "4g"  # 容器内存限制
     TASK_CONTAINER_CPU_LIMIT: float = 2.0                  # 容器 CPU 核心数限制
+
+    # ---- AutoResearch（researchclaw pipeline）隔离容器配置 ----
+    # 研究 pipeline 执行 LLM 生成的代码，多用户下必须容器隔离；默认复用任务镜像（一镜多入口）。
+    RESEARCH_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 研究运行镜像（默认复用任务镜像）
+    RESEARCH_CONTAINER_MEMORY_LIMIT: str = "4g"   # 研究容器内存限制
+    RESEARCH_CONTAINER_CPU_LIMIT: float = 2.0     # 研究容器 CPU 核心数限制
+    # 研究容器执行硬超时（秒）。不设则 ContainerJobSpec 回落到 TASK_TIME_LIMIT（默认 7 天），
+    # 一个卡死的研究容器会挂满 7 天，故此处收一个 backstop。定值须高于健康长任务的内部
+    # 墙钟预算之和：experiment.time_budget_sec 默认 7200（2h）+ REFINE 阶段另有 1.5×
+    # time_budget_sec（≈3h）的独立墙钟上限，再加 build/figure/9 段文档 stage，健康长任务
+    # 可逼近 5~6h。取 12h 作 backstop——远低于 7 天（卡死容器不再挂一周），又舒适高于任何
+    # 现实健康 pipeline 的总预算，不会误杀长任务。超时容器被 stop/kill 收 TIMED_OUT。
+    RESEARCH_CONTAINER_TIMEOUT: int = 12 * 3600   # 研究容器执行硬超时（秒），默认 12 小时
 
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）

@@ -1,7 +1,10 @@
 """Tests for system-level MindMemOS runtime configuration."""
 
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
+
+import yaml
 
 from app.core.config import settings
 from app.services import memory_service
@@ -10,6 +13,56 @@ from app.services.task_service import crud, execution
 
 class _User:
     id = uuid.UUID("11111111-1111-1111-1111-111111111111")
+
+
+def test_mock_tsp_template_disables_remote_memory(monkeypatch):
+    """The offline mock template must never inherit a MindMemOS binding."""
+    config_path = (
+        Path(__file__).resolve().parents[4]
+        / "examples/applications/tsp_benchmark_python_mock/config.yaml"
+    )
+    input_args = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    project_defaults = SimpleNamespace(
+        mindmemos_binding_id="binding-valid",
+        include_user_memory=True,
+        include_project_memory=True,
+        include_task_memory=True,
+        user_memory_limit=2,
+        project_memory_limit=2,
+        task_memory_limit=2,
+        mindmemos_search_strategy="fast",
+        mindmemos_rerank=False,
+        mindmemos_score_threshold=None,
+        mindmemos_fail_open=True,
+    )
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_ENABLED", True)
+    monkeypatch.setattr(
+        settings, "LLM4AD_MINDMEMOS_BASE_URL", "http://mindmemos-api:8000"
+    )
+    monkeypatch.setattr(settings, "LLM4AD_MINDMEMOS_JWT_SECRET", "jwt-test-secret")
+    monkeypatch.setattr(
+        memory_service, "get_project_memory_config", lambda *_args: project_defaults
+    )
+    monkeypatch.setattr(
+        memory_service, "get_mindmemos_provider_binding_error", lambda *_args: None
+    )
+
+    resolved = crud._apply_memory_defaults(
+        None,
+        input_args,
+        current_user=_User(),
+        project_id=uuid.uuid4(),
+    )
+    execution._apply_mindmemos_runtime_config(
+        resolved,
+        current_user=_User(),
+        task_id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+    )
+
+    assert resolved["memory"]["enabled"] is False
+    assert resolved["memory"]["type"] == "local_yaml"
+    assert "mindmemos_base_url" not in resolved["memory"]
 
 
 def test_apply_memory_defaults_falls_back_from_invalid_provider_binding(monkeypatch):

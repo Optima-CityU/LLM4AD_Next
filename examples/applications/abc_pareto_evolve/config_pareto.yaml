@@ -1,0 +1,198 @@
+# ==============================================================================
+# LLM4AD Configuration — Seeded Pareto-frontier ABC optimization (IWLS 2026)
+# ==============================================================================
+# Goal: take an existing benchmark's VBS AIGs as SEEDS and evolve an ABC
+# optimization *portfolio* (a list of command sequences) that pushes those AIGs
+# below the contest Virtual Best Solver (VBS) frontier. The ABC binary is FIXED.
+#
+# The evaluator (abc_pareto_evaluator.py) applies each evolved sequence to each
+# seed via  `source abc.rc; read_aiger <seed>; <seq>; strash; print_stats;
+# write_aiger`, verifies with `cec <seed> <out>`, Pareto-prunes the candidate
+# points, and scores the frontier against the fixed VBS frontier using the
+# official IWLS per-delay scoring. iwls_score > 100 means VBS is beaten.
+#
+# Target benchmark: ex222. The seed AIGs live in ./seeds (ex222_*.aig) and the
+# ABC binary must be provided at ./abc/abc (+ ./abc/abc.rc) — see README.md.
+
+project_name: "abc_pareto_evolve"
+
+description_en: "Evolve an ABC optimization portfolio that pushes ex222's VBS AIGs below the IWLS 2026 VBS frontier."
+description_zh: "进化 ABC 优化组合序列，从参赛者 VBS 种子出发，把 ex222 压到 IWLS 2026 VBS 前沿之下。"
+
+background: |
+  Berkeley ABC is a state-of-the-art logic synthesis tool for And-Inverter Graphs (AIGs).
+  The ABC binary is FIXED here. We start from EXISTING AIGs — the IWLS 2026 Virtual Best
+  Solver (VBS) members of one benchmark — and evolve an optimization portfolio: a list of
+  ABC command sequences (balance, rewrite, refactor, resub, dc2, dch, resyn2, resyn3, and
+  the GIA/& variants &get/&put/&dch/&syn2/&syn3, ...). Each sequence is applied to each seed
+  AIG with `read_aiger`, producing one (level, area) point; the union is Pareto-pruned into
+  a candidate frontier. The candidate frontier is scored against the FIXED VBS frontier with
+  the IWLS per-delay rule: for each VBS delay L, floor(100 * VBS_area(L) / our_best_area_at_level<=L),
+  averaged over VBS delays. A mean above 100 beats VBS; every candidate point not dominated by
+  VBS extends the frontier. All sequences must preserve function (checked via cec against the
+  seed, which is itself VBS-verified against the truth table). Level-preserving passes beat VBS
+  at the seed's delay; aggressive passes trade delay for smaller area. Denser, more diverse
+  portfolios place more non-dominated points.
+
+random_seed: 42
+base_dir: "./runs_pareto"
+
+# ==============================================================================
+# Workspace
+# ==============================================================================
+workspace:
+  auto_create: true
+  subdirs:
+    state: "state"
+    logs: "logs"
+    checkpoints: "checkpoints"
+    generated: "generated"
+    temp: "temp"
+    best: "best"
+    memory: "memory"
+
+# ==============================================================================
+# LLM Providers (name-only; credentials from ~/.llm4ad/settings.yaml)
+# ==============================================================================
+providers:
+  - name: "relay2"        # planner  -> 中转站2 (az.gptplus5.com)
+  - name: "relay2-coder"  # coder    -> 中转站2 (az.gptplus5.com)
+
+# ==============================================================================
+# Coder
+# ==============================================================================
+coder:
+  type: "custom"          # plain-LLM coder (no opencode CLI); calls the provider directly
+  provider: "relay2-coder"
+  timeout: 600.0
+  max_retries: 3
+  log_to_console: true
+
+# ==============================================================================
+# Planner
+# ==============================================================================
+planner:
+  type: "llm_evolution"
+  provider: "relay2"
+  selection_strategy: "weighted"
+  parent_selection_strategy: "tournament"
+  samplers:
+    - name: "init_sampler"
+    - name: "mutation_sampler"
+    - name: "crossover_sampler"
+
+# ==============================================================================
+# Evaluator
+# ==============================================================================
+evaluator:
+  type: "custom"
+  module: "abc_pareto_evaluator.py:AbcParetoEvaluator"
+  provider: "relay2"   # required field for custom evaluators (our evaluator doesn't call an LLM)
+
+  # Fixed ABC binary + rc (aliases like resyn2 live in abc.rc). Defaults point
+  # next to the evaluator file; override here if needed.
+  # abc_binary: "abc/abc"
+  # abc_rc: "abc/abc.rc"
+
+  # EXPERIMENT 1: start optimization from the existing VBS seeds (read_aiger)
+  # and try to push the VBS frontier further. Baseline = the full VBS frontier.
+  source_mode: "vbs"
+  # extend_vbs: score candidate ∪ VBS vs VBS. Baseline 100 = kept VBS unchanged;
+  # >100 = an evolved point extends the frontier. Right for incremental discovery.
+  score_mode: "extend_vbs"
+
+  # Directory of seed AIGs (ex222_*.aig). The evaluator globs "<bench>_*.aig".
+  seeds_dir: "seeds"
+  # Cap seeds per benchmark (sampled evenly across delay). Raise for denser
+  # coverage at higher cost. ex222 has 43 VBS members.
+  max_seeds: 100
+  # Per single-ABC-call timeout (seconds). Overall per-eval budget is `timeout`.
+  per_call_timeout: 60
+  # Persistent (seed, sequence) result cache. Shared across evaluations so
+  # identical optimize+cec work is never recomputed. Defaults next to the
+  # evaluator; delete the dir to force a clean recompute.
+  # cache_dir: "abc_pareto_cache"
+
+  timeout: 600.0       # One eval runs many ABC calls (seeds x portfolio + cec).
+  max_retries: 1
+  parallel: true       # Fixed binary -> evals are independent.
+  batch_size: 4
+
+  # Single benchmark: dataset is one truth file (ex222). Its VBS seeds are found
+  # by the evaluator from seeds_dir. Point elsewhere to attack another benchmark.
+  dataset:
+    mode: "directory"
+    path: "data/truth_pareto_ex222"
+    recursive: false
+
+  metrics: ["iwls_score", "num_dominating", "best_area_saved", "min_area", "portfolio_valid"]
+
+# ==============================================================================
+# Evolution
+# ==============================================================================
+evolution:
+  type: "island_ga"
+  max_generations: 50
+  # Disable early stopping: patience > max_generations means the no-improvement
+  # check never has enough history to trigger, so it always runs all 50 gens.
+  early_stop_patience: 100000
+  early_stop_threshold: 1e-6
+  checkpoint_interval: 5
+  max_checkpoints: 3
+  max_llm_concurrency: 4
+  elite_ratio: 0.1
+  survival_selection_strategy: "truncation"
+  num_islands: 1
+  island_population_size: 3
+  human_readable_timing: true
+
+# ==============================================================================
+# Multimodal
+# ==============================================================================
+multimodal:
+  enabled: false
+  max_images_per_prompt: 3
+  image_max_size_kb: 512
+  include_observation_text: true
+  two_step_refinement: false
+  behavior_storage: "rendered"
+
+# ==============================================================================
+# Logging
+# ==============================================================================
+logging:
+  level: "INFO"
+  format: null
+  file: null
+  console: true
+  json_format: false
+
+# ==============================================================================
+# Version Control — evolve target is the tiny portfolio dir, ABC stays fixed.
+# ==============================================================================
+version_control:
+  enabled: true
+  type: "git_worktree"
+  local_path: "synthesis_pareto"   # Only portfolio.py is evolved.
+  remote_url: null
+  revision: null
+  auto_initialize: true
+  auto_cleanup: true
+  max_worktree_age_days: 7
+  max_worktrees: 50
+  default_branch: "main"
+  commit_message_template: "Pareto portfolio evolution {algorithm_id}: {description}"
+
+# ==============================================================================
+# Repository Analyzer
+# ==============================================================================
+repo_analyzer:
+  type: "evolve_detector"
+  context_lines_before: 5
+  context_lines_after: 5
+  include:
+    - "*.py"
+  exclude:
+    - ".git/**"
+    - "__pycache__/**"
+    - "*.pyc"

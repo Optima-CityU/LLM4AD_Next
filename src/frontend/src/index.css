@@ -147,6 +147,34 @@
   }
 }
 
+/* AutoResearch 浅色模式：去掉磨砂/发光/模糊特效，让面板更清晰锐利。
+   仅作用于「浅色」（:not(.dark)）下的 .arc-shell 子树，暗色科技风保持不变。
+   注意 :root 永远匹配 <html>，暗色是 <html class="dark">，故必须用 :not(.dark) 排除。 */
+/* 整页底色压深一档（比 --background 更灰蓝），白卡片才浮得起来、有层次。 */
+:root:not(.dark) .arc-shell {
+  background-color: #eef2f7 !important;
+}
+:root:not(.dark) .arc-shell [class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+}
+/* 卡片保持纯白、页面/边栏底走略带灰蓝的 background，两者区分出层次
+   （避免整页一片纯白）。半透明层在浅色下改为对应的不透明底色。 */
+:root:not(.dark) .arc-shell [class*="bg-card/"] {
+  background-color: var(--card) !important;
+}
+:root:not(.dark) .arc-shell [class*="bg-background/"] {
+  background-color: var(--background) !important;
+}
+/* 装饰性光晕层（radial-gradient + blur 的绝对定位光斑）浅色下隐藏。
+   必须全部限定 .absolute，否则 [class*="blur-xl"] 会误伤内容卡片上的
+   backdrop-blur-xl（子串匹配），把整块内容 display:none 导致高度塌陷。 */
+:root:not(.dark) .arc-shell [class*="blur-2xl"].absolute,
+:root:not(.dark) .arc-shell [class*="blur-xl"].absolute,
+:root:not(.dark) .arc-shell [class*="blur-md"].absolute,
+:root:not(.dark) .arc-shell [class*="blur-sm"].absolute {
+  display: none !important;
+}
+
 /* Dark-only glow effects for evolution page */
 .dark .glow-primary {
   filter: drop-shadow(
@@ -334,6 +362,27 @@
   100% {
     transform: translateY(300%);
     opacity: 0;
+  }
+}
+/* AutoResearch 执行轨迹地图：当前 running 节点的外圈脉冲扩散 */
+@keyframes trace-ping {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  80%,
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+/* AutoResearch 进度主轴：当前前沿光束在连接段上从左向右流动 */
+@keyframes beamflow {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(400%);
   }
 }
 @keyframes landing-bounce-soft {

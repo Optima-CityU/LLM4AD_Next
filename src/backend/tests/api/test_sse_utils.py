@@ -17,7 +17,7 @@ class FakeRedis:
         return [("task:logs", pending[:count])] if pending else []
 
 
-def entry_handler(fields: dict) -> tuple[str, bool]:
+def entry_handler(_entry_id: str, fields: dict) -> tuple[str, bool]:
     payload = fields["data"]
     return f"data: {payload}\n\n", payload == "end"
 

@@ -211,11 +211,15 @@ async def chat_tune_upload_data(
     )
 
 
-def _chat_tune_entry_handler(fields: dict) -> tuple[str, bool] | None:
+def _chat_tune_entry_handler(
+    _entry_id: str, fields: dict
+) -> tuple[str, bool] | None:
     """解析调参 Stream 条目为 SSE 帧。
 
     将 done / error / cancelled 帧标记为终止事件。对脏数据宽松忽略，
     避免单个坏帧破坏整条 SSE 流。
+
+    id 行由 :func:`redis_sse_stream` 统一拼接，handler 只产出 event/data。
     """
     try:
         entry = json.loads(fields["data"])

@@ -50,6 +50,7 @@ x-backend-common: &backend-common
     dockerfile: src/backend/Dockerfile
     args:
       UV_INDEX_URL: ${UV_INDEX_URL:-}
+      GITHUB_PROXY: ${GITHUB_PROXY:-}
     ulimits: *build-ulimits
   env_file:
     - .env
@@ -206,7 +207,18 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    command: celery -A app.core.celery worker --loglevel=info --concurrency=8
+    command: celery -A app.core.celery worker -Q evolution -n evo@%h --loglevel=info --concurrency=50
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
+
+  research-worker:
+    <<: *backend-common
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    command: celery -A app.core.celery worker -Q research -n research@%h --loglevel=info --concurrency=50
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
@@ -230,6 +242,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        GITHUB_PROXY: ${GITHUB_PROXY:-}
       ulimits: *build-ulimits
     restart: "no"
     entrypoint: [ "true" ]

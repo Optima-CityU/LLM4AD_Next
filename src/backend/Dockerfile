@@ -24,6 +24,10 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 # ---------- 安装依赖（不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
+ARG GITHUB_PROXY=""
+RUN if [ -n "$GITHUB_PROXY" ]; then \
+      git config --global url."${GITHUB_PROXY%/}/https://github.com/".insteadOf "https://github.com/"; \
+    fi
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \

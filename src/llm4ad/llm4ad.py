@@ -456,13 +456,21 @@ class LLM4AD:
             "<level>{message}</level>"
         )
 
-        # Add console handler if enabled
+        # Add console handler if enabled. Honour NO_COLOR / non-tty so that
+        # when llm4ad runs as a captured child process (e.g. the AutoResearch
+        # container's llm4ad_driver subprocess, whose stderr is piped and
+        # re-logged) it emits plain text instead of ANSI escapes that show up
+        # as garbled markers in the event stream.
         if log_config.console:
+            colorize = (
+                not os.environ.get("NO_COLOR")
+                and getattr(sys.stderr, "isatty", lambda: False)()
+            )
             logger.add(
                 sys.stderr,
                 format=log_format,
                 level=level,
-                colorize=True,
+                colorize=colorize,
                 serialize=log_config.json_format,
             )
 

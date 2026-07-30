@@ -2012,6 +2012,891 @@ export type ReportTemplatesResponse = {
 export type ReportType = 'tech_change' | 'node_comparison' | 'chain_analysis' | 'champion_birth';
 
 /**
+ * 会话结果的结构化聚合（纯读盘、零 LLM），供前端直接渲染分析页。
+ *
+ * 各字段对应 ``run_dir`` 下现成文件；缺文件时降级为 None/空，不报错。
+ * 这份数据既独立可用（图表/时间线），也作为 LLM 报告的输入上下文。
+ */
+export type ResearchAnalysisData = {
+    session_id: string;
+    run_dir?: (string | null);
+    /**
+     * pipeline_summary.json + checkpoint.json 摘要
+     */
+    overview?: {
+        [key: string]: unknown;
+    };
+    /**
+     * degradation_signal.json：score/verdict/weaknesses
+     */
+    quality_gate?: ({
+    [key: string]: unknown;
+} | null);
+    /**
+     * experiment_summary_best.json 指标摘要
+     */
+    experiment?: ({
+    [key: string]: unknown;
+} | null);
+    /**
+     * deliverables/manifest.json
+     */
+    deliverables?: ({
+    [key: string]: unknown;
+} | null);
+    decisions?: Array<ResearchAnalysisDecisionItem>;
+    stages?: Array<ResearchAnalysisStageItem>;
+};
+
+/**
+ * 一次 pivot/refine 回滚记录（来自 decision_history.json）。
+ */
+export type ResearchAnalysisDecisionItem = {
+    decision: string;
+    rollback_target?: (string | null);
+    rollback_stage_num?: (number | null);
+    attempt?: (number | null);
+    timestamp?: (string | null);
+};
+
+/**
+ * 获取分析报告详情：结构化聚合数据 + 最近一次 LLM 报告（可为空）。
+ */
+export type ResearchAnalysisDetailResponse = {
+    session_id: string;
+    data: ResearchAnalysisData;
+    report?: (ResearchAnalysisEntry | null);
+};
+
+/**
+ * 存储于 ``session.analysis_report`` 的单条报告条目。
+ */
+export type ResearchAnalysisEntry = {
+    status: 'generating' | 'completed' | 'failed' | 'cancelled';
+    content?: (string | null);
+    created_at: string;
+    updated_at: string;
+    error?: (string | null);
+    provider_model?: (string | null);
+    language?: (string | null);
+};
+
+export type status = 'generating' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * 触发 LLM 生成结果分析报告的请求体。
+ *
+ * 入参对齐 chat 端 ``ReportGenerateRequest``：由用户传入模型与语言。
+ * ``provider_id``/``model_name`` 为空时回退到用户默认报告模型，再兜底 mock。
+ */
+export type ResearchAnalysisGenerateRequest = {
+    /**
+     * 报告输出语言：'zh' 中文，'en' 英文
+     */
+    language?: 'zh' | 'en';
+    /**
+     * LLM Provider：空/'default' 用用户默认，'mock' 走 mock，或真实 UUID
+     */
+    provider_id?: (string | null);
+    /**
+     * 模型名；为空用 Provider 默认模型
+     */
+    model_name?: (string | null);
+    /**
+     * 自定义 user prompt 模板；为空用内置默认模板
+     */
+    prompt_template?: (string | null);
+};
+
+/**
+ * 触发分析报告生成后的受理响应。
+ */
+export type ResearchAnalysisGenerateResponse = {
+    session_id: string;
+    status: 'generating' | 'completed' | 'failed' | 'cancelled';
+    message: string;
+};
+
+/**
+ * 结构化聚合中单个阶段（含重跑版本）的耗时/决策快照。
+ *
+ * 直接读盘拼装，**不经过 LLM**：``duration_sec`` 取 ``stage_health.json``，
+ * ``decision``/``next_stage`` 取 ``decision.json``，``versions`` 覆盖回跳产生的
+ * ``stage-NN_v1/_v2`` 目录（每次重跑一段）。
+ */
+export type ResearchAnalysisStageItem = {
+    /**
+     * 阶段号（1-23）
+     */
+    stage: number;
+    /**
+     * 阶段可读名，如 EXPERIMENT_RUN
+     */
+    name: string;
+    /**
+     * done/failed/pending 等
+     */
+    status?: string;
+    /**
+     * proceed/pivot/refine/degraded
+     */
+    decision?: (string | null);
+    next_stage?: (number | null);
+    /**
+     * 该阶段总耗时（含全部重跑）
+     */
+    duration_sec?: number;
+    /**
+     * 每次执行的耗时（秒），按 base/v1/v2 顺序
+     */
+    versions?: Array<(number)>;
+    artifacts_count?: number;
+    error?: (string | null);
+    /**
+     * 是否门控阶段（5/9/20）
+     */
+    is_gate?: boolean;
+};
+
+/**
+ * 停止分析报告生成后的响应。
+ */
+export type ResearchAnalysisStopResponse = {
+    session_id: string;
+    status: 'generating' | 'completed' | 'failed' | 'cancelled';
+    message: string;
+};
+
+/**
+ * 单个产物元数据（不含内容）。
+ */
+export type ResearchArtifactItem = {
+    /**
+     * 相对 run_dir 的路径
+     */
+    path: string;
+    /**
+     * 产物类别，前端可据此选渲染方式
+     */
+    kind: 'paper_draft' | 'paper_final' | 'figure' | 'code' | 'data' | 'log' | 'state' | 'config' | 'other';
+    /**
+     * 来自哪个 ARC 阶段
+     */
+    stage?: (number | null);
+    /**
+     * 字节数
+     */
+    size?: (number | null);
+    /**
+     * 最后修改时间
+     */
+    mtime?: (string | null);
+    mime?: (string | null);
+};
+
+/**
+ * 产物类别，前端可据此选渲染方式
+ */
+export type kind = 'paper_draft' | 'paper_final' | 'figure' | 'code' | 'data' | 'log' | 'state' | 'config' | 'other';
+
+/**
+ * 产物列表。
+ */
+export type ResearchArtifactListResponse = {
+    session_id: string;
+    run_dir: (string | null);
+    items?: Array<ResearchArtifactItem>;
+};
+
+/**
+ * 翻译单个产物文件的请求体（入参对齐 ``ResearchAnalysisGenerateRequest``）。
+ */
+export type ResearchArtifactTranslateRequest = {
+    /**
+     * 目标翻译语言：'zh' 中文，'en' 英文
+     */
+    target_language?: 'zh' | 'en';
+    /**
+     * LLM Provider：空/'default' 用用户默认，'mock' 走 mock，或真实 UUID
+     */
+    provider_id?: (string | null);
+    /**
+     * 模型名；为空用 Provider 默认模型
+     */
+    model_name?: (string | null);
+    /**
+     * 强制翻译开关：True 时不读缓存、重新翻译（覆盖同源缓存）
+     */
+    force?: boolean;
+};
+
+/**
+ * 目标翻译语言：'zh' 中文，'en' 英文
+ */
+export type target_language = 'zh' | 'en';
+
+/**
+ * 翻译受理响应：``cached`` 带全文；``translating`` 需连 SSE 拉增量。
+ */
+export type ResearchArtifactTranslateResponse = {
+    session_id: string;
+    /**
+     * 相对 run_dir 的路径
+     */
+    path: string;
+    status: 'cached' | 'translating';
+    /**
+     * 源文件内容哈希；SSE 流按此键控
+     */
+    source_hash: string;
+    target_language: string;
+    /**
+     * 命中缓存时的译文全文；translating 时为 None
+     */
+    content?: (string | null);
+};
+
+export type status2 = 'cached' | 'translating';
+
+/**
+ * 翻译停止响应：``stopped`` 已中断在跑任务；``idle`` 无任务可停。
+ */
+export type ResearchArtifactTranslateStopResponse = {
+    session_id: string;
+    /**
+     * 源文件内容哈希；SSE 流按此键控
+     */
+    source_hash: string;
+    target_language: string;
+    status: 'stopped' | 'idle';
+};
+
+export type status3 = 'stopped' | 'idle';
+
+/**
+ * 产物目录树节点。
+ */
+export type ResearchArtifactTreeNode = {
+    name: string;
+    path: string;
+    is_dir: boolean;
+    size?: (number | null);
+    mtime?: (string | null);
+    children?: Array<ResearchArtifactTreeNode>;
+};
+
+/**
+ * 产物目录树响应。
+ */
+export type ResearchArtifactTreeResponse = {
+    session_id: string;
+    run_dir: (string | null);
+    root?: (ResearchArtifactTreeNode | null);
+};
+
+/**
+ * 覆写产物文件内容（门控编辑）。
+ */
+export type ResearchArtifactWriteRequest = {
+    /**
+     * 文件新全文（UTF-8）
+     */
+    content: string;
+};
+
+/**
+ * 覆写产物文件的结果。
+ */
+export type ResearchArtifactWriteResponse = {
+    session_id: string;
+    /**
+     * 相对 run_dir 的路径
+     */
+    path: string;
+    /**
+     * 写入后字节数
+     */
+    size: number;
+};
+
+/**
+ * 向常驻协作 agent 发一条消息（answer 问题 / 改 stage 产物）。
+ *
+ * 只要**流水线没在跑**（session 非 ``running``）就能发——pending / paused（门控中）
+ * / 终态皆可。协作是与门控按钮平行的独立通道：agent 只读写 ``stage-NN/`` 产物 +
+ * 答疑，**不推进流水线、不改 session 主状态**。``stage`` 缺省时后端按
+ * 当前门控 stage > ``session.active_stage`` > 0 推断。
+ */
+export type ResearchCollabStartRequest = {
+    /**
+     * 发给 agent 的消息
+     */
+    message: string;
+    /**
+     * 协作针对的 stage 号；缺省由后端推断
+     */
+    stage?: (number | null);
+};
+
+/**
+ * 发起协作后的响应：新建的 COLLABORATING turn + 用户消息回显。
+ */
+export type ResearchCollabStartResponse = {
+    session: ResearchSessionItem;
+    turn: ResearchTurnItem;
+    user_message: ResearchMessageItem;
+};
+
+/**
+ * 删除操作的响应（会话 / 文件夹）。
+ */
+export type ResearchDeleteResponse = {
+    id: string;
+    message?: string;
+};
+
+/**
+ * 新建文件夹的请求体。
+ */
+export type ResearchFolderCreateRequest = {
+    /**
+     * 文件夹名
+     */
+    name: string;
+    /**
+     * 父文件夹 ID，None 表示根
+     */
+    parent_id?: (string | null);
+    /**
+     * 同级排序权重
+     */
+    sort_order?: number;
+};
+
+/**
+ * 文件夹响应模型。
+ */
+export type ResearchFolderItem = {
+    id: string;
+    user_id: string;
+    parent_id: (string | null);
+    name: string;
+    sort_order: number;
+    /**
+     * 该文件夹直接归属的会话数（不含子文件夹内的）
+     */
+    session_count?: number;
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * 扁平文件夹列表（前端可自选按 parent 组织树）。
+ */
+export type ResearchFolderListResponse = {
+    items?: Array<ResearchFolderItem>;
+    total?: number;
+    /**
+     * 未归属任何文件夹的会话数量
+     */
+    ungrouped_session_count?: number;
+};
+
+/**
+ * 批量重排单条：只需 id + 新 sort_order。
+ */
+export type ResearchFolderReorderItem = {
+    id: string;
+    sort_order: number;
+};
+
+/**
+ * `POST /folders/reorder` 请求体：一次性重排多个文件夹。
+ */
+export type ResearchFolderReorderRequest = {
+    /**
+     * 要重排的文件夹列表；未列出的不动
+     */
+    items: Array<ResearchFolderReorderItem>;
+};
+
+/**
+ * 树形节点，含子节点与该文件夹直接归属的会话数量。
+ */
+export type ResearchFolderTreeNode = {
+    id: string;
+    parent_id: (string | null);
+    name: string;
+    sort_order: number;
+    session_count?: number;
+    children?: Array<ResearchFolderTreeNode>;
+};
+
+/**
+ * `GET /folders/tree` 响应：嵌套树 + 未归属会话计数。
+ */
+export type ResearchFolderTreeResponse = {
+    tree?: Array<ResearchFolderTreeNode>;
+    ungrouped_session_count?: number;
+};
+
+/**
+ * 改文件夹（改名、移动、排序）。
+ */
+export type ResearchFolderUpdateRequest = {
+    name?: (string | null);
+    /**
+     * 新的父文件夹 ID。传 None 且请求体显式包含该键时移到根；未提供该键则不改变。
+     */
+    parent_id?: (string | null);
+    sort_order?: (number | null);
+};
+
+/**
+ * 单个 ``generated*.json`` 解，内容内联且已剥离大字段。
+ *
+ * 剥离策略复用演化任务持久化的
+ * :data:`app.utils.log_persist.LIST_STRIPPED_GENERATED_FIELDS`
+ * （``code_artifacts`` / ``generation_meta`` / ``worktree`` / ``description``
+ * 置空），避免整段源码/长文本撑爆响应。
+ */
+export type ResearchGeneratedItem = {
+    /**
+     * 相对 run_dir 的路径，可直接用于 /artifacts/download
+     */
+    path: string;
+    /**
+     * 文件名
+     */
+    name: string;
+    /**
+     * 来自哪个 ARC 阶段
+     */
+    stage?: (number | null);
+    /**
+     * llm4ad 演化 run 短 id（路径中 generated 的上一级目录名）
+     */
+    run_id?: (string | null);
+    /**
+     * 字节数
+     */
+    size?: (number | null);
+    /**
+     * 最后修改时间
+     */
+    mtime?: (string | null);
+    /**
+     * 剥离大字段后的解内容；解析失败为 null
+     */
+    data?: ({
+    [key: string]: unknown;
+} | null);
+};
+
+/**
+ * 所有 generated 解，内容内联、按 stage 分组。
+ */
+export type ResearchGeneratedResponse = {
+    session_id: string;
+    run_dir: (string | null);
+    groups?: Array<ResearchGeneratedStageGroup>;
+};
+
+/**
+ * 按 stage 分组的 generated 解。
+ */
+export type ResearchGeneratedStageGroup = {
+    /**
+     * stage 号；无法解析为 null
+     */
+    stage?: (number | null);
+    items?: Array<ResearchGeneratedItem>;
+};
+
+/**
+ * LLM4AD workspace 引用的三种形态。
+ */
+export type ResearchLLM4ADWorkspaceRef = {
+    /**
+     * task_ref: 引用现有调参任务；inline: 前端直接内联 LLM4AD AppConfig；upload: 走 upload-file 端点上传后传相对路径
+     */
+    kind: 'task_ref' | 'inline' | 'upload';
+    /**
+     * task_ref 用
+     */
+    task_id?: (string | null);
+    /**
+     * inline 用；结构与 LLM4AD AppConfig.from_dict 一致
+     */
+    config?: ({
+    [key: string]: unknown;
+} | null);
+    /**
+     * upload 用；相对 session 数据目录的路径
+     */
+    path?: (string | null);
+};
+
+/**
+ * task_ref: 引用现有调参任务；inline: 前端直接内联 LLM4AD AppConfig；upload: 走 upload-file 端点上传后传相对路径
+ */
+export type kind2 = 'task_ref' | 'inline' | 'upload';
+
+/**
+ * 单条消息。
+ */
+export type ResearchMessageItem = {
+    id: string;
+    session_id: string;
+    turn_id: string;
+    role: ResearchMessageRole;
+    content: string;
+    turn_status: ResearchTurnStatus;
+    error?: (string | null);
+    payload?: ({
+    [key: string]: unknown;
+} | null);
+    payload_locked?: boolean;
+    payload_locked_at?: (string | null);
+    payload_submission?: ({
+    [key: string]: unknown;
+} | null);
+    stage?: (number | null);
+    event_type?: (string | null);
+    event_key?: string;
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * `/turns/{tid}/messages` 分页响应。
+ *
+ * 正序游标翻页：``cursor`` = 上一页最后一条的 ``created_time`` ISO 字符串，
+ * 首次不传；``next_cursor`` 为 ``None`` 时表示无更多数据。
+ */
+export type ResearchMessageListResponse = {
+    items: Array<ResearchMessageItem>;
+    next_cursor?: (string | null);
+    has_more?: boolean;
+};
+
+/**
+ * 会话消息角色。
+ */
+export type ResearchMessageRole = 'user' | 'assistant' | 'system';
+
+/**
+ * ARC 执行模式（映射到 ``researchclaw run --mode``）。
+ *
+ * 与 ARC 的 ``PROJECT_MODES`` / 常见 CLI 值保持一致；未列出的值前端不给出，
+ * 但 backend 允许透传以便未来 ARC 升级新增模式无需 backend 同步改动。
+ */
+export type ResearchMode = 'full-auto' | 'gate-only' | 'checkpoint' | 'step-by-step' | 'co-pilot' | 'express' | 'thorough' | 'learning';
+
+/**
+ * 创建会话（不立即触发首轮）。
+ */
+export type ResearchSessionCreateRequest = {
+    /**
+     * 会话显示名；缺省时后端用 topic 前 60 字符生成
+     */
+    title?: (string | null);
+    /**
+     * 研究问题 / 主题
+     */
+    topic: string;
+    /**
+     * ARC domain profile id
+     */
+    profile?: string;
+    /**
+     * ARC HITL 模式
+     */
+    mode?: ResearchMode;
+    /**
+     * 归属分组，可选
+     */
+    folder_id?: (string | null);
+    /**
+     * 默认 LLM Provider（支持 'default' / 'mock' / UUID）
+     */
+    provider_id?: (string | null);
+    model_name?: (string | null);
+    /**
+     * LLM4AD workspace 引用；缺省时首轮会引导用户补齐
+     */
+    llm4ad_workspace?: (ResearchLLM4ADWorkspaceRef | null);
+};
+
+/**
+ * 会话详情 + 分页消息 + 最近一轮。
+ */
+export type ResearchSessionDetailResponse = {
+    session: ResearchSessionItem;
+    active_turn?: (ResearchTurnItem | null);
+    messages?: Array<ResearchMessageItem>;
+    /**
+     * 是否还有更早的历史消息；True 时用最早一条 id 做 before 游标
+     */
+    has_more?: boolean;
+};
+
+/**
+ * 会话响应模型。
+ */
+export type ResearchSessionItem = {
+    id: string;
+    user_id: string;
+    folder_id: (string | null);
+    title: string;
+    topic: string;
+    profile: string;
+    mode: string;
+    provider_id: (string | null);
+    model_name: (string | null);
+    status: ResearchSessionStatus;
+    active_turn_id: (string | null);
+    active_stage: (number | null);
+    active_stage_name: (string | null);
+    run_dir: (string | null);
+    best_objective: (number | null);
+    best_code_sha256: (string | null);
+    ended_time: (string | null);
+    error: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * 会话分页列表（游标分页，与 turn/message 列表统一）。
+ */
+export type ResearchSessionListResponse = {
+    items?: Array<ResearchSessionItem>;
+    /**
+     * 下一页游标 = 本页最后一条的 updated_time ISO；None 表示无更多
+     */
+    next_cursor?: (string | null);
+    has_more?: boolean;
+};
+
+/**
+ * `/sessions/{sid}/messages` 会话级消息分页响应。
+ *
+ * 与 ``ResearchSessionDetailResponse.messages`` 同款翻页语义（``before``/倒序
+ * 游标，返回时升序），但脱离会话详情单独成端点：供消息列表与日志面板各自带
+ * ``event_type`` 过滤、各自分页，互不饥饿。``messages`` 升序（最旧在前）；
+ * ``has_more`` 为 True 时用最早一条 ``id`` 作 ``before`` 继续往前翻。
+ */
+export type ResearchSessionMessagesResponse = {
+    messages?: Array<ResearchMessageItem>;
+    /**
+     * 是否还有更早的历史消息；True 时用最早一条 id 做 before 游标
+     */
+    has_more?: boolean;
+};
+
+/**
+ * 会话整体状态。
+ *
+ * 状态机：
+ * ``PENDING``（新建，未触发首轮） → ``RUNNING`` → 三个可暂停终态之一
+ * （``PAUSED`` 等待用户输入 / ``COMPLETED`` 23 阶段跑完 /
+ * ``FAILED`` 异常终止 / ``CANCELLED`` 用户主动停止）。
+ *
+ * ``PAUSED`` 是「非终止的暂停」，可以再次 ``POST /turns`` 恢复运行；
+ * 其余三态是终止态但仍允许 ``retry`` 或删除。
+ */
+export type ResearchSessionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * 更新会话（改名 / 移动分组 / 改默认 provider / 改 mode / 改 topic 等）。
+ */
+export type ResearchSessionUpdateRequest = {
+    title?: (string | null);
+    /**
+     * 研究主题/问题
+     */
+    topic?: (string | null);
+    /**
+     * ARC domain profile id（如 ml_vision）；未提供不变
+     */
+    profile?: (string | null);
+    /**
+     * 传 None 且请求体显式包含该键时移到未分组；未提供不变
+     */
+    folder_id?: (string | null);
+    mode?: (ResearchMode | null);
+    provider_id?: (string | null);
+    model_name?: (string | null);
+};
+
+/**
+ * `POST /sessions/{sid}/stages/{stage_num}/guide` 请求体。
+ */
+export type ResearchStageGuideRequest = {
+    /**
+     * 要注入的引导文本；ARC 下次跑到该 stage 时读取并注入 prompt
+     */
+    message: string;
+};
+
+/**
+ * `POST /guide` 响应。
+ */
+export type ResearchStageGuideResponse = {
+    session_id: string;
+    stage: number;
+    length: number;
+    guidance_path: string;
+};
+
+/**
+ * 单个阶段的状态快照。
+ */
+export type ResearchStageSnapshot = {
+    stage: number;
+    name: string;
+    status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
+    started_at?: (string | null);
+    ended_at?: (string | null);
+    error?: (string | null);
+};
+
+export type status4 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
+
+/**
+ * 会话当前状态的结构化快照。
+ *
+ * 比 SSE 流更"高层"：只有当前阶段号 + 进度、最优个体、最近关键 metrics。
+ * 前端列表页 / 详情页头部展示用。
+ */
+export type ResearchStateResponse = {
+    session_id: string;
+    status: ResearchSessionStatus;
+    active_stage: (number | null);
+    active_stage_name: (string | null);
+    stages?: Array<ResearchStageSnapshot>;
+    best_objective?: (number | null);
+    best_code_sha256?: (string | null);
+    metrics?: {
+        [key: string]: unknown;
+    };
+    hypotheses?: {
+        [key: string]: unknown;
+    };
+    updated_at?: (string | null);
+};
+
+/**
+ * 轮次响应模型。
+ */
+export type ResearchTurnItem = {
+    id: string;
+    session_id: string;
+    celery_task_id: (string | null);
+    status: ResearchTurnStatus;
+    provider_id: (string | null);
+    model_name: (string | null);
+    mode: (string | null);
+    from_stage: (string | null);
+    to_stage: (string | null);
+    user_input: (string | null);
+    respond_to_message_id: (string | null);
+    error: (string | null);
+    started_at: (string | null);
+    ended_at: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * `/sessions/{sid}/turns` 分页响应，倒序（最新的在前）。
+ */
+export type ResearchTurnListResponse = {
+    items: Array<ResearchTurnItem>;
+    next_cursor?: (string | null);
+    has_more?: boolean;
+};
+
+/**
+ * 重跑一个失败 / 停止的轮次。
+ */
+export type ResearchTurnRetryRequest = {
+    provider_id?: (string | null);
+    model_name?: (string | null);
+    mode?: (ResearchMode | null);
+};
+
+/**
+ * 触发新一轮（首启 / stop 后 resume / 表单回填 均走这里）。
+ *
+ * 三种触发方式：
+ * - 首启会话（``session.status == PENDING``）：只需 ``content`` 或直接空
+ * body（会话已带 topic）。
+ * - stop 后继续：可携带 ``content`` 追加消息；也可直接空 body 走 resume
+ * 语义（复用会话现有 topic + 现有 workspace）。
+ * - 表单回填：填 ``respond_to_message_id + submission``，``content`` 可省略。
+ *
+ * ``provider_id``/``model_name``/``mode``/``from_stage``/``to_stage`` 允许覆盖
+ * 会话默认值，本轮生效但不写回 session（用户下次不指定则回退到 session 默认）。
+ */
+export type ResearchTurnStartRequest = {
+    content?: (string | null);
+    respond_to_message_id?: (string | null);
+    /**
+     * 表单提交值；与 respond_to_message_id 必须同时出现或同时缺省
+     */
+    submission?: ({
+    [key: string]: unknown;
+} | null);
+    provider_id?: (string | null);
+    model_name?: (string | null);
+    mode?: (ResearchMode | null);
+    /**
+     * ARC --from-stage
+     */
+    from_stage?: (string | null);
+    /**
+     * ARC --to-stage
+     */
+    to_stage?: (string | null);
+};
+
+/**
+ * 触发新一轮后的响应。
+ */
+export type ResearchTurnStartResponse = {
+    session: ResearchSessionItem;
+    turn: ResearchTurnItem;
+    user_message?: (ResearchMessageItem | null);
+    assistant_message: ResearchMessageItem;
+    /**
+     * 若本轮由表单提交触发，被锁定的旧 assistant 消息（最新状态）
+     */
+    locked_message?: (ResearchMessageItem | null);
+};
+
+/**
+ * 单轮生成状态。
+ *
+ * - ``RUNNING``：ARC subprocess 运行中。
+ * - ``PAUSED_GATE``：命中硬门控、释放 worker，等用户回复后新建一轮续跑。
+ * - ``COLLABORATING``：门控暂停时发起的「人 + AI 协作改产物」子会话，不推进 pipeline。
+ * - ``COMPLETED`` / ``FAILED`` / ``CANCELLED``：终态。
+ */
+export type ResearchTurnStatus = 'running' | 'paused_gate' | 'collaborating' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * 停止轮次的响应。
+ */
+export type ResearchTurnStopResponse = {
+    session_id: string;
+    turn_id: string;
+    status: ResearchTurnStatus;
+    message: string;
+};
+
+/**
  * 重新发送验证码请求。
  */
 export type ResendVerifyCodeRequest = {
@@ -3195,6 +4080,335 @@ export type Llm4AdReportsGetRecommendData = {
 };
 
 export type Llm4AdReportsGetRecommendResponse = (AdvisorDetailResponse);
+
+export type Llm4AdResearchListFoldersResponse = (ResearchFolderListResponse);
+
+export type Llm4AdResearchCreateFolderData = {
+    requestBody: ResearchFolderCreateRequest;
+};
+
+export type Llm4AdResearchCreateFolderResponse = (ResearchFolderItem);
+
+export type Llm4AdResearchGetFolderTreeResponse = (ResearchFolderTreeResponse);
+
+export type Llm4AdResearchReorderFoldersData = {
+    requestBody: ResearchFolderReorderRequest;
+};
+
+export type Llm4AdResearchReorderFoldersResponse = (Array<ResearchFolderItem>);
+
+export type Llm4AdResearchUpdateFolderData = {
+    folderId: string;
+    requestBody: ResearchFolderUpdateRequest;
+};
+
+export type Llm4AdResearchUpdateFolderResponse = (ResearchFolderItem);
+
+export type Llm4AdResearchDeleteFolderData = {
+    folderId: string;
+};
+
+export type Llm4AdResearchDeleteFolderResponse = (ResearchDeleteResponse);
+
+export type Llm4AdResearchListSessionsData = {
+    /**
+     * 上一页最后一条的 updated_time ISO；首次不传
+     */
+    cursor?: (string | null);
+    /**
+     * 按分组过滤；不传且不指定 ungrouped 则返回全部
+     */
+    folderId?: (string | null);
+    limit?: number;
+    /**
+     * 关键词搜索：对 topic + title 做大小写不敏感模糊匹配（ILIKE）
+     */
+    q?: (string | null);
+    /**
+     * 按 session 状态过滤，可传多个；不传 = 全部状态
+     */
+    statuses?: (Array<ResearchSessionStatus> | null);
+    /**
+     * 仅返回未归属分组的会话，忽略 folder_id
+     */
+    ungrouped?: boolean;
+};
+
+export type Llm4AdResearchListSessionsResponse = (ResearchSessionListResponse);
+
+export type Llm4AdResearchCreateSessionData = {
+    requestBody: ResearchSessionCreateRequest;
+};
+
+export type Llm4AdResearchCreateSessionResponse = (ResearchSessionItem);
+
+export type Llm4AdResearchGetSessionData = {
+    /**
+     * 消息游标：返回该消息之前（更早）的消息
+     */
+    before?: (string | null);
+    /**
+     * 是否附带一页历史消息；推荐前端走独立的 /messages 端点做分页
+     */
+    includeMessages?: boolean;
+    limit?: number;
+    sessionId: string;
+};
+
+export type Llm4AdResearchGetSessionResponse = (ResearchSessionDetailResponse);
+
+export type Llm4AdResearchUpdateSessionData = {
+    requestBody: ResearchSessionUpdateRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchUpdateSessionResponse = (ResearchSessionItem);
+
+export type Llm4AdResearchDeleteSessionData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchDeleteSessionResponse = (ResearchDeleteResponse);
+
+export type Llm4AdResearchListSessionMessagesData = {
+    /**
+     * 消息游标：返回该消息之前（更早）的消息
+     */
+    before?: (string | null);
+    /**
+     * 白名单：只保留这些类型（日志面板传 log）；空则不限
+     */
+    eventType?: (Array<(string)> | null);
+    /**
+     * 黑名单：剔除这些类型（消息列表传 log 排除日志）；空则不剔除
+     */
+    excludeEventType?: (Array<(string)> | null);
+    limit?: number;
+    sessionId: string;
+};
+
+export type Llm4AdResearchListSessionMessagesResponse = (ResearchSessionMessagesResponse);
+
+export type Llm4AdResearchStartTurnData = {
+    requestBody: ResearchTurnStartRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchStartTurnResponse = (ResearchTurnStartResponse);
+
+export type Llm4AdResearchListTurnsData = {
+    /**
+     * 上一页最后一条的 created_time ISO
+     */
+    cursor?: (string | null);
+    /**
+     * 每页条数
+     */
+    limit?: number;
+    sessionId: string;
+};
+
+export type Llm4AdResearchListTurnsResponse = (ResearchTurnListResponse);
+
+export type Llm4AdResearchStopTurnData = {
+    sessionId: string;
+    turnId: string;
+};
+
+export type Llm4AdResearchStopTurnResponse = (ResearchTurnStopResponse);
+
+export type Llm4AdResearchRetryTurnData = {
+    requestBody?: ResearchTurnRetryRequest;
+    sessionId: string;
+    turnId: string;
+};
+
+export type Llm4AdResearchRetryTurnResponse = (ResearchTurnStartResponse);
+
+export type Llm4AdResearchStartCollabData = {
+    requestBody: ResearchCollabStartRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchStartCollabResponse = (ResearchCollabStartResponse);
+
+export type Llm4AdResearchGetTurnData = {
+    sessionId: string;
+    turnId: string;
+};
+
+export type Llm4AdResearchGetTurnResponse = (ResearchTurnItem);
+
+export type Llm4AdResearchListTurnMessagesData = {
+    /**
+     * 上一页最后一条的 created_time ISO
+     */
+    cursor?: (string | null);
+    /**
+     * 按事件类型过滤，多值：log/stage_transition/...
+     */
+    eventType?: (Array<(string)> | null);
+    /**
+     * 每页条数
+     */
+    limit?: number;
+    /**
+     * 按 role 过滤：user/assistant/system
+     */
+    role?: (ResearchMessageRole | null);
+    sessionId: string;
+    turnId: string;
+};
+
+export type Llm4AdResearchListTurnMessagesResponse = (ResearchMessageListResponse);
+
+export type Llm4AdResearchStreamTurnData = {
+    /**
+     * 标准 SSE 断线重连头；若 query 没传 last_id 则退回本 header
+     */
+    lastEventId?: (string | null);
+    /**
+     * 上次收到的 Redis Stream ID；断线续传用。默认 "0-0" 从头重放
+     */
+    lastId?: (string | null);
+    sessionId: string;
+    turnId: string;
+};
+
+export type Llm4AdResearchStreamTurnResponse = (unknown);
+
+export type Llm4AdResearchInjectStageGuidanceData = {
+    requestBody: ResearchStageGuideRequest;
+    sessionId: string;
+    stageNum: number;
+};
+
+export type Llm4AdResearchInjectStageGuidanceResponse = (ResearchStageGuideResponse);
+
+export type Llm4AdResearchListArtifactsData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchListArtifactsResponse = (ResearchArtifactListResponse);
+
+export type Llm4AdResearchArtifactTreeData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchArtifactTreeResponse = (ResearchArtifactTreeResponse);
+
+export type Llm4AdResearchDownloadArtifactData = {
+    /**
+     * 相对 run_dir 的路径
+     */
+    path: string;
+    sessionId: string;
+};
+
+export type Llm4AdResearchDownloadArtifactResponse = (unknown);
+
+export type Llm4AdResearchTranslateArtifactData = {
+    /**
+     * 相对 run_dir 的路径，如 stage-05/outline.md
+     */
+    path: string;
+    requestBody: ResearchArtifactTranslateRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchTranslateArtifactResponse = (ResearchArtifactTranslateResponse);
+
+export type Llm4AdResearchStopTranslateArtifactData = {
+    sessionId: string;
+    /**
+     * POST /translate 返回的源文件哈希
+     */
+    sourceHash: string;
+    /**
+     * 目标语言：'zh' / 'en'
+     */
+    targetLanguage?: string;
+};
+
+export type Llm4AdResearchStopTranslateArtifactResponse = (ResearchArtifactTranslateStopResponse);
+
+export type Llm4AdResearchStreamTranslateData = {
+    sessionId: string;
+    /**
+     * POST /translate 返回的源文件哈希
+     */
+    sourceHash: string;
+    /**
+     * 目标语言：'zh' / 'en'
+     */
+    targetLanguage?: string;
+};
+
+export type Llm4AdResearchStreamTranslateResponse = (unknown);
+
+export type Llm4AdResearchDownloadArtifactsArchiveData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchDownloadArtifactsArchiveResponse = (unknown);
+
+export type Llm4AdResearchWriteArtifactData = {
+    /**
+     * 相对 run_dir 的路径，如 stage-05/outline.md
+     */
+    path: string;
+    requestBody: ResearchArtifactWriteRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchWriteArtifactResponse = (ResearchArtifactWriteResponse);
+
+export type Llm4AdResearchListGeneratedData = {
+    sessionId: string;
+    /**
+     * 仅返回该 stage 的解；不传返回全部
+     */
+    stage?: (number | null);
+};
+
+export type Llm4AdResearchListGeneratedResponse = (ResearchGeneratedResponse);
+
+export type Llm4AdResearchGetStateData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchGetStateResponse = (ResearchStateResponse);
+
+export type Llm4AdResearchDownloadArcConfigData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchDownloadArcConfigResponse = (unknown);
+
+export type Llm4AdResearchGetAnalysisData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchGetAnalysisResponse = (ResearchAnalysisDetailResponse);
+
+export type Llm4AdResearchGenerateAnalysisData = {
+    requestBody: ResearchAnalysisGenerateRequest;
+    sessionId: string;
+};
+
+export type Llm4AdResearchGenerateAnalysisResponse = (ResearchAnalysisGenerateResponse);
+
+export type Llm4AdResearchStopAnalysisData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchStopAnalysisResponse = (ResearchAnalysisStopResponse);
+
+export type Llm4AdResearchStreamAnalysisData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchStreamAnalysisResponse = (unknown);
 
 export type Llm4AdTasksListExampleTemplatesResponse = (ExampleTemplateListResponse);
 
