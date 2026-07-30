@@ -101,6 +101,10 @@ function AutoResearchLayout() {
             >
               {t("autoResearch.header.brand")}
             </a>
+            {/* Beta 标志：提示此功能仍在早期测试阶段 */}
+            <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 leading-none shrink-0 select-none">
+              Beta
+            </span>
             {/* 侧栏收起时：logo 右侧注入会话/分组切换器 */}
             {headerLeft}
           </div>

@@ -181,6 +181,7 @@ def resolve_provider_for_arc(
             "primary_model": resolved_model or raw_model or "gpt-4o",
             "api_key": provider.api_key or provider.auth_token or "",
             "auth_token": provider.auth_token or "",
+            "timeout": provider.timeout,
         }
 
 
@@ -215,6 +216,7 @@ def proxy_provider_for_arc(
         api_key=provider_config.get("api_key") or "",
         auth_token=provider_config.get("auth_token") or "",
         model=provider_config.get("primary_model", ""),
+        timeout=provider_config.get("timeout") or 60.0,
     )
     provider_config["api_key"] = token
     provider_config["auth_token"] = ""

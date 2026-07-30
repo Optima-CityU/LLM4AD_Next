@@ -163,6 +163,7 @@
   },
   "sidebar": {
     "projectManagement": "项目管理",
+    "autoResearch": "AutoResearch",
     "research": "研究",
     "globalConfig": "全局配置",
     "llmProvider": "模型供应商",

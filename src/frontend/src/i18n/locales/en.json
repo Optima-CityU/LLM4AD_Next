@@ -163,6 +163,7 @@
   },
   "sidebar": {
     "projectManagement": "Projects",
+    "autoResearch": "AutoResearch",
     "research": "Research",
     "globalConfig": "Configuration",
     "llmProvider": "LLM Providers",
