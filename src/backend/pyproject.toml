@@ -38,8 +38,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# uv sync --extra research
-research = ["researchclaw"]
+# uv sync --extra research; torch pinned to CPU index below.
+research = ["researchclaw", "torch>=2.2"]
 
 [tool.uv]
 # Drop xgboost's Linux-only NVIDIA NCCL dependency (~400 MB) from the backend
@@ -52,6 +52,13 @@ override-dependencies = ["nvidia-nccl-cu12; sys_platform == 'never'"]
 llm4ad-next = { path = "../..", editable = true }
 # ── AutoResearch (optional) ─────────────────────────────────────────────────
 researchclaw = { git = "https://github.com/y414987863/AutoResearchClawAD.git", branch = "dev/0.5.0-llm4ad" }
+torch = [{ index = "pytorch-cpu" }]
+
+# CPU-only torch wheels; explicit = only torch resolves here, rest stays on PyPI.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
