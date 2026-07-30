@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -57,6 +57,28 @@ def resolve_builtin_base_url(base_url: str | None, access_token: str | None = No
     for marker, value in replacements.items():
         resolved = resolved.replace(marker, value)
     return resolved
+
+
+def create_builtin_gateway_access_token(
+    user_id: uuid.UUID | str,
+    *,
+    ttl_seconds: int | None = None,
+) -> str:
+    """Create a task-scoped user token for background built-in model requests.
+
+    HTTP-triggered model calls reuse the caller's access token. Background jobs
+    do not retain that request context, so they need an equivalent token before
+    resolving the built-in gateway URL. The token lives no longer than the LLM
+    credential proxy token and is hidden behind that proxy during task execution.
+    """
+    from app.core.security import create_access_token
+
+    return create_access_token(
+        user_id,
+        expires_delta=timedelta(
+            seconds=ttl_seconds or settings.LLM_PROXY_TOKEN_TTL
+        ),
+    )
 
 
 def get_provider_with_auth(db: Session, provider_id: uuid.UUID, current_user: models.User) -> models.LLMProvider:

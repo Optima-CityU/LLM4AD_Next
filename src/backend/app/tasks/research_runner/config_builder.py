@@ -124,7 +124,12 @@ def resolve_provider_for_arc(
         （``UserDefaultModel.report_provider_id``）或最终 mock 兜底
       - 真实 UUID → 查 ``LLMProvider`` 表
     """
+    from app.core.config import settings
     from app.models import LLMProvider
+    from app.services.provider_service import (
+        create_builtin_gateway_access_token,
+        resolve_builtin_base_url,
+    )
     from app.services.user_default_model_service import get_user_default_model
 
     def _mock() -> dict[str, Any]:
@@ -173,9 +178,18 @@ def resolve_provider_for_arc(
             "openai-compatible",
         )
         raw_model = (provider.model or "").split(";")[0].strip()
+        base_url = provider.base_url or "https://api.openai.com/v1"
+        if provider.is_builtin:
+            base_url = resolve_builtin_base_url(
+                base_url,
+                create_builtin_gateway_access_token(
+                    user_id,
+                    ttl_seconds=settings.RESEARCH_CONTAINER_TIMEOUT + 3600,
+                ),
+            )
         return {
             "provider": provider_type,
-            "base_url": provider.base_url or "https://api.openai.com/v1",
+            "base_url": base_url,
             "wire_api": "chat_completions",
             "api_key_env": ARC_API_KEY_ENV,
             "primary_model": resolved_model or raw_model or "gpt-4o",

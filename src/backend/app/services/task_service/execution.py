@@ -61,10 +61,15 @@ def _resolve_providers(
         处理后的 *input_args* 字典。
     """
     from app.models import LLMProvider
-    from app.services.provider_service import fetch_builtin_provider_models, resolve_builtin_base_url
+    from app.services.provider_service import (
+        create_builtin_gateway_access_token,
+        fetch_builtin_provider_models,
+        resolve_builtin_base_url,
+    )
     from app.services.user_default_model_service import get_user_default_model
 
     input_args["providers"] = []
+    runtime_access_token = access_token or create_builtin_gateway_access_token(current_user.id)
     providers = db.exec(
         select(LLMProvider).where(
             or_(
@@ -79,11 +84,11 @@ def _resolve_providers(
     for p in providers:
         base_url = p.base_url
         if p.is_builtin:
-            base_url = resolve_builtin_base_url(base_url, access_token)
+            base_url = resolve_builtin_base_url(base_url, runtime_access_token)
         if p.is_builtin:
             models_list = fetch_builtin_provider_models(
                 p,
-                access_token,
+                runtime_access_token,
                 user_id=str(current_user.id),
             )
         else:
@@ -131,7 +136,7 @@ def _resolve_providers(
     evaluator_provider = evaluator_config.get("provider", "default")
     evaluator_model = evaluator_config.get("provider_model", "")
 
-    defaults = get_user_default_model(db, current_user.id, access_token)
+    defaults = get_user_default_model(db, current_user.id, runtime_access_token)
 
     if not planner_provider or planner_provider == "default":
         if defaults and defaults.planner_provider_id and defaults.planner_model_name:
@@ -191,7 +196,7 @@ def _resolve_providers(
     input_args["planner"] = planner_config
     input_args["coder"] = coder_config
     input_args["evaluator"] = evaluator_config
-    embedding_config = _build_embedding_config(db, defaults, access_token)
+    embedding_config = _build_embedding_config(db, defaults, runtime_access_token)
     if embedding_config:
         input_args["embedding"] = embedding_config
         text_config = embedding_config.get("text_config") or {}

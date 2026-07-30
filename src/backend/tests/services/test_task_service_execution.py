@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+from app.core.security import decode_access_token
 from app.models import (
     EmbeddingMode,
     EmbeddingProvider,
@@ -73,6 +74,83 @@ class _FakeDB:
         if model is EmbeddingProvider and self._embedding_provider and self._embedding_provider.id == item_id:
             return self._embedding_provider
         return None
+
+
+def test_resolve_providers_issues_gateway_token_without_http_context(monkeypatch):
+    user_id = uuid4()
+    provider_id = uuid4()
+    embedding_provider_id = uuid4()
+    gateway_url = "http://gateway:9090/litellm_proxy/${TEAM_ID}/{accessToken}/v1"
+    provider = LLMProvider(
+        id=provider_id,
+        user_id=None,
+        name="Builtin LiteLLM",
+        type=ProviderType.OPENAI_COMPATIBLE,
+        api_key="EMPTY",
+        base_url=gateway_url,
+        model="test-model",
+        is_builtin=True,
+        visible_to_all=True,
+    )
+    embedding_provider = EmbeddingProvider(
+        id=embedding_provider_id,
+        user_id=None,
+        name="Builtin Embedding",
+        type=EmbeddingProviderType.OPENAI_COMPATIBLE,
+        mode=EmbeddingMode.SHARED,
+        api_key="EMPTY",
+        base_url=gateway_url,
+        model="test-embedding",
+        dim=1536,
+        is_builtin=True,
+        visible_to_all=True,
+    )
+    defaults = SimpleNamespace(
+        planner_provider_id=provider_id,
+        planner_model_name="test-model",
+        coder_provider_id=provider_id,
+        coder_model_name="test-model",
+        other_provider_id=provider_id,
+        other_model_name="test-model",
+        embedding_enabled=True,
+        embedding_provider_id=embedding_provider_id,
+    )
+    observed_tokens = []
+
+    monkeypatch.setattr(task_service.settings, "TEAM_ID", "team-123", raising=False)
+    monkeypatch.setattr(
+        "app.services.user_default_model_service.get_user_default_model",
+        lambda _db, _user_id, access_token=None: defaults,
+    )
+
+    def fake_fetch(_provider, access_token, **_kwargs):
+        observed_tokens.append(access_token)
+        return ["test-model"]
+
+    monkeypatch.setattr(
+        "app.services.provider_service.fetch_builtin_provider_models", fake_fetch
+    )
+
+    resolved = task_service._resolve_providers(
+        _FakeDB([provider], embedding_provider),
+        {
+            "planner": {"provider": "default", "provider_model": ""},
+            "coder": {"provider": "default", "provider_model": ""},
+            "evaluator": {"provider": "default", "provider_model": ""},
+        },
+        SimpleNamespace(id=user_id),
+        access_token=None,
+    )
+
+    assert len(observed_tokens) == 1
+    gateway_token = observed_tokens[0]
+    assert gateway_token
+    payload = decode_access_token(gateway_token)
+    assert payload is not None
+    assert payload["sub"] == str(user_id)
+    expected_url = f"http://gateway:9090/litellm_proxy/team-123/{gateway_token}/v1"
+    assert resolved["providers"][0]["base_url"] == expected_url
+    assert resolved["embedding"]["base_url"] == expected_url
 
 
 def test_resolve_providers_uses_dynamic_builtin_models_for_default_slots(monkeypatch):
