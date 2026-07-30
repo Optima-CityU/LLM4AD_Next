@@ -158,6 +158,13 @@ def delete_task_logs(task_id: str | uuid.UUID) -> None:
 REPORT_GEN_PREFIX = "report_gen:"
 REPORT_GEN_TTL = 600  # 10 minutes safety TTL
 
+_CLEAR_REPORT_GENERATION_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
 REPORT_STREAM_PREFIX = "report_stream:"
 REPORT_STREAM_TTL = 3600  # 1 hour
 REPORT_STREAM_MAXLEN = 10000
@@ -189,10 +196,24 @@ def get_report_generation_id(task_id: str | uuid.UUID, report_type: str) -> str 
     return r.get(report_gen_key(task_id, report_type))
 
 
-def clear_report_generation_id(task_id: str | uuid.UUID, report_type: str) -> None:
-    """清除当前报告生成 ID。"""
+def clear_report_generation_id(
+    task_id: str | uuid.UUID,
+    report_type: str,
+    generation_id: str | None = None,
+) -> bool:
+    """清除报告生成 ID；传入 generation ID 时仅清除调用者自己的值。"""
     r = get_sync_redis()
-    r.delete(report_gen_key(task_id, report_type))
+    key = report_gen_key(task_id, report_type)
+    if generation_id is None:
+        return bool(r.delete(key))
+    return bool(
+        r.eval(
+            _CLEAR_REPORT_GENERATION_SCRIPT,
+            1,
+            key,
+            generation_id,
+        )
+    )
 
 
 def push_report_chunk(task_id: str | uuid.UUID, report_type: str, entry: dict) -> None:

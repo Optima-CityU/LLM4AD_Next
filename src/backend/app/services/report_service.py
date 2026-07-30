@@ -203,15 +203,18 @@ def stop_report_generation(
     gen_id = get_report_generation_id(str(task_id), report_type)
     if not gen_id:
         report_data = (task.reports or {}).get(report_type)
-        if report_data and report_data.get("status") == ReportStatus.GENERATING.value:
-            _persist_report(task_id, report_type, ReportStatus.CANCELLED, None)
-        else:
+        if not report_data or report_data.get("status") != ReportStatus.GENERATING.value:
             raise HTTPException(
                 status_code=400,
                 detail="No active report generation to stop",
             )
+    elif not clear_report_generation_id(str(task_id), report_type, gen_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Report generation changed while stopping; please retry",
+        )
 
-    clear_report_generation_id(str(task_id), report_type)
+    _persist_report(task_id, report_type, ReportStatus.CANCELLED, None)
     push_report_chunk(
         str(task_id),
         report_type,
@@ -254,7 +257,6 @@ async def _run_report_generation(
     from llm4ad.infra.provider.base import BaseProvider
 
     content_buffer = ""
-    cancelled = False
     try:
         provider = BaseProvider.create(
             provider_config["type"],
@@ -298,15 +300,8 @@ async def _run_report_generation(
         async for chunk in provider.generate_stream(prompt):
             current_id = get_report_generation_id(str(task_id), report_type)
             if current_id != generation_id:
-                cancelled = True
                 logger.info(
                     f"Report generation cancelled: task_id={task_id}, type={report_type}, generation_id={generation_id}"
-                )
-                _persist_report(
-                    task_id,
-                    report_type,
-                    ReportStatus.CANCELLED,
-                    content_buffer,
                 )
                 return
 
@@ -317,6 +312,12 @@ async def _run_report_generation(
                 {"type": "chunk", "content": chunk},
             )
 
+        if get_report_generation_id(str(task_id), report_type) != generation_id:
+            logger.info(
+                f"Report generation cancelled before completion: task_id={task_id}, type={report_type}, generation_id={generation_id}"
+            )
+            return
+
         push_report_chunk(
             str(task_id),
             report_type,
@@ -326,11 +327,12 @@ async def _run_report_generation(
         _persist_report(task_id, report_type, ReportStatus.COMPLETED, content_buffer)
 
     except _ReportGenerationCancelled:
-        cancelled = True
-        _persist_report(task_id, report_type, ReportStatus.CANCELLED, content_buffer)
+        logger.info(
+            f"Report generation cancelled: task_id={task_id}, type={report_type}, generation_id={generation_id}"
+        )
 
     except Exception as exc:
-        if cancelled:
+        if get_report_generation_id(str(task_id), report_type) != generation_id:
             return
         logger.exception(f"Report generation failed: task_id={task_id}, type={report_type}")
         push_report_chunk(
@@ -340,8 +342,7 @@ async def _run_report_generation(
         )
         _persist_report(task_id, report_type, ReportStatus.FAILED, content_buffer, error=str(exc))
     finally:
-        if not cancelled:
-            clear_report_generation_id(str(task_id), report_type)
+        clear_report_generation_id(str(task_id), report_type, generation_id)
 
 
 def _persist_report(

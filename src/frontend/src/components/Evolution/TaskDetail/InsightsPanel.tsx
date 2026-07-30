@@ -40,6 +40,7 @@ import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { useReportStream } from "@/hooks/useReportStream"
 import { taskKeys } from "@/lib/task-queries"
 import { cn } from "@/lib/utils"
+import { resolveCurrentReport } from "./insights-report-state"
 import type { GANode } from "./island-ga-mock-data"
 import ReportMarkdown from "./ReportMarkdown"
 
@@ -220,7 +221,7 @@ export default function InsightsPanel({ task }: InsightsPanelProps) {
       activeType
     ]
     const fromQuery = reportQuery.data?.report
-    return fromTask ?? fromQuery ?? null
+    return resolveCurrentReport(fromTask, fromQuery)
   }, [task.reports, activeType, reportQuery.data])
 
   const templatesQuery = useQuery({
@@ -335,6 +336,7 @@ export default function InsightsPanel({ task }: InsightsPanelProps) {
         requestBody: req,
       }),
     onSuccess: () => {
+      setStreamingType(activeType)
       toast.success(t("evolution.insights.generateSuccess"))
       queryClient.invalidateQueries({
         queryKey: taskKeys.report(task.id, activeType),
