@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from types import ModuleType
 
@@ -91,3 +92,46 @@ async def test_hierarchical_summary_recursively_merges_chunks_and_reports_progre
     assert all(call["max_tokens"] == 321 for call in provider.calls)
     assert [event["stage"] for event in progress] == ["summarize"] * 3 + ["merge"]
     assert [event["round"] for event in progress] == [1, 1, 1, 2]
+
+
+async def test_hierarchical_summary_runs_at_most_five_requests_in_parallel():
+    class BlockingProvider:
+        def __init__(self):
+            self.active = 0
+            self.peak_active = 0
+            self.started = 0
+            self.first_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def generate(self, _prompt: str, **_kwargs):
+            self.active += 1
+            self.peak_active = max(self.peak_active, self.active)
+            self.started += 1
+            self.first_started.set()
+            try:
+                await self.release.wait()
+                return GenerationResult(text=f"summary-{self.started}")
+            finally:
+                self.active -= 1
+
+    provider = BlockingProvider()
+    summary_task = asyncio.create_task(
+        report_service._summarize_evolution_evidence(
+            provider,
+            [
+                {"node_id": f"node-{index}", "description": "x" * 80}
+                for index in range(6)
+            ],
+            on_progress=lambda _event: None,
+            max_chars=80,
+        )
+    )
+
+    await provider.first_started.wait()
+    await asyncio.sleep(0.01)
+    try:
+        assert provider.started == 5
+        assert provider.peak_active == 5
+    finally:
+        provider.release.set()
+        await summary_task

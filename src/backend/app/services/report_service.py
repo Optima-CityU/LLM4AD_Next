@@ -42,6 +42,7 @@ from app.services.task_service import get_task_with_auth
 SUMMARY_CHUNK_MAX_CHARS = 40_000
 INTERMEDIATE_SUMMARY_MAX_TOKENS = 4_096
 INTERMEDIATE_SUMMARY_MAX_CHARS = 16_000
+SUMMARY_MAX_CONCURRENCY = 5
 
 
 class _ReportGenerationCancelled(Exception):
@@ -751,6 +752,7 @@ async def _summarize_evolution_evidence(
     background: str = "",
     max_chars: int = SUMMARY_CHUNK_MAX_CHARS,
     max_tokens: int = INTERMEDIATE_SUMMARY_MAX_TOKENS,
+    max_concurrency: int = SUMMARY_MAX_CONCURRENCY,
 ) -> str:
     """Recursively summarize compact node evidence until one final summary remains."""
     items = [json.dumps(item, ensure_ascii=False, default=str) for item in evidence]
@@ -760,30 +762,50 @@ async def _summarize_evolution_evidence(
     round_number = 1
     while True:
         chunks = _pack_summary_items(items, max_chars)
-        summaries: list[str] = []
         stage = "summarize" if round_number == 1 else "merge"
+        semaphore = asyncio.Semaphore(max(1, max_concurrency))
+        completed = 0
+        total_chunks = len(chunks)
 
-        for index, chunk in enumerate(chunks, start=1):
-            if is_cancelled and is_cancelled():
-                raise _ReportGenerationCancelled
-            on_progress(
-                {
-                    "stage": stage,
-                    "round": round_number,
-                    "completed": index,
-                    "total": len(chunks),
-                }
-            )
-            result = await provider.generate(
-                _build_intermediate_summary_prompt(chunk, round_number, background),
-                max_tokens=max_tokens,
-            )
-            if is_cancelled and is_cancelled():
-                raise _ReportGenerationCancelled
-            text = _limit_text(result.text.strip(), INTERMEDIATE_SUMMARY_MAX_CHARS)
-            if not text:
-                raise RuntimeError("Intermediate evolution summary was empty")
-            summaries.append(text)
+        async def _summarize_chunk(
+            chunk: str,
+            current_semaphore: asyncio.Semaphore = semaphore,
+            current_round: int = round_number,
+            current_stage: str = stage,
+            current_total: int = total_chunks,
+        ) -> str:
+            nonlocal completed
+            async with current_semaphore:
+                if is_cancelled and is_cancelled():
+                    raise _ReportGenerationCancelled
+                result = await provider.generate(
+                    _build_intermediate_summary_prompt(chunk, current_round, background),
+                    max_tokens=max_tokens,
+                )
+                if is_cancelled and is_cancelled():
+                    raise _ReportGenerationCancelled
+                text = _limit_text(result.text.strip(), INTERMEDIATE_SUMMARY_MAX_CHARS)
+                if not text:
+                    raise RuntimeError("Intermediate evolution summary was empty")
+                completed += 1
+                on_progress(
+                    {
+                        "stage": current_stage,
+                        "round": current_round,
+                        "completed": completed,
+                        "total": current_total,
+                    }
+                )
+                return text
+
+        tasks = [asyncio.create_task(_summarize_chunk(chunk)) for chunk in chunks]
+        try:
+            summaries = await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
         if len(summaries) == 1:
             return summaries[0]
