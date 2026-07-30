@@ -247,7 +247,8 @@ def build_arc_config(
         "project": {
             "name": (session.title or "research")[:200],
             "mode": project_mode,
-            "profile": session.profile,
+            # ml_vision 走 sandbox 直跑，不使用 ARC 域 profile，故置空。
+            "profile": "" if session.profile in _SANDBOX_PROFILES else session.profile,
         },
         "research": {
             "topic": session.topic,
