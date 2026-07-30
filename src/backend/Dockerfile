@@ -9,7 +9,7 @@ FROM python:3.12-bookworm
 ENV PYTHONUNBUFFERED=1
 
 # ---------- 安装 uv 包管理器 ----------
-COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
+COPY --from=ghcr.1ms.run/astral-sh/uv:0.9.26 /uv /uvx /bin/
 
 # 预编译字节码，加快启动速度
 ENV UV_COMPILE_BYTECODE=1

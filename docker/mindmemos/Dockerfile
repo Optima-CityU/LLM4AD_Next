@@ -5,7 +5,7 @@ ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_HTTP_TIMEOUT=120
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
+COPY --from=ghcr.1ms.run/astral-sh/uv:0.9.26 /uv /uvx /bin/
 
 WORKDIR /app/mindmemos
 ENV PATH="/app/mindmemos/.venv/bin:$PATH"
