@@ -110,6 +110,7 @@ def seed_builtin_provider() -> models.LLMProvider | None:
             "auth_token": "",
             "model": settings.BUILTIN_PROVIDER_MODELS,
             "max_tokens": settings.BUILTIN_PROVIDER_MAX_TOKENS,
+            "timeout": settings.BUILTIN_PROVIDER_TIMEOUT,
         }
         if provider:
             # 仅在字段实际变化时才写入：EncryptedString 每次加密用新 IV，

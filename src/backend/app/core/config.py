@@ -227,6 +227,7 @@ class Settings(BaseSettings):
     BUILTIN_PROVIDER_API_KEY: str = ""
     BUILTIN_PROVIDER_MODELS: str = "" # 多模型分号分隔
     BUILTIN_PROVIDER_MAX_TOKENS: int = 16384
+    BUILTIN_PROVIDER_TIMEOUT: float = 600.0
     BUILTIN_PROVIDER_DEFAULT_MODEL: str = "" # 为空则取 MODELS 中的第一个
     LITELLM_GATEWAY_BASE_URL: str = "http://gateway:9090"
     GATEWAY_BACKEND_SERVICE_TOKEN: str = ""
