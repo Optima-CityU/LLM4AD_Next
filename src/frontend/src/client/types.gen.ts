@@ -2476,6 +2476,48 @@ export type ResearchLLM4ADWorkspaceRef = {
 export type kind2 = 'task_ref' | 'inline' | 'upload';
 
 /**
+ * 单条日志（来自 ``research_log`` 表，与对话消息分家）。
+ */
+export type ResearchLogItem = {
+    id: string;
+    session_id: string;
+    turn_id: string;
+    level: string;
+    message: string;
+    source: string;
+    module?: (string | null);
+    stage?: (number | null);
+    event_key?: string;
+    turn_status: ResearchTurnStatus;
+    ts?: (string | null);
+    seq?: number;
+    stream_id?: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * `/sessions/{sid}/logs` 日志双端游标窗口响应。
+ *
+ * ``items`` **恒定升序**（旧→新），渲染不用反转。返回窗口两端的游标与是否还有
+ * 更多，供日志查看器上下双向翻页：
+ *
+ * - ``older_cursor``：指向本批**最旧**一条；带 ``order=desc`` 回传可取更旧一页。
+ * - ``has_older``：更旧方向是否还有数据。
+ * - ``newer_cursor``：指向本批**最新**一条；带 ``order=asc`` 回传可取更新一页。
+ * - ``has_newer``：更新方向是否还有数据。
+ *
+ * ``limit=0`` 全量返回时，两端游标为 None、两个 has_* 均为 False。
+ */
+export type ResearchLogPageResponse = {
+    items?: Array<ResearchLogItem>;
+    older_cursor?: (string | null);
+    has_older?: boolean;
+    newer_cursor?: (string | null);
+    has_newer?: boolean;
+};
+
+/**
  * 单条消息。
  */
 export type ResearchMessageItem = {
@@ -2497,15 +2539,18 @@ export type ResearchMessageItem = {
     stage?: (number | null);
     event_type?: (string | null);
     event_key?: string;
+    seq?: number;
+    stream_id?: (string | null);
     created_time: string;
     updated_time: string;
 };
 
 /**
- * `/turns/{tid}/messages` 分页响应。
+ * `/sessions/{sid}/messages` 消息分页响应（不含 log，log 走 `/logs`）。
  *
- * 正序游标翻页：``cursor`` = 上一页最后一条的 ``created_time`` ISO 字符串，
- * 首次不传；``next_cursor`` 为 ``None`` 时表示无更多数据。
+ * 游标翻页：``cursor`` = 上一页末条的不透明游标（``{iso}|{seq}|{id}``），首次
+ * 不传；``next_cursor`` 为 ``None`` 时表示无更多数据。``order`` 决定 items 顺序
+ * （``desc`` 历史翻页 / ``asc`` SSE 回放）。
  */
 export type ResearchMessageListResponse = {
     items: Array<ResearchMessageItem>;
@@ -2567,6 +2612,7 @@ export type ResearchSessionCreateRequest = {
 export type ResearchSessionDetailResponse = {
     session: ResearchSessionItem;
     active_turn?: (ResearchTurnItem | null);
+    active_collab_turn?: (ResearchTurnItem | null);
     messages?: Array<ResearchMessageItem>;
     /**
      * 是否还有更早的历史消息；True 时用最早一条 id 做 before 游标
@@ -2609,22 +2655,6 @@ export type ResearchSessionListResponse = {
      * 下一页游标 = 本页最后一条的 updated_time ISO；None 表示无更多
      */
     next_cursor?: (string | null);
-    has_more?: boolean;
-};
-
-/**
- * `/sessions/{sid}/messages` 会话级消息分页响应。
- *
- * 与 ``ResearchSessionDetailResponse.messages`` 同款翻页语义（``before``/倒序
- * 游标，返回时升序），但脱离会话详情单独成端点：供消息列表与日志面板各自带
- * ``event_type`` 过滤、各自分页，互不饥饿。``messages`` 升序（最旧在前）；
- * ``has_more`` 为 True 时用最早一条 ``id`` 作 ``before`` 继续往前翻。
- */
-export type ResearchSessionMessagesResponse = {
-    messages?: Array<ResearchMessageItem>;
-    /**
-     * 是否还有更早的历史消息；True 时用最早一条 id 做 before 游标
-     */
     has_more?: boolean;
 };
 
@@ -4042,24 +4072,62 @@ export type Llm4AdResearchDeleteSessionData = {
 
 export type Llm4AdResearchDeleteSessionResponse = (ResearchDeleteResponse);
 
-export type Llm4AdResearchListSessionMessagesData = {
+export type Llm4AdResearchListMessagesData = {
     /**
-     * 消息游标：返回该消息之前（更早）的消息
+     * 上一页末条的不透明游标（next_cursor 原样回传）
      */
-    before?: (string | null);
+    cursor?: (string | null);
     /**
-     * 白名单：只保留这些类型（日志面板传 log）；空则不限
+     * 白名单：只保留这些类型（如 stage_transition）；空则不限。log 走 /logs
      */
     eventType?: (Array<(string)> | null);
-    /**
-     * 黑名单：剔除这些类型（消息列表传 log 排除日志）；空则不剔除
-     */
-    excludeEventType?: (Array<(string)> | null);
     limit?: number;
+    /**
+     * 翻页方向（单页恒升序返回）：desc 从最新往旧翻（默认）/ asc 从最旧往新翻
+     */
+    order?: string;
+    /**
+     * 按 role 过滤：user/assistant/system
+     */
+    role?: (ResearchMessageRole | null);
     sessionId: string;
+    /**
+     * 传则只返回该轮消息；不传则跨全会话
+     */
+    turnId?: (string | null);
 };
 
-export type Llm4AdResearchListSessionMessagesResponse = (ResearchSessionMessagesResponse);
+export type Llm4AdResearchListMessagesResponse = (ResearchMessageListResponse);
+
+export type Llm4AdResearchListLogsData = {
+    /**
+     * 上一页末条的不透明游标（next_cursor 原样回传）
+     */
+    cursor?: (string | null);
+    /**
+     * 按日志级别过滤白名单（INFO/WARNING/ERROR/DEBUG）；空则不限
+     */
+    level?: (Array<(string)> | null);
+    /**
+     * 单页条数；传 0 表示不分页、一次返回全部匹配（无游标）
+     */
+    limit?: number;
+    /**
+     * 翻页方向（单页恒升序返回）：desc 从最新往旧翻（默认）/ asc 从最旧往新翻
+     */
+    order?: string;
+    /**
+     * 关键字：对日志 message 做大小写不敏感模糊匹配（ILIKE）；空则不限
+     */
+    q?: (string | null);
+    sessionId: string;
+    /**
+     * 传则只返回该轮日志；不传则跨全会话
+     */
+    turnId?: (string | null);
+};
+
+export type Llm4AdResearchListLogsResponse = (ResearchLogPageResponse);
 
 export type Llm4AdResearchStartTurnData = {
     requestBody: ResearchTurnStartRequest;
@@ -4110,29 +4178,6 @@ export type Llm4AdResearchGetTurnData = {
 };
 
 export type Llm4AdResearchGetTurnResponse = (ResearchTurnItem);
-
-export type Llm4AdResearchListTurnMessagesData = {
-    /**
-     * 上一页最后一条的 created_time ISO
-     */
-    cursor?: (string | null);
-    /**
-     * 按事件类型过滤，多值：log/stage_transition/...
-     */
-    eventType?: (Array<(string)> | null);
-    /**
-     * 每页条数
-     */
-    limit?: number;
-    /**
-     * 按 role 过滤：user/assistant/system
-     */
-    role?: (ResearchMessageRole | null);
-    sessionId: string;
-    turnId: string;
-};
-
-export type Llm4AdResearchListTurnMessagesResponse = (ResearchMessageListResponse);
 
 export type Llm4AdResearchStreamTurnData = {
     /**

@@ -144,7 +144,7 @@ def read_all_logs(task_id: str | uuid.UUID) -> list[dict]:
     r = get_sync_redis()
     key = task_logs_key(task_id)
     entries = r.xrange(key)
-    return [json.loads(fields["data"]) for _entry_id, fields in entries]
+    return [json.loads(fields["data"]) for _z, fields in entries]
 
 
 def delete_task_logs(task_id: str | uuid.UUID) -> None:
@@ -415,17 +415,21 @@ def push_research_event(
     session_id: str | uuid.UUID,
     turn_id: str | uuid.UUID,
     entry: dict,
-) -> None:
-    """向科研 Stream 追加一条事件（XADD）。
+) -> str | None:
+    """向科研 Stream 追加一条事件（XADD），返回该条的 Stream entry id。
 
-    近似 MAXLEN 限流，首次写入时设置 TTL。失败仅记录日志，避免影响主流程。
-    entry 至少要包含 ``type`` 字段供前端分派渲染。
+    近似 MAXLEN 限流，首次写入时设置 TTL。失败仅记录日志并返回 ``None``，
+    避免影响主流程。entry 至少要包含 ``type`` 字段供前端分派渲染。
+
+    返回值（``decode_responses=True`` 下为 ``"<ms>-<seq>"`` 形式的 str）即
+    SSE 帧 ``id:`` 行携带、前端断线续传用的游标。调用方据此持久化到 DB 行，
+    让 REST 快照能与 SSE 续传点精确对齐。异常路径返回 ``None``，调用方须容忍。
     """
     try:
         r = get_sync_redis()
         key = research_stream_key(session_id, turn_id)
         payload = json.dumps(entry, ensure_ascii=False, default=str)
-        r.xadd(
+        stream_id = r.xadd(
             key,
             {"data": payload},
             maxlen=RESEARCH_STREAM_MAXLEN,
@@ -433,6 +437,7 @@ def push_research_event(
         )
         if r.ttl(key) == -1:
             r.expire(key, RESEARCH_STREAM_TTL)
+        return stream_id
     except Exception:
         import logging
 
@@ -442,6 +447,7 @@ def push_research_event(
             turn_id,
             exc_info=True,
         )
+        return None
 
 
 def delete_research_stream(

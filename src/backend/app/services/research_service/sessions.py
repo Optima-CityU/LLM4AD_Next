@@ -25,6 +25,7 @@ from app.models.research import (
     ResearchSession,
     ResearchSessionStatus,
     ResearchTurn,
+    ResearchTurnStatus,
 )
 from app.schemas.research import (
     ResearchMessageItem,
@@ -41,6 +42,7 @@ from app.tasks.research_runner import cleanup_run_dir, stage_display_name
 
 from ._common import (
     _encode_reverse_cursor,
+    _find_turn_by_status,
     _get_folder,
     _get_session,
     _parse_reverse_cursor,
@@ -272,6 +274,15 @@ def get_session_detail(
         if turn:
             active_turn = ResearchTurnItem.model_validate(turn)
 
+    # 活跃协作轮：协作是与 pipeline 并存的独立 turn，不被 session.active_turn_id
+    # 跟踪，单独查出暴露给前端，供刷新后恢复协作 SSE 订阅（免翻 /turns 列表）。
+    active_collab_turn = None
+    collab_turn = _find_turn_by_status(
+        db, session.id, ResearchTurnStatus.COLLABORATING.value
+    )
+    if collab_turn is not None:
+        active_collab_turn = ResearchTurnItem.model_validate(collab_turn)
+
     messages: list[ResearchMessageItem] = []
     has_more = False
     if include_messages:
@@ -299,6 +310,7 @@ def get_session_detail(
     return ResearchSessionDetailResponse(
         session=ResearchSessionItem.model_validate(session),
         active_turn=active_turn,
+        active_collab_turn=active_collab_turn,
         messages=messages,
         has_more=has_more,
     )

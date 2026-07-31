@@ -1,4 +1,12 @@
-import { AlertTriangle, Check, CircleDot, Cog, Loader2, X } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  CircleDot,
+  Cog,
+  Loader2,
+  MinusCircle,
+  X,
+} from "lucide-react"
 import { memo, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -53,6 +61,18 @@ function statusVisual(status: string): {
         dot: "bg-primary",
         glow: "shadow-[0_0_8px_0] shadow-primary/50",
         bar: "from-primary/70 to-primary/30",
+      }
+    // 非活跃 turn 里残留的「运行中」：turn 已取消/中断但容器被 kill、来不及落
+    // stage 终态（后端不追溯回填，见 stop_turn）。展示成灰色静态「中断」，不再
+    // 永久转圈。仅由 StageTimeline 在 live=false 时把 running 映射到此。
+    case "interrupted":
+      return {
+        Icon: MinusCircle,
+        spin: false,
+        color: "text-muted-foreground/60",
+        dot: "bg-muted-foreground/40",
+        glow: "",
+        bar: "from-muted-foreground/40 to-muted-foreground/20",
       }
     case "done":
       return {
@@ -123,8 +143,21 @@ function fmtDuration(ms: number): string {
  * 胶囊（图标 + 时刻）。若该阶段既有开始又有结束，行尾补一枚耗时标。被非阶段消息
  * 打断处自然分段（由 ChatPanel 决定成组边界）。
  */
-function StageTimeline({ entries }: { entries: StageEntry[] }) {
+function StageTimeline({
+  entries,
+  live = true,
+}: {
+  entries: StageEntry[]
+  /** 该时间轴所属 turn 是否为「当前活跃且在跑」的 turn。false 时残留的 running
+   *  会被降级为 interrupted（灰色静态），不再永久转圈。默认 true 向后兼容。 */
+  live?: boolean
+}) {
   const { t, i18n } = useTranslation()
+
+  // 把「非活跃 turn 里残留的 running」映射成 interrupted：仅影响视觉与文案，不改
+  // 原始状态数据。done/failed/waiting 等终态不受影响。
+  const effectiveStatus = (status: string): string =>
+    !live && status === "running" ? "interrupted" : status
 
   // 组内最长耗时，用于耗时微条按比例缩放（让「哪一步拖时间」一眼可见）。
   const maxMs = useMemo(() => {
@@ -152,7 +185,8 @@ function StageTimeline({ entries }: { entries: StageEntry[] }) {
         />
         {entries.map((e) => {
           const latest = e.statuses[e.statuses.length - 1]
-          const v = statusVisual(latest.status)
+          const latestStatus = effectiveStatus(latest.status)
+          const v = statusVisual(latestStatus)
           const name =
             stageNameByLang(e.stage, i18n.language) || `stage-${e.stage}`
           const first = e.statuses[0]
@@ -224,7 +258,7 @@ function StageTimeline({ entries }: { entries: StageEntry[] }) {
                       "bg-current/10",
                     )}
                   >
-                    {t(`autoResearch.stageStatus.${latest.status}`, latest.status)}
+                    {t(`autoResearch.stageStatus.${latestStatus}`, latestStatus)}
                   </span>
                 )}
               </span>

@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 
-import type { ResearchMessageItem } from "@/client"
+import type { ResearchLogItem } from "@/client"
 import { cn } from "@/lib/utils"
 
 /**
@@ -16,6 +16,9 @@ export interface StreamLogEntry {
   /** 稳定 key：实时日志用 ``l:<seq>``，历史回放用 ``h:<message id>``。 */
   id: string
   eventKey?: string
+  /** 本条对应的 Redis Stream entry id（<ms>-<seq>）。REST 与 SSE 同源一致、
+   *  全局唯一（不受 retry 复用 turn_id 影响），作首选精确去重键。 */
+  streamId?: string
   level: string
   message: string
   module?: string
@@ -24,23 +27,21 @@ export interface StreamLogEntry {
 }
 
 /**
- * 把持久化的 ``event_type === "log"`` 消息还原成 :class:`StreamLogEntry`。
+ * 把独立 ``research_log`` 表的 :class:`ResearchLogItem` 还原成 :class:`StreamLogEntry`。
  *
- * log 消息落库时 payload 即事件本体（含 level/message/module/source/ts），与实时
- * SSE ``type: "log"`` 同源，故两处可按 ``event_key`` 去重合并。
+ * 后端已把 log 从消息表拆到 ``/logs`` 端点，字段直接平铺（level/message/module/
+ * source/ts），与实时 SSE ``type: "log"`` 同源，故两处可按 ``event_key`` 去重合并。
  */
-export function messageToLogEntry(
-  message: ResearchMessageItem,
-): StreamLogEntry {
-  const payload = (message.payload ?? {}) as Record<string, unknown>
+export function logItemToStreamEntry(item: ResearchLogItem): StreamLogEntry {
   return {
-    id: message.id,
-    eventKey: message.event_key || undefined,
-    level: (payload.level as string) || "INFO",
-    message: (payload.message as string) ?? message.content ?? "",
-    module: payload.module as string | undefined,
-    source: payload.source as string | undefined,
-    ts: (payload.ts as string | undefined) ?? message.created_time,
+    id: item.id,
+    eventKey: item.event_key || undefined,
+    streamId: item.stream_id ?? undefined,
+    level: item.level || "INFO",
+    message: item.message ?? "",
+    module: item.module ?? undefined,
+    source: item.source || undefined,
+    ts: item.ts ?? item.created_time,
   }
 }
 

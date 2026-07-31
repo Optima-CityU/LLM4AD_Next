@@ -1,11 +1,15 @@
-"""消息（Message）子域：单轮历史消息分页 + Stage 引导注入。
+"""消息（Message）与日志（Log）子域：分页查询 + Stage 引导注入。
 
-- ``list_turn_messages``：正序游标分页返回单轮全部消息（含 log/stage/evolution
-  等系统事件），供刷新恢复与增量拉取；
+按数据源拆成两个互不掺和的查询：
+
+- ``list_messages``：查 ``research_message`` 表（对话 + stage/artifact/guidance
+  等系统事件，**不含 log**），``turn_id`` 可选（传=单轮，不传=跨会话），
+  ``order`` 决定翻页方向（``desc`` 历史翻页 / ``asc`` SSE 回放）；
+- ``list_logs``：查独立的 ``research_log`` 表，同样支持 ``turn_id`` / ``order``；
 - ``inject_stage_guidance``：对应 ARC CLI ``researchclaw guide``，把引导文本落成
   ``run_dir/stage-NN/hitl_guidance.md``，ARC 下次跑到该 stage 时读入 prompt。
 
-两者都以消息表 / guidance 文件为中心，故合于一模块。
+三者都以消息/日志表 / guidance 文件为中心，故合于一模块。
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
-from sqlmodel import Session, or_, select, tuple_
+from sqlmodel import Session, func, select, tuple_
 
 from app import models
 from app.models.research import (
@@ -27,9 +31,10 @@ from app.models.research import (
     ResearchTurnStatus,
 )
 from app.schemas.research import (
+    ResearchLogItem,
+    ResearchLogPageResponse,
     ResearchMessageItem,
     ResearchMessageListResponse,
-    ResearchSessionMessagesResponse,
     ResearchStageGuideRequest,
     ResearchStageGuideResponse,
 )
@@ -45,6 +50,10 @@ from ._common import (
     _get_session_and_turn,
     _parse_forward_cursor,
 )
+
+# 消息 / 日志分页单页硬上限，防误刷。
+_MESSAGE_LIMIT_MAX = 500
+_LOG_LIMIT_MAX = 2000
 
 
 def inject_stage_guidance(
@@ -114,6 +123,15 @@ def inject_stage_guidance(
                 existing.updated_time = datetime.now(UTC)
                 db.add(existing)
             else:
+                # 补 seq：guidance 走 REST 同步落库、无 sink 计数器可共享，取该 turn
+                # 当前 max(seq)+1。否则默认 seq=0，在 created_time 撞车时会被 tiebreaker
+                # 排到该时刻所有事件最前，造成引导消息乱序显示在最新状态之前。
+                max_seq = db.exec(
+                    select(func.max(ResearchMessage.seq))
+                    .where(ResearchMessage.session_id == session.id)
+                    .where(ResearchMessage.turn_id == active_turn_id)
+                ).one()
+                next_seq = (max_seq or 0) + 1
                 db.add(ResearchMessage(
                     session_id=session.id,
                     turn_id=active_turn_id,
@@ -124,6 +142,7 @@ def inject_stage_guidance(
                     event_key=f"guide:{stage_num}",
                     stage=stage_num,
                     turn_status=ResearchTurnStatus.RUNNING.value,
+                    seq=next_seq,
                 ))
             db.commit()
     except Exception:
@@ -141,173 +160,130 @@ def inject_stage_guidance(
     )
 
 
-def _log_to_message_dict(log: ResearchLog) -> dict:
-    """将 ResearchLog 转换为 ResearchMessageItem 兼容的字典。
+def _apply_cursor_and_order(stmt, model, order: str, cursor: str | None):
+    """给查询套上「复合游标 + 排序方向」。
 
-    ResearchLog 缺少 role/content/payload 等字段，需要映射：
-    - level → payload.level
-    - message → content
-    - source/module → payload
+    统一 ``messages`` / ``logs`` 两表的翻页逻辑：都以 ``(created_time, seq, id)``
+    三元组做全序游标——``seq`` 是 per-turn 递增（跨 turn 不唯一），且 Windows 下
+    ``created_time`` 精度粗、同批 flush 常撞时间戳，故必须追加全局唯一的 ``id``
+    作最终 tiebreaker，否则漏行 / 提前 ``has_more=False``。
+
+    - ``order == "asc"``：``ORDER BY ... ASC``，游标取严格 ``>``（SSE 回放，越翻越新）；
+    - ``order == "desc"``：``ORDER BY ... DESC``，游标取严格 ``<``（历史翻页，越翻越旧）。
+
+    兼容旧版纯 ISO 游标（无 ``|`` 分隔符）：退化为仅时间戳比较，切换期短暂、不丢数据。
     """
-    return {
-        "id": log.id,
-        "session_id": log.session_id,
-        "turn_id": log.turn_id,
-        "role": ResearchMessageRole.SYSTEM,  # 日志都是 system 角色
-        "content": log.message,
-        "turn_status": log.turn_status,
-        "error": None,
-        "payload": {
-            "type": "log",
-            "level": log.level,
-            "message": log.message,
-            "source": log.source,
-            "module": log.module,
-            "ts": log.ts.isoformat() if log.ts else None,
-        },
-        "payload_locked": False,
-        "payload_locked_at": None,
-        "payload_submission": None,
-        "stage": log.stage,
-        "event_type": "log",
-        "event_key": log.event_key,
-        "created_time": log.created_time,
-        "updated_time": log.updated_time,
-        "seq": log.seq,
-    }
-
-
-def _list_turn_logs(
-    db: Session,
-    session_id: uuid.UUID,
-    turn_id: uuid.UUID,
-    cursor: str | None,
-    limit: int,
-) -> tuple[list[ResearchLog], str | None, bool]:
-    """从 research_log 表查询单轮日志，返回 (items, next_cursor, has_more)。"""
-    stmt = (
-        select(ResearchLog)
-        .where(ResearchLog.session_id == session_id)
-        .where(ResearchLog.turn_id == turn_id)
-    )
+    triple = tuple_(model.created_time, model.seq, model.id)
     if cursor:
-        # 复合游标 (created_time, seq, id) 严格大于，杜绝同时间戳批量日志翻页丢行。
         cur_ts, cur_seq, cur_id = _parse_forward_cursor(cursor)
         if cur_seq is not None and cur_id is not None:
-            stmt = stmt.where(
-                tuple_(ResearchLog.created_time, ResearchLog.seq, ResearchLog.id)
-                > (cur_ts, cur_seq, cur_id)
-            )
+            if order == "asc":
+                stmt = stmt.where(triple > (cur_ts, cur_seq, cur_id))
+            else:
+                stmt = stmt.where(triple < (cur_ts, cur_seq, cur_id))
+        elif order == "asc":
+            stmt = stmt.where(model.created_time > cur_ts)
         else:
-            # 旧版纯 ISO 游标兜底：仅时间戳比较（切换期短暂，不丢数据）。
-            stmt = stmt.where(ResearchLog.created_time > cur_ts)
-
-    page = max(1, min(limit, 500))
-    rows = db.exec(
-        stmt.order_by(
-            ResearchLog.created_time.asc(),
-            ResearchLog.seq.asc(),
-            ResearchLog.id.asc(),
+            stmt = stmt.where(model.created_time < cur_ts)
+    if order == "asc":
+        stmt = stmt.order_by(
+            model.created_time.asc(), model.seq.asc(), model.id.asc()
         )
-        .limit(page + 1)
-    ).all()
+    else:
+        stmt = stmt.order_by(
+            model.created_time.desc(), model.seq.desc(), model.id.desc()
+        )
+    return stmt
+
+
+def _finalize_page(rows, page: int, order: str):
+    """把「多取一条」的查询结果裁成一页，统一升序返回。
+
+    ``rows`` 已按 ``order`` 方向排序（``desc`` 最新在前 / ``asc`` 最旧在前）。
+
+    - ``next_cursor`` 取**查询顺序下的最后一条**——即翻页前进边界（``desc`` 指向
+      这批最旧那条、继续往更旧翻；``asc`` 指向最新那条、继续往更新翻）。故它必须
+      在反转之前取。
+    - 返回列表**恒定升序**（最旧在前）：``order`` 只决定「取更新的一页还是更旧的
+      一页」及游标方向，**不改变单页内部的时间顺序**，前端拼接逻辑无需分方向讨论。
+
+    返回 ``(items_ascending, next_cursor, has_more)``。
+    """
     has_more = len(rows) > page
-    items = rows[:page]
+    items = list(rows[:page])
     next_cursor: str | None = None
     if has_more and items:
         last = items[-1]
         next_cursor = _encode_forward_cursor(last.created_time, last.seq, last.id)
+    if order != "asc":
+        items = list(reversed(items))
     return items, next_cursor, has_more
 
 
-def list_turn_messages(
+def _has_beyond(db: Session, base_stmt, model, boundary_row, *, newer: bool) -> bool:
+    """探测边界行 ``boundary_row`` 之外某方向是否还有匹配行。
+
+    ``base_stmt`` 是已套好所有过滤（session/turn/level/q）但**未套游标与排序**的
+    查询。用复合键 ``(created_time, seq, id)`` 与边界行严格比较：``newer=True`` 查
+    是否存在更新的行（``> 边界``），否则查更旧的（``< 边界``）。只取 1 行判存在，
+    两端探测互不依赖客户端的翻页方向，恒定正确。
+    """
+    triple = tuple_(model.created_time, model.seq, model.id)
+    key = (boundary_row.created_time, boundary_row.seq, boundary_row.id)
+    probe = base_stmt.where(triple > key if newer else triple < key)
+    return db.exec(probe.limit(1)).first() is not None
+
+
+def list_messages(
     db: Session,
     session_id: uuid.UUID,
-    turn_id: uuid.UUID,
     user: models.User,
     *,
+    turn_id: uuid.UUID | None,
+    order: str,
     cursor: str | None,
     limit: int,
     event_type: list[str] | None,
     role: ResearchMessageRole | None,
 ) -> ResearchMessageListResponse:
-    """返回单轮消息（含 log/stage/evolution 等所有系统事件），正序游标分页。
+    """消息分页（查 ``research_message``，不含 log）。
 
-    - ``cursor``：ISO8601 时间戳；只返回 ``created_time > cursor`` 的行。
-      首次不传 → 从头开始。
+    - ``turn_id``：传 → 只返回该轮消息（附带 turn 归属校验）；不传 → 跨全会话。
+    - ``order``：只决定**翻页前进方向**，不改变单页内部顺序——返回列表**恒定升序**
+      （最旧在前）。``desc``（默认）从最新开始、往更旧翻（历史翻页）；``asc`` 从
+      最旧开始、往更新翻（SSE 回放）。
+    - ``cursor``：不透明复合游标 ``{iso}|{seq}|{id}``，首次不传；用返回的
+      ``next_cursor`` 原样回传继续翻。
     - ``limit``：单页大小；后端硬上限 500 防误刷。
-    - ``event_type``：可选类型过滤（如 ``["log", "stage_transition"]``），
-      为空 → 不过滤。
+    - ``event_type``：可选类型白名单（如 ``["stage_transition"]``）；空 → 不过滤。
+      注意 log 已拆到 ``research_log`` 表，此处不接受也不返回 ``"log"``。
     - ``role``：可选角色过滤。
 
     Raises:
         HTTPException 404: session/turn 不存在或不属于该用户。
         HTTPException 400: cursor 格式非法。
     """
-    session, turn = _get_session_and_turn(db, session_id, turn_id, user)
+    if turn_id is not None:
+        session, turn = _get_session_and_turn(db, session_id, turn_id, user)
+    else:
+        session = _get_session(db, session_id, user)
+        turn = None
 
-    # 如果只查询 log，路由到 research_log 表
-    if event_type == ["log"] and role is None:
-        items, next_cursor, has_more = _list_turn_logs(
-            db, session.id, turn.id, cursor, limit
-        )
-        return ResearchMessageListResponse(
-            items=[ResearchMessageItem.model_validate(_log_to_message_dict(log)) for log in items],
-            next_cursor=next_cursor,
-            has_more=has_more,
-        )
-
-    # log 存在独立的 research_log 表，只有精确 ["log"] 才路由过去。混合请求
-    # （如 ["log", "stage_transition"]）落到下面的 research_message 查询，而该表
-    # **不含** log 行——log 会被静默丢弃。跨两表合并 + 统一游标分页改动过大，
-    # 这里先把静默降级为显式告警，便于定位（前端应对 log 与其他类型分开各调一次）。
-    if event_type and "log" in event_type:
-        logger.warning(
-            f"list_turn_messages: mixed event_type {event_type} includes 'log'; "
-            "logs live in research_log and are dropped — query 'log' separately"
-        )
-
-    # 否则查询 research_message 表（不含 log）
-    stmt = (
-        select(ResearchMessage)
-        .where(ResearchMessage.session_id == session.id)
-        .where(ResearchMessage.turn_id == turn.id)
+    stmt = select(ResearchMessage).where(
+        ResearchMessage.session_id == session.id
     )
-    if cursor:
-        # 复合游标 (created_time, seq, id) 严格大于，杜绝同时间戳批量消息翻页丢行。
-        cur_ts, cur_seq, cur_id = _parse_forward_cursor(cursor)
-        if cur_seq is not None and cur_id is not None:
-            stmt = stmt.where(
-                tuple_(
-                    ResearchMessage.created_time,
-                    ResearchMessage.seq,
-                    ResearchMessage.id,
-                )
-                > (cur_ts, cur_seq, cur_id)
-            )
-        else:
-            stmt = stmt.where(ResearchMessage.created_time > cur_ts)
+    if turn is not None:
+        stmt = stmt.where(ResearchMessage.turn_id == turn.id)
     if event_type:
         stmt = stmt.where(ResearchMessage.event_type.in_(event_type))
     if role is not None:
         stmt = stmt.where(ResearchMessage.role == role)
 
-    # 多取一条判断 has_more；硬上限 500 防误刷。
-    page = max(1, min(limit, 500))
-    rows = db.exec(
-        stmt.order_by(
-            ResearchMessage.created_time.asc(),
-            ResearchMessage.seq.asc(),
-            ResearchMessage.id.asc(),
-        )
-        .limit(page + 1)
-    ).all()
-    has_more = len(rows) > page
-    items = rows[:page]
-    next_cursor: str | None = None
-    if has_more and items:
-        last = items[-1]
-        next_cursor = _encode_forward_cursor(last.created_time, last.seq, last.id)
+    stmt = _apply_cursor_and_order(stmt, ResearchMessage, order, cursor)
+
+    page = max(1, min(limit, _MESSAGE_LIMIT_MAX))
+    rows = db.exec(stmt.limit(page + 1)).all()
+    items, next_cursor, has_more = _finalize_page(rows, page, order)
     return ResearchMessageListResponse(
         items=[ResearchMessageItem.model_validate(m) for m in items],
         next_cursor=next_cursor,
@@ -315,134 +291,97 @@ def list_turn_messages(
     )
 
 
-def _list_session_logs(
-    db: Session,
-    session_id: uuid.UUID,
-    before: uuid.UUID | None,
-    limit: int,
-) -> tuple[list[ResearchLog], bool]:
-    """从 research_log 表查询会话日志，返回 (items, has_more)。"""
-    stmt = select(ResearchLog).where(ResearchLog.session_id == session_id)
-
-    if before is not None:
-        anchor = db.get(ResearchLog, before)
-        if anchor and anchor.session_id == session_id:
-            # 复合游标 (created_time, seq, id)：seq 仍是主排序键（保证同 turn 内
-            # 严格顺序），但会话级是跨 turn 分页，而 seq 是 per-turn 递增（每轮 sink
-            # 从 0 重开）——跨 turn 不唯一。尤其 Windows 下 created_time 精度粗，同批
-            # flush 的日志常拿到相同 created_time，此时两个 turn 的 (created_time, seq)
-            # 会撞键，仅用二元组游标会漏行、甚至提前 has_more=False。追加全局唯一的
-            # id 作最终 tiebreaker，给出全序且无缝的翻页边界。
-            stmt = stmt.where(
-                tuple_(ResearchLog.created_time, ResearchLog.seq, ResearchLog.id)
-                < (anchor.created_time, anchor.seq, anchor.id)
-            )
-
-    page = max(1, min(limit, 2000))
-    rows = db.exec(
-        stmt.order_by(
-            ResearchLog.created_time.desc(),
-            ResearchLog.seq.desc(),
-            ResearchLog.id.desc(),
-        ).limit(page + 1)
-    ).all()
-    has_more = len(rows) > page
-    # 倒序取一页后反转成升序（最旧在前），与详情端点一致，前端拼接逻辑不变。
-    log_rows = list(reversed(rows[:page]))
-    return log_rows, has_more
-
-
-def list_session_messages(
+def list_logs(
     db: Session,
     session_id: uuid.UUID,
     user: models.User,
     *,
-    before: uuid.UUID | None,
+    turn_id: uuid.UUID | None,
+    order: str,
+    cursor: str | None,
     limit: int,
-    event_type: list[str] | None,
-    exclude_event_type: list[str] | None,
-) -> ResearchSessionMessagesResponse:
-    """会话级消息分页（跨所有 turn），``before``/倒序游标，返回时升序。
+    level: list[str] | None,
+    q: str | None,
+) -> ResearchLogPageResponse:
+    """日志双端游标窗口 / 全量查询（查独立的 ``research_log`` 表）。
 
-    与 ``sessions.get_session_detail`` 的附带消息同款翻页语义，但独立成端点、
-    额外支持类型过滤——让消息列表与日志面板各调一次、各自分页，避免共享一页
-    数据时互相饥饿。
+    ``items`` **恒定升序**（旧→新），并返回窗口两端的游标与是否还有更多，供日志
+    查看器上下双向翻页。两端 ``has_older`` / ``has_newer`` 用独立的 EXISTS 探测
+    （与客户端从哪个方向导航过来无关，恒定正确）。
 
-    - ``before``：消息 id 游标；只返回严格早于该消息（``created_time, id`` 复合
-      键比较）的行。首次不传 → 从最新一页开始。
-    - ``limit``：单页大小；后端硬上限 100。
-    - ``event_type``：**白名单**，只保留这些类型（如日志面板传 ``["log"]``）；
-      空则不限。
-    - ``exclude_event_type``：**黑名单**，剔除这些类型（如消息列表传 ``["log"]``
-      排除日志）。用黑名单而非白名单是因为 user/assistant 消息 ``event_type`` 为
-      NULL，白名单会漏掉它们。二者可叠加，一般只用其一。
+    - ``turn_id``：传 → 仅该轮；不传 → 跨全会话。
+    - ``order`` / ``cursor``：只决定「本页取更旧还是更新的一批」及游标锚点方向，
+      不改变返回的升序。``order=desc``（默认）从最新往旧翻、``order=asc`` 从最旧
+      往新翻；``cursor`` 用返回的 ``older_cursor`` / ``newer_cursor`` 原样回传。
+    - ``level``：可选级别白名单（INFO/WARNING/...）。
+    - ``q``：可选关键字，对 ``message`` 做大小写不敏感模糊匹配（ILIKE，转义
+      用户输入里的 ``% _ \\`` 通配符）。
+    - ``limit``：单页大小；后端硬上限 2000。**传 ``0`` 表示不分页、一次返回全部
+      匹配行**（两端游标为 None、两个 has_* 均 False）——导出 / 全量检索用，大
+      会话可能上万行，慎用。
 
     Raises:
-        HTTPException 404: session 不存在或不属于该用户。
+        HTTPException 404: session/turn 不存在或不属于该用户。
+        HTTPException 400: cursor 格式非法。
     """
-    session = _get_session(db, session_id, user)
+    if turn_id is not None:
+        session, turn = _get_session_and_turn(db, session_id, turn_id, user)
+    else:
+        session = _get_session(db, session_id, user)
+        turn = None
 
-    # 如果只查询 log（白名单 = ["log"]），路由到 research_log 表
-    if event_type == ["log"]:
-        log_rows, has_more = _list_session_logs(db, session.id, before, limit)
-        return ResearchSessionMessagesResponse(
-            messages=[ResearchMessageItem.model_validate(_log_to_message_dict(log)) for log in log_rows],
-            has_more=has_more,
+    # base_stmt：套齐所有过滤但**不含游标与排序**，供两端 EXISTS 探测复用。
+    base_stmt = select(ResearchLog).where(ResearchLog.session_id == session.id)
+    if turn is not None:
+        base_stmt = base_stmt.where(ResearchLog.turn_id == turn.id)
+    if level:
+        base_stmt = base_stmt.where(ResearchLog.level.in_(level))
+    if q and (term := q.strip()):
+        # 转义 LIKE 通配符，避免用户输入的 % / _ / \ 被当作通配符。
+        esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        base_stmt = base_stmt.where(
+            ResearchLog.message.ilike(f"%{esc}%", escape="\\")
         )
 
-    # 与 list_turn_messages 同理：混合白名单里带 'log' 会静默丢掉日志行
-    # （research_message 表不含 log），显式告警便于定位。
-    if event_type and "log" in event_type:
-        logger.warning(
-            f"list_session_messages: mixed event_type {event_type} includes 'log'; "
-            "logs live in research_log and are dropped — query 'log' separately"
-        )
-
-    # 否则查询 research_message 表（不含 log）
-    stmt = select(ResearchMessage).where(
-        ResearchMessage.session_id == session.id
-    )
-    if event_type:
-        stmt = stmt.where(ResearchMessage.event_type.in_(event_type))
-    if exclude_event_type:
-        # 剔除黑名单类型，但显式保留 NULL event_type（user/assistant 对话消息）。
-        # SQL 三值逻辑下 `NULL NOT IN (...)` 求值为 NULL 而非 TRUE，会被 WHERE 连同
-        # 一起过滤掉，故必须 OR 上 IS NULL 才能把对话消息留下。
-        stmt = stmt.where(
-            or_(
-                ResearchMessage.event_type.is_(None),
-                ResearchMessage.event_type.notin_(exclude_event_type),
+    # limit == 0：不分页，取全部匹配行（升序，两端无更多）。
+    if limit <= 0:
+        rows = db.exec(
+            base_stmt.order_by(
+                ResearchLog.created_time.asc(),
+                ResearchLog.seq.asc(),
+                ResearchLog.id.asc(),
             )
+        ).all()
+        return ResearchLogPageResponse(
+            items=[ResearchLogItem.model_validate(log) for log in rows],
         )
-    if before is not None:
-        anchor = db.get(ResearchMessage, before)
-        if anchor and anchor.session_id == session.id:
-            # 复合游标 (created_time, seq, id)：日志批量写入常同一微秒，仅按
-            # created_time 严格小于会漏掉与锚点同时间戳的行，故带 seq 次级键。但
-            # 会话级是跨 turn 分页，seq 是 per-turn 递增（每轮从 0 重开）跨 turn 不
-            # 唯一——同 created_time 下两个 turn 的 seq 会撞键，二元组游标仍会漏行/
-            # 提前 has_more=False。追加全局唯一的 id 作最终 tiebreaker 杜绝。
-            stmt = stmt.where(
-                tuple_(
-                    ResearchMessage.created_time,
-                    ResearchMessage.seq,
-                    ResearchMessage.id,
-                )
-                < (anchor.created_time, anchor.seq, anchor.id)
-            )
 
-    page = max(1, min(limit, 2000))
-    rows = db.exec(
-        stmt.order_by(
-            ResearchMessage.created_time.desc(),
-            ResearchMessage.seq.desc(),
-            ResearchMessage.id.desc(),
-        ).limit(page + 1)
-    ).all()
-    has_more = len(rows) > page
-    # 倒序取一页后反转成升序（最旧在前），与详情端点一致，前端拼接逻辑不变。
-    msg_rows = list(reversed(rows[:page]))
-    return ResearchSessionMessagesResponse(
-        messages=[ResearchMessageItem.model_validate(m) for m in msg_rows],
-        has_more=has_more,
+    stmt = _apply_cursor_and_order(base_stmt, ResearchLog, order, cursor)
+    page = min(limit, _LOG_LIMIT_MAX)
+    rows = db.exec(stmt.limit(page + 1)).all()
+    # 复用 _finalize_page 得到升序 items（丢弃其 next_cursor/has_more——双端窗口
+    # 用首尾行独立探测两端，不走单向游标语义）。
+    items, _, _ = _finalize_page(rows, page, order)
+
+    older_cursor: str | None = None
+    newer_cursor: str | None = None
+    has_older = False
+    has_newer = False
+    if items:
+        oldest, newest = items[0], items[-1]
+        older_cursor = _encode_forward_cursor(
+            oldest.created_time, oldest.seq, oldest.id
+        )
+        newer_cursor = _encode_forward_cursor(
+            newest.created_time, newest.seq, newest.id
+        )
+        has_older = _has_beyond(db, base_stmt, ResearchLog, oldest, newer=False)
+        has_newer = _has_beyond(db, base_stmt, ResearchLog, newest, newer=True)
+
+    return ResearchLogPageResponse(
+        items=[ResearchLogItem.model_validate(log) for log in items],
+        older_cursor=older_cursor,
+        has_older=has_older,
+        newer_cursor=newer_cursor,
+        has_newer=has_newer,
     )

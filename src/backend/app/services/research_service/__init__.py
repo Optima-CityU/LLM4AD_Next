@@ -31,8 +31,8 @@ from .folders import (
 )
 from .messages import (
     inject_stage_guidance,
-    list_session_messages,
-    list_turn_messages,
+    list_logs,
+    list_messages,
 )
 from .sessions import (
     create_session,
@@ -76,10 +76,10 @@ __all__ = [
     "list_artifacts",
     "list_folders",
     "list_generated_solutions",
-    "list_session_messages",
+    "list_logs",
+    "list_messages",
     "list_session_turns",
     "list_sessions",
-    "list_turn_messages",
     "reorder_folders",
     "resolve_artifact_path",
     "retry_turn",

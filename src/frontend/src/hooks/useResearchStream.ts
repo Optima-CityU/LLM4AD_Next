@@ -30,6 +30,8 @@ export interface ResearchStreamEvent {
   event_key?: string
   /** DB 主键（message_id），后端在 SSE 中回填，优先使用它做精确去重。 */
   message_id?: string
+  /** per-turn 递增序列号，后端 emit 时回填；与 ts 一起作为稳定排序键。 */
+  seq?: number
   /** 本帧的 Redis Stream ID（来自 SSE `id:` 行），断线续传时回传。 */
   _streamId?: string
   // 允许透传后端未来新增字段
@@ -92,15 +94,27 @@ export function useResearchStream(
   sessionId: string | null,
   turnId: string | null,
   callbacks: ResearchStreamCallbacks,
-  options?: { enabled?: boolean; reconnectToken?: number | string },
+  options?: {
+    enabled?: boolean
+    reconnectToken?: number | string
+    /** 首连续传点（Redis Stream ID）：调用方传「已拉取历史的末端」stream_id，
+     *  SSE 从该点之后续传、跳过积压，避免首连从 0-0 全量重放上万条。不传则 0-0。
+     *  仅影响**首连**；断线重连始终用最后收到帧的 stream id（lastIdRef）。 */
+    initialLastId?: string | null
+  },
 ) {
   const enabled = options?.enabled !== false
   const reconnectToken = options?.reconnectToken ?? 0
+  const initialLastId = options?.initialLastId ?? null
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 最近一帧的 Redis Stream ID；断线续传用。切换 turn 时清空。
   const lastIdRef = useRef<string | null>(null)
+  // 首连续传点存 ref：每次 render 刷新，connect 时读取。用 ref 而非依赖，避免
+  // 该值异步到位（REST 拉完才算得出末端 stream_id）时触发无谓的断连重连。
+  const initialLastIdRef = useRef<string | null>(initialLastId)
+  initialLastIdRef.current = initialLastId
   const attemptRef = useRef(0)
   // turn 已收到终止信号（done/error/timeout）。置位后不再重连——否则后端会对
   // 已终态 turn 反复短路返回 done，触发无意义的退避重连风暴。切换 turn 时复位。
@@ -143,8 +157,9 @@ export function useResearchStream(
       setIsStreaming(true)
 
       const baseUrl = import.meta.env.VITE_API_URL || ""
-      // 首连从流头 replay，依靠 event_key 去重；重连则从最后一个 Redis ID 续传。
-      const lastId = lastIdRef.current ?? "0-0"
+      // 续传游标优先级：断线重连用最后收到帧的 Redis ID（lastIdRef）；首连用调用方
+      // 给的续传点（initialLastId=已拉取历史末端，跳过积压）；都没有才 0-0 全量 replay。
+      const lastId = lastIdRef.current ?? initialLastIdRef.current ?? "0-0"
       const url = `${baseUrl}/api/v1/llm4ad/research/sessions/${sessionId}/turns/${turnId}/stream?last_id=${encodeURIComponent(
         lastId,
       )}`

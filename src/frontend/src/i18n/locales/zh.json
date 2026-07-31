@@ -2697,6 +2697,7 @@
       "workflow": "工作流",
       "report": "报告分析",
       "ide": "打开 IDE",
+      "logs": "日志",
       "comingSoon": "功能开发中"
     },
     "analysis": {
@@ -2851,7 +2852,8 @@
       "failed": "失败",
       "skipped": "跳过",
       "waiting": "等待输入",
-      "gate": "人工确认点"
+      "gate": "人工确认点",
+      "interrupted": "已中断"
     },
     "create": {
       "title": "新建科研会话",
@@ -2909,13 +2911,23 @@
       "stageError": "错误",
       "systemEvent": "系统事件",
       "streamLogs": {
-        "title": "实时日志",
+        "title": "研究日志",
         "waiting": "SSE 已连接，等待日志...",
         "truncated": "已隐藏较早的 {{count}} 行",
         "toggle": "日志",
         "count": "{{count}} 条",
         "loadEarlier": "加载更早",
         "empty": "本轮暂无日志"
+      },
+      "logs": {
+        "loadLatest": "获取最新",
+        "fullScreen": "全屏",
+        "halfScreen": "半屏",
+        "loaded": "已加载 {{count}} 条",
+        "noMoreOlder": "已经到顶了，没有更早的日志",
+        "exportLoaded": "下载当前已加载的 {{count}} 条",
+        "exportAll": "下载全部日志（从后端拉取所有匹配行）",
+        "filterLabel": "筛选"
       },
       "editTopic": "点击编辑",
       "topicEditable": "可编辑",

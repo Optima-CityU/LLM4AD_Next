@@ -487,6 +487,9 @@ class ResearchMessage(SQLModel, TimeMixin, table=True):
     )
     # per-turn 递增序列号，保证事件严格顺序（解决同一微秒内多事件的排序问题）
     seq: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
+    # 本条对应的 Redis Stream entry id（<ms>-<seq>）。前端刷新后据此从「已拉取
+    # 历史的末端」精确续传 SSE（免全量重放），并作精确去重键。旧数据 / push 失败为 NULL。
+    stream_id: str | None = Field(default=None, max_length=64)
 
     session: ResearchSession | None = Relationship(back_populates="messages")
 
@@ -563,3 +566,6 @@ class ResearchLog(SQLModel, TimeMixin, table=True):
     )
     # per-turn 递增序列号，保证事件严格顺序（解决同一微秒内多事件的排序问题）
     seq: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
+    # 本条对应的 Redis Stream entry id（<ms>-<seq>）。前端刷新后据此续传 SSE
+    # 并作精确去重键（尤其修 retry 复用 turn_id 时 event_key="<type>:<seq>" 撞键）。
+    stream_id: str | None = Field(default=None, max_length=64)

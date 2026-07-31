@@ -2,11 +2,11 @@ import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import { useResearchTurnMessages } from "@/hooks/useAutoResearch"
+import { useResearchLogs } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
 
 import {
-  messageToLogEntry,
+  logItemToStreamEntry,
   type StreamLogEntry,
   StreamLogList,
 } from "./StreamLogConsole"
@@ -15,12 +15,12 @@ import {
  * 单个 turn 的内联折叠日志区。
  *
  * 默认折叠；展开时才按 ``turn_id`` 懒加载该轮持久化日志
- * （``useResearchTurnMessages` + `eventType=["log"]``，升序向前翻）。活跃轮把
+ * （``useResearchLogs` + `turnId``，独立 research_log 表双端游标窗口）。活跃轮把
  * SSE 实时 tail（``liveLogs``）叠加进来，与已拉取的持久日志按 ``event_key`` 去重，
  * 保证「实时推送」与「刷新后重放」看到同一份、不重复。
  *
- * 排序：后端 per-turn 端点仅支持升序，故日志天然按时间升序；展开/新增时自动
- * 滚到底部看最新（后端无倒序/tail 参数，此为既定取舍）。
+ * 排序：``useResearchLogs`` 恒返回升序，日志天然按时间升序；展开/新增时自动
+ * 滚到底部看最新。向上「加载更早」用 ``loadOlder``（older_cursor + order=desc）。
  */
 export default function TurnLogPanel({
   sessionId,
@@ -38,8 +38,8 @@ export default function TurnLogPanel({
   const { t } = useTranslation()
   const [open, setOpen] = useState(defaultOpen)
 
-  const q = useResearchTurnMessages(sessionId, turnId, {
-    eventType: ["log"],
+  const q = useResearchLogs(sessionId, {
+    turnId,
     enabled: open,
   })
 
@@ -48,17 +48,17 @@ export default function TurnLogPanel({
     const seen = new Set<string>()
     const out: StreamLogEntry[] = []
     const push = (e: StreamLogEntry) => {
-      const sig = e.eventKey ?? e.id
+      // 去重键优先级：stream_id（REST/SSE 同源、全局唯一，修 retry 复用 turn_id 时
+      // event_key="<type>:<seq>" per-turn 计数器归零导致的撞键）> event_key > 合成 id。
+      const sig = e.streamId ?? e.eventKey ?? e.id
       if (seen.has(sig)) return
       seen.add(sig)
       out.push(e)
     }
-    for (const page of q.data?.pages ?? []) {
-      for (const m of page.items ?? []) push(messageToLogEntry(m))
-    }
+    for (const item of q.entries) push(logItemToStreamEntry(item))
     for (const e of liveLogs) push(e)
     return out
-  }, [q.data, liveLogs])
+  }, [q.entries, liveLogs])
 
   // 展开态、条目变化时自动滚到底部（看最新）。
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -89,7 +89,7 @@ export default function TurnLogPanel({
             {t("autoResearch.chat.streamLogs.count", { count })}
           </span>
         )}
-        {open && q.isFetching && (
+        {open && q.isLoading && (
           <Loader2 className="ml-auto h-3 w-3 animate-spin" />
         )}
       </button>
@@ -99,24 +99,24 @@ export default function TurnLogPanel({
           ref={scrollRef}
           className="max-h-64 overflow-y-auto px-3 py-2 font-mono text-[11px]"
         >
-          {q.hasNextPage && (
+          {q.hasOlder && (
             <button
               type="button"
-              onClick={() => void q.fetchNextPage()}
-              disabled={q.isFetchingNextPage}
+              onClick={q.loadOlder}
+              disabled={q.isFetchingOlder}
               className={cn(
                 "mb-1 w-full rounded py-0.5 text-center text-[10px] text-muted-foreground/60 hover:bg-muted/40",
-                q.isFetchingNextPage && "opacity-60",
+                q.isFetchingOlder && "opacity-60",
               )}
             >
-              {q.isFetchingNextPage ? (
+              {q.isFetchingOlder ? (
                 <Loader2 className="mx-auto h-3 w-3 animate-spin" />
               ) : (
                 t("autoResearch.chat.streamLogs.loadEarlier")
               )}
             </button>
           )}
-          {count === 0 && !q.isFetching ? (
+          {count === 0 && !q.isLoading ? (
             <div className="py-1 text-muted-foreground/60 italic">
               {t("autoResearch.chat.streamLogs.empty")}
             </div>

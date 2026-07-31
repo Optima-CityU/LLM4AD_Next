@@ -1,7 +1,6 @@
 import {
   ChevronDown,
   Cpu,
-  History,
   Info,
   ListStart,
   Loader2,
@@ -9,7 +8,6 @@ import {
   RotateCcw,
   Send,
   Square,
-  Terminal,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -41,9 +39,7 @@ import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { cn } from "@/lib/utils"
 
 import GatePanel from "./GatePanel"
-import HistoryLogDrawer, { type DrawerTab } from "./HistoryLogDrawer"
 import ProviderModelPicker from "./ProviderModelPicker"
-import type { StreamLogEntry } from "./StreamLogConsole"
 import { MODE_OPTIONS } from "./shared"
 import { stageNameByLang } from "./tech"
 
@@ -83,16 +79,6 @@ interface Props {
   onStop: () => void
   onRetry: () => void
   onGateSubmit: (messageId: string, submission: Record<string, unknown>) => void
-  /** 实时 + 历史合并后的日志（供底部日志/历史抽屉的日志 tab 展示）。 */
-  logs: StreamLogEntry[]
-  /** SSE 是否在跑：为 true 时即便零条也让日志入口可点（可看「等待日志」）。 */
-  logsActive: boolean
-  /** 是否还有更早的日志可加载。 */
-  logsHasMore?: boolean
-  /** 是否正在加载更多日志。 */
-  logsFetchingMore?: boolean
-  /** 加载更早的日志。 */
-  onLoadMoreLogs?: () => void
 }
 
 /**
@@ -123,27 +109,13 @@ export default function BottomComposer({
   onStop,
   onRetry,
   onGateSubmit,
-  logs,
-  logsActive,
-  logsHasMore,
-  logsFetchingMore,
-  onLoadMoreLogs,
 }: Props) {
   const { t, i18n } = useTranslation()
   const { data: providersData } = useProviders()
   const { data: defaultModels } = useUserDefaultModels()
   const [text, setText] = useState("")
   const [noteError, setNoteError] = useState(false)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>("logs")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const logListRef = useRef<HTMLDivElement>(null)
-
-  // 打开抽屉并激活指定 tab（日志 / 历史）。
-  const openDrawer = (tab: DrawerTab) => {
-    setDrawerTab(tab)
-    setDrawerOpen(true)
-  }
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // 输入框随内容自动增高：内容变化时重算高度（上限 max-h-32，超出滚动）。
@@ -156,44 +128,10 @@ export default function BottomComposer({
     el.style.height = `${el.scrollHeight}px`
   }, [text])
 
-  // 日志抽屉打开时先跳到底部。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在打开 / 切 tab 时定位
-  useEffect(() => {
-    if (!drawerOpen || drawerTab !== "logs") return
-    const el = logListRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [drawerOpen, drawerTab])
-
-  // 追尾新日志：仅当用户已贴近底部时才随新日志滚到底，上滚回看 / 翻页时不打断。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 依赖 logs.length 追尾新日志
-  useEffect(() => {
-    if (!drawerOpen || drawerTab !== "logs") return
-    const el = logListRef.current
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [logs.length])
-
   const status = session.status
   const terminal =
     status === "completed" || status === "failed" || status === "cancelled"
   const showRunTools = status === "pending" || terminal
-
-  // 日志/历史抽屉：running 分支与主分支共用同一个抽屉元素。
-  const drawer = (
-    <HistoryLogDrawer
-      sessionId={session.id}
-      open={drawerOpen}
-      onOpenChange={setDrawerOpen}
-      tab={drawerTab}
-      onTabChange={setDrawerTab}
-      logs={logs}
-      logListRef={logListRef}
-      logsHasMore={logsHasMore}
-      logsFetchingMore={logsFetchingMore}
-      onLoadMoreLogs={onLoadMoreLogs}
-    />
-  )
 
   // running：整条只留停止。
   if (running) {
@@ -205,14 +143,7 @@ export default function BottomComposer({
             {t("autoResearch.input.runningHint")}
           </span>
         </span>
-        <LogButton
-          count={logs.length}
-          active={logsActive}
-          onOpen={() => openDrawer("logs")}
-          label={t("autoResearch.chat.streamLogs.title")}
-        />
         <StopButton onStop={onStop} label={t("autoResearch.chat.stopTurn")} />
-        {drawer}
       </div>
     )
   }
@@ -310,15 +241,6 @@ export default function BottomComposer({
         className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 max-h-32 py-1 disabled:opacity-60 transition-[height] duration-150 ease-out"
       />
 
-      {/* 日志抽屉入口：随输入框（含门控时）；pending/终态由工具行承载 */}
-      {!showRunTools && (
-        <LogButton
-          count={logs.length}
-          active={logsActive}
-          onOpen={() => openDrawer("logs")}
-          label={t("autoResearch.chat.streamLogs.title")}
-        />
-      )}
 
       {/* 发送（agent） */}
       <button
@@ -515,29 +437,6 @@ export default function BottomComposer({
                     <RotateCcw className="size-3.5" />
                   </button>
                 )}
-                {/* 实时日志：放在运行历史左侧，带条数 badge */}
-                <button
-                  type="button"
-                  onClick={() => openDrawer("logs")}
-                  disabled={logs.length === 0 && !logsActive}
-                  title={t("autoResearch.chat.streamLogs.title")}
-                  className="relative size-7 grid place-items-center rounded-md text-muted-foreground/70 hover:text-primary hover:bg-primary/10 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-                >
-                  <Terminal className="size-3.5" />
-                  {logs.length > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-1 grid place-items-center rounded-full bg-primary text-primary-foreground text-[10px] font-mono leading-none tabular-nums">
-                      {logs.length > 99 ? "99+" : logs.length}
-                    </span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openDrawer("history")}
-                  title={t("autoResearch.chat.turnHistory")}
-                  className="size-7 grid place-items-center rounded-md text-muted-foreground/70 hover:text-primary hover:bg-primary/10 transition-colors"
-                >
-                  <History className="size-3.5" />
-                </button>
               </div>
             </div>
           )}
@@ -570,7 +469,6 @@ export default function BottomComposer({
           </span>
         </div>
       </div>
-      {drawer}
     </div>
   )
 }
@@ -608,38 +506,3 @@ function StopButton({
   )
 }
 
-/** 日志抽屉入口：终端图标 + 条数 badge。无日志且 SSE 未跑时禁用。 */
-function LogButton({
-  count,
-  active,
-  onOpen,
-  label,
-  compact,
-}: {
-  count: number
-  active: boolean
-  onOpen: () => void
-  label: string
-  compact?: boolean
-}) {
-  const disabled = count === 0 && !active
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      disabled={disabled}
-      title={label}
-      className={cn(
-        "relative shrink-0 inline-flex items-center justify-center rounded-lg border border-border/60 text-muted-foreground/80 hover:text-primary hover:border-primary/30 hover:bg-primary/5 disabled:opacity-40 disabled:pointer-events-none transition-all",
-        compact ? "size-6" : "size-8",
-      )}
-    >
-      <Terminal className={compact ? "size-3.5" : "size-4"} />
-      {count > 0 && (
-        <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 grid place-items-center rounded-full bg-primary text-primary-foreground text-[10px] font-mono leading-none tabular-nums">
-          {count > 99 ? "99+" : count}
-        </span>
-      )}
-    </button>
-  )
-}

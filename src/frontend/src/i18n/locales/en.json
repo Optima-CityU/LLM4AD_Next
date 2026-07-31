@@ -2827,6 +2827,7 @@
       "workflow": "Workflow",
       "report": "Report Analysis",
       "ide": "Open IDE",
+      "logs": "Logs",
       "comingSoon": "Coming soon"
     },
     "analysis": {
@@ -2981,7 +2982,8 @@
       "failed": "Failed",
       "skipped": "Skipped",
       "waiting": "Waiting",
-      "gate": "Gate"
+      "gate": "Gate",
+      "interrupted": "Interrupted"
     },
     "create": {
       "title": "New research session",
@@ -3039,13 +3041,23 @@
       "stageError": "Error",
       "systemEvent": "System event",
       "streamLogs": {
-        "title": "Live logs",
+        "title": "Research logs",
         "waiting": "SSE connected, waiting for logs...",
         "truncated": "{{count}} earlier lines hidden",
         "toggle": "Logs",
         "count": "{{count}} lines",
         "loadEarlier": "Load earlier",
         "empty": "No logs for this turn"
+      },
+      "logs": {
+        "loadLatest": "Get latest",
+        "fullScreen": "Full screen",
+        "halfScreen": "Half screen",
+        "loaded": "{{count}} loaded",
+        "noMoreOlder": "You've reached the top — no earlier logs",
+        "exportLoaded": "Download loaded {{count}} entries",
+        "exportAll": "Download all logs (fetch every matching line from backend)",
+        "filterLabel": "Filter"
       },
       "editTopic": "Click to edit",
       "topicEditable": "Editable",
