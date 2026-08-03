@@ -390,17 +390,22 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     })
   }, [msgQ.data, liveMessages])
 
-  // 当前待回复的门控 form 消息：paused 时最后一条未锁定的 form。移到底部
-  // GatePanel 操作；消息流里不再重复渲染这一条（见 renderedMessages）。
+  // 当前待回复的门控 form 消息：turn 进入 paused_gate 时最后一条未锁定的 form。
+  // 移到底部 GatePanel 操作；消息流里不再重复渲染这一条（见 renderedMessages）。
+  //
+  // 门槛用 turn 级状态（activeTurn.status === "paused_gate"）而非 session.status
+  // ——与 SSE 订阅门槛 turnLive 同源：session.status 经 prop 透传、滞后刷新，
+  // waiting_for_input 到达后它常慢一拍，会让底部 GatePanel 迟迟不出现。turn 的
+  // paused_gate 对应 session 的 paused，语义一致且刷新时序与 activeTurnId 对齐。
   const gateMessage = useMemo(() => {
-    if (session.status !== "paused") return null
+    if (activeTurn?.status !== "paused_gate") return null
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       const kind = (m.payload as { kind?: string } | null)?.kind
       if (kind === "form" && !m.payload_locked) return m
     }
     return null
-  }, [messages, session.status])
+  }, [messages, activeTurn?.status])
 
   // 活跃门控从消息流里剔除（它由底部 GatePanel 承载操作，避免重复展示）。
   const renderedMessages = useMemo(
@@ -455,12 +460,16 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // ── SSE：关键事件到达时按类型分流失效相关查询 ─────────────────────────
   // 订阅门槛用 turn 级状态（与 activeTurnId 同源自 detail query），而非 session.status
   // 那个经 prop 透传、滞后刷新的字段——重试复用同一 turn_id 时 session.status 常慢一拍，
-  // 会导致 sseEnabled 迟迟不翻 true、SSE 不重连。turn 的 running / paused_gate 对应
-  // session 的 running / paused，语义一致且刷新时序与 turn_id 对齐。
-  // turn 存活（running / paused_gate）：SSE 与续传探针的共同前提。
-  const turnLive =
-    !!activeTurnId &&
-    (activeTurn?.status === "running" || activeTurn?.status === "paused_gate")
+  // 会导致 sseEnabled 迟迟不翻 true、SSE 不重连。
+  //
+  // 只认 running：paused_gate **不订阅**。命中硬门控时后端已 emit done 关流、worker
+  // 释放（backend streaming.persist_gate_pause：落 waiting_for_input 表单后主循环
+  // emit done），该 turn 的 Redis Stream 不会再有新事件。门控提交走**新建 turn**
+  // （backend turns._reply_to_gate：旧 paused 轮落 COMPLETED、新 turn 带新 turn_id
+  // 入队），新事件写到新 stream key，靠 activeTurnId 变化自然重连新流。故 paused_gate
+  // 保持订阅只会连上一条只剩 done 的死流（触发 onDone 空跑）或空连 idle→timeout→退避
+  // 重连周期性打后端，无任何收益。门控表单本身由 REST messages 兜底（已落库），不依赖 SSE。
+  const turnLive = !!activeTurnId && activeTurn?.status === "running"
 
   // SSE 首连续传点探针：只取活跃轮**最新一条** log 的 stream_id（order=desc、limit=1，
   // 极轻量）。log 是量最大的源（一轮可上万条），据其末端续传能把首连从「0-0 全量
@@ -1020,7 +1029,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
                     <TurnLogPanel
                       sessionId={session.id}
                       turnId={group.turnId}
-                      defaultOpen={group.turnId === lastTurnId || group.turnId === activeTurnId}
+                      defaultOpen={group.turnId === lastTurnId}
                       liveLogs={
                         group.turnId === activeTurnId ? streamLogs : EMPTY_LOGS
                       }

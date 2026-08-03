@@ -24,12 +24,14 @@ import { cn } from "@/lib/utils"
  *
  * 数据来自 `listGenerated`（按 stage 分组，因为一个会话里演化可能在多个 stage
  * 跑多次）。图表数据转换逻辑对齐 evolution 页面：score 取 `evaluation.score`，
- * 散点用 min-max 归一化着色，趋势按 generation 累积算 max/avg（用原始分）。
+ * 散点用 min-max 归一化着色，趋势按 generation 累积算 max（单调不降）+ 每代内
+ * 最优 genMax（对齐全屏 TrendPanel 的两条线，不再显示平均分）。
  * 这里显示简化的小图，点击全屏按钮查看完整功能。
  */
 
 const MAX_COLOR = "#00d4ff"
-const AVG_COLOR = "#a66cff"
+// 与全屏 TrendPanel 的 GEN_MAX_COLOR 对齐：第二条线是「当代最优」，不再是平均分。
+const GEN_MAX_COLOR = "#a66cff"
 // island 配色（与 evolution ISLAND_COLORS 一致，循环取用）。
 const ISLAND_COLORS = [
   "#00d4ff",
@@ -64,7 +66,7 @@ interface ExpData {
   maxGeneration: number
   population: number
   bestScore: number | null
-  gens: { g: number; max: number; avg: number }[]
+  gens: { g: number; max: number; genMax: number }[]
 }
 
 /** 从某 stage 的个体列表构造图表数据（复用 evolution 的提取 / 归一化 / 累积逻辑）。 */
@@ -123,28 +125,23 @@ function buildExpData(items: ResearchGeneratedItem[]): ExpData {
     if (bestScore === null || n.rawScore > bestScore) bestScore = n.rawScore
   }
 
-  // 趋势：按 generation 分组，累积算 max/avg（用原始分，保证 max 线单调）。
+  // 趋势：按 generation 分组，算两条线（对齐全屏 TrendPanel）——
+  // max = 从首代累积到当代的全局最优（单调不降）；genMax = 该代内最优（反映每代种群质量）。
   const genMap = new Map<number, number[]>()
   for (const n of scored) {
     if (!genMap.has(n.generation)) genMap.set(n.generation, [])
     genMap.get(n.generation)?.push(n.rawScore)
   }
   const genKeys = [...genMap.keys()].sort((a, b) => a - b)
-  const gens: { g: number; max: number; avg: number }[] = []
+  const gens: { g: number; max: number; genMax: number }[] = []
   let runningMax = Number.NEGATIVE_INFINITY
-  let runningSum = 0
-  let runningCount = 0
   for (const g of genKeys) {
-    for (const s of genMap.get(g) ?? []) {
-      if (s > runningMax) runningMax = s
-      runningSum += s
-      runningCount += 1
-    }
-    gens.push({
-      g,
-      max: runningMax,
-      avg: runningCount ? runningSum / runningCount : 0,
-    })
+    const genScores = genMap.get(g) ?? []
+    const genMax = genScores.length
+      ? Math.max(...genScores)
+      : runningMax
+    if (genMax > runningMax) runningMax = genMax
+    gens.push({ g, max: runningMax, genMax })
   }
 
   return {
@@ -535,7 +532,7 @@ function TrendView({ data }: { data: ExpData }) {
   const ih = H - PT - PB
   const gmax = Math.max(1, data.maxGeneration)
 
-  const vals = data.gens.flatMap((d) => [d.max, d.avg])
+  const vals = data.gens.flatMap((d) => [d.max, d.genMax])
   const rawMin = vals.length ? Math.min(...vals) : 0
   const rawMax = vals.length ? Math.max(...vals) : 1
   const {
@@ -547,7 +544,9 @@ function TrendView({ data }: { data: ExpData }) {
   const xOf = (g: number) => PL + (g / gmax) * iw
   const yOf = (v: number) => PT + (1 - (v - yMin) / yRange) * ih
   const maxPts = data.gens.map((d) => `${xOf(d.g)},${yOf(d.max)}`).join(" ")
-  const avgPts = data.gens.map((d) => `${xOf(d.g)},${yOf(d.avg)}`).join(" ")
+  const genMaxPts = data.gens
+    .map((d) => `${xOf(d.g)},${yOf(d.genMax)}`)
+    .join(" ")
   const xTickIdx = pickIndices(data.gens.length, 4)
 
   if (data.gens.length === 0) {
@@ -617,9 +616,9 @@ function TrendView({ data }: { data: ExpData }) {
           {t("autoResearch.experiment.generation")}
         </text>
         <polyline
-          points={avgPts}
+          points={genMaxPts}
           fill="none"
-          stroke={AVG_COLOR}
+          stroke={GEN_MAX_COLOR}
           strokeWidth={1.4}
           strokeDasharray="5 3"
         />
@@ -651,9 +650,9 @@ function TrendView({ data }: { data: ExpData }) {
         <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
           <span
             className="h-0 w-3 border-t border-dashed"
-            style={{ borderColor: AVG_COLOR }}
+            style={{ borderColor: GEN_MAX_COLOR }}
           />
-          {t("autoResearch.experiment.avg")}
+          {t("autoResearch.experiment.genMax")}
         </span>
       </div>
     </div>

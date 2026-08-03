@@ -444,6 +444,11 @@ export function useResearchLogs(
   // 并发闸门，防止同方向重复触发。
   const olderBusyRef = useRef(false)
   const latestBusyRef = useRef(false)
+  // 已发起首屏请求的 filterKey：本 hook 手写、无 React Query 的在途去重，dev 下
+  // StrictMode 会把首屏 effect「mount→cleanup→mount」跑两次，两次都发同参请求。
+  // 记下已发起的 filterKey，第二次 mount 命中即跳过，只发一次；filterKey 真正
+  // 变化（换 turn/筛选）时不同 → 正常重发。disabled 分支复位以便再启用时重取。
+  const startedKeyRef = useRef<string | null>(null)
 
   // 筛选签名：任一变化都重载。level 数组转字符串参与依赖。
   const levelKey = level && level.length ? [...level].sort().join(",") : ""
@@ -463,8 +468,12 @@ export function useResearchLogs(
       setHasLoaded(false)
       olderCursorRef.current = null
       newerCursorRef.current = null
+      startedKeyRef.current = null
       return
     }
+    // StrictMode 双 mount 去重：同一 filterKey 已发起过首屏请求则跳过第二次。
+    if (startedKeyRef.current === filterKey) return
+    startedKeyRef.current = filterKey
     const gen = ++genRef.current
     setIsLoading(true)
     // 新一轮首屏开始：标记未 settle，待成功/失败后再置 true。换筛选（含换 turn）

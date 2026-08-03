@@ -8,6 +8,7 @@ import {
   DownloadCloud,
   Loader2,
   Search,
+  WrapText,
   X,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -78,8 +79,8 @@ const LEVEL_FILTER_STYLES: Record<LogLevel, { on: string; off: string }> = {
   },
 }
 
-/** 渲染单条 research 日志行（对齐 evolution 日志样式）。 */
-function renderResearchLog(entry: ResearchLogItem) {
+/** 渲染单条 research 日志行（对齐 evolution 日志样式）。wrap=true 时长日志折行。 */
+function renderResearchLog(entry: ResearchLogItem, wrap: boolean) {
   const level = String(entry.level ?? "").toUpperCase()
   const levelCls = LEVEL_STYLES[level] ?? "text-gray-500 dark:text-gray-400"
   const messageCls = LEVEL_MESSAGE_STYLES[level] ?? DEFAULT_MESSAGE_CLS
@@ -92,7 +93,12 @@ function renderResearchLog(entry: ResearchLogItem) {
     .join(" ")
 
   return (
-    <div className="leading-5 whitespace-pre hover:bg-black/[0.03] dark:hover:bg-white/[0.03]">
+    <div
+      className={cn(
+        "leading-5 hover:bg-black/[0.03] dark:hover:bg-white/[0.03]",
+        wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre",
+      )}
+    >
       {time && <span className="text-gray-500 select-none">[{time}] </span>}
       {level && <span className={`${levelCls} select-none`}>{level}</span>}
       <span className={messageCls}> {entry.message}</span>
@@ -130,6 +136,9 @@ export default function ResearchLogPanel({
   const [searchQuery, setSearchQuery] = useState("")
   const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(new Set())
   const [isExporting, setIsExporting] = useState(false)
+  // 长日志折行：默认开（贴合面板宽度、不用横向拖）。虚拟列表 measureElement 动态测高，
+  // 折行变高会自动校正，不破坏滚动定位。
+  const [wrap, setWrap] = useState(true)
 
   const levelArr = useMemo(() => Array.from(levelFilter), [levelFilter])
 
@@ -196,6 +205,12 @@ export default function ResearchLogPanel({
     estimateSize: () => 20,
     overscan: 30,
   })
+
+  // 切换折行时每行真实高度变了，强制虚拟列表重测，避免总高与定位错位。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅 wrap 变化时需重测
+  useEffect(() => {
+    virtualizer.measure()
+  }, [wrap])
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current
@@ -350,6 +365,23 @@ export default function ResearchLogPanel({
             defaultValue: "已加载 {{count}} 条",
           })}
         </span>
+        {/* 折行开关：开=长日志按面板宽折行；关=不换行、超宽横向滚动（贴合终端）。 */}
+        <button
+          type="button"
+          onClick={() => setWrap((v) => !v)}
+          className={cn(
+            "shrink-0 grid place-items-center size-7 rounded-md border transition-colors",
+            wrap
+              ? "border-primary/40 bg-primary/10 text-primary"
+              : "border-border/70 text-muted-foreground hover:text-foreground hover:bg-accent/60",
+          )}
+          title={t("autoResearch.chat.logs.wrap", {
+            defaultValue: "长日志折行显示",
+          })}
+          aria-pressed={wrap}
+        >
+          <WrapText className="size-3.5" />
+        </button>
         {/* 下载当前已加载：纯前端导出内存里的 entries */}
         <button
           type="button"
@@ -405,7 +437,7 @@ export default function ResearchLogPanel({
         <div
           ref={containerRef}
           onScroll={handleScroll}
-          className="flex-1 w-full overflow-auto px-4 py-3 text-xs font-mono bg-card"
+          className="arc-visible-scroll flex-1 w-full overflow-auto px-4 py-3 text-xs font-mono bg-card"
         >
           {/* 顶部：加载更早；没有更多时给一句到顶提示 */}
           {hasOlder ? (
@@ -447,12 +479,12 @@ export default function ResearchLogPanel({
                   position: "absolute",
                   top: 0,
                   left: 0,
-                  width: "max-content",
+                  width: wrap ? "100%" : "max-content",
                   minWidth: "100%",
                   transform: `translateY(${row.start}px)`,
                 }}
               >
-                {renderResearchLog(entries[row.index])}
+                {renderResearchLog(entries[row.index], wrap)}
               </div>
             ))}
           </div>
@@ -477,13 +509,13 @@ export default function ResearchLogPanel({
         </div>
       )}
 
-      {/* 到顶 / 到底 */}
+      {/* 到顶 / 到底：右侧上下居中悬浮 */}
       {entries.length > 0 && (
-        <div className="absolute bottom-2 right-4 flex flex-col gap-1">
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-1.5">
           <button
             type="button"
             onClick={scrollToTop}
-            className="p-1 rounded bg-muted/80 text-muted-foreground opacity-80 hover:opacity-100 hover:bg-muted transition-opacity"
+            className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md text-muted-foreground hover:bg-background/90 hover:border-primary/50 hover:text-foreground active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             title={t("evolution.logs.scrollToTop")}
           >
             <ArrowUpToLine className="size-3.5" />
@@ -491,7 +523,7 @@ export default function ResearchLogPanel({
           <button
             type="button"
             onClick={scrollToBottom}
-            className="p-1 rounded bg-muted/80 text-muted-foreground opacity-80 hover:opacity-100 hover:bg-muted transition-opacity"
+            className="size-7 grid place-items-center rounded-full bg-background/40 backdrop-blur border border-border/50 shadow-md text-muted-foreground hover:bg-background/90 hover:border-primary/50 hover:text-foreground active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             title={t("evolution.logs.scrollToBottom")}
           >
             <ArrowDownToLine className="size-3.5" />

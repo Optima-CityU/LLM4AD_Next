@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   CircleDot,
   Cog,
@@ -9,9 +8,7 @@ import {
   FlaskConical,
   Info,
   Loader2,
-  Play,
   Sparkles,
-  X,
 } from "lucide-react"
 import { memo, useId, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -146,74 +143,14 @@ function UserRow({ message }: { message: ResearchMessageItem }) {
 // ---- System event row ----
 
 function SystemEventRow({ message }: { message: ResearchMessageItem }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const eventType = message.event_type ?? "log"
   const payload = (message.payload ?? {}) as Record<string, unknown>
-  const stage = message.stage ?? (payload.stage as number | undefined) ?? null
-  // 阶段名优先用本地化短名（对齐顶部进度轨），回退到后端下发的英文枚举名，
-  // 避免「顶部中文 / 正文英文」割裂（如 KNOWLEDGE_EXTRACT ↔ 知识综合）。
-  const stageName =
-    (stage != null ? stageNameByLang(stage, i18n.language) : "") ||
-    (payload.name as string | undefined) ||
-    (payload.stage_name as string | undefined) ||
-    ""
   const time = new Date(message.created_time).toLocaleTimeString()
 
-  // 阶段转场：阶段名走文本，状态（running/done/…）走带色状态胶囊 + 状态图标。
-  // 「开始运行 / 完成」等所有历史行共用同一低饱和底样式，仅靠图标色与状态胶囊
-  // 颜色区分，保证长列表风格统一、不晃眼（此前 running 行带描边 + 呼吸动画，
-  // 而每个「开始运行」都是历史事件常驻，导致整屏发光闪烁）。
-  if (eventType === "stage_transition" && stage != null) {
-    const status = String(payload.status ?? "")
-    const v = stageTransitionVisual(status)
-    const label = t("autoResearch.chat.stagePrefix", {
-      stage,
-      name: stageName || `stage-${stage}`,
-    })
-    // 失败时把后端返回的错误原因展示出来（优先 payload.error，回退 message.error），
-    // 否则用户只能看到一个红色「失败」胶囊，无法定位到底缺了什么。
-    const errorText =
-      status === "failed"
-        ? (payload.error as string | undefined) || message.error || ""
-        : ""
-    return (
-      <div className="px-6 py-0.5">
-        <div className="flex max-w-fit items-center gap-2 rounded-full bg-muted/30 px-3 py-1 text-[11px] text-muted-foreground/80">
-          <v.Icon
-            className={cn(
-              "size-3.5 shrink-0",
-              v.iconClass,
-              v.spin && "animate-spin",
-            )}
-          />
-          <span className="truncate">{label}</span>
-          {status && (
-            <span
-              className={cn(
-                "shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide",
-                v.pillClass,
-              )}
-            >
-              {t(`autoResearch.stageStatus.${status}`, status)}
-            </span>
-          )}
-          <span className="text-[10px] opacity-50 shrink-0">{time}</span>
-        </div>
-        {errorText && (
-          <div className="mt-1 ml-2 flex max-w-2xl items-start gap-1.5 rounded-md border border-red-500/25 bg-red-500/5 px-2.5 py-1.5 text-[11px] text-red-600 dark:text-red-400">
-            <AlertTriangle className="mt-px size-3.5 shrink-0" />
-            <div className="min-w-0 whitespace-pre-wrap break-words">
-              <span className="mr-1 font-semibold uppercase tracking-wide opacity-80">
-                {t("autoResearch.chat.stageError")}
-              </span>
-              {errorText}
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
+  // 说明：带阶段号的 stage_transition 不会走到这里——它在 ChatPanel.collapseTurn
+  // 里被折叠进 StageTimeline（竖向时间轴）渲染。只有 stage==null 的 stage_transition
+  // 才以普通系统事件行落到此处，走下面 meta 的 "stage_transition" 兜底分支。
   const meta = (() => {
     switch (eventType) {
       case "stage_transition":
@@ -264,52 +201,6 @@ function SystemEventRow({ message }: { message: ResearchMessageItem }) {
       </div>
     </div>
   )
-}
-
-/** 阶段转场状态的图标 + 胶囊配色（与顶部进度轨 / 侧栏状态色一致）。 */
-function stageTransitionVisual(status: string): {
-  Icon: typeof Cog
-  iconClass: string
-  spin: boolean
-  pillClass: string
-} {
-  switch (status) {
-    case "running":
-      return {
-        Icon: Play,
-        iconClass: "text-primary",
-        spin: false,
-        pillClass: "border-primary/30 bg-primary/10 text-primary",
-      }
-    case "done":
-      return {
-        Icon: Check,
-        iconClass: "text-emerald-500",
-        spin: false,
-        pillClass: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
-      }
-    case "waiting":
-      return {
-        Icon: CircleDot,
-        iconClass: "text-amber-500",
-        spin: false,
-        pillClass: "border-amber-500/30 bg-amber-500/10 text-amber-500",
-      }
-    case "failed":
-      return {
-        Icon: X,
-        iconClass: "text-red-500",
-        spin: false,
-        pillClass: "border-red-500/30 bg-red-500/10 text-red-500",
-      }
-    default:
-      return {
-        Icon: Cog,
-        iconClass: "text-cyan-500",
-        spin: false,
-        pillClass: "border-border/50 bg-muted/40 text-muted-foreground",
-      }
-  }
 }
 
 // ---- Assistant form / choice (HITL gate) —— 只读回显 ----

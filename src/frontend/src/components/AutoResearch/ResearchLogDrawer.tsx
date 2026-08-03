@@ -114,7 +114,7 @@ export default function ResearchLogDrawer({
             )}
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+          <div className="arc-visible-scroll min-h-0 flex-1 overflow-y-auto px-4 py-2">
             {turnsQ.isLoading ? (
               <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
                 <Loader2 className="size-4 animate-spin mr-2" />

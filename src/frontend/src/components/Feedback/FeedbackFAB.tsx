@@ -1,11 +1,15 @@
 import { BookOpen, HelpCircle, MessageSquarePlus, Users } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { useRouterState } from "@tanstack/react-router"
 
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
 import { GITHUB_ISSUES_URL } from "@/lib/siteMetadata"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
 import { cn } from "@/lib/utils"
+
+/** AutoResearch 页在顶栏右上角自带问号入口，故此全局悬浮球在该页隐藏，避免重复。 */
+const FAB_HIDDEN_PATHS = ["/autoresearch"]
 
 function useDraggable(initial: { right: number; bottom: number }) {
   const [pos, setPos] = useState(initial)
@@ -61,6 +65,10 @@ export function FeedbackFAB() {
   const [contactOpen, setContactOpen] = useState(false)
   const collapseTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
+  // 某些页面（如 AutoResearch）在顶栏自带问号入口，这里隐藏全局悬浮球以免重复。
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const hidden = FAB_HIDDEN_PATHS.some((p) => pathname.startsWith(p))
+
   const { pos, hasMoved, onPointerDown } = useDraggable({
     right: 14,
     bottom: 118,
@@ -81,6 +89,8 @@ export function FeedbackFAB() {
   }
 
   const isOnRight = pos.right < window.innerWidth / 2
+
+  if (hidden) return null
 
   return (
     <>

@@ -39,6 +39,7 @@ import {
   useResearchGenerated,
   useResearchState,
 } from "@/hooks/useAutoResearch"
+import { useAutoResearchHeader } from "@/hooks/useAutoResearchHeader"
 import { cn } from "@/lib/utils"
 import AnalysisReport from "./AnalysisReport"
 import ArtifactPreviewDialog, {
@@ -58,6 +59,8 @@ const IDE_REFRESH_COOLDOWN_MS = 3000
 
 interface Props {
   session: ResearchSessionItem | null
+  /** 右侧产物面板是否收起：收起时把四枚操作按钮注入顶栏右侧。 */
+  rightCollapsed?: boolean
 }
 
 /**
@@ -69,7 +72,7 @@ interface Props {
  * 标题行以省纵向空间。产物树点文件名预览、点下载图标下载；顶部一键折叠到第一层，
  * 每个目录可递归展开全部子孙。
  */
-export default function ArtifactsPanel({ session }: Props) {
+export default function ArtifactsPanel({ session, rightCollapsed }: Props) {
   const { t } = useTranslation()
 
   return (
@@ -79,13 +82,19 @@ export default function ArtifactsPanel({ session }: Props) {
           {t("autoResearch.artifacts.placeholder")}
         </div>
       ) : (
-        <PanelInner session={session} />
+        <PanelInner session={session} rightCollapsed={rightCollapsed} />
       )}
     </aside>
   )
 }
 
-function PanelInner({ session }: { session: ResearchSessionItem }) {
+function PanelInner({
+  session,
+  rightCollapsed,
+}: {
+  session: ResearchSessionItem
+  rightCollapsed?: boolean
+}) {
   const { t, i18n } = useTranslation()
   const state = useResearchState(session.id, {
     // SSE 实时推送，不需要轮询
@@ -223,15 +232,84 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
       .finally(() => setZipping(false))
   }, [session.id, zipping])
 
+  // 产物面板收起时：把「报告分析 / 研究日志 / 打开 IDE / 下载产物」四枚紧凑按钮
+  // 注入顶栏右侧（语言/主题切换器左侧）。四者的弹层/抽屉/下载均走 portal 或纯动作，
+  // 面板收起（width:0 + inert）也能正常触发；展开或会话卸载时自动清空注入。
+  const { setHeaderRight } = useAutoResearchHeader()
+  useEffect(() => {
+    if (!rightCollapsed) {
+      setHeaderRight(null)
+      return
+    }
+    setHeaderRight(
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setTool("report")}
+          title={t("autoResearch.mainTabs.report")}
+          aria-label={t("autoResearch.mainTabs.report")}
+          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
+        >
+          <FileBarChart className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setLogDrawerTab("logs")
+            setLogDrawerOpen(true)
+          }}
+          title={t("autoResearch.mainTabs.logsFull", {
+            defaultValue: "完整日志",
+          })}
+          aria-label={t("autoResearch.mainTabs.logsFull", {
+            defaultValue: "完整日志",
+          })}
+          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
+        >
+          <ScrollText className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setTool("ide")}
+          title={t("autoResearch.mainTabs.ide")}
+          aria-label={t("autoResearch.mainTabs.ide")}
+          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
+        >
+          <Code className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleDownloadAll}
+          disabled={zipping}
+          title={t("autoResearch.artifacts.downloadAll")}
+          aria-label={t("autoResearch.artifacts.downloadAll")}
+          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {zipping ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <DownloadCloud className="size-4" />
+          )}
+        </button>
+      </div>,
+    )
+    return () => setHeaderRight(null)
+  }, [rightCollapsed, zipping, handleDownloadAll, setHeaderRight, t])
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* 任务信息（最前）：报告分析/IDE 入口 + 状态/主题 + 运行进度 */}
-      <CollapsibleSection
-        icon={Info}
-        title={t("autoResearch.state.taskInfo")}
-        right={<StatusPill status={status} />}
-      >
-        <div className="space-y-3">
+      {/* 任务信息（面板顶部，常显不可折叠）：主题 + 状态 + 运行进度。
+          不再包在可折叠区里——它是这个会话的基本信息，应始终可见。 */}
+      <div className="shrink-0 border-b border-border/40">
+        {/* 标题行：图标 + 标题 + 状态徽标 */}
+        <div className="flex items-center h-9 px-3 gap-2">
+          <Info className="size-3.5 text-primary/80 shrink-0" />
+          <span className="flex-1 min-w-0 text-[11px] font-semibold uppercase tracking-wider text-foreground/80">
+            {t("autoResearch.state.taskInfo")}
+          </span>
+          <StatusPill status={status} />
+        </div>
+        <div className="px-3 pb-3 space-y-3">
           {/* 研究主题：直接显示内容，无 label、无嵌套面板 */}
           <p
             className="text-[13px] font-semibold text-foreground leading-relaxed line-clamp-3"
@@ -273,7 +351,93 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
             </div>
           )}
         </div>
-      </CollapsibleSection>
+      </div>
+
+      {/* 面板级操作条：报告分析 / 研究日志 / 打开 IDE / 下载产物。这四项是对整个
+          研究会话的平级操作入口，不隶属「产物」，故置于任务信息下方、其余区域之上。
+          统一主色点缀（无语义的多色只会制造噪音）：图标着主色以保证可供性/可点感，
+          表面中性实底 + 细阴影强化按钮质感，hover 再整体提亮。 */}
+      <div className="grid grid-cols-2 gap-1.5 px-3 py-2.5 shrink-0 border-b border-border/40">
+        {/* 报告分析 */}
+        <button
+          type="button"
+          onClick={() => setTool("report")}
+          title={t("autoResearch.mainTabs.report")}
+          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
+        >
+          <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
+            <FileBarChart className="size-3.5 text-primary" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-[11px] font-semibold text-foreground/90 truncate">
+              {t("autoResearch.mainTabs.report")}
+            </div>
+          </div>
+        </button>
+
+        {/* 完整日志（整会话，区别于中间面板的「本轮日志」） */}
+        <button
+          type="button"
+          onClick={() => {
+            setLogDrawerTab("logs")
+            setLogDrawerOpen(true)
+          }}
+          title={t("autoResearch.mainTabs.logsFull", {
+            defaultValue: "完整日志",
+          })}
+          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
+        >
+          <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
+            <ScrollText className="size-3.5 text-primary" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-[11px] font-semibold text-foreground/90 truncate">
+              {t("autoResearch.mainTabs.logsFull", {
+                defaultValue: "完整日志",
+              })}
+            </div>
+          </div>
+        </button>
+
+        {/* 打开 IDE */}
+        <button
+          type="button"
+          onClick={() => setTool("ide")}
+          title={t("autoResearch.mainTabs.ide")}
+          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
+        >
+          <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
+            <Code className="size-3.5 text-primary" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-[11px] font-semibold text-foreground/90 truncate">
+              {t("autoResearch.mainTabs.ide")}
+            </div>
+          </div>
+        </button>
+
+        {/* 下载产物 */}
+        <button
+          type="button"
+          onClick={handleDownloadAll}
+          disabled={zipping}
+          title={t("autoResearch.artifacts.downloadAll")}
+          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card disabled:hover:border-border/70"
+        >
+          <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
+            {zipping ? (
+              <Loader2 className="size-3.5 text-primary animate-spin" />
+            ) : (
+              <DownloadCloud className="size-3.5 text-primary" />
+            )}
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-[11px] font-semibold text-foreground/90 truncate">
+              下载产物
+            </div>
+          </div>
+        </button>
+      </div>
 
       {/* llm4ad 实验：视图切换在左，全屏按钮在最右侧（ml_vision 画像下隐藏） */}
       {!hideExperiment && (
@@ -344,86 +508,6 @@ function PanelInner({ session }: { session: ResearchSessionItem }) {
               </button>
             </div>
           )
-        }
-        stickyTop={
-          // 操作卡片：报告分析 / 日志 / 打开 IDE / 打包下载，卡片化设计，一行两个
-          <div className="grid grid-cols-2 gap-2 pt-1 pb-2 mb-1 border-b border-border/40">
-            {/* 报告分析 - 蓝色主题 */}
-            <button
-              type="button"
-              onClick={() => setTool("report")}
-              title={t("autoResearch.mainTabs.report")}
-              className="group relative flex items-center gap-2 p-2 rounded-lg border border-blue-500/20 bg-gradient-to-br from-blue-500/8 via-blue-500/5 to-transparent hover:from-blue-500/15 hover:via-blue-500/10 hover:border-blue-500/40 hover:shadow-lg hover:shadow-blue-500/10 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-            >
-              <div className="grid place-items-center size-7 rounded-lg bg-blue-500/15 group-hover:bg-blue-500/25 group-hover:scale-110 transition-all duration-200">
-                <FileBarChart className="size-4 text-blue-600 dark:text-blue-400 group-hover:rotate-6 transition-transform duration-200" />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-[11px] font-semibold text-foreground/90 truncate">
-                  {t("autoResearch.mainTabs.report")}
-                </div>
-              </div>
-            </button>
-
-            {/* 日志 - 橙色主题 */}
-            <button
-              type="button"
-              onClick={() => {
-                setLogDrawerTab("logs")
-                setLogDrawerOpen(true)
-              }}
-              title={t("autoResearch.mainTabs.logs", { defaultValue: "日志" })}
-              className="group relative flex items-center gap-2 p-2 rounded-lg border border-orange-500/20 bg-gradient-to-br from-orange-500/8 via-orange-500/5 to-transparent hover:from-orange-500/15 hover:via-orange-500/10 hover:border-orange-500/40 hover:shadow-lg hover:shadow-orange-500/10 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-            >
-              <div className="grid place-items-center size-7 rounded-lg bg-orange-500/15 group-hover:bg-orange-500/25 group-hover:scale-110 transition-all duration-200">
-                <ScrollText className="size-4 text-orange-600 dark:text-orange-400 group-hover:rotate-6 transition-transform duration-200" />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-[11px] font-semibold text-foreground/90 truncate">
-                  研究日志
-                </div>
-              </div>
-            </button>
-
-            {/* 打开 IDE - 绿色主题 */}
-            <button
-              type="button"
-              onClick={() => setTool("ide")}
-              title={t("autoResearch.mainTabs.ide")}
-              className="group relative flex items-center gap-2 p-2 rounded-lg border border-green-500/20 bg-gradient-to-br from-green-500/8 via-green-500/5 to-transparent hover:from-green-500/15 hover:via-green-500/10 hover:border-green-500/40 hover:shadow-lg hover:shadow-green-500/10 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
-            >
-              <div className="grid place-items-center size-7 rounded-lg bg-green-500/15 group-hover:bg-green-500/25 group-hover:scale-110 transition-all duration-200">
-                <Code className="size-4 text-green-600 dark:text-green-400 group-hover:-rotate-6 transition-transform duration-200" />
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-[11px] font-semibold text-foreground/90 truncate">
-                  {t("autoResearch.mainTabs.ide")}
-                </div>
-              </div>
-            </button>
-
-            {/* 打包下载 - 紫色主题 */}
-            <button
-              type="button"
-              onClick={handleDownloadAll}
-              disabled={zipping}
-              title={t("autoResearch.artifacts.downloadAll")}
-              className="group relative flex items-center gap-2 p-2 rounded-lg border border-purple-500/20 bg-gradient-to-br from-purple-500/8 via-purple-500/5 to-transparent hover:from-purple-500/15 hover:via-purple-500/10 hover:border-purple-500/40 hover:shadow-lg hover:shadow-purple-500/10 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
-            >
-              <div className="grid place-items-center size-7 rounded-lg bg-purple-500/15 group-hover:bg-purple-500/25 group-hover:scale-110 transition-all duration-200">
-                {zipping ? (
-                  <Loader2 className="size-4 text-purple-600 dark:text-purple-400 animate-spin" />
-                ) : (
-                  <DownloadCloud className="size-4 text-purple-600 dark:text-purple-400 group-hover:-rotate-6 transition-transform duration-200" />
-                )}
-              </div>
-              <div className="flex-1 text-left min-w-0">
-                <div className="text-[11px] font-semibold text-foreground/90 truncate">
-                  下载产物
-                </div>
-              </div>
-            </button>
-          </div>
         }
       >
         {treeQ.isLoading ? (

@@ -137,7 +137,16 @@ def _dispatch_pipeline_intent(
 
     try:
         with get_db_session() as db:
-            session = db.get(ResearchSession, session_id)
+            # 对 session 行加 FOR UPDATE：agent 异步推进 pipeline 与用户手点门控
+            # （HTTP start_turn）争同一个 gate，必须串行化——否则二者可能同时穿过
+            # PAUSED_GATE 守卫，一个 approve 一个 reject，谁赢随机。加锁后本事务与
+            # HTTP 侧共用同一把 session 行锁：先到者持锁推进、落 payload_locked，
+            # 后到者阻塞至其 commit，再据已推进的状态被幂等锁/守卫正确拒绝。
+            session = db.exec(
+                select(ResearchSession)
+                .where(ResearchSession.id == session_id)
+                .with_for_update()
+            ).first()
             if session is None:
                 return
             paused_turn = _find_paused_gate_turn(db, session_id)

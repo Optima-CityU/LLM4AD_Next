@@ -399,7 +399,10 @@ function AutoResearchPage() {
       >
         <div className="h-full" style={{ width: rightWidth }}>
           <TechPanel className="h-full flex flex-col bg-muted/60 dark:bg-background/50">
-            <ArtifactsPanel session={activeSession} />
+            <ArtifactsPanel
+              session={activeSession}
+              rightCollapsed={rightCollapsed}
+            />
           </TechPanel>
         </div>
       </aside>

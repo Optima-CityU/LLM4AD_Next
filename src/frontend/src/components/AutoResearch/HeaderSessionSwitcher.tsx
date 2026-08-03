@@ -6,7 +6,7 @@ import {
   Search,
   Sparkles,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ResearchFolderItem, ResearchSessionItem } from "@/client"
@@ -51,10 +51,18 @@ export default function HeaderSessionSwitcher({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState("")
+  // 关键词防抖：与展开态侧栏一致的 300ms。否则每敲一个字母都会以新 query key 触发
+  // 一次服务端 ILIKE 查询（输入「tsp」= 3 次废请求）。
+  const [debouncedQ, setDebouncedQ] = useState("")
   // 分组树的本地折叠态（默认全部展开）。
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
-  const kw = q.trim()
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQ(q.trim()), 300)
+    return () => clearTimeout(id)
+  }, [q])
+
+  const kw = debouncedQ
   const hasFilter = kw.length > 0
 
   // 分组默认折叠（避免一次展开 N 个分组、并发 N 个懒加载请求）；只有激活会话所在
@@ -143,6 +151,24 @@ export default function HeaderSessionSwitcher({
             />
           ) : (
             <>
+              {ungroupedCount > 0 && (
+                <SwitcherFolder
+                  folderId={null}
+                  label={t("autoResearch.sidebar.ungrouped")}
+                  totalCount={ungroupedCount}
+                  activeId={activeSession?.id ?? null}
+                  collapsed={!!collapsed.__ungrouped__}
+                  onToggle={() =>
+                    setCollapsed((s) => ({
+                      ...s,
+                      __ungrouped__: !s.__ungrouped__,
+                    }))
+                  }
+                  onPick={pick}
+                  // 有分组时给未分组一个标题头；无分组时它就是唯一列表
+                  showHeader={folders.length > 0}
+                />
+              )}
               {folders.map((folder) => (
                 <SwitcherFolder
                   key={folder.id}
@@ -163,24 +189,6 @@ export default function HeaderSessionSwitcher({
                   onPick={pick}
                 />
               ))}
-              {ungroupedCount > 0 && (
-                <SwitcherFolder
-                  folderId={null}
-                  label={t("autoResearch.sidebar.ungrouped")}
-                  totalCount={ungroupedCount}
-                  activeId={activeSession?.id ?? null}
-                  collapsed={!!collapsed.__ungrouped__}
-                  onToggle={() =>
-                    setCollapsed((s) => ({
-                      ...s,
-                      __ungrouped__: !s.__ungrouped__,
-                    }))
-                  }
-                  onPick={pick}
-                  // 有分组时给未分组一个标题头；无分组时它就是唯一列表
-                  showHeader={folders.length > 0}
-                />
-              )}
               {folders.length === 0 && ungroupedCount === 0 && (
                 <p className="px-3 py-6 text-center text-xs text-muted-foreground/60">
                   {t("autoResearch.sidebar.noSessions")}

@@ -1,6 +1,8 @@
-import { useTranslation } from "react-i18next"
-
 import type { ResearchLogItem } from "@/client"
+import {
+  LEVEL_MESSAGE_STYLES,
+  LEVEL_STYLES,
+} from "@/components/Evolution/TaskDetail/log-renderers"
 import { cn } from "@/lib/utils"
 
 /**
@@ -45,61 +47,45 @@ export function logItemToStreamEntry(item: ResearchLogItem): StreamLogEntry {
   }
 }
 
-/** 最多渲染的日志行数：长跑可产生上万行，只保留尾部若干行进 DOM。 */
-const MAX_RENDERED = 500
-
 /**
- * 纯日志列表渲染：空态提示、尾部截断保护、逐行渲染。
+ * 单条日志行渲染（时刻 + level 色 + [source] + message）。
  *
- * 由调用方（底部输入栏的日志抽屉）套上容器与滚动区。entries 由 ChatPanel 合并
- * 持久化历史（``event_type === "log"``）与实时 SSE ``type: "log"`` tail 提供，
- * 因此刷新后与已结束会话仍可见完整日志。
+ * 供 {@link TurnLogPanel} 的虚拟列表逐行调用。此前的 `StreamLogList`（带
+ * `MAX_RENDERED` 尾部截断）已被虚拟列表取代删除——尾部截断与「加载更早」前插
+ * 方向相反，会吃掉前插的更旧日志导致上翻失效，虚拟列表下不再需要 DOM 上限保护。
  */
-export function StreamLogList({ entries }: { entries: StreamLogEntry[] }) {
-  const { t } = useTranslation()
+const DEFAULT_MESSAGE_CLS = "text-gray-800 dark:text-gray-200"
 
-  if (entries.length === 0) {
-    return (
-      <div className="py-1 text-muted-foreground/60 italic">
-        {t("autoResearch.chat.streamLogs.waiting")}
-      </div>
-    )
-  }
-
-  // 只渲染尾部 MAX_RENDERED 行，超出部分用一条提示替代（DOM 上限保护）。
-  const overflow = entries.length - MAX_RENDERED
-  const rendered = overflow > 0 ? entries.slice(overflow) : entries
-
-  return (
-    <>
-      {overflow > 0 && (
-        <div className="py-1 text-muted-foreground/50 italic">
-          {t("autoResearch.chat.streamLogs.truncated", { count: overflow })}
-        </div>
-      )}
-      {rendered.map((e) => (
-        <LogLine key={e.id} entry={e} />
-      ))}
-    </>
-  )
-}
-
-function LogLine({ entry }: { entry: StreamLogEntry }) {
+export function LogLine({
+  entry,
+  wrap = false,
+}: {
+  entry: StreamLogEntry
+  /** 长日志是否折行显示（默认 false=不换行、超宽横向滚动，贴合终端）。 */
+  wrap?: boolean
+}) {
   const time = entry.ts
     ? new Date(entry.ts).toLocaleTimeString(undefined, {
         hour12: false,
       })
     : ""
+  // 等级色对齐右侧抽屉 ResearchLogPanel：label 用 LEVEL_STYLES、正文用 LEVEL_MESSAGE_STYLES
+  // （比 label 柔和，整屏日志仍可读、又能一眼辨严重度）。缺省等级回退灰色。
+  const level = String(entry.level ?? "").toUpperCase()
+  const levelCls = LEVEL_STYLES[level] ?? "text-gray-500 dark:text-gray-400"
+  const messageCls = LEVEL_MESSAGE_STYLES[level] ?? DEFAULT_MESSAGE_CLS
+  // 默认 whitespace-pre（不换行、超宽横向滚动）对齐抽屉：长日志用横向滚动而非换行，
+  // 更贴合终端。wrap=true 时容器去掉 whitespace-pre、正文 flex-1 折行——虚拟列表用
+  // measureElement 动态测每行真实高度，折行变高会被自动校正，不破坏滚动定位。
   return (
-    <div className="flex gap-2 py-0.5 whitespace-pre-wrap wrap-break-word">
+    <div className={cn("flex gap-2 py-0.5 leading-5", !wrap && "whitespace-pre")}>
       {time && (
-        <span className="text-muted-foreground/60 shrink-0">{time}</span>
+        <span className="text-muted-foreground/60 shrink-0 select-none">
+          {time}
+        </span>
       )}
       <span
-        className={cn(
-          "shrink-0 w-16 whitespace-nowrap uppercase font-semibold",
-          levelColor(entry.level),
-        )}
+        className={`shrink-0 w-16 whitespace-nowrap uppercase font-semibold select-none ${levelCls}`}
       >
         {entry.level || "LOG"}
       </span>
@@ -111,26 +97,14 @@ function LogLine({ entry }: { entry: StreamLogEntry }) {
           [{entry.source}]
         </span>
       )}
-      <span className="text-foreground/90 min-w-0">{entry.message}</span>
+      <span
+        className={cn(
+          messageCls,
+          wrap && "flex-1 min-w-0 whitespace-pre-wrap break-words",
+        )}
+      >
+        {entry.message}
+      </span>
     </div>
   )
-}
-
-function levelColor(level: string) {
-  switch (level?.toUpperCase()) {
-    case "ERROR":
-    case "CRITICAL":
-    case "FATAL":
-      return "text-destructive"
-    case "WARN":
-    case "WARNING":
-      return "text-amber-500"
-    case "INFO":
-      return "text-emerald-500"
-    case "DEBUG":
-    case "TRACE":
-      return "text-muted-foreground"
-    default:
-      return "text-foreground/70"
-  }
 }

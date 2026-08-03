@@ -121,7 +121,7 @@ export default function StageGroupRail({
   }).filter((x) => x.present.length > 0)
 
   return (
-    <div className="overflow-x-auto px-8 pt-2 pb-1.5">
+    <div className="overflow-x-auto px-8 pt-3 pb-1.5">
       <div className="mx-auto flex w-full min-w-fit max-w-3xl xl:max-w-4xl 2xl:max-w-5xl items-start">
         {groups.map(({ g, present, info }, gi) => {
           const isActivePhase =
@@ -167,16 +167,11 @@ export default function StageGroupRail({
                       >
                         {t(`autoResearch.stageGroups.${g.key}`, g.key)}
                       </span>
-                      {/* 圈下数字改为该 Phase 覆盖的阶段序号区间（如「文献发现」= 3-6） */}
+                      {/* 圈下数字：该 Phase 覆盖的阶段序号区间（如「文献发现」= 3-6）。
+                          llm4ad 标识改为浮在圆圈顶部的小标签（见 StepNode），此处不再内联。 */}
                       <span className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground/60">
                         {g.from === g.to ? g.from : `${g.from}-${g.to}`}
                       </span>
-                      {isLlm4ad && (
-                        <span className="mt-0.5 inline-flex items-center gap-0.5 rounded-full bg-primary/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary ring-1 ring-primary/30">
-                          <Cpu className="size-2" />
-                          LLM4AD
-                        </span>
-                      )}
                     </div>
                   </button>
                 </HoverCardTrigger>
@@ -229,13 +224,27 @@ function StepNode({
   const solid = info.status === "done"
 
   return (
+    // 尺寸恒定、不缩放：激活态不放大圆圈（放大会牵动 LLM4AD 标签、破坏 D/E 对齐），
+    // 改由样式表达——脉冲光晕 + 圆盘淡色底 + 主色描边环。
     <div
-      className={cn(
-        "relative grid place-items-center transition-transform duration-300",
-        isActive && "scale-[1.12]",
-      )}
+      className="relative grid place-items-center"
       style={{ width: NODE, height: NODE }}
     >
+      {/* LLM4AD 标签：浮在圆圈正上方、底边与圆环顶部相切紧贴。绝对定位、不占列高，
+          清楚标记「实验设计 / 实验执行」两步由 LLM4AD 演化引擎驱动。
+          bottom-full 贴到节点盒顶，translate-y 下移到圆环视觉顶部（半径 R 居中于盒内）。 */}
+      {isLlm4ad && (
+        <span
+          className="pointer-events-none absolute bottom-full left-1/2 z-10 -translate-x-1/2 translate-y-0.75 rounded bg-primary px-1 py-px text-[8px] font-bold uppercase leading-none tracking-wide text-primary-foreground shadow-sm"
+          style={{
+            boxShadow:
+              "0 0 5px color-mix(in srgb, var(--primary) 45%, transparent)",
+          }}
+        >
+          LLM4AD
+        </span>
+      )}
+
       {/* 光晕：当前脉冲 / 完成柔光 */}
       {(isActive || solid) && (
         <span
@@ -288,11 +297,14 @@ function StepNode({
         )}
       </svg>
 
-      {/* 中心圆盘 + 内容：完成态不再单独描边（避免与外圈进度环重复），仅当前带淡底 */}
+      {/* 中心圆盘 + 内容：当前带淡底 + 主色描边环（不放大，靠样式突出）；
+          llm4ad 非当前步保留淡主色环，标记这两步的特殊性 */}
       <span
         className={cn(
           "relative grid place-items-center rounded-full bg-background/60 backdrop-blur-sm transition-colors",
-          isLlm4ad && !isActive && "ring-1 ring-primary/30",
+          isActive
+            ? "ring-2 ring-primary/60"
+            : isLlm4ad && "ring-1 ring-primary/30",
         )}
         style={{
           width: R * 2 - 6,
