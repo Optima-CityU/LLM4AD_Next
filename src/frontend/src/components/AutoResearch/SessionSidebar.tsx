@@ -1265,10 +1265,8 @@ function SessionRow({
           >
             {t(`autoResearch.profile.${session.profile}`, session.profile)}
           </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground/40">
-            ·
-          </span>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+          {/* 时间推到最右：与第一行的 best_objective 竖直对齐成右侧元数据列，扫视更快。 */}
+          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
             {formatSessionCreated(session.created_time)}
           </span>
         </div>
