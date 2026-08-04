@@ -663,7 +663,11 @@ def _emit_stage_event(
         payload["error"] = error
     sink.emit(
         event,
-        event_key=f"stage-{stage_num}:{status}",
+        # 不传固定 event_key：让 sink 兜底分配 per-turn 唯一键 ``stage_transition:{seq}``，
+        # 使同一 (stage, status) 每次都作为独立行落库（不再被 uq_turn_role_event 折叠）。
+        # REFINE/回跳导致 stage 多次进入 running、或 ARC 重复回调，都会各存一行，完整
+        # 保留执行轨迹。get_state 仍按 event_type 折叠出快照，不受影响；前端 collapseTurn
+        # 合并相邻同态条目，渲染无重复。
         persist_content=f"[stage-{stage_num}] {display} {status}",
         persist_payload=payload,
     )

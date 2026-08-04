@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# uv sync --extra research; torch pinned to CPU index below.
+# uv sync --extra research --upgrade-package researchclaw; torch pinned to CPU index below.
 research = ["researchclaw", "torch>=2.2"]
 
 [tool.uv]
