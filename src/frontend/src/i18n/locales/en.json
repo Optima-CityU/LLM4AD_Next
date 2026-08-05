@@ -1128,6 +1128,12 @@
       "trend": {
         "globalTrend": "Global Trend",
         "instanceTrend": "Instance Trend",
+        "scale": {
+          "linear": "Linear",
+          "log": "Log",
+          "linearHint": "Linear scale: raw scores shown at equal spacing",
+          "logHint": "Log scale: compresses very low outliers so the rest of the series is easier to tell apart (handles 0/negative scores)"
+        },
         "highestScore": "Global Best",
         "genMaxScore": "Current Gen Best",
         "generation": "Gen",

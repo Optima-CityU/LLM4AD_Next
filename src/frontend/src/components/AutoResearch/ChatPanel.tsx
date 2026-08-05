@@ -106,14 +106,16 @@ function statusOf(m: ResearchMessageItem): string {
 }
 
 /**
- * 折叠某一轮内**相邻且同阶段**的 stage_transition 为一个时间轴条目，多个状态
+ * 折叠某一轮内**同阶段**的 stage_transition 为一个时间轴条目，多个状态
  * （如 running→done）按时序叠加进 `statuses`；右侧即可展示各状态发生的时刻。
  *
- * 合并规则「仅相邻」（后端已保证去重后时序正确）：
+ * 合并规则「只被不同阶段打断」（后端已保证去重后时序正确）：
  * - `阶段1开始 → 阶段1结束`（紧邻）→ 合并成一条，statuses=[running, done]。
- * - `阶段1开始 → 阶段2开始 → 阶段1结束`→ 不合并（中间隔了阶段2），三条独立。
- * - 任何非 stage_transition 事件（assistant 文本 / evolution_step 等）也会打断
- *   相邻性：其后的同阶段事件另起一条。
+ * - `阶段1开始 → 阶段2开始 → 阶段1结束`→ 不合并（中间隔了**其它阶段**），三条独立。
+ * - `阶段1开始 →（assistant 文本 / evolution_step 等非阶段消息）→ 阶段1结束`→
+ *   **仍合并**：非阶段消息不打断相邻性，只有「不同阶段的 stage 事件」才打断。
+ *   合并后该阶段行与被跨过的非阶段消息按各自在 items 中的位置渲染（阶段行在前、
+ *   被跨消息在后）。
  */
 function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
   const items: RenderItem[] = []
@@ -126,8 +128,9 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
     const eventType = m.event_type ?? "log"
     const stage = stageOf(m)
     if (eventType !== "stage_transition" || stage == null) {
+      // 非阶段消息不打断相邻性：不重置 lastStage，后续同阶段仍可合并到前一条。
+      // （只有下方遇到「不同阶段」的 stage 事件才会另起一条。）
       items.push({ kind: "msg", message: m })
-      lastStage = null // 非阶段事件打断相邻性
       continue
     }
     const st: StageStatus = {

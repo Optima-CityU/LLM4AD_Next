@@ -1128,6 +1128,12 @@
       "trend": {
         "globalTrend": "全局趋势",
         "instanceTrend": "实例级趋势",
+        "scale": {
+          "linear": "线性",
+          "log": "对数",
+          "linearHint": "线性刻度：等距展示原始分值",
+          "logHint": "对数刻度：压缩极低离群点，让其余趋势更易区分（兼容 0/负分）"
+        },
         "highestScore": "全局最优",
         "genMaxScore": "当代最优",
         "generation": "代",

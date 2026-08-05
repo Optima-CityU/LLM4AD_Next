@@ -343,7 +343,7 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.8.0,<3.0.0" },
     { name = "python-multipart", specifier = ">=0.0.7,<1.0.0" },
     { name = "qrcode", extras = ["pil"], specifier = ">=8.0" },
-    { name = "researchclaw", marker = "extra == 'research'", git = "https://github.com/y414987863/AutoResearchClawAD.git?branch=dev%2F0.5.0-llm4ad" },
+    { name = "researchclaw", marker = "extra == 'research'", git = "https://github.com/y414987863/AutoResearchClawAD.git?branch=dev%2F0.5.0-llm4ad_0.1.0" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=1.40.6,<2.0.0" },
     { name = "sqlmodel", specifier = ">=0.0.21,<1.0.0" },
     { name = "tenacity", specifier = ">=8.2.3,<9.0.0" },
@@ -4415,7 +4415,7 @@ wheels = [
 [[package]]
 name = "researchclaw"
 version = "0.5.0"
-source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?branch=dev%2F0.5.0-llm4ad#3f1967de503785f06897504e17de398e9a3447b2" }
+source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?branch=dev%2F0.5.0-llm4ad_0.1.0#190d96fe63b534857d97302b3be1d5e768531d27" }
 dependencies = [
     { name = "arxiv" },
     { name = "numpy" },
