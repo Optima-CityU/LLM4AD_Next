@@ -119,6 +119,9 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
   const items: RenderItem[] = []
   let lastStage: number | null = null
   let lastIdx = -1
+  // 整轮累计每个阶段号的「第几次访问」：每新建一条 stage entry 时 +1。计数跨越
+  // 非阶段消息的打断（不重置），故一轮内重跑的阶段序号连续，与时间轴分段无关。
+  const occByStage = new Map<number, number>()
   for (const m of messages) {
     const eventType = m.event_type ?? "log"
     const stage = stageOf(m)
@@ -139,9 +142,11 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
         st,
       )
     } else {
+      const occurrence = (occByStage.get(stage) ?? 0) + 1
+      occByStage.set(stage, occurrence)
       items.push({
         kind: "stage",
-        entry: { id: `stage:${m.id}`, stage, statuses: [st] },
+        entry: { id: `stage:${m.id}`, stage, statuses: [st], occurrence },
       })
       lastStage = stage
       lastIdx = items.length - 1

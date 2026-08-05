@@ -5,6 +5,7 @@ import {
   Cog,
   Loader2,
   MinusCircle,
+  Repeat,
   X,
 } from "lucide-react"
 import { memo, useMemo } from "react"
@@ -37,6 +38,9 @@ export interface StageEntry {
   id: string
   stage: number
   statuses: StageStatus[]
+  /** 该阶段在**整轮**内第几次出现（1=首次，≥2=重跑）。由 ChatPanel 按 turn 统一
+   *  编号后注入，故即使一轮被非阶段消息打断成多条时间轴，序号仍连续。 */
+  occurrence?: number
 }
 
 /** 阶段状态 → 图标 + 配色（与顶部进度轨 / 侧栏状态色一致）。 */
@@ -197,6 +201,8 @@ function StageTimeline({
               : null
           const barPct = ms != null && maxMs > 0 ? Math.max(6, (ms / maxMs) * 100) : 0
           const errText = e.statuses.find((s) => s.status === "failed")?.error
+          // 该阶段在整轮内第几次出现（≥2 才是重跑，加小标）。由 ChatPanel 注入。
+          const occurrence = e.occurrence ?? 1
 
           const row = (
             <div
@@ -219,6 +225,19 @@ function StageTimeline({
                 <span className="truncate text-[12px] font-medium text-foreground/90">
                   {t("autoResearch.chat.stagePrefix", { stage: e.stage, name })}
                 </span>
+                {/* 重跑小标：同阶段第 2 次及以后出现时显示「×N」，首次不加。 */}
+                {occurrence >= 2 && (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] font-semibold leading-none text-amber-600 tabular-nums dark:text-amber-400"
+                    title={t("autoResearch.chat.stageRepeatHint", {
+                      count: occurrence,
+                      defaultValue: "该阶段第 {{count}} 次运行",
+                    })}
+                  >
+                    <Repeat className="size-2.5" />
+                    {occurrence}
+                  </span>
+                )}
                 {errText && (
                   <AlertTriangle className="size-3.5 shrink-0 text-red-500" />
                 )}

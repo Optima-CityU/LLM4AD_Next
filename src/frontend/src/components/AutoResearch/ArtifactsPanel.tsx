@@ -363,15 +363,13 @@ function PanelInner({
           type="button"
           onClick={() => setTool("report")}
           title={t("autoResearch.mainTabs.report")}
-          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
+          className="group flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
         >
           <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
             <FileBarChart className="size-3.5 text-primary" />
           </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-[11px] font-semibold text-foreground/90 truncate">
-              {t("autoResearch.mainTabs.report")}
-            </div>
+          <div className="min-w-0 text-[11px] font-semibold text-foreground/90 truncate">
+            {t("autoResearch.mainTabs.report")}
           </div>
         </button>
 
@@ -385,17 +383,15 @@ function PanelInner({
           title={t("autoResearch.mainTabs.logsFull", {
             defaultValue: "完整日志",
           })}
-          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
+          className="group flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
         >
           <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
             <ScrollText className="size-3.5 text-primary" />
           </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-[11px] font-semibold text-foreground/90 truncate">
-              {t("autoResearch.mainTabs.logsFull", {
-                defaultValue: "完整日志",
-              })}
-            </div>
+          <div className="min-w-0 text-[11px] font-semibold text-foreground/90 truncate">
+            {t("autoResearch.mainTabs.logsFull", {
+              defaultValue: "完整日志",
+            })}
           </div>
         </button>
 
@@ -404,15 +400,13 @@ function PanelInner({
           type="button"
           onClick={() => setTool("ide")}
           title={t("autoResearch.mainTabs.ide")}
-          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
+          className="group flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
         >
           <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
             <Code className="size-3.5 text-primary" />
           </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-[11px] font-semibold text-foreground/90 truncate">
-              {t("autoResearch.mainTabs.ide")}
-            </div>
+          <div className="min-w-0 text-[11px] font-semibold text-foreground/90 truncate">
+            {t("autoResearch.mainTabs.ide")}
           </div>
         </button>
 
@@ -422,7 +416,7 @@ function PanelInner({
           onClick={handleDownloadAll}
           disabled={zipping}
           title={t("autoResearch.artifacts.downloadAll")}
-          className="group flex items-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card disabled:hover:border-border/70"
+          className="group flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card disabled:hover:border-border/70"
         >
           <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
             {zipping ? (
@@ -431,10 +425,8 @@ function PanelInner({
               <DownloadCloud className="size-3.5 text-primary" />
             )}
           </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-[11px] font-semibold text-foreground/90 truncate">
-              下载产物
-            </div>
+          <div className="min-w-0 text-[11px] font-semibold text-foreground/90 truncate">
+            {t("autoResearch.mainTabs.download")}
           </div>
         </button>
       </div>

@@ -2827,6 +2827,7 @@
       "workflow": "Workflow",
       "report": "Report Analysis",
       "ide": "Open IDE",
+      "download": "Download Artifacts",
       "logs": "Logs",
       "logsFull": "Full Logs",
       "comingSoon": "Coming soon"
@@ -3039,6 +3040,7 @@
       "llm4adFinal": "LLM4AD final state received",
       "stagePrefix": "Stage {{stage}} · {{name}}",
       "stagePrefixBare": "Stage {{stage}}",
+      "stageRepeatHint": "This stage's run #{{count}}",
       "stageFlow": "Stage {{from}} → {{to}}",
       "durationSeconds": "{{seconds}}s",
       "evolutionStep": "Evolution · score {{score}}",

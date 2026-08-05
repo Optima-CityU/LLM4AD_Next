@@ -2697,6 +2697,7 @@
       "workflow": "工作流",
       "report": "报告分析",
       "ide": "打开 IDE",
+      "download": "下载产物",
       "logs": "日志",
       "logsFull": "完整日志",
       "comingSoon": "功能开发中"
@@ -2909,6 +2910,7 @@
       "llm4adFinal": "已收到 LLM4AD 最终状态",
       "stagePrefix": "阶段 {{stage}} · {{name}}",
       "stagePrefixBare": "阶段 {{stage}}",
+      "stageRepeatHint": "该阶段第 {{count}} 次运行",
       "stageFlow": "阶段 {{from}} → {{to}}",
       "durationSeconds": "{{seconds}} 秒",
       "evolutionStep": "演化 · 得分 {{score}}",
