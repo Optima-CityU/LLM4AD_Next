@@ -79,13 +79,13 @@ function AutoResearchLayout() {
               <div className="relative shrink-0">
                 <img
                   src={icon}
-                  alt="LLM4AD_Next"
+                  alt="OpenLoopX"
                   className="h-7 w-auto landing-spin-periodic"
                 />
                 <div className="absolute inset-0 rounded-full bg-primary/20 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               </div>
               <span className="text-sm font-bold tracking-wider hidden sm:inline landing-gradient-animated">
-                LLM4AD_Next
+                OpenLoopX
               </span>
             </Link>
             {/* 结合标志：LLM4AD_Next × AutoResearchClaw（可点击跳转到源项目） */}

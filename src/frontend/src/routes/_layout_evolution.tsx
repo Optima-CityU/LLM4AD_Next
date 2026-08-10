@@ -896,13 +896,13 @@ function Layout() {
               <div className="relative shrink-0">
                 <img
                   src={icon}
-                  alt="LLM4AD_Next"
+                  alt="OpenLoopX"
                   className="h-8 w-auto landing-spin-periodic"
                 />
                 <div className="absolute inset-0 rounded-full bg-primary/20 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               </div>
               <span className="text-base font-bold tracking-wider landing-gradient-animated shrink-0">
-                LLM4AD_Next
+                OpenLoopX
               </span>
               <span className="hidden lg:inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
                 {t("evolution.simulationTitle")}

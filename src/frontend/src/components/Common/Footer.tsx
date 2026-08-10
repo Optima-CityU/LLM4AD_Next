@@ -56,7 +56,7 @@ export function Footer() {
     <footer className="py-4 px-6 border-t border-border">
       <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
         <p className="text-muted-foreground text-sm">
-          &copy; {currentYear} LLM4AD_Next Team. All rights reserved.
+          &copy; {currentYear} OpenLoopX Team. All rights reserved.
         </p>
         <FooterMetadataLinks />
       </div>

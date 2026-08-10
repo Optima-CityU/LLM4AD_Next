@@ -51,7 +51,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       {
-        title: "LLM4AD_Next - Algorithm Design with Large Language Models",
+        title: "OpenLoopX - Algorithm Design with Large Language Models",
       },
     ],
   }),
@@ -320,11 +320,11 @@ function Navbar() {
           <div className="flex items-center gap-3">
             <img
               src={icon}
-              alt="LLM4AD_Next"
+              alt="OpenLoopX"
               className="h-8 w-auto landing-spin-periodic"
             />
             <span className="text-lg font-bold tracking-wider landing-gradient-animated">
-              LLM4AD_Next
+              OpenLoopX
             </span>
           </div>
 
@@ -1082,9 +1082,9 @@ function LandingFooter() {
         <div className="flex flex-col sm:flex-row items-start justify-between gap-8">
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-3">
-              <img src={icon} alt="LLM4AD_Next" className="h-6 w-auto" />
+              <img src={icon} alt="OpenLoopX" className="h-6 w-auto" />
               <span className="text-sm font-medium text-foreground">
-                LLM4AD_Next
+                OpenLoopX
               </span>
             </div>
             <p className="text-xs text-muted-foreground/70 whitespace-nowrap">
@@ -1114,7 +1114,7 @@ function LandingFooter() {
 
         <div className="mt-8 pt-4 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground/50">
-            &copy; {new Date().getFullYear()} LLM4AD_Next Team. All rights
+            &copy; {new Date().getFullYear()} OpenLoopX Team. All rights
             reserved.
           </p>
           <div className="flex flex-col items-center gap-1 sm:items-end">
