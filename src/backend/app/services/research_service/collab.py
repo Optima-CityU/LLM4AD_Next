@@ -47,8 +47,12 @@ def start_collab_turn(
 
     前置：session 非 ``running``（否则 409）。并发：已有 COLLABORATING turn 在跑
     → 409（同一时刻只允许一个 agent 轮）。
+
+    并发不变量：对 session 行加 ``FOR UPDATE`` 后再读守卫并建轮，与
+    :func:`start_turn` / :func:`retry_turn` 共用同一把 session 行锁，杜绝协作轮
+    与 pipeline 轮同时穿过各自守卫（TOCTOU）。锁随本函数末尾 commit 释放。
     """
-    session = _get_session(db, session_id, user)
+    session = _get_session(db, session_id, user, for_update=True)
 
     if session.status == ResearchSessionStatus.RUNNING.value:
         raise HTTPException(

@@ -15,7 +15,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useCallback } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   Llm4AdResearchService,
@@ -27,6 +27,7 @@ import {
   type ResearchFolderListResponse,
   type ResearchFolderReorderRequest,
   type ResearchFolderUpdateRequest,
+  type ResearchLogItem,
   type ResearchSessionCreateRequest,
   type ResearchSessionDetailResponse,
   type ResearchSessionItem,
@@ -336,7 +337,6 @@ export function useResearchSessionMessages(
     pageSize?: number
     kind?: string
     eventType?: string[]
-    excludeEventType?: string[]
   },
 ) {
   const pageSize = opts?.pageSize ?? 100
@@ -346,57 +346,272 @@ export function useResearchSessionMessages(
       ? [...researchKeys.sessionMessages(sessionId), kind]
       : [...researchKeys.all, "messages", "none", kind],
     queryFn: ({ pageParam }) =>
-      Llm4AdResearchService.listSessionMessages({
+      // 统一 listMessages：不传 turn_id = 会话级；order=desc 历史往旧翻，
+      // 游标用后端回传的 next_cursor 原样续传（不再手拼消息 id）。log 已拆到
+      // /logs 端点，本端点天然不含 log，无需再排除。
+      Llm4AdResearchService.listMessages({
         sessionId: sessionId as string,
         limit: pageSize,
-        before: (pageParam as string | undefined) ?? undefined,
-        eventType: opts?.eventType ?? undefined,
-        excludeEventType: opts?.excludeEventType ?? undefined,
-      }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) =>
-      lastPage.has_more ? (lastPage.messages?.[0]?.id ?? undefined) : undefined,
-    enabled: !!sessionId,
-    staleTime: 5_000,
-  })
-}
-
-/**
- * 单个 turn 的消息，按 turn 懒加载分页（用于内联折叠日志区）。
- *
- * 走 per-turn 端点 ``GET /sessions/{id}/turns/{tid}/messages``，语义与会话级
- * 端点相反：游标是上一页**最后一条**的 ``created_time``（``cursor``/``next_cursor``），
- * **升序向前**翻（越翻越新），pages 直接顺序拼接即得升序全量，无需反转。
- *
- * 典型用法：``eventType=["log"]`` 只取该轮日志；``enabled`` 控制展开才拉取，
- * 折叠态不请求。``eventType`` 参与 query key，不同过滤缓存互不覆盖。
- */
-export function useResearchTurnMessages(
-  sessionId: string | null,
-  turnId: string | null,
-  opts?: { pageSize?: number; eventType?: string[]; enabled?: boolean },
-) {
-  const pageSize = opts?.pageSize ?? 200
-  const eventKey = opts?.eventType?.join(",") ?? "all"
-  return useInfiniteQuery({
-    queryKey:
-      sessionId && turnId
-        ? [...researchKeys.turn(sessionId, turnId), "messages", eventKey]
-        : [...researchKeys.all, "turn", "none", "messages", eventKey],
-    queryFn: ({ pageParam }) =>
-      Llm4AdResearchService.listTurnMessages({
-        sessionId: sessionId as string,
-        turnId: turnId as string,
-        limit: pageSize,
+        order: "desc",
         cursor: (pageParam as string | undefined) ?? undefined,
         eventType: opts?.eventType ?? undefined,
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) =>
       lastPage.has_more ? (lastPage.next_cursor ?? undefined) : undefined,
-    enabled: !!sessionId && !!turnId && opts?.enabled !== false,
+    enabled: !!sessionId,
     staleTime: 5_000,
   })
+}
+
+// ---- 日志（独立 research_log 表，双端游标窗口） ----
+
+/** {@link useResearchLogs} 返回的日志控制器。 */
+export interface ResearchLogsController {
+  /**
+   * 已累积日志。前端不排序、不去重，完全按后端返回顺序拼接：顶部（更旧）
+   * 前插、底部（更新）追加。依赖后端每页内升序 + 两端游标为排他边界。
+   */
+  entries: ResearchLogItem[]
+  /** 首屏（或筛选变更后重载）加载中。 */
+  isLoading: boolean
+  /** 首屏是否已取过一次（成功/失败/空都算）。用于判断续传探针已 settle。 */
+  hasLoaded: boolean
+  /** 正在向上加载更旧一页。 */
+  isFetchingOlder: boolean
+  /** 正在向下加载更新一页。 */
+  isFetchingLatest: boolean
+  /** 上方是否还有更旧的日志可加载。 */
+  hasOlder: boolean
+  /** 加载出错信息（首屏）。 */
+  error: string | null
+  /** 向上翻：用最旧游标 + order=desc 取更旧一页并前插。 */
+  loadOlder: () => void
+  /** 向下翻：用最新游标 + order=asc 取更新一页并追加（无更多也无妨）。 */
+  loadLatest: () => void
+  /** 丢弃当前累积并按当前筛选从最新一页重载。 */
+  reload: () => void
+}
+
+/**
+ * 日志双端游标分页 hook（对齐后端 ``listLogs`` 的对称双向游标窗口）。
+ *
+ * 后端每次返回 ``items``（恒升序）+ 两端游标：``older_cursor`` 指向本批最旧、
+ * ``newer_cursor`` 指向本批最新，配合 ``has_older`` / ``has_newer``。本 hook **不排序、
+ * 不去重**，完全按后端返回顺序拼接：向上翻用 ``older_cursor`` + ``order=desc`` 把新一批
+ * 前插到最前，向下翻用 ``newer_cursor`` + ``order=asc`` 追加到最后，游标全部原样回传、
+ * 不手拼。依赖后端每页内升序 + 两端游标为排他边界（相邻页不重叠）。
+ *
+ * - 首屏（及 turnId/level/q 变更后）以 ``order=desc`` 无游标拉最新一页；
+ * - ``loadOlder`` 前插更旧一页，``hasOlder`` 反映是否还有更旧；
+ * - ``loadLatest`` 追加更新一页，「获取最新」按钮恒可点（拿不到也无妨）。
+ *
+ * 未走 React Query：需要「向上/向下双向累积 + 恒显示获取最新」的手控语义，
+ * useInfiniteQuery 的单向 hasNextPage 表达不了，手管游标 + 请求代次更清晰。
+ */
+export function useResearchLogs(
+  sessionId: string | null,
+  opts?: {
+    turnId?: string | null
+    level?: string[]
+    q?: string
+    limit?: number
+    enabled?: boolean
+  },
+): ResearchLogsController {
+  const turnId = opts?.turnId ?? null
+  const level = opts?.level
+  const q = opts?.q ?? ""
+  const limit = opts?.limit ?? 100
+  const enabled = opts?.enabled ?? true
+
+  const [entries, setEntries] = useState<ResearchLogItem[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [isFetchingOlder, setIsFetchingOlder] = useState(false)
+  const [isFetchingLatest, setIsFetchingLatest] = useState(false)
+  const [hasOlder, setHasOlder] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // 首屏是否「已取过一次」（成功/失败/空都算，仅未发起或 disabled 为 false）。
+  // 调用方据此判断续传探针已 settle，可安全据 entries 计算 last_id 后再连 SSE，
+  // 避免「isLoading 初始 false」造成的假 settle 窗口。
+  const [hasLoaded, setHasLoaded] = useState(false)
+
+  // 窗口两端游标（后端原样回传，不手拼）。
+  const olderCursorRef = useRef<string | null>(null)
+  const newerCursorRef = useRef<string | null>(null)
+  // 请求代次：筛选变更即自增，用于丢弃过期响应。
+  const genRef = useRef(0)
+  // 并发闸门，防止同方向重复触发。
+  const olderBusyRef = useRef(false)
+  const latestBusyRef = useRef(false)
+  // 已发起首屏请求的 filterKey：本 hook 手写、无 React Query 的在途去重，dev 下
+  // StrictMode 会把首屏 effect「mount→cleanup→mount」跑两次，两次都发同参请求。
+  // 记下已发起的 filterKey，第二次 mount 命中即跳过，只发一次；filterKey 真正
+  // 变化（换 turn/筛选）时不同 → 正常重发。disabled 分支复位以便再启用时重取。
+  const startedKeyRef = useRef<string | null>(null)
+
+  // 筛选签名：任一变化都重载。level 数组转字符串参与依赖。
+  const levelKey = level && level.length ? [...level].sort().join(",") : ""
+  const filterKey = `${sessionId ?? ""}|${turnId ?? ""}|${levelKey}|${q}|${enabled}`
+
+  // 把最新筛选值存 ref，供翻页回调读取（避免闭包过期）。
+  const paramsRef = useRef({ sessionId, turnId, level, q, limit })
+  paramsRef.current = { sessionId, turnId, level, q, limit }
+
+  // 首屏 / 筛选变更：以 order=desc 无游标拉最新一页。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 以 filterKey 聚合筛选依赖
+  useEffect(() => {
+    if (!sessionId || !enabled) {
+      setEntries([])
+      setHasOlder(false)
+      setError(null)
+      setHasLoaded(false)
+      olderCursorRef.current = null
+      newerCursorRef.current = null
+      startedKeyRef.current = null
+      return
+    }
+    // StrictMode 双 mount 去重：同一 filterKey 已发起过首屏请求则跳过第二次。
+    if (startedKeyRef.current === filterKey) return
+    startedKeyRef.current = filterKey
+    const gen = ++genRef.current
+    setIsLoading(true)
+    // 新一轮首屏开始：标记未 settle，待成功/失败后再置 true。换筛选（含换 turn）
+    // 时据此让依赖它的 SSE gating 短暂掉下来、待新探针 settle 再连，避免用旧 last_id。
+    setHasLoaded(false)
+    setError(null)
+    const p = paramsRef.current
+    Llm4AdResearchService.listLogs({
+      sessionId,
+      turnId: p.turnId ?? undefined,
+      order: "desc",
+      limit: p.limit,
+      level: p.level && p.level.length ? p.level : undefined,
+      q: p.q || undefined,
+    })
+      .then((page) => {
+        if (gen !== genRef.current) return
+        // 首屏直接用后端返回（页内已升序），不做任何排序。
+        setEntries(page.items ?? [])
+        olderCursorRef.current = page.older_cursor ?? null
+        newerCursorRef.current = page.newer_cursor ?? null
+        setHasOlder(!!page.has_older)
+        setIsLoading(false)
+        setHasLoaded(true)
+      })
+      .catch((e: unknown) => {
+        if (gen !== genRef.current) return
+        setError(e instanceof Error ? e.message : String(e))
+        setIsLoading(false)
+        // 失败也算 settle：让 SSE 回退 0-0 全量重放，胜过永久卡住不连。
+        setHasLoaded(true)
+      })
+  }, [filterKey])
+
+  const loadOlder = useCallback(() => {
+    const p = paramsRef.current
+    if (!p.sessionId || olderBusyRef.current) return
+    if (!olderCursorRef.current) return
+    olderBusyRef.current = true
+    const gen = genRef.current
+    setIsFetchingOlder(true)
+    Llm4AdResearchService.listLogs({
+      sessionId: p.sessionId,
+      turnId: p.turnId ?? undefined,
+      order: "desc",
+      cursor: olderCursorRef.current,
+      limit: p.limit,
+      level: p.level && p.level.length ? p.level : undefined,
+      q: p.q || undefined,
+    })
+      .then((page) => {
+        if (gen !== genRef.current) return
+        const items = page.items ?? []
+        // 更旧的一批直接前插到最前（页内升序，整体仍升序）。
+        if (items.length) setEntries((prev) => [...items, ...prev])
+        olderCursorRef.current = page.older_cursor ?? olderCursorRef.current
+        setHasOlder(!!page.has_older)
+      })
+      .finally(() => {
+        olderBusyRef.current = false
+        if (gen === genRef.current) setIsFetchingOlder(false)
+      })
+  }, [])
+
+  const loadLatest = useCallback(() => {
+    const p = paramsRef.current
+    if (!p.sessionId || latestBusyRef.current) return
+    latestBusyRef.current = true
+    const gen = genRef.current
+    setIsFetchingLatest(true)
+    // 有最新游标 → order=asc 取更新一页；无（极端兜底）→ desc 无游标重取最新一页。
+    const cursor = newerCursorRef.current
+    Llm4AdResearchService.listLogs({
+      sessionId: p.sessionId,
+      turnId: p.turnId ?? undefined,
+      order: cursor ? "asc" : "desc",
+      cursor: cursor ?? undefined,
+      limit: p.limit,
+      level: p.level && p.level.length ? p.level : undefined,
+      q: p.q || undefined,
+    })
+      .then((page) => {
+        if (gen !== genRef.current) return
+        const items = page.items ?? []
+        // 更新的一批直接追加到最后（页内升序，整体仍升序）。
+        if (items.length) setEntries((prev) => [...prev, ...items])
+        // 仅在真的取到更新一批时推进最新游标，避免回退到旧位。
+        if (page.newer_cursor) newerCursorRef.current = page.newer_cursor
+      })
+      .finally(() => {
+        latestBusyRef.current = false
+        if (gen === genRef.current) setIsFetchingLatest(false)
+      })
+  }, [])
+
+  const reload = useCallback(() => {
+    genRef.current++
+    // 触发首屏 effect 之外的手动重载：直接复用首屏路径。
+    const p = paramsRef.current
+    if (!p.sessionId) return
+    const gen = genRef.current
+    setIsLoading(true)
+    setError(null)
+    Llm4AdResearchService.listLogs({
+      sessionId: p.sessionId,
+      turnId: p.turnId ?? undefined,
+      order: "desc",
+      limit: p.limit,
+      level: p.level && p.level.length ? p.level : undefined,
+      q: p.q || undefined,
+    })
+      .then((page) => {
+        if (gen !== genRef.current) return
+        setEntries(page.items ?? [])
+        olderCursorRef.current = page.older_cursor ?? null
+        newerCursorRef.current = page.newer_cursor ?? null
+        setHasOlder(!!page.has_older)
+        setIsLoading(false)
+      })
+      .catch((e: unknown) => {
+        if (gen !== genRef.current) return
+        setError(e instanceof Error ? e.message : String(e))
+        setIsLoading(false)
+      })
+  }, [])
+
+  return {
+    entries,
+    isLoading,
+    hasLoaded,
+    isFetchingOlder,
+    isFetchingLatest,
+    hasOlder,
+    error,
+    loadOlder,
+    loadLatest,
+    reload,
+  }
 }
 
 export function useCreateResearchSession() {

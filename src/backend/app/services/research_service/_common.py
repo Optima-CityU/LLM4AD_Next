@@ -110,20 +110,49 @@ def _get_folder(
 
 
 def _get_session(
-    db: Session, session_id: uuid.UUID, user: models.User
+    db: Session,
+    session_id: uuid.UUID,
+    user: models.User,
+    *,
+    for_update: bool = False,
 ) -> ResearchSession:
-    """按 ID + user 校验拉取会话；不存在返 404。"""
-    session = db.get(ResearchSession, session_id)
+    """按 ID + user 校验拉取会话；不存在返 404。
+
+    ``for_update=True`` 时对 session 行加 ``SELECT ... FOR UPDATE`` 行锁，把
+    「读状态守卫 + 建轮 + 改 session」整段临界区串行化——消除并发
+    start/collab/retry/门控回复之间的 TOCTOU（多个请求同时穿过 RUNNING /
+    PAUSED_GATE / COLLABORATING 守卫，各自建轮）。第二个请求会阻塞在行锁上，
+    直到第一个 commit 后才加载 session，此时状态已推进（如 RUNNING），守卫
+    据此正确拒绝。锁随事务 commit/rollback 释放，不留孤儿（对比 Redis 锁需
+    TTL 兜底、崩溃会阻塞）。所有建轮入口只锁 session 一行且顺序一致，不死锁。
+    """
+    if for_update:
+        session = db.exec(
+            select(ResearchSession)
+            .where(ResearchSession.id == session_id)
+            .with_for_update()
+        ).first()
+    else:
+        session = db.get(ResearchSession, session_id)
     if not session or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="session not found")
     return session
 
 
 def _get_session_and_turn(
-    db: Session, session_id: uuid.UUID, turn_id: uuid.UUID, user: models.User
+    db: Session,
+    session_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    user: models.User,
+    *,
+    for_update: bool = False,
 ) -> tuple[ResearchSession, ResearchTurn]:
-    """一次拿到 (session, turn) 并校验归属（跨用户/跨会话都 404）。"""
-    session = _get_session(db, session_id, user)
+    """一次拿到 (session, turn) 并校验归属（跨用户/跨会话都 404）。
+
+    ``for_update`` 透传给 :func:`_get_session`：建轮类操作（如 retry）传 True 锁
+    session 行，纯读操作（stop / get / stream）保持 False。
+    """
+    session = _get_session(db, session_id, user, for_update=for_update)
     turn = db.get(ResearchTurn, turn_id)
     if not turn or turn.session_id != session.id:
         raise HTTPException(status_code=404, detail="turn not found")

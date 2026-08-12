@@ -25,10 +25,10 @@ import type {
 } from "@/client"
 import {
   researchKeys,
+  useResearchLogs,
   useResearchSessionDetail,
   useResearchSessionMessages,
   useResearchState,
-  useResearchTurns,
   useRetryResearchTurn,
   useStartCollab,
   useStartResearchTurn,
@@ -70,6 +70,24 @@ const EMPTY_LOGS: StreamLogEntry[] = []
 const LIVE_MSG_CAP = 300
 
 /**
+ * 比较两个 Redis Stream entry id（形如 ``"<ms>-<seq>"``），返回**较小**者。
+ *
+ * 按 ``ms`` 数值、再 ``seq`` 数值比较——不能用字符串序（``"10-0" < "9-0"`` 会误判）。
+ * 任一为空视为「该源无续传约束」，直接返回另一个；都为空返回 undefined。
+ * 用于把 message / log 两源各自已落库末端取 min 作 SSE 首连续传点，保证不跳空。
+ */
+function minStreamId(a?: string | null, b?: string | null): string | undefined {
+  if (!a) return b ?? undefined
+  if (!b) return a ?? undefined
+  const [ma, sa] = a.split("-")
+  const [mb, sb] = b.split("-")
+  const nma = Number(ma)
+  const nmb = Number(mb)
+  if (nma !== nmb) return nma < nmb ? a : b
+  return Number(sa ?? 0) <= Number(sb ?? 0) ? a : b
+}
+
+/**
  * 消息流渲染项：普通消息，或「一次阶段访问的时间轴条目」（含叠加的多个状态）。
  */
 type RenderItem =
@@ -88,25 +106,31 @@ function statusOf(m: ResearchMessageItem): string {
 }
 
 /**
- * 折叠某一轮内**相邻且同阶段**的 stage_transition 为一个时间轴条目，多个状态
+ * 折叠某一轮内**同阶段**的 stage_transition 为一个时间轴条目，多个状态
  * （如 running→done）按时序叠加进 `statuses`；右侧即可展示各状态发生的时刻。
  *
- * 合并规则「仅相邻」（后端已保证去重后时序正确）：
+ * 合并规则「只被不同阶段打断」（后端已保证去重后时序正确）：
  * - `阶段1开始 → 阶段1结束`（紧邻）→ 合并成一条，statuses=[running, done]。
- * - `阶段1开始 → 阶段2开始 → 阶段1结束`→ 不合并（中间隔了阶段2），三条独立。
- * - 任何非 stage_transition 事件（assistant 文本 / evolution_step 等）也会打断
- *   相邻性：其后的同阶段事件另起一条。
+ * - `阶段1开始 → 阶段2开始 → 阶段1结束`→ 不合并（中间隔了**其它阶段**），三条独立。
+ * - `阶段1开始 →（assistant 文本 / evolution_step 等非阶段消息）→ 阶段1结束`→
+ *   **仍合并**：非阶段消息不打断相邻性，只有「不同阶段的 stage 事件」才打断。
+ *   合并后该阶段行与被跨过的非阶段消息按各自在 items 中的位置渲染（阶段行在前、
+ *   被跨消息在后）。
  */
 function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
   const items: RenderItem[] = []
   let lastStage: number | null = null
   let lastIdx = -1
+  // 整轮累计每个阶段号的「第几次访问」：每新建一条 stage entry 时 +1。计数跨越
+  // 非阶段消息的打断（不重置），故一轮内重跑的阶段序号连续，与时间轴分段无关。
+  const occByStage = new Map<number, number>()
   for (const m of messages) {
     const eventType = m.event_type ?? "log"
     const stage = stageOf(m)
     if (eventType !== "stage_transition" || stage == null) {
+      // 非阶段消息不打断相邻性：不重置 lastStage，后续同阶段仍可合并到前一条。
+      // （只有下方遇到「不同阶段」的 stage 事件才会另起一条。）
       items.push({ kind: "msg", message: m })
-      lastStage = null // 非阶段事件打断相邻性
       continue
     }
     const st: StageStatus = {
@@ -121,9 +145,11 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
         st,
       )
     } else {
+      const occurrence = (occByStage.get(stage) ?? 0) + 1
+      occByStage.set(stage, occurrence)
       items.push({
         kind: "stage",
-        entry: { id: `stage:${m.id}`, stage, statuses: [st] },
+        entry: { id: `stage:${m.id}`, stage, statuses: [st], occurrence },
       })
       lastStage = stage
       lastIdx = items.length - 1
@@ -137,12 +163,18 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
  * 普通消息用 `MessageItem`。这样阶段流不再是一堆独立胶囊，而是一条连贯时间轴，
  * 被非阶段消息打断处自然分段。
  */
-function renderTurnItems(items: RenderItem[], sessionId: string): ReactNode[] {
+function renderTurnItems(
+  items: RenderItem[],
+  sessionId: string,
+  live: boolean,
+): ReactNode[] {
   const out: ReactNode[] = []
   let run: StageEntry[] = []
   const flush = () => {
     if (run.length === 0) return
-    out.push(<StageTimeline key={`tl:${run[0].id}`} entries={run} />)
+    out.push(
+      <StageTimeline key={`tl:${run[0].id}`} entries={run} live={live} />,
+    )
     run = []
   }
   for (const it of items) {
@@ -244,26 +276,19 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // pipeline turn 的显式重连令牌：retry 复用同一 turn_id，需手动 bump 让 SSE 重连。
   const [streamReconnectToken, setStreamReconnectToken] = useState(0)
 
-  // 查询 turns 列表，用于刷新页面后恢复 collaborating turn
-  // 关闭自动刷新，仅在页面加载时查询一次，避免协作完成后的循环刷新
-  const turnsQ = useResearchTurns(session.id, 10)
-
-  // 页面加载/会话切换时，自动恢复正在进行的 collaborating turn
-  // 使用 ref 记录是否已经初始化过，避免后续查询刷新重复设置
+  // 页面加载/会话切换时，自动恢复正在进行的 collaborating turn。
+  // 数据源直接用 session detail 的 active_collab_turn（后端已单独暴露活跃协作轮，
+  // 无需再翻 /turns 列表）。使用 ref 记录是否已初始化，避免协作完成后 detail 刷新
+  // 重复设置导致的循环。
   const collabInitializedRef = useRef(false)
   useEffect(() => {
-    if (!turnsQ.data?.items || collabInitializedRef.current) return
-
-    // 查找状态为 collaborating 的 turn
-    const collaboratingTurn = turnsQ.data.items.find(
-      (t) => t.status === "collaborating"
-    )
-
-    if (collaboratingTurn) {
-      setCollabTurnId(collaboratingTurn.id)
+    if (collabInitializedRef.current) return
+    const collab = detail.data?.active_collab_turn
+    if (collab && collab.status === "collaborating") {
+      setCollabTurnId(collab.id)
       collabInitializedRef.current = true
     }
-  }, [turnsQ.data?.items])
+  }, [detail.data?.active_collab_turn])
 
   // 会话切换时重置初始化标记
   useEffect(() => {
@@ -309,17 +334,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 
   // ── 消息历史：两个独立分页查询，各自翻页、互不饥饿 ──────────────────
   // 主消息列表排除 log（保留对话与里程碑），避免长跑时成百上千 log 把对话挤到
-  // 分页深处；每轮日志改由内联折叠的 TurnLogPanel 按 turn 懒加载。日志面板
-  // （底部抽屉）仍走 logQ 独立查询做全局总览。
+  // 分页深处；每轮日志改由内联折叠的 TurnLogPanel 按 turn 懒加载。全局日志总览
+  // 移到右侧面板的 ResearchLogDrawer（独立 listLogs 双端游标窗口）。
   const msgQ = useResearchSessionMessages(session.id, {
     pageSize: 200,
     kind: "chat",
-    excludeEventType: ["log"],
-  })
-  const logQ = useResearchSessionMessages(session.id, {
-    pageSize: 200,
-    kind: "log",
-    eventType: ["log"],
   })
 
   // 切换 turn 时清空实时消息
@@ -333,37 +352,68 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     // pages[0] 最新页、pages[n] 更旧页；反转后拼接 = 升序全量（后端已排序）
     const flat: ResearchMessageItem[] = []
     for (let i = pages.length - 1; i >= 0; i--) {
-      for (const m of pages[i].messages ?? []) flat.push(m)
+      for (const m of pages[i].items ?? []) flat.push(m)
     }
-    // 去重策略：用 message_id（DB 主键）去重。
-    // SSE 推送的事件在后端已回填 message_id（streaming.py:226），与 DB 记录保持一致。
+    // 去重策略：优先用 message_id（DB 主键）去重，再用 (turn_id, event_key) 兜底。
+    // SSE 推送的事件后端已回填 message_id（streaming.py:226），与 DB 记录一致时靠
+    // 主键即可精确去重；但个别事件类型若未回填 message_id，live 会退化成合成 id
+    // （live:turn:event_key，见 upsert 处），与 REST 真 id 对不上 → 主键去重漏掉、
+    // 两条都显示。故再建 (turn_id, event_key) 索引兜底：event_key 在后端受
+    // uq_research_message_turn_role_event 约束、按轮唯一，跨轮加 turn_id 前缀防撞。
     const messageMap = new Map<string, ResearchMessageItem>()
+    const restEventKeys = new Set<string>()
     for (const message of flat) {
       messageMap.set(message.id, message)
+      if (message.event_key) {
+        restEventKeys.add(`${message.turn_id}::${message.event_key}`)
+      }
     }
     // SSE 实时数据：仅补充 REST 尚未包含的新事件。
-    // 注意 REST 是权威源——一旦某 message_id 已由 REST 返回（后端已回填
-    // message_id，见上），就不能再用 live 的合成字段覆盖它：live 消息里的
+    // 注意 REST 是权威源——一旦某事件已由 REST 返回（无论按 message_id 还是
+    // event_key 命中），就不能再用 live 的合成字段覆盖它：live 消息里的
     // payload_locked/turn_status/content/error 都是硬编码近似值（见 upsert 处），
     // 反向覆盖会导致已 locked 的门控表单被误判为「待回填」、里程碑内容显示不全。
     for (const liveMsg of liveMessages) {
-      if (!messageMap.has(liveMsg.id)) messageMap.set(liveMsg.id, liveMsg)
+      if (messageMap.has(liveMsg.id)) continue
+      if (
+        liveMsg.event_key &&
+        restEventKeys.has(`${liveMsg.turn_id}::${liveMsg.event_key}`)
+      ) {
+        continue
+      }
+      messageMap.set(liveMsg.id, liveMsg)
     }
-    // 信任后端排序：REST 数据已升序排列，SSE 数据是最新的，按插入顺序返回即可
-    return [...messageMap.values()]
+    // 兜底稳定排序：后端已按 (created_time, seq, id) 排序，且现在 REST 与 SSE live
+    // 用同一发射时刻 + 同一 per-turn seq 计数器（不再有落库时刻倒挂 / seq=0 撞车），
+    // 但 live 与 REST 两路合并后的插入顺序仍可能因 refetch 时序错位。故这里按同一
+    // 三元组键再稳定排序一次，与后端语义完全对齐，彻底消除「最新状态排到前面」。
+    return [...messageMap.values()].sort((a, b) => {
+      if (a.created_time !== b.created_time) {
+        return a.created_time < b.created_time ? -1 : 1
+      }
+      const sa = a.seq ?? 0
+      const sb = b.seq ?? 0
+      if (sa !== sb) return sa - sb
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    })
   }, [msgQ.data, liveMessages])
 
-  // 当前待回复的门控 form 消息：paused 时最后一条未锁定的 form。移到底部
-  // GatePanel 操作；消息流里不再重复渲染这一条（见 renderedMessages）。
+  // 当前待回复的门控 form 消息：turn 进入 paused_gate 时最后一条未锁定的 form。
+  // 移到底部 GatePanel 操作；消息流里不再重复渲染这一条（见 renderedMessages）。
+  //
+  // 门槛用 turn 级状态（activeTurn.status === "paused_gate"）而非 session.status
+  // ——与 SSE 订阅门槛 turnLive 同源：session.status 经 prop 透传、滞后刷新，
+  // waiting_for_input 到达后它常慢一拍，会让底部 GatePanel 迟迟不出现。turn 的
+  // paused_gate 对应 session 的 paused，语义一致且刷新时序与 activeTurnId 对齐。
   const gateMessage = useMemo(() => {
-    if (session.status !== "paused") return null
+    if (activeTurn?.status !== "paused_gate") return null
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       const kind = (m.payload as { kind?: string } | null)?.kind
       if (kind === "form" && !m.payload_locked) return m
     }
     return null
-  }, [messages, session.status])
+  }, [messages, activeTurn?.status])
 
   // 活跃门控从消息流里剔除（它由底部 GatePanel 承载操作，避免重复展示）。
   const renderedMessages = useMemo(
@@ -418,11 +468,56 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // ── SSE：关键事件到达时按类型分流失效相关查询 ─────────────────────────
   // 订阅门槛用 turn 级状态（与 activeTurnId 同源自 detail query），而非 session.status
   // 那个经 prop 透传、滞后刷新的字段——重试复用同一 turn_id 时 session.status 常慢一拍，
-  // 会导致 sseEnabled 迟迟不翻 true、SSE 不重连。turn 的 running / paused_gate 对应
-  // session 的 running / paused，语义一致且刷新时序与 turn_id 对齐。
-  const sseEnabled =
-    !!activeTurnId &&
-    (activeTurn?.status === "running" || activeTurn?.status === "paused_gate")
+  // 会导致 sseEnabled 迟迟不翻 true、SSE 不重连。
+  //
+  // 只认 running：paused_gate **不订阅**。命中硬门控时后端已 emit done 关流、worker
+  // 释放（backend streaming.persist_gate_pause：落 waiting_for_input 表单后主循环
+  // emit done），该 turn 的 Redis Stream 不会再有新事件。门控提交走**新建 turn**
+  // （backend turns._reply_to_gate：旧 paused 轮落 COMPLETED、新 turn 带新 turn_id
+  // 入队），新事件写到新 stream key，靠 activeTurnId 变化自然重连新流。故 paused_gate
+  // 保持订阅只会连上一条只剩 done 的死流（触发 onDone 空跑）或空连 idle→timeout→退避
+  // 重连周期性打后端，无任何收益。门控表单本身由 REST messages 兜底（已落库），不依赖 SSE。
+  const turnLive = !!activeTurnId && activeTurn?.status === "running"
+
+  // SSE 首连续传点探针：只取活跃轮**最新一条** log 的 stream_id（order=desc、limit=1，
+  // 极轻量）。log 是量最大的源（一轮可上万条），据其末端续传能把首连从「0-0 全量
+  // 重放上万条」降到「只补探针之后的增量」。仅活跃轮启用；非活跃轮无 SSE、无需探针。
+  // 注意：探针只依赖 turnLive，**不**依赖 sseEnabled——它必须先于 SSE 跑完，
+  // 好让 sseEnabled 能等它 settle。二者互为前提会死锁，故探针挂在更靠前的 turnLive 上。
+  const logProbe = useResearchLogs(session.id, {
+    turnId: activeTurnId,
+    limit: 1,
+    enabled: turnLive,
+  })
+
+  // SSE 订阅门槛：turn 存活，且两个历史源都已「取过一次」（settle，空也算）。
+  // 必须等两源 settle 再连——否则 status 先到、REST 未回时抢连，initialLastId 仍空
+  // → 退化成 last_id=0-0 全量重放（正是要消除的慢路径）。两源任一为空（新轮无历史）
+  // 时 initialLastId=undefined，SSE 正常从 0-0 连，符合预期、不会卡住。
+  const historyReady = logProbe.hasLoaded && msgQ.isFetched
+  const sseEnabled = turnLive && historyReady
+
+  // 两源各自已落库末端 stream_id，取较小值作首连续传点（保证不跳空，重叠交由
+  // TurnLogPanel / messages 的去重兜底）。message 源末端从升序 messages 里向后找
+  // 首个带 stream_id 且属活跃轮者；log 源末端取探针最新一条。任一缺失回退到另一个，
+  // 都缺失则 undefined → useResearchStream 回退 0-0 全量重放（无历史的新轮即此情形）。
+  const initialLastId = useMemo(() => {
+    if (!activeTurnId) return undefined
+    let msgStreamId: string | undefined
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.turn_id === activeTurnId && m.stream_id) {
+        msgStreamId = m.stream_id
+        break
+      }
+    }
+    const logEntries = logProbe.entries
+    const logStreamId =
+      logEntries.length > 0
+        ? (logEntries[logEntries.length - 1].stream_id ?? undefined)
+        : undefined
+    return minStreamId(msgStreamId, logStreamId)
+  }, [activeTurnId, messages, logProbe.entries])
 
   // 去抖合并突发失效（evolution_step 在 stage 12 可能高频到达）。按需累积要
   // 失效的 query key 组，一个 tick 内合并成一次 invalidate。
@@ -456,6 +551,8 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     [flushInvalidations],
   )
   // 全量失效（终止事件时用）：立即，不走去抖。
+  // 返回 messages 的失效 Promise（refetch 落定即 resolve），供 onDone 等 REST
+  // 权威数据到位后再清 liveMessages——避免 done 瞬间清空导致 REST 尚未返回时闪空。
   const invalidateAll = useCallback(() => {
     if (flushTimerRef.current) {
       clearTimeout(flushTimerRef.current)
@@ -463,13 +560,14 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     }
     pendingRef.current = new Set()
     qc.invalidateQueries({ queryKey: researchKeys.sessionDetail(session.id) })
-    qc.invalidateQueries({
+    const messagesSettled = qc.invalidateQueries({
       queryKey: researchKeys.sessionMessages(session.id),
       exact: false,
     })
     qc.invalidateQueries({ queryKey: researchKeys.state(session.id) })
     qc.invalidateQueries({ queryKey: researchKeys.artifacts(session.id) })
     qc.invalidateQueries({ queryKey: researchKeys.artifactTree(session.id) })
+    return messagesSettled
   }, [qc, session.id])
 
   /** 按事件类型决定要失效哪些查询组，避免高频事件全量失效。 */
@@ -500,45 +598,6 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     [scheduleInvalidate, qc, session.id],
   )
 
-  // 从持久化日志消息还原历史日志（logQ 只拉 event_type==="log"）。log 事件
-  // 持久化时 payload 即事件本体，含 level/message/module/source/ts，与实时 SSE
-  // 同源。日志走独立分页查询，不再受对话消息分页影响。
-  const historyLogs = useMemo<StreamLogEntry[]>(() => {
-    const pages = logQ.data?.pages ?? []
-    const out: StreamLogEntry[] = []
-    // pages[0] 最新页、pages[n] 更旧页；反转拼接 = 升序
-    for (let i = pages.length - 1; i >= 0; i--) {
-      for (const m of pages[i].messages ?? []) {
-        const p = (m.payload ?? {}) as Record<string, unknown>
-        out.push({
-          id: `h:${m.id}`,
-          eventKey: m.event_key || undefined,
-          level: (p.level as string) || "INFO",
-          message: (p.message as string) ?? m.content ?? "",
-          module: (p.module as string | undefined) ?? undefined,
-          source: (p.source as string | undefined) ?? undefined,
-          ts: (p.ts as string | undefined) ?? m.created_time,
-        })
-      }
-    }
-    return out
-  }, [logQ.data])
-
-  // 历史 + 实时按 event_key 合并；没有 event_key 的旧数据才退回 ts+message。
-  const mergedLogs = useMemo<StreamLogEntry[]>(() => {
-    const seen = new Set<string>()
-    const out: StreamLogEntry[] = []
-    const push = (e: StreamLogEntry) => {
-      const sig = e.eventKey ?? `${e.ts ?? ""}|${e.message}`
-      if (seen.has(sig)) return
-      seen.add(sig)
-      out.push(e)
-    }
-    for (const e of historyLogs) push(e)
-    for (const e of streamLogs) push(e)
-    return out.length > LOG_CAP ? out.slice(-LOG_CAP) : out
-  }, [historyLogs, streamLogs])
-
   // 卸载时清掉去抖定时器，避免对已卸载组件触发 invalidate
   useEffect(() => {
     return () => {
@@ -557,7 +616,12 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         invalidateForEvent(evt.type)
       },
       onDone: () => {
-        invalidateAll()
+        // 等 messages 失效并 refetch 落定后再清 liveMessages：此时 REST 已成为
+        // 权威源，清空实时叠加层可彻底避免「同一事件 live 版残留」引发的重复，
+        // 并保证结束后 100% 以持久化 messages 为准。清空前 REST 已到位，无闪空。
+        invalidateAll().finally(() => {
+          setLiveMessages([])
+        })
         // 覆盖所有会话列表（文件夹分页 / 搜索分页 / 旧扁平）与文件夹计数
         qc.invalidateQueries({ queryKey: researchKeys.all })
       },
@@ -604,6 +668,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
               stage: evt.stage ?? null,
               event_type: evt.type,
               event_key: evt.event_key as string,
+              // 后端 emit 时回填的 per-turn seq（与 REST 同一计数器），供稳定排序；
+              // 个别旧事件可能无 seq，回退 0。
+              seq: evt.seq ?? 0,
               created_time: nowIso,
               updated_time: nowIso,
             }
@@ -621,6 +688,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         const entry: StreamLogEntry = {
           id: `l:${++logSeqRef.current}`,
           eventKey: evt.event_key as string | undefined,
+          streamId: evt._streamId,
           level: (evt.level as string) || "INFO",
           message: (evt.message as string) || "",
           module: (evt.module as string | undefined) ?? undefined,
@@ -634,7 +702,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         })
       },
     },
-    { enabled: sseEnabled, reconnectToken: streamReconnectToken },
+    {
+      enabled: sseEnabled,
+      reconnectToken: streamReconnectToken,
+      initialLastId,
+    },
   )
 
   // ── collab agent 的 SSE：独立于 pipeline turn，订阅活跃 collab turn ──────
@@ -955,11 +1027,17 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
                       className="absolute left-0 top-0 bottom-0 w-0.5 rounded-full bg-border/30 transition-all duration-300 group-hover/turn:w-[3px] group-hover/turn:bg-primary/60 group-hover/turn:shadow-[0_0_8px_0] group-hover/turn:shadow-primary/30"
                     />
                     {/* 渲染：相邻的阶段条目成组画成竖向时间轴，普通消息按原样。 */}
-                    {renderTurnItems(group.items, session.id)}
+                    {renderTurnItems(
+                      group.items,
+                      session.id,
+                      group.turnId === activeTurnId &&
+                        (activeTurn?.status === "running" ||
+                          activeTurn?.status === "paused_gate"),
+                    )}
                     <TurnLogPanel
                       sessionId={session.id}
                       turnId={group.turnId}
-                      defaultOpen={group.turnId === lastTurnId || group.turnId === activeTurnId}
+                      defaultOpen={group.turnId === lastTurnId}
                       liveLogs={
                         group.turnId === activeTurnId ? streamLogs : EMPTY_LOGS
                       }
@@ -1050,11 +1128,6 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           onStop={handleStop}
           onRetry={handleRetry}
           onGateSubmit={handleFormSubmit}
-          logs={mergedLogs}
-          logsActive={sseEnabled}
-          logsHasMore={logQ.hasNextPage}
-          logsFetchingMore={logQ.isFetchingNextPage}
-          onLoadMoreLogs={() => void logQ.fetchNextPage()}
         />
       )}
     </div>

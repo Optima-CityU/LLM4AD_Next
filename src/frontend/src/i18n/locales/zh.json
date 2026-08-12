@@ -1248,6 +1248,12 @@
       "trend": {
         "globalTrend": "全局趋势",
         "instanceTrend": "实例级趋势",
+        "scale": {
+          "linear": "线性",
+          "log": "对数",
+          "linearHint": "线性刻度：等距展示原始分值",
+          "logHint": "对数刻度：压缩极低离群点，让其余趋势更易区分（兼容 0/负分）"
+        },
         "highestScore": "全局最优",
         "genMaxScore": "当代最优",
         "generation": "代",
@@ -1946,7 +1952,7 @@
       "viewMore": "查看更多"
     },
     "footer": {
-      "copyright": "LLM4AD_Next - 基于大模型的算法设计工具",
+      "copyright": "OpenLoopX - 基于大模型的算法设计工具",
       "team": "",
       "resources": "资源"
     }
@@ -2817,6 +2823,9 @@
       "workflow": "工作流",
       "report": "报告分析",
       "ide": "打开 IDE",
+      "download": "下载产物",
+      "logs": "日志",
+      "logsFull": "完整日志",
       "comingSoon": "功能开发中"
     },
     "analysis": {
@@ -2971,7 +2980,8 @@
       "failed": "失败",
       "skipped": "跳过",
       "waiting": "等待输入",
-      "gate": "人工确认点"
+      "gate": "人工确认点",
+      "interrupted": "已中断"
     },
     "create": {
       "title": "新建科研会话",
@@ -3003,15 +3013,19 @@
       "emptyPickSession": "在左侧选择或新建一个会话开始",
       "emptyTitle": "还没有对话",
       "pendingTitle": "准备就绪",
-      "pendingHint": "AI 将按照 22 个阶段自动执行研究流程，您可以随时查看进度或介入调整",
+      "pendingHint": "AI 将按照 23 个阶段自动执行研究流程，您可以随时查看进度或介入调整",
       "pendingSubtitle": "确认您的研究主题，点击下方开始按钮即可启动 AI 研究流程",
       "loading": "加载消息...",
       "sending": "发送中",
       "startTurn": "运行",
       "resumeTurn": "继续运行",
       "stopTurn": "停止",
+      "pipelineRunning": "流水线运行中",
+      "runHint": "直接推进流水线，即时执行",
+      "collabHint": "让 AI 帮你答疑 / 改产物 / 推进",
       "retryTurn": "重试",
       "sendMessage": "发送",
+      "clearInput": "清空",
       "streamDisconnected": "SSE 连接已断开，重连中...",
       "loadMore": "加载更早的消息",
       "noMore": "没有更多消息了",
@@ -3022,6 +3036,7 @@
       "llm4adFinal": "已收到 LLM4AD 最终状态",
       "stagePrefix": "阶段 {{stage}} · {{name}}",
       "stagePrefixBare": "阶段 {{stage}}",
+      "stageRepeatHint": "该阶段第 {{count}} 次运行",
       "stageFlow": "阶段 {{from}} → {{to}}",
       "durationSeconds": "{{seconds}} 秒",
       "evolutionStep": "演化 · 得分 {{score}}",
@@ -3029,13 +3044,26 @@
       "stageError": "错误",
       "systemEvent": "系统事件",
       "streamLogs": {
-        "title": "实时日志",
+        "title": "研究日志",
         "waiting": "SSE 已连接，等待日志...",
         "truncated": "已隐藏较早的 {{count}} 行",
-        "toggle": "日志",
+        "toggle": "本轮日志",
         "count": "{{count}} 条",
         "loadEarlier": "加载更早",
-        "empty": "本轮暂无日志"
+        "empty": "本轮暂无日志",
+        "emptyTag": "空",
+        "noMatchTag": "无匹配"
+      },
+      "logs": {
+        "loadLatest": "获取最新",
+        "fullScreen": "全屏",
+        "halfScreen": "半屏",
+        "loaded": "已加载 {{count}} 条",
+        "noMoreOlder": "已经到顶了，没有更早的日志",
+        "exportLoaded": "下载当前已加载的 {{count}} 条",
+        "exportAll": "下载全部日志（从后端拉取所有匹配行）",
+        "filterLabel": "筛选",
+        "wrap": "长日志折行显示"
       },
       "editTopic": "点击编辑",
       "topicEditable": "可编辑",
@@ -3101,6 +3129,7 @@
     "collab": {
       "placeholder": "问 AI 助手，或让它帮你改产物…（回车发送）",
       "placeholderGate": "填写说明 / 理由，再点上方门控按钮（打回、重做需填写）；或问 AI 帮你审阅…",
+      "placeholderRunning": "运行期间暂不可输入…",
       "thinking": "AI 助手思考中…",
       "usingTool": "正在调用 {{tool}}…",
       "hint": "AI 助手：可解释产物、帮你修改文件；流水线运行时不可用。",
@@ -3291,6 +3320,7 @@
       "islands": "岛屿",
       "best": "最高分",
       "avg": "平均分",
+      "genMax": "当代最优",
       "generation": "代数",
       "score": "得分",
       "fullValueHint": "完整值（未四舍五入）"

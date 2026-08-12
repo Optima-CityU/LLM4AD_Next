@@ -16,6 +16,12 @@ export interface AutoResearchHeaderCtx {
    * 注入到这里，供无侧栏时快速切换会话。
    */
   setHeaderLeft: (node: ReactNode) => void
+  /**
+   * 顶栏右侧列（语言/主题切换器左侧）注入点：右侧产物面板收起时，产物面板把
+   * 「报告分析 / 研究日志 / 打开 IDE / 下载产物」四枚紧凑操作按钮注入到这里，
+   * 供无产物面板时仍能一键触发（弹层/抽屉走 portal，收起也能正常弹出）。
+   */
+  setHeaderRight: (node: ReactNode) => void
   /** header 下方的全宽挂载点（portal target）；未就绪时为 null。 */
   bandEl: HTMLElement | null
 }
@@ -28,6 +34,7 @@ export const AutoResearchHeaderContext =
 const NOOP_HEADER_CTX: AutoResearchHeaderCtx = {
   setHeaderCenter: () => {},
   setHeaderLeft: () => {},
+  setHeaderRight: () => {},
   bandEl: null,
 }
 

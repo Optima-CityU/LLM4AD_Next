@@ -7303,6 +7303,167 @@ export const ResearchLLM4ADWorkspaceRefSchema = {
     description: 'LLM4AD workspace 引用的三种形态。'
 } as const;
 
+export const ResearchLogItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        turn_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Turn Id'
+        },
+        level: {
+            type: 'string',
+            title: 'Level'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        source: {
+            type: 'string',
+            title: 'Source'
+        },
+        module: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Module'
+        },
+        stage: {
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stage'
+        },
+        event_key: {
+            type: 'string',
+            title: 'Event Key',
+            default: ''
+        },
+        turn_status: {
+            '$ref': '#/components/schemas/ResearchTurnStatus'
+        },
+        ts: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Ts'
+        },
+        seq: {
+            type: 'integer',
+            title: 'Seq',
+            default: 0
+        },
+        stream_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stream Id'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'session_id', 'turn_id', 'level', 'message', 'source', 'turn_status', 'created_time', 'updated_time'],
+    title: 'ResearchLogItem',
+    description: '单条日志（来自 ``research_log`` 表，与对话消息分家）。'
+} as const;
+
+export const ResearchLogPageResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchLogItem'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        older_cursor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Older Cursor'
+        },
+        has_older: {
+            type: 'boolean',
+            title: 'Has Older',
+            default: false
+        },
+        newer_cursor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Newer Cursor'
+        },
+        has_newer: {
+            type: 'boolean',
+            title: 'Has Newer',
+            default: false
+        }
+    },
+    type: 'object',
+    title: 'ResearchLogPageResponse',
+    description: `\`/sessions/{sid}/logs\` 日志双端游标窗口响应。
+
+\`\`items\`\` **恒定升序**（旧→新），渲染不用反转。返回窗口两端的游标与是否还有
+更多，供日志查看器上下双向翻页：
+
+- \`\`older_cursor\`\`：指向本批**最旧**一条；带 \`\`order=desc\`\` 回传可取更旧一页。
+- \`\`has_older\`\`：更旧方向是否还有数据。
+- \`\`newer_cursor\`\`：指向本批**最新**一条；带 \`\`order=asc\`\` 回传可取更新一页。
+- \`\`has_newer\`\`：更新方向是否还有数据。
+
+\`\`limit=0\`\` 全量返回时，两端游标为 None、两个 has_* 均为 False。`
+} as const;
+
 export const ResearchMessageItemSchema = {
     properties: {
         id: {
@@ -7409,6 +7570,22 @@ export const ResearchMessageItemSchema = {
             title: 'Event Key',
             default: ''
         },
+        seq: {
+            type: 'integer',
+            title: 'Seq',
+            default: 0
+        },
+        stream_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stream Id'
+        },
         created_time: {
             type: 'string',
             format: 'date-time',
@@ -7455,10 +7632,11 @@ export const ResearchMessageListResponseSchema = {
     type: 'object',
     required: ['items'],
     title: 'ResearchMessageListResponse',
-    description: `\`/turns/{tid}/messages\` 分页响应。
+    description: `\`/sessions/{sid}/messages\` 消息分页响应（不含 log，log 走 \`/logs\`）。
 
-正序游标翻页：\`\`cursor\`\` = 上一页最后一条的 \`\`created_time\`\` ISO 字符串，
-首次不传；\`\`next_cursor\`\` 为 \`\`None\`\` 时表示无更多数据。`
+游标翻页：\`\`cursor\`\` = 上一页末条的不透明游标（\`\`{iso}|{seq}|{id}\`\`），首次
+不传；\`\`next_cursor\`\` 为 \`\`None\`\` 时表示无更多数据。\`\`order\`\` 决定 items 顺序
+（\`\`desc\`\` 历史翻页 / \`\`asc\`\` SSE 回放）。`
 } as const;
 
 export const ResearchMessageRoleSchema = {
@@ -7574,6 +7752,16 @@ export const ResearchSessionDetailResponseSchema = {
             '$ref': '#/components/schemas/ResearchSessionItem'
         },
         active_turn: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ResearchTurnItem'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        active_collab_turn: {
             anyOf: [
                 {
                     '$ref': '#/components/schemas/ResearchTurnItem'
@@ -7805,32 +7993,6 @@ export const ResearchSessionListResponseSchema = {
     type: 'object',
     title: 'ResearchSessionListResponse',
     description: '会话分页列表（游标分页，与 turn/message 列表统一）。'
-} as const;
-
-export const ResearchSessionMessagesResponseSchema = {
-    properties: {
-        messages: {
-            items: {
-                '$ref': '#/components/schemas/ResearchMessageItem'
-            },
-            type: 'array',
-            title: 'Messages'
-        },
-        has_more: {
-            type: 'boolean',
-            title: 'Has More',
-            description: '是否还有更早的历史消息；True 时用最早一条 id 做 before 游标',
-            default: false
-        }
-    },
-    type: 'object',
-    title: 'ResearchSessionMessagesResponse',
-    description: `\`/sessions/{sid}/messages\` 会话级消息分页响应。
-
-与 \`\`ResearchSessionDetailResponse.messages\`\` 同款翻页语义（\`\`before\`\`/倒序
-游标，返回时升序），但脱离会话详情单独成端点：供消息列表与日志面板各自带
-\`\`event_type\`\` 过滤、各自分页，互不饥饿。\`\`messages\`\` 升序（最旧在前）；
-\`\`has_more\`\` 为 True 时用最早一条 \`\`id\`\` 作 \`\`before\`\` 继续往前翻。`
 } as const;
 
 export const ResearchSessionStatusSchema = {

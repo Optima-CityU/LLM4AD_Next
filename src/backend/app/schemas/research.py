@@ -255,6 +255,11 @@ class ResearchMessageItem(BaseModel):
     stage: int | None = None
     event_type: str | None = None
     event_key: str = ""
+    # per-turn 递增序列号：与 created_time 一起作为前端稳定排序的第二排序键，
+    # 解决同一时刻多事件的顺序问题（对齐 ResearchLogItem.seq）。
+    seq: int = 0
+    # 本条对应的 Redis Stream entry id（<ms>-<seq>）：前端断线续传游标 + 精确去重键。
+    stream_id: str | None = None
     created_time: datetime
     updated_time: datetime
 
@@ -278,10 +283,11 @@ class ResearchStageGuideResponse(BaseModel):
 
 
 class ResearchMessageListResponse(BaseModel):
-    """`/turns/{tid}/messages` 分页响应。
+    """`/sessions/{sid}/messages` 消息分页响应（不含 log，log 走 `/logs`）。
 
-    正序游标翻页：``cursor`` = 上一页最后一条的 ``created_time`` ISO 字符串，
-    首次不传；``next_cursor`` 为 ``None`` 时表示无更多数据。
+    游标翻页：``cursor`` = 上一页末条的不透明游标（``{iso}|{seq}|{id}``），首次
+    不传；``next_cursor`` 为 ``None`` 时表示无更多数据。``order`` 决定 items 顺序
+    （``desc`` 历史翻页 / ``asc`` SSE 回放）。
     """
 
     items: list[ResearchMessageItem]
@@ -289,20 +295,48 @@ class ResearchMessageListResponse(BaseModel):
     has_more: bool = False
 
 
-class ResearchSessionMessagesResponse(BaseModel):
-    """`/sessions/{sid}/messages` 会话级消息分页响应。
+class ResearchLogItem(BaseModel):
+    """单条日志（来自 ``research_log`` 表，与对话消息分家）。"""
 
-    与 ``ResearchSessionDetailResponse.messages`` 同款翻页语义（``before``/倒序
-    游标，返回时升序），但脱离会话详情单独成端点：供消息列表与日志面板各自带
-    ``event_type`` 过滤、各自分页，互不饥饿。``messages`` 升序（最旧在前）；
-    ``has_more`` 为 True 时用最早一条 ``id`` 作 ``before`` 继续往前翻。
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    session_id: uuid.UUID
+    turn_id: uuid.UUID
+    level: str
+    message: str
+    source: str
+    module: str | None = None
+    stage: int | None = None
+    event_key: str = ""
+    turn_status: ResearchTurnStatus
+    ts: datetime | None = None
+    seq: int = 0
+    # 本条对应的 Redis Stream entry id（<ms>-<seq>）：前端断线续传游标 + 精确去重键。
+    stream_id: str | None = None
+    created_time: datetime
+    updated_time: datetime
+
+
+class ResearchLogPageResponse(BaseModel):
+    """`/sessions/{sid}/logs` 日志双端游标窗口响应。
+
+    ``items`` **恒定升序**（旧→新），渲染不用反转。返回窗口两端的游标与是否还有
+    更多，供日志查看器上下双向翻页：
+
+    - ``older_cursor``：指向本批**最旧**一条；带 ``order=desc`` 回传可取更旧一页。
+    - ``has_older``：更旧方向是否还有数据。
+    - ``newer_cursor``：指向本批**最新**一条；带 ``order=asc`` 回传可取更新一页。
+    - ``has_newer``：更新方向是否还有数据。
+
+    ``limit=0`` 全量返回时，两端游标为 None、两个 has_* 均为 False。
     """
 
-    messages: list[ResearchMessageItem] = Field(default_factory=list)
-    has_more: bool = Field(
-        default=False,
-        description="是否还有更早的历史消息；True 时用最早一条 id 做 before 游标",
-    )
+    items: list[ResearchLogItem] = Field(default_factory=list)
+    older_cursor: str | None = None
+    has_older: bool = False
+    newer_cursor: str | None = None
+    has_newer: bool = False
 
 
 class ResearchTurnListResponse(BaseModel):
@@ -318,6 +352,10 @@ class ResearchSessionDetailResponse(BaseModel):
 
     session: ResearchSessionItem
     active_turn: "ResearchTurnItem | None" = None
+    # 当前活跃的协作轮（status=COLLABORATING）。协作是与 pipeline 并存的独立 turn，
+    # 不被 session.active_turn_id 指针跟踪，故单独暴露：前端刷新后据此恢复协作 SSE
+    # 订阅，无需再翻 /turns 列表。无进行中的协作时为 None。
+    active_collab_turn: "ResearchTurnItem | None" = None
     messages: list[ResearchMessageItem] = Field(default_factory=list)
     has_more: bool = Field(
         default=False,

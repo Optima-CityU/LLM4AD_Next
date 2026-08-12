@@ -38,12 +38,12 @@ from app.schemas.research import (
     ResearchFolderTreeResponse,
     ResearchFolderUpdateRequest,
     ResearchGeneratedResponse,
+    ResearchLogPageResponse,
     ResearchMessageListResponse,
     ResearchSessionCreateRequest,
     ResearchSessionDetailResponse,
     ResearchSessionItem,
     ResearchSessionListResponse,
-    ResearchSessionMessagesResponse,
     ResearchSessionUpdateRequest,
     ResearchStageGuideRequest,
     ResearchStageGuideResponse,
@@ -228,37 +228,96 @@ def get_session(
 
 @router.get(
     "/sessions/{session_id}/messages",
-    response_model=ResearchSessionMessagesResponse,
-    summary="会话级历史消息分页（跨所有轮次，支持 event_type 过滤）",
+    response_model=ResearchMessageListResponse,
+    summary="消息分页（不含 log；turn_id 可选切换会话级/单轮，支持双向游标）",
 )
-def list_session_messages(
+def list_messages(
     session_id: uuid.UUID,
     db: SessionDep,
     current_user: CurrentUser,
-    before: uuid.UUID | None = Query(
-        default=None, description="消息游标：返回该消息之前（更早）的消息",
+    turn_id: uuid.UUID | None = Query(
+        default=None, description="传则只返回该轮消息；不传则跨全会话",
+    ),
+    order: str = Query(
+        default="desc",
+        pattern="^(asc|desc)$",
+        description="翻页方向（单页恒升序返回）：desc 从最新往旧翻（默认）/ asc 从最旧往新翻",
+    ),
+    cursor: str | None = Query(
+        default=None, description="上一页末条的不透明游标（next_cursor 原样回传）",
     ),
     limit: int = Query(default=100, ge=1, le=500),
     event_type: list[str] | None = Query(
         default=None,
-        description="白名单：只保留这些类型（日志面板传 log）；空则不限",
+        description="白名单：只保留这些类型（如 stage_transition）；空则不限。log 走 /logs",
     ),
-    exclude_event_type: list[str] | None = Query(
-        default=None,
-        description="黑名单：剔除这些类型（消息列表传 log 排除日志）；空则不剔除",
+    role: ResearchMessageRole | None = Query(
+        default=None, description="按 role 过滤：user/assistant/system",
     ),
 ):
-    """会话级消息分页，脱离会话详情单独成端点。
+    """只查 ``research_message`` 表（对话 + stage/artifact/guidance 等系统事件，
+    **不含 log**——日志走 ``GET /logs``）。
 
-    专供前端消息列表与日志面板各调一次、各带类型过滤、各自分页——消息列表用
-    ``exclude_event_type=log`` 排除日志、日志面板用 ``event_type=log`` 只取日志，
-    避免共享一页数据时长跑日志淹没对话消息。翻页语义与
-    ``GET /sessions/{id}?include_messages=true`` 一致（``before``/倒序游标，返回升序）。
+    ``turn_id`` 统一会话级与单轮：传了 = 单轮（附带 turn 归属校验），不传 = 跨全
+    会话。``order`` 统一历史翻页（``desc``）与 SSE 回放（``asc``）——刷新恢复流程：
+    先 ``?turn_id=<tid>&order=asc`` 拿该轮完整历史，再连 ``/stream`` 实时 tail。
+    翻页用返回的 ``next_cursor`` 原样回传，为 None 表示到底。
     """
-    return research_service.list_session_messages(
+    return research_service.list_messages(
         db, session_id, current_user,
-        before=before, limit=limit,
-        event_type=event_type, exclude_event_type=exclude_event_type,
+        turn_id=turn_id, order=order, cursor=cursor, limit=limit,
+        event_type=event_type, role=role,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/logs",
+    response_model=ResearchLogPageResponse,
+    summary="日志双端游标窗口（独立 research_log 表；turn_id 可选，可上下双向翻页）",
+)
+def list_logs(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    turn_id: uuid.UUID | None = Query(
+        default=None, description="传则只返回该轮日志；不传则跨全会话",
+    ),
+    order: str = Query(
+        default="desc",
+        pattern="^(asc|desc)$",
+        description="翻页方向（单页恒升序返回）：desc 从最新往旧翻（默认）/ asc 从最旧往新翻",
+    ),
+    cursor: str | None = Query(
+        default=None, description="上一页末条的不透明游标（next_cursor 原样回传）",
+    ),
+    limit: int = Query(
+        default=200, ge=0, le=2000,
+        description="单页条数；传 0 表示不分页、一次返回全部匹配（无游标）",
+    ),
+    level: list[str] | None = Query(
+        default=None, description="按日志级别过滤白名单（INFO/WARNING/ERROR/DEBUG）；空则不限",
+    ),
+    q: str | None = Query(
+        default=None,
+        max_length=200,
+        description="关键字：对日志 message 做大小写不敏感模糊匹配（ILIKE）；空则不限",
+    ),
+):
+    """只查 ``research_log`` 表（占总量 90-95% 的 log 已从消息表拆出）。
+
+    返回**双端游标窗口**：``items`` 恒升序（旧→新，渲染不反转），并给出窗口两端
+    的游标与是否还有更多，供日志查看器上下双向翻页——
+    ``older_cursor`` + ``order=desc`` 取更旧一页、``newer_cursor`` + ``order=asc``
+    取更新一页。``has_older`` / ``has_newer`` 由独立 EXISTS 探测，恒定正确。
+
+    返回 :class:`ResearchLogItem`，含 level/source/module/ts，不伪装成消息结构。
+    ``q`` 关键字搜索日志正文；``limit=0`` 不分页取全部匹配行（两端游标为 None、
+    has_* 均 False；导出 / 全量检索用，大会话可能上万行，慎用）。
+    """
+    return research_service.list_logs(
+        db, session_id, current_user,
+        turn_id=turn_id, order=order, cursor=cursor, limit=limit,
+        level=level, q=q,
     )
 
 
@@ -415,39 +474,6 @@ def get_turn(
 ):
     """轻量端点：只返回 turn 表状态，不含消息。"""
     return research_service.get_turn(db, session_id, turn_id, current_user)
-
-
-@router.get(
-    "/sessions/{session_id}/turns/{turn_id}/messages",
-    response_model=ResearchMessageListResponse,
-    summary="历史消息分页（DB 持久化，任意时间可回放）",
-)
-def list_turn_messages(
-    session_id: uuid.UUID,
-    turn_id: uuid.UUID,
-    db: SessionDep,
-    current_user: CurrentUser,
-    cursor: str | None = Query(None, description="上一页最后一条的 created_time ISO"),
-    limit: int = Query(200, ge=1, le=500, description="每页条数"),
-    event_type: list[str] | None = Query(
-        None, description="按事件类型过滤，多值：log/stage_transition/...",
-    ),
-    role: ResearchMessageRole | None = Query(
-        None, description="按 role 过滤：user/assistant/system",
-    ),
-):
-    """DB-backed 历史，与 ``/stream`` SSE 是互补关系：
-
-    - SSE 只保留 2h 内的事件（Redis TTL），且用于**实时**推送；
-    - 本端点从 ``research_message`` 表读，任意时间都能回放全量历史。
-
-    前端刷新流程建议：先调本端点拿完整历史，再调 ``/stream?last_id=<0-0>``
-    从流头恢复实时 tail；SSE 端会短路已终态 turn，不会白等 30 分钟 idle。
-    """
-    return research_service.list_turn_messages(
-        db, session_id, turn_id, current_user,
-        cursor=cursor, limit=limit, event_type=event_type, role=role,
-    )
 
 
 # ---- SSE 流 ----

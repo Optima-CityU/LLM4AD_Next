@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { AdminAnalyticsGetAdminAnalyticsOverviewData, AdminAnalyticsGetAdminAnalyticsOverviewResponse, AdminAnalyticsGetAdminOperationsSummaryResponse, AdminAnalyticsGetAdminOperationsTasksResponse, AdminAnalyticsGetAdminOperationsFeedbackResponse, AdminAnalyticsGetAdminOperationsLitellmResponse, AdminAnalyticsGetAdminVisitorsPlausibleData, AdminAnalyticsGetAdminVisitorsPlausibleResponse, AdminAnalyticsGetAdminVisitorsGithubResponse, FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, InternalGetGatewayUserData, InternalGetGatewayUserResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryCommitMemoryCardExtractionData, Llm4AdMemoryCommitMemoryCardExtractionResponse, Llm4AdMemoryDiscardMemoryCardExtractionData, Llm4AdMemoryDiscardMemoryCardExtractionResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetBuiltinProviderQuotaResponse, Llm4AdProvidersGetLitellmUserQuotasResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdResearchListFoldersResponse, Llm4AdResearchCreateFolderData, Llm4AdResearchCreateFolderResponse, Llm4AdResearchGetFolderTreeResponse, Llm4AdResearchReorderFoldersData, Llm4AdResearchReorderFoldersResponse, Llm4AdResearchUpdateFolderData, Llm4AdResearchUpdateFolderResponse, Llm4AdResearchDeleteFolderData, Llm4AdResearchDeleteFolderResponse, Llm4AdResearchListSessionsData, Llm4AdResearchListSessionsResponse, Llm4AdResearchCreateSessionData, Llm4AdResearchCreateSessionResponse, Llm4AdResearchGetSessionData, Llm4AdResearchGetSessionResponse, Llm4AdResearchUpdateSessionData, Llm4AdResearchUpdateSessionResponse, Llm4AdResearchDeleteSessionData, Llm4AdResearchDeleteSessionResponse, Llm4AdResearchListSessionMessagesData, Llm4AdResearchListSessionMessagesResponse, Llm4AdResearchStartTurnData, Llm4AdResearchStartTurnResponse, Llm4AdResearchListTurnsData, Llm4AdResearchListTurnsResponse, Llm4AdResearchStopTurnData, Llm4AdResearchStopTurnResponse, Llm4AdResearchRetryTurnData, Llm4AdResearchRetryTurnResponse, Llm4AdResearchStartCollabData, Llm4AdResearchStartCollabResponse, Llm4AdResearchGetTurnData, Llm4AdResearchGetTurnResponse, Llm4AdResearchListTurnMessagesData, Llm4AdResearchListTurnMessagesResponse, Llm4AdResearchStreamTurnData, Llm4AdResearchStreamTurnResponse, Llm4AdResearchInjectStageGuidanceData, Llm4AdResearchInjectStageGuidanceResponse, Llm4AdResearchListArtifactsData, Llm4AdResearchListArtifactsResponse, Llm4AdResearchArtifactTreeData, Llm4AdResearchArtifactTreeResponse, Llm4AdResearchDownloadArtifactData, Llm4AdResearchDownloadArtifactResponse, Llm4AdResearchTranslateArtifactData, Llm4AdResearchTranslateArtifactResponse, Llm4AdResearchStopTranslateArtifactData, Llm4AdResearchStopTranslateArtifactResponse, Llm4AdResearchStreamTranslateData, Llm4AdResearchStreamTranslateResponse, Llm4AdResearchDownloadArtifactsArchiveData, Llm4AdResearchDownloadArtifactsArchiveResponse, Llm4AdResearchWriteArtifactData, Llm4AdResearchWriteArtifactResponse, Llm4AdResearchListGeneratedData, Llm4AdResearchListGeneratedResponse, Llm4AdResearchGetStateData, Llm4AdResearchGetStateResponse, Llm4AdResearchDownloadArcConfigData, Llm4AdResearchDownloadArcConfigResponse, Llm4AdResearchGetAnalysisData, Llm4AdResearchGetAnalysisResponse, Llm4AdResearchGenerateAnalysisData, Llm4AdResearchGenerateAnalysisResponse, Llm4AdResearchStopAnalysisData, Llm4AdResearchStopAnalysisResponse, Llm4AdResearchStreamAnalysisData, Llm4AdResearchStreamAnalysisResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, OidcGithubAuthorizeData, OidcGithubAuthorizeResponse, OidcGithubCallbackData, OidcGithubCallbackResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, StarRewardReadStarRewardStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+import type { AdminAnalyticsGetAdminAnalyticsOverviewData, AdminAnalyticsGetAdminAnalyticsOverviewResponse, AdminAnalyticsGetAdminOperationsSummaryResponse, AdminAnalyticsGetAdminOperationsTasksResponse, AdminAnalyticsGetAdminOperationsFeedbackResponse, AdminAnalyticsGetAdminOperationsLitellmResponse, AdminAnalyticsGetAdminVisitorsPlausibleData, AdminAnalyticsGetAdminVisitorsPlausibleResponse, AdminAnalyticsGetAdminVisitorsGithubResponse, FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, InternalGetGatewayUserData, InternalGetGatewayUserResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryCommitMemoryCardExtractionData, Llm4AdMemoryCommitMemoryCardExtractionResponse, Llm4AdMemoryDiscardMemoryCardExtractionData, Llm4AdMemoryDiscardMemoryCardExtractionResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetBuiltinProviderQuotaResponse, Llm4AdProvidersGetLitellmUserQuotasResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdResearchListFoldersResponse, Llm4AdResearchCreateFolderData, Llm4AdResearchCreateFolderResponse, Llm4AdResearchGetFolderTreeResponse, Llm4AdResearchReorderFoldersData, Llm4AdResearchReorderFoldersResponse, Llm4AdResearchUpdateFolderData, Llm4AdResearchUpdateFolderResponse, Llm4AdResearchDeleteFolderData, Llm4AdResearchDeleteFolderResponse, Llm4AdResearchListSessionsData, Llm4AdResearchListSessionsResponse, Llm4AdResearchCreateSessionData, Llm4AdResearchCreateSessionResponse, Llm4AdResearchGetSessionData, Llm4AdResearchGetSessionResponse, Llm4AdResearchUpdateSessionData, Llm4AdResearchUpdateSessionResponse, Llm4AdResearchDeleteSessionData, Llm4AdResearchDeleteSessionResponse, Llm4AdResearchListMessagesData, Llm4AdResearchListMessagesResponse, Llm4AdResearchListLogsData, Llm4AdResearchListLogsResponse, Llm4AdResearchStartTurnData, Llm4AdResearchStartTurnResponse, Llm4AdResearchListTurnsData, Llm4AdResearchListTurnsResponse, Llm4AdResearchStopTurnData, Llm4AdResearchStopTurnResponse, Llm4AdResearchRetryTurnData, Llm4AdResearchRetryTurnResponse, Llm4AdResearchStartCollabData, Llm4AdResearchStartCollabResponse, Llm4AdResearchGetTurnData, Llm4AdResearchGetTurnResponse, Llm4AdResearchStreamTurnData, Llm4AdResearchStreamTurnResponse, Llm4AdResearchInjectStageGuidanceData, Llm4AdResearchInjectStageGuidanceResponse, Llm4AdResearchListArtifactsData, Llm4AdResearchListArtifactsResponse, Llm4AdResearchArtifactTreeData, Llm4AdResearchArtifactTreeResponse, Llm4AdResearchDownloadArtifactData, Llm4AdResearchDownloadArtifactResponse, Llm4AdResearchTranslateArtifactData, Llm4AdResearchTranslateArtifactResponse, Llm4AdResearchStopTranslateArtifactData, Llm4AdResearchStopTranslateArtifactResponse, Llm4AdResearchStreamTranslateData, Llm4AdResearchStreamTranslateResponse, Llm4AdResearchDownloadArtifactsArchiveData, Llm4AdResearchDownloadArtifactsArchiveResponse, Llm4AdResearchWriteArtifactData, Llm4AdResearchWriteArtifactResponse, Llm4AdResearchListGeneratedData, Llm4AdResearchListGeneratedResponse, Llm4AdResearchGetStateData, Llm4AdResearchGetStateResponse, Llm4AdResearchDownloadArcConfigData, Llm4AdResearchDownloadArcConfigResponse, Llm4AdResearchGetAnalysisData, Llm4AdResearchGetAnalysisResponse, Llm4AdResearchGenerateAnalysisData, Llm4AdResearchGenerateAnalysisResponse, Llm4AdResearchStopAnalysisData, Llm4AdResearchStopAnalysisResponse, Llm4AdResearchStreamAnalysisData, Llm4AdResearchStreamAnalysisResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, OidcGithubAuthorizeData, OidcGithubAuthorizeResponse, OidcGithubCallbackData, OidcGithubCallbackResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, StarRewardReadStarRewardStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
 
 export class AdminAnalyticsService {
     /**
@@ -26,7 +26,7 @@ export class AdminAnalyticsService {
             }
         });
     }
-    
+
     /**
      * Get Admin Operations Summary
      * Return operations summary statistics.
@@ -2442,23 +2442,26 @@ export class Llm4AdResearchService {
     }
     
     /**
-     * 会话级历史消息分页（跨所有轮次，支持 event_type 过滤）
-     * 会话级消息分页，脱离会话详情单独成端点。
+     * 消息分页（不含 log；turn_id 可选切换会话级/单轮，支持双向游标）
+     * 只查 ``research_message`` 表（对话 + stage/artifact/guidance 等系统事件，
+     * **不含 log**——日志走 ``GET /logs``）。
      *
-     * 专供前端消息列表与日志面板各调一次、各带类型过滤、各自分页——消息列表用
-     * ``exclude_event_type=log`` 排除日志、日志面板用 ``event_type=log`` 只取日志，
-     * 避免共享一页数据时长跑日志淹没对话消息。翻页语义与
-     * ``GET /sessions/{id}?include_messages=true`` 一致（``before``/倒序游标，返回升序）。
+     * ``turn_id`` 统一会话级与单轮：传了 = 单轮（附带 turn 归属校验），不传 = 跨全
+     * 会话。``order`` 统一历史翻页（``desc``）与 SSE 回放（``asc``）——刷新恢复流程：
+     * 先 ``?turn_id=<tid>&order=asc`` 拿该轮完整历史，再连 ``/stream`` 实时 tail。
+     * 翻页用返回的 ``next_cursor`` 原样回传，为 None 表示到底。
      * @param data The data for the request.
      * @param data.sessionId
-     * @param data.before 消息游标：返回该消息之前（更早）的消息
+     * @param data.turnId 传则只返回该轮消息；不传则跨全会话
+     * @param data.order 翻页方向（单页恒升序返回）：desc 从最新往旧翻（默认）/ asc 从最旧往新翻
+     * @param data.cursor 上一页末条的不透明游标（next_cursor 原样回传）
      * @param data.limit
-     * @param data.eventType 白名单：只保留这些类型（日志面板传 log）；空则不限
-     * @param data.excludeEventType 黑名单：剔除这些类型（消息列表传 log 排除日志）；空则不剔除
-     * @returns ResearchSessionMessagesResponse Successful Response
+     * @param data.eventType 白名单：只保留这些类型（如 stage_transition）；空则不限。log 走 /logs
+     * @param data.role 按 role 过滤：user/assistant/system
+     * @returns ResearchMessageListResponse Successful Response
      * @throws ApiError
      */
-    public static listSessionMessages(data: Llm4AdResearchListSessionMessagesData): CancelablePromise<Llm4AdResearchListSessionMessagesResponse> {
+    public static listMessages(data: Llm4AdResearchListMessagesData): CancelablePromise<Llm4AdResearchListMessagesResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm4ad/research/sessions/{session_id}/messages',
@@ -2466,10 +2469,56 @@ export class Llm4AdResearchService {
                 session_id: data.sessionId
             },
             query: {
-                before: data.before,
+                turn_id: data.turnId,
+                order: data.order,
+                cursor: data.cursor,
                 limit: data.limit,
                 event_type: data.eventType,
-                exclude_event_type: data.excludeEventType
+                role: data.role
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * 日志双端游标窗口（独立 research_log 表；turn_id 可选，可上下双向翻页）
+     * 只查 ``research_log`` 表（占总量 90-95% 的 log 已从消息表拆出）。
+     *
+     * 返回**双端游标窗口**：``items`` 恒升序（旧→新，渲染不反转），并给出窗口两端
+     * 的游标与是否还有更多，供日志查看器上下双向翻页——
+     * ``older_cursor`` + ``order=desc`` 取更旧一页、``newer_cursor`` + ``order=asc``
+     * 取更新一页。``has_older`` / ``has_newer`` 由独立 EXISTS 探测，恒定正确。
+     *
+     * 返回 :class:`ResearchLogItem`，含 level/source/module/ts，不伪装成消息结构。
+     * ``q`` 关键字搜索日志正文；``limit=0`` 不分页取全部匹配行（两端游标为 None、
+     * has_* 均 False；导出 / 全量检索用，大会话可能上万行，慎用）。
+     * @param data The data for the request.
+     * @param data.sessionId
+     * @param data.turnId 传则只返回该轮日志；不传则跨全会话
+     * @param data.order 翻页方向（单页恒升序返回）：desc 从最新往旧翻（默认）/ asc 从最旧往新翻
+     * @param data.cursor 上一页末条的不透明游标（next_cursor 原样回传）
+     * @param data.limit 单页条数；传 0 表示不分页、一次返回全部匹配（无游标）
+     * @param data.level 按日志级别过滤白名单（INFO/WARNING/ERROR/DEBUG）；空则不限
+     * @param data.q 关键字：对日志 message 做大小写不敏感模糊匹配（ILIKE）；空则不限
+     * @returns ResearchLogPageResponse Successful Response
+     * @throws ApiError
+     */
+    public static listLogs(data: Llm4AdResearchListLogsData): CancelablePromise<Llm4AdResearchListLogsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/research/sessions/{session_id}/logs',
+            path: {
+                session_id: data.sessionId
+            },
+            query: {
+                turn_id: data.turnId,
+                order: data.order,
+                cursor: data.cursor,
+                limit: data.limit,
+                level: data.level,
+                q: data.q
             },
             errors: {
                 422: 'Validation Error'
@@ -2628,45 +2677,6 @@ export class Llm4AdResearchService {
             path: {
                 session_id: data.sessionId,
                 turn_id: data.turnId
-            },
-            errors: {
-                422: 'Validation Error'
-            }
-        });
-    }
-    
-    /**
-     * 历史消息分页（DB 持久化，任意时间可回放）
-     * DB-backed 历史，与 ``/stream`` SSE 是互补关系：
-     *
-     * - SSE 只保留 2h 内的事件（Redis TTL），且用于**实时**推送；
-     * - 本端点从 ``research_message`` 表读，任意时间都能回放全量历史。
-     *
-     * 前端刷新流程建议：先调本端点拿完整历史，再调 ``/stream?last_id=<0-0>``
-     * 从流头恢复实时 tail；SSE 端会短路已终态 turn，不会白等 30 分钟 idle。
-     * @param data The data for the request.
-     * @param data.sessionId
-     * @param data.turnId
-     * @param data.cursor 上一页最后一条的 created_time ISO
-     * @param data.limit 每页条数
-     * @param data.eventType 按事件类型过滤，多值：log/stage_transition/...
-     * @param data.role 按 role 过滤：user/assistant/system
-     * @returns ResearchMessageListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listTurnMessages(data: Llm4AdResearchListTurnMessagesData): CancelablePromise<Llm4AdResearchListTurnMessagesResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/llm4ad/research/sessions/{session_id}/turns/{turn_id}/messages',
-            path: {
-                session_id: data.sessionId,
-                turn_id: data.turnId
-            },
-            query: {
-                cursor: data.cursor,
-                limit: data.limit,
-                event_type: data.eventType,
-                role: data.role
             },
             errors: {
                 422: 'Validation Error'

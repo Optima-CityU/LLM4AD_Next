@@ -578,3 +578,139 @@
     opacity: 1;
   }
 }
+
+/* AutoResearch 底部输入卡：运行态指示。放弃沿框环绕的运动流光(宽矩形上速度不均、
+   叠加 backdrop-blur 易卡顿),改为整框「呼吸外发光」——box-shadow 明暗缓动,沉稳且
+   纯合成器动画不掉帧。挂在卡片本体上,不额外加节点。 */
+@keyframes bc-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent),
+      0 0 10px 0 color-mix(in srgb, var(--primary) 12%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent),
+      0 0 22px 2px color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+}
+.bc-running-breathe {
+  animation: bc-breathe 3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-running-breathe {
+    /* 降低动效:不呼吸,保留一圈柔和常亮外发光作为运行指示。 */
+    animation: none;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent),
+      0 0 16px 1px color-mix(in srgb, var(--primary) 20%, transparent);
+  }
+}
+
+/* AutoResearch 底部「发送/运行」主操作药丸的质感层。纯装饰，不改点击区与语义：
+   1) ::before 顶部弧面高光——一层自上而下渐隐的白，让实心按钮有微凸的立体感；
+   2) ::after 斜向柔光——默认停在左侧外，hover 时扫过整颗药丸；
+   3) 外发光阴影——静态贴地、hover 时聚成一圈主色柔光，呼应暗色科技风。
+   两枚伪元素均 pointer-events:none 且被外壳 overflow-hidden 裁到药丸内。 */
+.bc-send-pill {
+  position: relative;
+  box-shadow: 0 1px 2px 0 color-mix(in srgb, var(--primary) 25%, transparent);
+  transition: box-shadow 0.3s ease;
+}
+.bc-send-pill:hover {
+  box-shadow: 0 2px 12px 0 color-mix(in srgb, var(--primary) 45%, transparent);
+}
+.bc-send-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.22),
+    rgba(255, 255, 255, 0.05) 45%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 3;
+}
+.bc-send-pill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(255, 255, 255, 0.38),
+    transparent
+  );
+  transform: translateX(-140%) skewX(-16deg);
+  pointer-events: none;
+  z-index: 4;
+}
+.bc-send-pill:hover::after {
+  transform: translateX(360%) skewX(-16deg);
+  transition: transform 0.75s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-send-pill::after {
+    display: none;
+  }
+}
+
+/* AutoResearch turn 日志面板：并排展开多个时，常显的滚动条会很杂乱。默认把滑块
+   隐藏（轨道宽度恒定，故无布局跳动），hover 整个面板（.arc-log）或聚焦其内时才
+   浮现滑块。浅/暗色分别配色，对齐全局滚动条观感。 */
+.arc-log-scroll {
+  scrollbar-color: transparent transparent;
+}
+.arc-log-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.arc-log:hover .arc-log-scroll,
+.arc-log-scroll:focus-within {
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+.arc-log:hover .arc-log-scroll::-webkit-scrollbar-thumb,
+.arc-log-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+.dark .arc-log:hover .arc-log-scroll,
+.dark .arc-log-scroll:focus-within {
+  scrollbar-color: rgba(0, 150, 255, 0.3) transparent;
+}
+.dark .arc-log:hover .arc-log-scroll::-webkit-scrollbar-thumb,
+.dark .arc-log-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(0, 150, 255, 0.3);
+}
+
+/* 研究日志抽屉正文：常显、加宽的滚动条。全局滚动条仅 5px 且很淡,在日志卡片底色上
+   几乎看不见,让人误以为「没有滚动条」。这里单独给日志正文一条更明显的滚动条。 */
+.arc-visible-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: rgba(0, 0, 0, 0.28) transparent;
+}
+.dark .arc-visible-scroll {
+  scrollbar-color: rgba(0, 150, 255, 0.35) transparent;
+}
+.arc-visible-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.arc-visible-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 9999px;
+}
+.arc-visible-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+.dark .arc-visible-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 150, 255, 0.35);
+}
+.dark .arc-visible-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 150, 255, 0.55);
+}

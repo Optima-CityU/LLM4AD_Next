@@ -1,4 +1,13 @@
-import { AlertTriangle, Check, CircleDot, Cog, Loader2, X } from "lucide-react"
+import {
+  AlertTriangle,
+  Check,
+  CircleDot,
+  Cog,
+  Loader2,
+  MinusCircle,
+  Repeat,
+  X,
+} from "lucide-react"
 import { memo, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -29,6 +38,9 @@ export interface StageEntry {
   id: string
   stage: number
   statuses: StageStatus[]
+  /** 该阶段在**整轮**内第几次出现（1=首次，≥2=重跑）。由 ChatPanel 按 turn 统一
+   *  编号后注入，故即使一轮被非阶段消息打断成多条时间轴，序号仍连续。 */
+  occurrence?: number
 }
 
 /** 阶段状态 → 图标 + 配色（与顶部进度轨 / 侧栏状态色一致）。 */
@@ -53,6 +65,18 @@ function statusVisual(status: string): {
         dot: "bg-primary",
         glow: "shadow-[0_0_8px_0] shadow-primary/50",
         bar: "from-primary/70 to-primary/30",
+      }
+    // 非活跃 turn 里残留的「运行中」：turn 已取消/中断但容器被 kill、来不及落
+    // stage 终态（后端不追溯回填，见 stop_turn）。展示成灰色静态「中断」，不再
+    // 永久转圈。仅由 StageTimeline 在 live=false 时把 running 映射到此。
+    case "interrupted":
+      return {
+        Icon: MinusCircle,
+        spin: false,
+        color: "text-muted-foreground/60",
+        dot: "bg-muted-foreground/40",
+        glow: "",
+        bar: "from-muted-foreground/40 to-muted-foreground/20",
       }
     case "done":
       return {
@@ -123,8 +147,21 @@ function fmtDuration(ms: number): string {
  * 胶囊（图标 + 时刻）。若该阶段既有开始又有结束，行尾补一枚耗时标。被非阶段消息
  * 打断处自然分段（由 ChatPanel 决定成组边界）。
  */
-function StageTimeline({ entries }: { entries: StageEntry[] }) {
+function StageTimeline({
+  entries,
+  live = true,
+}: {
+  entries: StageEntry[]
+  /** 该时间轴所属 turn 是否为「当前活跃且在跑」的 turn。false 时残留的 running
+   *  会被降级为 interrupted（灰色静态），不再永久转圈。默认 true 向后兼容。 */
+  live?: boolean
+}) {
   const { t, i18n } = useTranslation()
+
+  // 把「非活跃 turn 里残留的 running」映射成 interrupted：仅影响视觉与文案，不改
+  // 原始状态数据。done/failed/waiting 等终态不受影响。
+  const effectiveStatus = (status: string): string =>
+    !live && status === "running" ? "interrupted" : status
 
   // 组内最长耗时，用于耗时微条按比例缩放（让「哪一步拖时间」一眼可见）。
   const maxMs = useMemo(() => {
@@ -152,7 +189,8 @@ function StageTimeline({ entries }: { entries: StageEntry[] }) {
         />
         {entries.map((e) => {
           const latest = e.statuses[e.statuses.length - 1]
-          const v = statusVisual(latest.status)
+          const latestStatus = effectiveStatus(latest.status)
+          const v = statusVisual(latestStatus)
           const name =
             stageNameByLang(e.stage, i18n.language) || `stage-${e.stage}`
           const first = e.statuses[0]
@@ -163,6 +201,8 @@ function StageTimeline({ entries }: { entries: StageEntry[] }) {
               : null
           const barPct = ms != null && maxMs > 0 ? Math.max(6, (ms / maxMs) * 100) : 0
           const errText = e.statuses.find((s) => s.status === "failed")?.error
+          // 该阶段在整轮内第几次出现（≥2 才是重跑，加小标）。由 ChatPanel 注入。
+          const occurrence = e.occurrence ?? 1
 
           const row = (
             <div
@@ -185,6 +225,19 @@ function StageTimeline({ entries }: { entries: StageEntry[] }) {
                 <span className="truncate text-[12px] font-medium text-foreground/90">
                   {t("autoResearch.chat.stagePrefix", { stage: e.stage, name })}
                 </span>
+                {/* 重跑小标：同阶段第 2 次及以后出现时显示「×N」，首次不加。 */}
+                {occurrence >= 2 && (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] font-semibold leading-none text-amber-600 tabular-nums dark:text-amber-400"
+                    title={t("autoResearch.chat.stageRepeatHint", {
+                      count: occurrence,
+                      defaultValue: "该阶段第 {{count}} 次运行",
+                    })}
+                  >
+                    <Repeat className="size-2.5" />
+                    {occurrence}
+                  </span>
+                )}
                 {errText && (
                   <AlertTriangle className="size-3.5 shrink-0 text-red-500" />
                 )}
@@ -224,7 +277,7 @@ function StageTimeline({ entries }: { entries: StageEntry[] }) {
                       "bg-current/10",
                     )}
                   >
-                    {t(`autoResearch.stageStatus.${latest.status}`, latest.status)}
+                    {t(`autoResearch.stageStatus.${latestStatus}`, latestStatus)}
                   </span>
                 )}
               </span>

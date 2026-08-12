@@ -951,7 +951,7 @@ function FolderSessionGroup({
           ) : (
             <ChevronRight className="size-3 text-muted-foreground" />
           )}
-          <SectionLabel className="truncate flex-1 text-left">
+          <SectionLabel className="truncate flex-1 text-left text-xs normal-case tracking-normal">
             {label}
           </SectionLabel>
           <span className="ml-1 shrink-0 rounded-full bg-muted/50 px-1.5 py-px text-[10px] tabular-nums text-muted-foreground/70">
@@ -1163,6 +1163,22 @@ function statusDot(status: string) {
   return sessionDotClasses(status)
 }
 
+/** 会话创建时间的紧凑展示：同年省略年份，只留「月-日 时:分」，节省侧栏横向空间。 */
+function formatSessionCreated(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  const now = new Date()
+  const mm = `${d.getMonth() + 1}`.padStart(2, "0")
+  const dd = `${d.getDate()}`.padStart(2, "0")
+  const hh = `${d.getHours()}`.padStart(2, "0")
+  const mi = `${d.getMinutes()}`.padStart(2, "0")
+  const datePart =
+    d.getFullYear() === now.getFullYear()
+      ? `${mm}-${dd}`
+      : `${d.getFullYear()}-${mm}-${dd}`
+  return `${datePart} ${hh}:${mi}`
+}
+
 function SessionRow({
   session,
   folders,
@@ -1179,6 +1195,9 @@ function SessionRow({
   onSwitchProfile,
 }: SessionRowProps) {
   const { t } = useTranslation()
+  // 区分实验血统：algorithm_evolution=集成 LLM4AD 引擎；其余（ml_vision 等）
+  // 走 AutoResearchClaw 原生。用不同色的小徽章在列表上一眼可辨。
+  const isLlm4ad = session.profile === "algorithm_evolution"
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: 拖放为指针增强；行内已有 button 承载选择/键盘可达性
     <div
@@ -1195,7 +1214,7 @@ function SessionRow({
       }
       onDragEnd={draggable ? () => onDragEnd?.() : undefined}
       className={cn(
-        "group relative flex items-center rounded-md h-8 text-xs transition-all duration-200",
+        "group relative flex items-center rounded-md min-h-[2.75rem] text-xs transition-all duration-200",
         draggable && "cursor-grab active:cursor-grabbing",
         dragging && "opacity-40",
         isActive
@@ -1206,26 +1225,51 @@ function SessionRow({
       <button
         type="button"
         onClick={() => onSelect(session.id)}
-        className="flex-1 min-w-0 flex items-center gap-2 pl-3 pr-1 h-full text-left cursor-pointer"
+        className="flex-1 min-w-0 flex flex-col justify-center gap-1 pl-3 pr-1 py-1.5 h-full text-left cursor-pointer"
       >
-        <span
-          className={cn(
-            "size-1.5 rounded-full shrink-0",
-            statusDot(session.status),
-          )}
-          title={t(`autoResearch.status.${session.status}`, session.status)}
-        />
-        <span className="flex-1 truncate" title={session.title}>
-          {session.title}
-        </span>
-        {session.best_objective != null && (
+        {/* 第一行：状态点 + 标题 + 最优目标 */}
+        <div className="flex items-center gap-2 min-w-0">
           <span
-            className="shrink-0 text-[10px] font-mono tabular-nums text-emerald-500/90"
-            title={t("autoResearch.state.bestObjective")}
+            className={cn(
+              "size-1.5 rounded-full shrink-0",
+              statusDot(session.status),
+            )}
+            title={t(`autoResearch.status.${session.status}`, session.status)}
+          />
+          <span
+            className="flex-1 truncate text-[13px] font-medium"
+            title={session.title}
           >
-            {session.best_objective}
+            {session.title}
           </span>
-        )}
+          {session.best_objective != null && (
+            <span
+              className="shrink-0 text-[10px] font-mono tabular-nums text-emerald-500/90"
+              title={t("autoResearch.state.bestObjective")}
+            >
+              {session.best_objective}
+            </span>
+          )}
+        </div>
+        {/* 第二行：血统标注 + 创建时间。血统只用「安静的彩色文字」标注（去掉实底/
+            边框胶囊）——它出现在每一行，若做成高对比 chip 会连成彩色条带、和标题抢
+            视觉；降为低饱和小字后仍可一眼辨血统，却退回到「元数据」的层级。
+            llm4ad 用主色淡标，原生（autoresearch 等）用中性灰——避免琥珀色喧宾夺主。 */}
+        <div className="flex items-center gap-1.5 pl-3.5 min-w-0">
+          <span
+            className={cn(
+              "shrink-0 text-[10px] font-medium leading-none",
+              isLlm4ad ? "text-primary/70" : "text-muted-foreground/60",
+            )}
+            title={t(`autoResearch.profileDesc.${session.profile}`, "")}
+          >
+            {t(`autoResearch.profile.${session.profile}`, session.profile)}
+          </span>
+          {/* 时间推到最右：与第一行的 best_objective 竖直对齐成右侧元数据列，扫视更快。 */}
+          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+            {formatSessionCreated(session.created_time)}
+          </span>
+        </div>
       </button>
 
       <DropdownMenu>

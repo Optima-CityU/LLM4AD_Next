@@ -202,6 +202,17 @@ class ResearchEventSink:
         self._flusher.start()
         self._log_flusher.start()
 
+    def next_seq(self) -> int:
+        """分配一个 per-turn 递增 seq（锁保护，跨线程安全）。
+
+        供**同步直接落库**的路径（如 gate form / guidance）取号，与 :meth:`emit`
+        共享同一计数器——否则同步写默认 seq=0，在 created_time 撞车时会被 tiebreaker
+        排到该时刻所有事件的最前面，造成「最新状态反而显示在前」的乱序。
+        """
+        with self._seq_lock:
+            self._seq += 1
+            return self._seq
+
     def emit(
         self,
         event: dict[str, Any],
@@ -228,7 +239,14 @@ class ResearchEventSink:
         ``message_id`` 字段，推送到 SSE；前端可据此做精确去重（优于 event_key，
         因为 message_id 是 DB 主键，messages 接口返回的历史数据也带这个 ID）。
         """
-        event.setdefault("ts", datetime.now(UTC).isoformat())
+        # 发射时刻：一次定死，同时用作 SSE 帧的 ts 和 DB 行的 created_time。
+        # 这是根治乱序的关键——DB 的排序键 created_time 若沿用 TimeMixin 的落库
+        # 时刻，异步 flusher 批量延迟 commit 会让「逻辑更早」的事件拿到「更晚」的
+        # created_time（尤其和 gate form / guidance 那种同步直接 commit 混排时），
+        # 造成时间倒挂。改为在此处一次性定死发射时刻并透传到 row，让 REST 快照的
+        # 排序 == 事件真实发射顺序，且与 SSE live 帧（用同一个 ts）落到同一时钟。
+        emitted_at = datetime.now(UTC)
+        event.setdefault("ts", emitted_at.isoformat())
 
         # 落 DB 的事件：先解析出最终 event_key 和 message_id，回填进 event payload，
         # 让 SSE 帧与 DB 行携带**同一个** event_key 和 message_id。前端刷新时
@@ -247,9 +265,17 @@ class ResearchEventSink:
             with self._seq_lock:
                 self._seq += 1
                 resolved_seq = self._seq
+            # 回填 seq 到 event，SSE live 帧也带上，前端可与 REST 用同一排序键
+            event["seq"] = resolved_seq
 
+        # XADD 返回的 Redis Stream entry id（<ms>-<seq>），持久化到 DB 行，
+        # 让前端刷新时能从「已拉取历史的末端」精确续传 SSE（免全量重放），
+        # 并作精确去重键。push 失败或非持久事件时保持 None。
+        stream_id: str | None = None
         try:
-            push_research_event(self.session_id, self.turn_id, event)
+            stream_id = push_research_event(
+                self.session_id, self.turn_id, event
+            )
         except Exception:
             logger.warning(
                 f"sink redis push failed turn={self.turn_id} "
@@ -266,7 +292,12 @@ class ResearchEventSink:
         if event_type == "log":
             # 日志事件：构建 log row 并入队到 research_log 表
             row = self._build_log_row(
-                event, event_key=resolved_key, message_id=resolved_id, seq=resolved_seq
+                event,
+                event_key=resolved_key,
+                message_id=resolved_id,
+                seq=resolved_seq,
+                created_time=emitted_at,
+                stream_id=stream_id,
             )
             target_queue = self._log_queue
         else:
@@ -279,6 +310,8 @@ class ResearchEventSink:
                 payload=persist_payload,
                 message_id=resolved_id,
                 seq=resolved_seq,
+                created_time=emitted_at,
+                stream_id=stream_id,
             )
             target_queue = self._db_queue
 
@@ -346,6 +379,8 @@ class ResearchEventSink:
         payload: dict[str, Any] | None,
         message_id: uuid.UUID | None = None,
         seq: int = 0,
+        created_time: datetime | None = None,
+        stream_id: str | None = None,
     ) -> dict[str, Any]:
         """把 event 打包成待插入的 row dict（不入库，由 flusher 反序列化）。
 
@@ -354,12 +389,14 @@ class ResearchEventSink:
 
         ``message_id`` 若提供则使用（如 gate form 预分配的 UUID），否则自动生成。
         ``seq`` 为 per-turn 递增序列号，保证事件严格顺序。
+        ``created_time`` 为发射时刻；显式写入以覆盖 TimeMixin 的落库时刻，避免异步
+        flusher 批量延迟 commit 造成的时间倒挂（详见 :meth:`emit`）。
         """
         etype = str(event.get("type") or "unknown")[:32]
         key = event_key if event_key is not None else self._resolve_event_key(event, None)
         raw_stage = event.get("stage")
         msg_id = message_id if message_id is not None else uuid.uuid4()
-        return {
+        row = {
             "id": msg_id,
             "session_id": self.session_id,
             "turn_id": self.turn_id,
@@ -371,7 +408,11 @@ class ResearchEventSink:
             "stage": raw_stage if isinstance(raw_stage, int) else None,
             "turn_status": ResearchTurnStatus.RUNNING.value,
             "seq": seq,
+            "stream_id": stream_id,
         }
+        if created_time is not None:
+            row["created_time"] = created_time
+        return row
 
     def _build_log_row(
         self,
@@ -380,6 +421,8 @@ class ResearchEventSink:
         event_key: str | None,
         message_id: uuid.UUID | None = None,
         seq: int = 0,
+        created_time: datetime | None = None,
+        stream_id: str | None = None,
     ) -> dict[str, Any]:
         """把 log event 打包成待插入 research_log 表的 row dict。
 
@@ -391,12 +434,13 @@ class ResearchEventSink:
         - stage: 可选的阶段号
         - ts: 可选的原始时间戳
         - seq: per-turn 递增序列号，保证事件严格顺序
+        - created_time: 发射时刻，显式覆盖 TimeMixin 落库时刻（见 :meth:`emit`）
         """
         key = event_key if event_key is not None else self._resolve_event_key(event, None)
         raw_stage = event.get("stage")
         msg_id = message_id if message_id is not None else uuid.uuid4()
 
-        return {
+        row = {
             "id": msg_id,
             "session_id": self.session_id,
             "turn_id": self.turn_id,
@@ -409,7 +453,11 @@ class ResearchEventSink:
             "stage": raw_stage if isinstance(raw_stage, int) else None,
             "ts": event.get("ts"),  # ISO8601 字符串或 None，flusher 会转 datetime
             "seq": seq,
+            "stream_id": stream_id,
         }
+        if created_time is not None:
+            row["created_time"] = created_time
+        return row
 
     def _flush_loop(self) -> None:
         """后台线程：拉 queue，批量 commit ResearchMessage。
@@ -615,7 +663,11 @@ def _emit_stage_event(
         payload["error"] = error
     sink.emit(
         event,
-        event_key=f"stage-{stage_num}:{status}",
+        # 不传固定 event_key：让 sink 兜底分配 per-turn 唯一键 ``stage_transition:{seq}``，
+        # 使同一 (stage, status) 每次都作为独立行落库（不再被 uq_turn_role_event 折叠）。
+        # REFINE/回跳导致 stage 多次进入 running、或 ARC 重复回调，都会各存一行，完整
+        # 保留执行轨迹。get_state 仍按 event_type 折叠出快照，不受影响；前端 collapseTurn
+        # 合并相邻同态条目，渲染无重复。
         persist_content=f"[stage-{stage_num}] {display} {status}",
         persist_payload=payload,
     )
@@ -771,7 +823,10 @@ def persist_gate_pause(
         ),
     }
 
-    # 1. DB: 落 form 消息（turn_status = PAUSED_GATE），event_key 用 message_id 幂等
+    # 1. DB: 落 form 消息（turn_status = PAUSED_GATE），event_key 用 message_id 幂等。
+    # 显式补 seq（与 sink emit 共享计数器）+ created_time（发射时刻）：同步直接 commit
+    # 若不补，seq 默认 0、created_time=落库时刻，与异步 flusher 的事件混排时会乱序。
+    # 本条逻辑上排在上面 _emit_stage_event(blocked_approval) 之后，故 seq/时刻都更大。
     try:
         with get_db_session() as db:
             db.add(ResearchMessage(
@@ -785,6 +840,8 @@ def persist_gate_pause(
                 event_key=f"gate:{message_id}",
                 stage=stage_num,
                 turn_status=ResearchTurnStatus.PAUSED_GATE.value,
+                seq=sink.next_seq(),
+                created_time=datetime.now(UTC),
             ))
             db.commit()
     except IntegrityError:

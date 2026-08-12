@@ -458,8 +458,13 @@ def start_turn(
 
     时序不变量：先 **commit** 落库，再产生 Redis 副作用与 Celery 入队——否则
     commit 失败会留下已入队但无行的孤儿任务。
+
+    并发不变量：对 session 行加 ``FOR UPDATE`` 行锁后再读状态守卫——把「读
+    RUNNING/PAUSED_GATE/COLLABORATING → 建轮」整段串行化，杜绝两个并发请求
+    同时穿过守卫各自建轮（TOCTOU）。锁随本函数末尾 commit 释放。门控回复分支
+    （:func:`_reply_to_gate`）复用同一 db 事务，锁一直持有到它 commit。
     """
-    session = _get_session(db, session_id, user)
+    session = _get_session(db, session_id, user, for_update=True)
 
     # 协作进行中守卫：存在 COLLABORATING turn 时（gate 暂停期间的「人+AI 改产物」
     # 子会话在跑），禁止 gate 回复 / 新建轮，避免与协作容器并发改同一 run_dir。
@@ -603,8 +608,14 @@ def retry_turn(
     request: ResearchTurnRetryRequest,
     user: models.User,
 ) -> ResearchTurnStartResponse:
-    """重跑失败或已停止的轮次，复用 ``turn_id``。"""
-    session, turn = _get_session_and_turn(db, session_id, turn_id, user)
+    """重跑失败或已停止的轮次，复用 ``turn_id``。
+
+    并发不变量：同 :func:`start_turn`，对 session 行加 ``FOR UPDATE`` 后再读
+    COLLABORATING 守卫并重置 turn，串行化到本函数末尾 commit。
+    """
+    session, turn = _get_session_and_turn(
+        db, session_id, turn_id, user, for_update=True
+    )
     if turn.status not in (
         ResearchTurnStatus.FAILED.value,
         ResearchTurnStatus.CANCELLED.value,

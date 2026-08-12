@@ -1248,6 +1248,12 @@
       "trend": {
         "globalTrend": "Global Trend",
         "instanceTrend": "Instance Trend",
+        "scale": {
+          "linear": "Linear",
+          "log": "Log",
+          "linearHint": "Linear scale: raw scores shown at equal spacing",
+          "logHint": "Log scale: compresses very low outliers so the rest of the series is easier to tell apart (handles 0/negative scores)"
+        },
         "highestScore": "Global Best",
         "genMaxScore": "Current Gen Best",
         "generation": "Gen",
@@ -1945,7 +1951,7 @@
       "viewMore": "View all news"
     },
     "footer": {
-      "copyright": "LLM4AD_Next - Algorithm Design with Large Language Models",
+      "copyright": "OpenLoopX - Algorithm Design with Large Language Models",
       "team": "",
       "resources": "Resources"
     }
@@ -2947,6 +2953,9 @@
       "workflow": "Workflow",
       "report": "Report Analysis",
       "ide": "Open IDE",
+      "download": "Download Artifacts",
+      "logs": "Logs",
+      "logsFull": "Full Logs",
       "comingSoon": "Coming soon"
     },
     "analysis": {
@@ -3101,7 +3110,8 @@
       "failed": "Failed",
       "skipped": "Skipped",
       "waiting": "Waiting",
-      "gate": "Gate"
+      "gate": "Gate",
+      "interrupted": "Interrupted"
     },
     "create": {
       "title": "New research session",
@@ -3133,15 +3143,19 @@
       "emptyPickSession": "Pick a session on the left or create one to begin",
       "emptyTitle": "No conversation yet",
       "pendingTitle": "Ready to go",
-      "pendingHint": "AI will automatically execute the research process across 22 stages. You can monitor progress or intervene at any time",
+      "pendingHint": "AI will automatically execute the research process across 23 stages. You can monitor progress or intervene at any time",
       "pendingSubtitle": "Confirm your research topic and click the start button below to launch the AI research workflow",
       "loading": "Loading messages...",
       "sending": "Sending",
       "startTurn": "Run",
       "resumeTurn": "Resume",
       "stopTurn": "Stop",
+      "pipelineRunning": "Pipeline running",
+      "runHint": "Advance the pipeline directly, run now",
+      "collabHint": "Let AI answer questions / edit outputs / advance",
       "retryTurn": "Retry",
       "sendMessage": "Send",
+      "clearInput": "Clear",
       "streamDisconnected": "SSE disconnected, reconnecting...",
       "loadMore": "Load older messages",
       "noMore": "No more messages",
@@ -3152,6 +3166,7 @@
       "llm4adFinal": "LLM4AD final state received",
       "stagePrefix": "Stage {{stage}} · {{name}}",
       "stagePrefixBare": "Stage {{stage}}",
+      "stageRepeatHint": "This stage's run #{{count}}",
       "stageFlow": "Stage {{from}} → {{to}}",
       "durationSeconds": "{{seconds}}s",
       "evolutionStep": "Evolution · score {{score}}",
@@ -3159,13 +3174,26 @@
       "stageError": "Error",
       "systemEvent": "System event",
       "streamLogs": {
-        "title": "Live logs",
+        "title": "Research logs",
         "waiting": "SSE connected, waiting for logs...",
         "truncated": "{{count}} earlier lines hidden",
-        "toggle": "Logs",
+        "toggle": "This turn",
         "count": "{{count}} lines",
         "loadEarlier": "Load earlier",
-        "empty": "No logs for this turn"
+        "empty": "No logs for this turn",
+        "emptyTag": "empty",
+        "noMatchTag": "no match"
+      },
+      "logs": {
+        "loadLatest": "Get latest",
+        "fullScreen": "Full screen",
+        "halfScreen": "Half screen",
+        "loaded": "{{count}} loaded",
+        "noMoreOlder": "You've reached the top — no earlier logs",
+        "exportLoaded": "Download loaded {{count}} entries",
+        "exportAll": "Download all logs (fetch every matching line from backend)",
+        "filterLabel": "Filter",
+        "wrap": "Wrap long log lines"
       },
       "editTopic": "Click to edit",
       "topicEditable": "Editable",
@@ -3231,6 +3259,7 @@
     "collab": {
       "placeholder": "Ask the AI assistant, or have it edit outputs… (Enter to send)",
       "placeholderGate": "Write a note / reason, then click a gate button above (required for reject/redo); or ask the AI to review…",
+      "placeholderRunning": "Input is unavailable while running…",
       "thinking": "AI assistant thinking…",
       "usingTool": "Calling {{tool}}…",
       "hint": "AI assistant: explains outputs and edits files; unavailable while the pipeline runs.",
@@ -3421,6 +3450,7 @@
       "islands": "Islands",
       "best": "Best",
       "avg": "Avg",
+      "genMax": "Gen best",
       "generation": "Generation",
       "score": "Score",
       "fullValueHint": "Full value (not rounded)"

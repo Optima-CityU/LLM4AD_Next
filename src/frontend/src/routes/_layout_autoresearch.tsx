@@ -10,6 +10,7 @@ import { type ReactNode, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { ScanlineOverlay, TechBackground } from "@/components/AutoResearch/tech"
+import { AutoResearchHelpMenu } from "@/components/AutoResearch/HelpMenu"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -48,8 +49,10 @@ function AutoResearchLayout() {
   const [headerCenter, setHeaderCenter] = useState<ReactNode>(null)
   // 顶栏左侧列（logo 右侧）：侧栏收起时注入「会话/分组切换器」。
   const [headerLeft, setHeaderLeft] = useState<ReactNode>(null)
+  // 顶栏右侧列（语言/主题切换器左侧）：右侧产物面板收起时注入四枚紧凑操作按钮。
+  const [headerRight, setHeaderRight] = useState<ReactNode>(null)
   const headerCtx = useMemo(
-    () => ({ setHeaderCenter, setHeaderLeft, bandEl: null }),
+    () => ({ setHeaderCenter, setHeaderLeft, setHeaderRight, bandEl: null }),
     [],
   )
 
@@ -76,13 +79,13 @@ function AutoResearchLayout() {
               <div className="relative shrink-0">
                 <img
                   src={icon}
-                  alt="LLM4AD_Next"
+                  alt="OpenLoopX"
                   className="h-7 w-auto landing-spin-periodic"
                 />
                 <div className="absolute inset-0 rounded-full bg-primary/20 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               </div>
               <span className="text-sm font-bold tracking-wider hidden sm:inline landing-gradient-animated">
-                LLM4AD_Next
+                OpenLoopX
               </span>
             </Link>
             {/* 结合标志：LLM4AD_Next × AutoResearchClaw（可点击跳转到源项目） */}
@@ -117,8 +120,12 @@ function AutoResearchLayout() {
             </div>
           </div>
           <div className="flex items-center justify-end gap-2">
+            {/* 产物面板收起时：语言/主题切换器左侧注入四枚紧凑操作按钮 */}
+            {headerRight}
+            {headerRight && <div className="w-px h-5 bg-border/40" />}
             <LanguageToggle />
             <ThemeToggle />
+            <AutoResearchHelpMenu />
             <div className="w-px h-5 bg-border/40" />
             {user && (
               <DropdownMenu>
