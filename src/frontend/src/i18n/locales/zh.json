@@ -836,6 +836,7 @@
       "title": "内置供应商额度",
       "remaining": "剩余 {{value}}",
       "detail": "已用 {{spend}} / 预算 {{budget}}",
+      "verifyGithub": "连接 GitHub 验证 Star",
       "unavailable": "暂不可用",
       "unavailableHint": "暂无法查询额度，请稍后重试或联系管理员。"
     },

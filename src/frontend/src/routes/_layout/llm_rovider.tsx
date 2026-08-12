@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { RefreshCw, Unplug, WalletCards } from "lucide-react"
+import { Github, RefreshCw, Unplug, WalletCards } from "lucide-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useBuiltinProviderQuota } from "@/hooks/useProviders"
+import { starRewardStatusQueryOptions } from "@/lib/star-reward"
 
 const DEFAULT_PAGE_SIZE = 10
 
@@ -36,6 +37,13 @@ function formatQuotaValue(value: number | null | undefined, currency: string) {
 function BuiltinQuotaBar() {
   const { t } = useTranslation()
   const { data, isLoading, isFetching, refetch } = useBuiltinProviderQuota()
+  const { data: rewardStatus, isPending: isRewardStatusPending } = useQuery(
+    starRewardStatusQueryOptions,
+  )
+  const apiBase = import.meta.env.VITE_API_URL || ""
+  const githubAuthorizeUrl =
+    `${apiBase}/api/v1/oidc/github/authorize?redirect=` +
+    encodeURIComponent("/llm_rovider")
 
   if (isLoading) {
     return <Skeleton className="h-10 w-full rounded-md" />
@@ -79,6 +87,14 @@ function BuiltinQuotaBar() {
                 : t("llmProvider.quota.unavailable")}
             </Badge>
             <GithubStarLink className="h-7" />
+            {!isRewardStatusPending && rewardStatus?.starred === null && (
+              <Button asChild variant="outline" size="sm" className="h-7">
+                <a href={githubAuthorizeUrl}>
+                  <Github data-icon="inline-start" />
+                  {t("llmProvider.quota.verifyGithub")}
+                </a>
+              </Button>
+            )}
           </div>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
             {data.available

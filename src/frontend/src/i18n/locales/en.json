@@ -836,6 +836,7 @@
       "title": "Built-in provider quota",
       "remaining": "{{value}} remaining",
       "detail": "{{spend}} used / {{budget}} budget",
+      "verifyGithub": "Connect GitHub to verify Star",
       "unavailable": "Unavailable",
       "unavailableHint": "Quota is unavailable. Please retry later or contact your administrator."
     },
