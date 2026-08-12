@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 
 import { Llm4AdProvidersService } from "@/client"
 import { DataTable } from "@/components/Common/DataTable"
+import { GithubStarLink } from "@/components/Common/GithubStarLink"
 import { PageNumbers } from "@/components/Common/PageNumbers"
 import AddProvider from "@/components/LlmProvider/AddProvider"
 import { columns } from "@/components/LlmProvider/columns"
@@ -77,6 +78,7 @@ function BuiltinQuotaBar() {
                   })
                 : t("llmProvider.quota.unavailable")}
             </Badge>
+            <GithubStarLink className="h-7" />
           </div>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
             {data.available

@@ -1,7 +1,10 @@
+import { useQuery } from "@tanstack/react-query"
 import { Star } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { isLoggedIn } from "@/hooks/useAuth"
 import { GITHUB_PROJECT_URL } from "@/lib/siteMetadata"
+import { starRewardStatusQueryOptions } from "@/lib/star-reward"
 import { cn } from "@/lib/utils"
 
 interface GithubStarLinkProps {
@@ -17,6 +20,13 @@ export function GithubStarLink({
 }: GithubStarLinkProps) {
   const { t } = useTranslation()
   const label = t("common.starOnGithub")
+  const loggedIn = isLoggedIn()
+  const { data: rewardStatus, isPending } = useQuery({
+    ...starRewardStatusQueryOptions,
+    enabled: loggedIn,
+  })
+
+  if (loggedIn && (isPending || rewardStatus?.reward_granted)) return null
 
   return (
     <a

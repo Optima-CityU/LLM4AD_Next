@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ExternalLink, Gift, Github } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { builtinProviderQuotaQueryKey } from "@/hooks/useProviders"
-import { fetchStarRewardStatus, type StarRewardStatus } from "@/lib/star-reward"
+import { starRewardStatusQueryOptions } from "@/lib/star-reward"
 
 interface StarRewardDialogProps {
   enabled: boolean
@@ -23,58 +23,58 @@ interface StarRewardDialogProps {
 export function StarRewardDialog({ enabled }: StarRewardDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [status, setStatus] = useState<StarRewardStatus | null>(null)
+  const { data: status } = useQuery({
+    ...starRewardStatusQueryOptions,
+    enabled,
+  })
   const [open, setOpen] = useState(false)
   const notifiedGrantedRepos = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !status) return
     let cancelled = false
 
-    void fetchStarRewardStatus()
-      .then(async (nextStatus) => {
-        if (cancelled) return
-        setStatus(nextStatus)
-        if (nextStatus.starred === false) {
-          setOpen(true)
-          return
-        }
-        if (nextStatus.reward_granted) {
-          await queryClient.invalidateQueries({
-            queryKey: builtinProviderQuotaQueryKey,
-          })
-          void queryClient.refetchQueries({
+    if (status.starred === false) {
+      setOpen(true)
+      return
+    }
+    if (status.reward_granted) {
+      void queryClient
+        .invalidateQueries({
+          queryKey: builtinProviderQuotaQueryKey,
+        })
+        .then(() =>
+          queryClient.refetchQueries({
             queryKey: builtinProviderQuotaQueryKey,
             type: "active",
-          })
+          }),
+        )
+        .then(() => {
           if (cancelled) return
 
           if (
-            nextStatus.reward_granted_now &&
-            !notifiedGrantedRepos.current.has(nextStatus.repo)
+            status.reward_granted_now &&
+            !notifiedGrantedRepos.current.has(status.repo)
           ) {
-            notifiedGrantedRepos.current.add(nextStatus.repo)
+            notifiedGrantedRepos.current.add(status.repo)
             toast.success(
               t("starReward.grantedToast", {
-                amount: nextStatus.reward_amount,
+                amount: status.reward_amount,
               }),
               {
-                description: nextStatus.api_key_cache_refreshed
+                description: status.api_key_cache_refreshed
                   ? t("starReward.apiKeyRefreshed")
                   : undefined,
               },
             )
           }
         }
-      })
-      .catch(() => {
-        // Reward status should not block normal app usage.
-      })
+    }
 
     return () => {
       cancelled = true
     }
-  }, [enabled, queryClient, t])
+  }, [enabled, queryClient, status, t])
 
   const repoUrl = useMemo(() => {
     if (!status?.repo) return "https://github.com"

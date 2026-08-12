@@ -39,7 +39,7 @@
     "goToFirstPage": "跳转到第一页",
     "goToLastPage": "跳转到最后一页",
     "reset": "重置",
-    "starOnGithub": "喜欢 OpenLoopX？点个 Star"
+    "starOnGithub": "点击 Star 领取额外额度"
   },
   "validation": {
     "passwordRequired": "请输入密码",
