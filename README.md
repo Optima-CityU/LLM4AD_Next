@@ -30,6 +30,12 @@
 
 ---
 
+<p align="center">
+  <strong>⭐ Star us on GitHub to earn 10$ bonus tokens for the <a href="https://llm4ad-next.cn/">Online Website</a>!</strong>
+</p>
+
+---
+
 ## 🔥 News
 
 - 🔬 [2026.07][New Feature]: **Search methods migrated** — EoH, MEoH, ReEvo, and MCTS-AHD are now available as standalone orchestrators. See [Search Methods](#search-methods-automatic-heuristic-design).
