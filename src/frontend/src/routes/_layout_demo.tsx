@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ReportType, TaskResponse, TaskStatus } from "@/client"
+import { GithubStarLink } from "@/components/Common/GithubStarLink"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import DemoRightPanel from "@/components/Demo/DemoRightPanel"
@@ -409,6 +410,10 @@ function DemoLayout() {
           </div>
 
           <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground min-w-0">
+            <GithubStarLink
+              className="hidden md:inline-flex"
+              labelClassName="hidden lg:inline"
+            />
             <div className="hidden sm:flex items-center gap-3">
               <LanguageToggle />
               <ThemeToggle />

@@ -1,6 +1,7 @@
-export const GITHUB_PROJECT_URL =
-  "https://github.com/Optima-CityU/LLM4AD_Next"
+export const GITHUB_PROJECT_URL = "https://github.com/Optima-CityU/LLM4AD_Next"
 export const GITHUB_ISSUES_URL = `${GITHUB_PROJECT_URL}/issues/new/choose`
+export const ICP_BEIAN_NUMBER = "粤ICP备2026092246号"
+export const ICP_BEIAN_URL = "https://beian.miit.gov.cn"
 
 type SiteEnvironment = Partial<{
   VITE_APP_VERSION: string

@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next"
 import { z } from "zod"
 import type { ReportType, TaskResponse, TaskStatus } from "@/client"
 import { Llm4AdProjectsService, Llm4AdTasksService } from "@/client"
+import { GithubStarLink } from "@/components/Common/GithubStarLink"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import AIChatFloating from "@/components/Evolution/AIChatFloating"
@@ -36,12 +37,12 @@ import EvolutionTaskList, {
   CreateTaskDialog,
   useInfiniteTasks,
 } from "@/components/Evolution/EvolutionTaskList"
-import { resolvePanelTask } from "@/components/Evolution/task-panel-task"
-import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import ShortcutsHelp from "@/components/Evolution/ShortcutsHelp"
 import TechBackground from "@/components/Evolution/TechBackground"
 import TechCorner from "@/components/Evolution/TechCorner"
 import TechPanel from "@/components/Evolution/TechPanel"
+import { resolvePanelTask } from "@/components/Evolution/task-panel-task"
+import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import DemoEvolutionTour from "@/components/Onboarding/DemoEvolutionTour"
 import { getProjectIcon } from "@/components/Projects/ProjectIcons"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -977,6 +978,10 @@ function Layout() {
           {/* Right: actions. Sized by content (auto column) so the buttons are
               always fully visible and never overlapped by the center title. */}
           <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground">
+            <GithubStarLink
+              className="hidden xl:inline-flex"
+              labelClassName="hidden 2xl:inline"
+            />
             {/* Collapsed right panel → surface its task actions in the top bar */}
             {rightCollapsed && (
               <>
@@ -1115,7 +1120,9 @@ function Layout() {
               style={{ width: `${rightWidth}px` }}
             >
               <TechPanel className="h-full flex flex-col">
-                <EvolutionRightPanel task={resolvePanelTask(selectedTask, effectiveTask)} />
+                <EvolutionRightPanel
+                  task={resolvePanelTask(selectedTask, effectiveTask)}
+                />
               </TechPanel>
             </div>
           </aside>

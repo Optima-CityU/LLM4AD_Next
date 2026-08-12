@@ -3,6 +3,8 @@ import { CircleDot, Github, Landmark, Tag } from "lucide-react"
 import {
   GITHUB_ISSUES_URL,
   GITHUB_PROJECT_URL,
+  ICP_BEIAN_NUMBER,
+  ICP_BEIAN_URL,
   siteMetadata,
 } from "@/lib/siteMetadata"
 import { cn } from "@/lib/utils"
@@ -16,7 +18,12 @@ export function FooterMetadataLinks({ className }: FooterMetadataLinksProps) {
     "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 
   return (
-    <div className={cn("flex flex-wrap items-center justify-center gap-1", className)}>
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-center gap-1",
+        className,
+      )}
+    >
       <a
         href={GITHUB_PROJECT_URL}
         target="_blank"
@@ -39,12 +46,15 @@ export function FooterMetadataLinks({ className }: FooterMetadataLinksProps) {
         <CircleDot className="size-3.5" />
         <span>Issue</span>
       </a>
-      {siteMetadata.beian && (
-        <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground">
-          <Landmark className="size-3.5" />
-          <span>{siteMetadata.beian}</span>
-        </span>
-      )}
+      <a
+        href={ICP_BEIAN_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={linkClassName}
+      >
+        <Landmark className="size-3.5" />
+        <span>{ICP_BEIAN_NUMBER}</span>
+      </a>
     </div>
   )
 }

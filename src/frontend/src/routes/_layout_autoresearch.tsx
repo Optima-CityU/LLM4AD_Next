@@ -8,9 +8,9 @@ import {
 import { ArrowLeft, LogOut, Settings } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-
-import { ScanlineOverlay, TechBackground } from "@/components/AutoResearch/tech"
 import { AutoResearchHelpMenu } from "@/components/AutoResearch/HelpMenu"
+import { ScanlineOverlay, TechBackground } from "@/components/AutoResearch/tech"
+import { GithubStarLink } from "@/components/Common/GithubStarLink"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -120,6 +120,10 @@ function AutoResearchLayout() {
             </div>
           </div>
           <div className="flex items-center justify-end gap-2">
+            <GithubStarLink
+              className="hidden xl:inline-flex"
+              labelClassName="hidden 2xl:inline"
+            />
             {/* 产物面板收起时：语言/主题切换器左侧注入四枚紧凑操作按钮 */}
             {headerRight}
             {headerRight && <div className="w-px h-5 bg-border/40" />}

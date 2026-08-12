@@ -34,9 +34,10 @@ import {
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { NewsService } from "@/client"
+import { FooterMetadataLinks } from "@/components/Common/Footer"
+import { GithubStarLink } from "@/components/Common/GithubStarLink"
 import IslandBackground from "@/components/Common/IslandBackground"
 import LanguageToggle from "@/components/Common/LanguageToggle"
-import { FooterMetadataLinks } from "@/components/Common/Footer"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
@@ -342,6 +343,7 @@ function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-2">
+            <GithubStarLink labelClassName="hidden xl:inline" />
             <LanguageToggle />
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1" />
@@ -403,6 +405,10 @@ function Navbar() {
               {link.label}
             </a>
           ))}
+          <GithubStarLink
+            className="w-full"
+            onClick={() => setMobileOpen(false)}
+          />
           <div className="flex items-center gap-2 pt-2 border-t border-border/50">
             <LanguageToggle />
             <ThemeToggle />

@@ -9,6 +9,7 @@ import { LogOut, RotateCcw, Settings } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Footer } from "@/components/Common/Footer"
+import { GithubStarLink } from "@/components/Common/GithubStarLink"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import { StarRewardDialog } from "@/components/Common/StarRewardDialog"
 import ThemeToggle from "@/components/Common/ThemeToggle"
@@ -159,6 +160,11 @@ function Layout() {
 
           {/* Right: toggles + role + avatar */}
           <div className="flex items-center gap-1 text-xs">
+            <GithubStarLink
+              className="hidden sm:inline-flex"
+              labelClassName="hidden xl:inline"
+            />
+            <div className="hidden h-5 w-px bg-border sm:block sm:mx-1" />
             <LanguageToggle />
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1.5" />
