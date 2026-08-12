@@ -1,6 +1,5 @@
-<p align="center">
-  <img src="docs/en/LLM4AD Next.jpg" alt="LLM4AD Next" width="400">
-</p>
+<h1 align="center">OpenLoopX · LLM4AD Next</h1>
+
 
 <p align="center">
   <strong>From problem description to runnable evolutionary algorithm search — in one command.</strong><br>
@@ -8,10 +7,10 @@
 </p>
 
 <p align="center">
+  <a href="https://llm4ad-next.cn/">Website</a> ·
   <a href="#quick-start">Quickstart</a> ·
   <a href="docs/en/index.md">Docs</a> ·
-  <a href="https://github.com/Optima-CityU/LLM4AD_Next/wiki">Wiki</a> ·
-  <a href="https://llm4ad-next.cn/">Online Demo</a>
+  <a href="https://github.com/Optima-CityU/LLM4AD_Next/wiki">Wiki</a> 
 </p>
 
 <p align="center">
