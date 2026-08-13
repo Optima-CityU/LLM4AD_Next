@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import traceback
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -47,6 +50,71 @@ load_dotenv()
 def show_version():
     """Show LLM4AD version information."""
     console.print(f"LLM4AD version: [bold green]{__version__}[/bold green]")
+
+
+def _install_dependencies(work_dir: Path) -> bool:
+    """Check and install dependencies from requirements.txt if present.
+
+    Args:
+        work_dir: Working directory to look for requirements.txt
+
+    Returns:
+        True if dependencies were installed or no requirements.txt exists,
+        False if installation failed.
+    """
+    req_path = work_dir / "requirements.txt"
+    if not req_path.exists():
+        return True
+
+    console.print("[yellow]Found requirements.txt, installing dependencies...[/yellow]")
+
+    try:
+        # Use uv pip install for faster installation
+        result = subprocess.run(
+            [
+                "uv", "pip", "install",
+                "--python", sys.executable,
+                "--no-progress",
+                "-r", str(req_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minutes timeout
+        )
+        if result.returncode != 0:
+            console.print("[bold red]Dependency installation failed:[/bold red]")
+            console.print(result.stderr)
+            return False
+        console.print("[green]Dependencies installed successfully[/green]")
+        return True
+    except FileNotFoundError:
+        # uv not found, fallback to pip
+        console.print("[dim]uv not found, using pip...[/dim]")
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "pip", "install",
+                    "-r", str(req_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            if result.returncode != 0:
+                console.print("[bold red]Dependency installation failed:[/bold red]")
+                console.print(result.stderr)
+                return False
+            console.print("[green]Dependencies installed successfully[/green]")
+            return True
+        except Exception as e:
+            console.print(f"[bold red]Failed to install dependencies:[/bold red] {e}")
+            return False
+    except subprocess.TimeoutExpired:
+        console.print("[bold red]Dependency installation timed out after 600s[/bold red]")
+        return False
+    except Exception as e:
+        console.print(f"[bold red]Failed to install dependencies:[/bold red] {e}")
+        return False
 
 
 @app.command("list")
@@ -114,9 +182,28 @@ def run_pipeline(
     resume: str | None = typer.Option(
         None, "--resume", "-r", help="Resume from checkpoint at this path"
     ),
+    skip_install: bool = typer.Option(
+        False, "--skip-install", help="Skip automatic dependency installation from requirements.txt"
+    ),
 ):
-    """Run an algorithm design pipeline with the given configuration."""
+    """Run an algorithm design pipeline with the given configuration.
+
+    By default, if a requirements.txt file exists in the same directory as the config file,
+    dependencies will be automatically installed before running the pipeline.
+    Use --skip-install to disable this behavior.
+    """
     console.print(f"[bold blue]Running pipeline with config:[/bold blue] {config}")
+
+    # Install dependencies from requirements.txt if present (unless --skip-install)
+    if not skip_install:
+        config_dir = Path(config).parent.resolve()
+        if not _install_dependencies(config_dir):
+            console.print(
+                "[yellow]Warning:[/yellow] Dependency installation failed. "
+                "You may encounter import errors during evaluation."
+            )
+            if not typer.confirm("Continue anyway?", default=False):
+                raise typer.Exit(code=1)
 
     # Create LLM4AD instance and run
     try:

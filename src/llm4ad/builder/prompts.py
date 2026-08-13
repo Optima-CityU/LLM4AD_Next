@@ -1117,6 +1117,11 @@ imports today, but also what alternative approaches for this same problem are
 LIKELY to need after a few generations of evolution. The cost of including a
 spare package (small) is much lower than the cost of a mid-run pip install.
 
+IMPORTANT: Pay close attention to the task description below. Look for domain-specific
+keywords (e.g., "image", "vision", "text", "graph", "time series") and include
+corresponding packages even if the baseline code doesn't import them yet — evolution
+may discover better approaches that need them.
+
 ## Task Description
 {task_description}
 
@@ -1142,28 +1147,59 @@ spare package (small) is much lower than the cost of a mid-run pip install.
 ## What to include
 1. **Currently-imported packages**: every third-party package the code above
    actually imports right now.
-2. **Anticipated companion packages**: packages a competent practitioner would
+2. **Task-description-driven packages**: scan the task description for domain
+   keywords and include relevant packages (see keyword hints below).
+3. **Problem-type-driven packages**: use the cheat sheet below as a baseline
+   for the declared problem_type.
+4. **Evolution-anticipation packages**: packages a competent practitioner would
    reach for if they re-implemented this problem with a different but
-   reasonable approach. Use the cheat sheet below as a starting point, then
-   add anything else that fits the specific task description.
+   reasonable approach.
 
 ### Cheat sheet by problem_type
-- `combinatorial_optimization`: numpy, scipy, networkx, ortools, pulp,
-  mip, numba
+- `combinatorial_optimization`: numpy, scipy, networkx, ortools, pulp, mip, numba
 - `sorting`: numpy
 - `scheduling`: numpy, scipy, networkx, ortools, pandas, mip
 - `ml`: numpy, pandas, scikit-learn, scipy, matplotlib, joblib
 - `rl`: numpy, scipy, gymnasium, torch, matplotlib, stable-baselines3
 - `regression`: numpy, pandas, scikit-learn, scipy, statsmodels, matplotlib
 - `simulation`: numpy, scipy, matplotlib, pandas, numba
+- `computer_vision`: numpy, opencv-python, Pillow, scikit-image, torch, torchvision, matplotlib
+- `image_processing`: numpy, opencv-python, Pillow, scikit-image, matplotlib, scipy
+- `nlp`: numpy, torch, transformers, tokenizers, nltk, spacy, scikit-learn
+- `text_processing`: numpy, pandas, nltk, spacy, scikit-learn
+- `deep_learning`: numpy, torch, torchvision, matplotlib, scipy, tqdm
+- `graph_processing`: numpy, networkx, scipy, matplotlib
+- `data_analysis`: numpy, pandas, matplotlib, seaborn, scipy, scikit-learn
+- `time_series`: numpy, pandas, scipy, statsmodels, matplotlib, scikit-learn
+- `visualization`: matplotlib, seaborn, plotly, pandas, numpy
 - `other`: numpy, scipy, matplotlib (only the obviously useful ones)
 
-For RL tasks specifically: include the env backend (e.g. `gymnasium[box2d]`)
+### Task description keyword hints (add these if keywords appear in task_description):
+- Keywords "image", "vision", "visual", "picture", "photo", "camera", "pixel", "cv":
+  ADD opencv-python, Pillow, scikit-image
+- Keywords "video", "frame", "stream": ADD opencv-python
+- Keywords "text", "language", "nlp", "sentiment", "translation", "summarization":
+  ADD transformers, tokenizers (or nltk, spacy for simpler tasks)
+- Keywords "plot", "chart", "graph" (visualization context), "dashboard":
+  ADD matplotlib, seaborn (or plotly for interactive)
+- Keywords "neural", "deep learning", "cnn", "rnn", "lstm", "transformer", "diffusion":
+  ADD torch, torchvision (if vision-related)
+- Keywords "time series", "forecast", "trend", "seasonal":
+  ADD pandas, statsmodels
+- Keywords "network", "node", "edge", "topology", "centrality":
+  ADD networkx
+- Keywords "parallel", "multiprocess", "distributed":
+  ADD joblib (or ray for heavier workloads)
+
+For RL tasks specifically: include the env backend (e.g. `gymnasium[box2d]`,
+`gymnasium[atari]`, `gymnasium[mujoco]` based on task description keywords)
 AND a deep-learning framework (`torch` is the safest default) AND `scipy`
-since policy/optimization variants commonly reach for it.
+since policy/optimization variants commonly reach for it. If the task mentions
+"image" or "visual" observations, ADD opencv-python and Pillow.
 
 For complexity_tier='complex', err on the side of including a few extras
-(numba for hot loops, joblib for parallelism, matplotlib for diagnostics).
+(numba for hot loops, joblib for parallelism, matplotlib for diagnostics,
+tqdm for progress tracking).
 
 ## Hard rules
 1. Output one package per line, in pip-installable form (e.g. `numpy`, `numpy>=1.24`,
@@ -1171,7 +1207,9 @@ For complexity_tier='complex', err on the side of including a few extras
 2. EXCLUDE the Python standard library (e.g. `os`, `json`, `subprocess`, `pathlib`,
    `typing`, `dataclasses`, `asyncio`, `re`, `math`, `random`, `itertools`,
    `functools`, `collections`, `hashlib`, `logging`, `tempfile`, `shutil`,
-   `importlib`, `concurrent`, `multiprocessing`, `threading`, `time`).
+   `importlib`, `concurrent`, `multiprocessing`, `threading`, `time`, `datetime`,
+   `io`, `copy`, `ast`, `inspect`, `argparse`, `enum`, `abc`, `uuid`, `csv`,
+   `pickle`, `warnings`, `traceback`, `sqlite3`).
 3. EXCLUDE `llm4ad` itself — the project depends on the parent package, not on PyPI.
 4. Use a permissive lower-bound version constraint (`>=X.Y`) when a recent feature
    is clearly needed; otherwise output the bare package name. Never pin an exact
@@ -1181,7 +1219,7 @@ For complexity_tier='complex', err on the side of including a few extras
    `yaml` -> `PyYAML`, `serial` -> `pyserial`, `bs4` -> `beautifulsoup4`,
    `gym` -> `gymnasium` (prefer the maintained fork unless the code clearly
    relies on legacy `gym`).
-6. Cap the list at ~12 entries. If the cheat sheet would push you past that,
+6. Cap the list at ~20 entries. If the cheat sheet would push you past that,
    keep the most directly relevant ones for this specific problem and drop
    the more speculative entries.
 7. Deduplicate. Sort alphabetically.

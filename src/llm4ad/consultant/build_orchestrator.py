@@ -825,11 +825,19 @@ class BuildOrchestrator:
             test_evaluator_code=blueprint.test_evaluator_code or "(none)",
         )
         try:
-            result = await self._provider.generate(prompt, temperature=0.2, max_tokens=1024)
+            result = await self._provider.generate(prompt, temperature=0.2, max_tokens=2048)
             cleaned = self._sanitize_requirements(result.text)
+
+            # Fallback: if LLM returned nothing useful, use problem-type baseline
+            if not cleaned:
+                logger.warning(
+                    "LLM produced no valid requirements; applying fallback for problem_type=%s",
+                    analysis.problem_type,
+                )
+                cleaned = self._get_fallback_requirements(analysis.problem_type)
         except Exception as e:
-            logger.warning("requirements.txt generation failed: {}", e)
-            cleaned = ""
+            logger.warning("requirements.txt generation failed: {}; applying fallback", e)
+            cleaned = self._get_fallback_requirements(analysis.problem_type)
 
         blueprint.requirements_txt = cleaned
         if cleaned:
@@ -840,8 +848,43 @@ class BuildOrchestrator:
                 n, analysis.problem_type, analysis.complexity_tier,
             )
         else:
-            logger.info("Stage 4 (requirements): produced no packages (stdlib-only or LLM failure)")
+            logger.info("Stage 4 (requirements): produced no packages (stdlib-only)")
         return blueprint
+
+    @staticmethod
+    def _get_fallback_requirements(problem_type: str | None) -> str:
+        """Provide baseline requirements when LLM generation fails.
+
+        Returns a minimal set of common packages for the given problem type.
+        This ensures that generated tasks have at least basic dependencies
+        even when LLM-based generation fails.
+
+        Args:
+            problem_type: The analyzed problem type (e.g., "rl", "ml", "computer_vision").
+
+        Returns:
+            Newline-separated package list, or empty string for unknown types.
+        """
+        # Baseline packages by problem type
+        fallback_map = {
+            "rl": ["gymnasium", "numpy", "scipy", "torch"],
+            "ml": ["numpy", "pandas", "scikit-learn", "scipy"],
+            "computer_vision": ["numpy", "opencv-python", "Pillow", "torch", "torchvision"],
+            "image_processing": ["numpy", "opencv-python", "Pillow", "scikit-image"],
+            "nlp": ["numpy", "torch", "transformers", "tokenizers"],
+            "text_processing": ["numpy", "pandas", "nltk"],
+            "deep_learning": ["numpy", "torch", "torchvision", "matplotlib"],
+            "graph_processing": ["numpy", "networkx", "scipy"],
+            "data_analysis": ["numpy", "pandas", "matplotlib", "scipy"],
+            "time_series": ["numpy", "pandas", "scipy", "statsmodels"],
+            "regression": ["numpy", "pandas", "scikit-learn", "scipy"],
+            "combinatorial_optimization": ["numpy", "scipy", "networkx"],
+            "scheduling": ["numpy", "scipy", "networkx"],
+            "simulation": ["numpy", "scipy", "matplotlib"],
+        }
+
+        packages = fallback_map.get(problem_type or "other", ["numpy", "scipy"])
+        return "\n".join(sorted(packages)) + "\n" if packages else ""
 
     @staticmethod
     def _sanitize_requirements(text: str) -> str:
