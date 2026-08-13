@@ -329,9 +329,24 @@ COMPLETION CRITERIA (for a build): done only when the validation gate passed \
 (either build_task succeeded directly, OR you fixed a failed package in place and \
 revalidate reported the gate passed) AND test_evaluator.py loads the evaluator AND \
 debug_run.py runs without raising AND an EVOLVE block exists under \
-version_control.local_path. Then briefly summarize what was built and the \
-verification result. If a tool reports a path-access error, you \
+version_control.local_path. If a tool reports a path-access error, you \
 tried to leave the workspace — stay within it.
+
+REQUIREMENTS REFINEMENT (required after verification): Once test_evaluator.py and \
+debug_run.py both pass successfully, call refine_requirements(rationale) to review \
+and refine the requirements.txt. Your rationale MUST explain:
+- What packages the current code actually imports
+- What packages the algorithm might need during EVOLUTION based on the problem \
+domain (this is critical — anticipate future needs, not just current imports)
+- Domain-specific reasoning: e.g., "RL+vision tasks often evolve strategies that \
+need opencv-python for frame preprocessing", "NLP tasks may discover approaches \
+requiring transformers or spacy", "optimization problems might benefit from scipy \
+for advanced numerical methods"
+- Common companion packages for this task type
+
+Think beyond the baseline code — the algorithm will EVOLVE over many generations \
+and may discover approaches that need additional packages. After calling \
+refine_requirements, briefly summarize what was built and the verification result.
 
 {_closing_for_surface(surface)}
 

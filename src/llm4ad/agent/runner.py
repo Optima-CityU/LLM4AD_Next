@@ -791,6 +791,148 @@ def make_tools(
             "Fix the offending file and call revalidate again."
         )
 
+    async def refine_requirements(rationale: str) -> str:
+        """Review and refine requirements.txt based on runtime evidence and evolution anticipation.
+
+        Call this AFTER running test_evaluator.py and debug_run.py successfully to
+        ensure requirements.txt covers:
+        1. All packages actually imported in the current code
+        2. Packages that might be needed during evolution (based on problem domain)
+        3. Common companion packages for the task type
+
+        Your rationale should explain:
+        - What packages to add and why (including evolution anticipation)
+        - What the algorithm might evolve into needing (e.g., "RL+vision task may
+          discover frame preprocessing approaches that need opencv-python")
+        - Domain-specific reasoning (e.g., "NLP tasks often evolve to use transformers")
+
+        Args:
+            rationale: Your analysis of what packages should be in requirements.txt
+                and why, with explicit reasoning about potential evolution paths.
+
+        Returns:
+            Confirmation of the refined requirements.txt, or an error if no package exists.
+        """
+        if state.blueprint is None or state.project_name is None:
+            return "Error: no current package. Call build_task first."
+
+        from llm4ad.consultant.build_orchestrator import BuildOrchestrator
+
+        bp = state.blueprint
+        project_dir = base / bp.project_name
+        req_path = project_dir / "requirements.txt"
+
+        # Read current requirements
+        current_reqs = bp.requirements_txt.strip()
+        current_packages = {
+            line.split(">=")[0].split("==")[0].split("[")[0].strip().lower()
+            for line in current_reqs.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+
+        # Extract imports from all code files
+        import re
+        import_pattern = re.compile(r"^\s*(?:from|import)\s+([a-zA-Z0-9_]+)", re.MULTILINE)
+
+        all_imports: set[str] = set()
+        for code in [bp.evaluator_code, bp.algorithm_code, bp.test_evaluator_code]:
+            if code:
+                all_imports.update(m.group(1) for m in import_pattern.finditer(code))
+
+        # Map common import names to PyPI packages
+        import_to_pypi = {
+            "cv2": "opencv-python",
+            "PIL": "Pillow",
+            "sklearn": "scikit-learn",
+            "yaml": "PyYAML",
+            "bs4": "beautifulsoup4",
+            "serial": "pyserial",
+        }
+
+        # Filter out stdlib and llm4ad
+        stdlib = {
+            "os", "sys", "json", "subprocess", "pathlib", "typing", "dataclasses",
+            "asyncio", "re", "math", "random", "itertools", "functools", "copy",
+            "collections", "hashlib", "logging", "tempfile", "shutil", "io",
+            "importlib", "concurrent", "multiprocessing", "threading", "time",
+            "datetime", "ast", "inspect", "argparse", "enum", "abc", "uuid",
+            "csv", "pickle", "warnings", "traceback", "sqlite3",
+        }
+
+        needed_packages = set()
+        for imp in all_imports:
+            if imp in stdlib or imp == "llm4ad":
+                continue
+            pkg = import_to_pypi.get(imp, imp)
+            needed_packages.add(pkg.lower())
+
+        # Ask LLM to refine based on rationale and anticipation
+        provider = _build_llm_provider(provider_config)
+
+        prompt = f"""Review and refine the requirements.txt for this algorithm design task.
+
+## Current requirements.txt:
+{current_reqs or "(empty)"}
+
+## Actual imports found in code:
+{", ".join(sorted(all_imports)) or "(none)"}
+
+## Problem type: {getattr(state.blueprint, 'problem_type', 'unknown')}
+
+## Your reasoning:
+{rationale}
+
+## Instructions:
+Based on your analysis above, produce a refined requirements.txt that includes:
+1. All packages needed by current imports
+2. Packages likely needed during evolution (you explained these in your rationale)
+3. Common companion packages for this problem domain
+
+Output one package per line (e.g., "numpy", "opencv-python", "torch>=2.0").
+Sort alphabetically. No comments, no code fences, no prose.
+"""
+
+        try:
+            result = await provider.generate(prompt, temperature=0.2, max_tokens=1024)
+            refined = BuildOrchestrator._sanitize_requirements(result.text)
+
+            if not refined:
+                # Fallback: at minimum include what's actually imported
+                refined = "\n".join(sorted(needed_packages)) + "\n" if needed_packages else ""
+
+            # Write back to disk and blueprint
+            bp.requirements_txt = refined
+            if refined.strip():
+                req_path.write_text(refined, encoding="utf-8")
+                from loguru import logger
+                package_count = len([line for line in refined.splitlines() if line.strip()])
+                logger.info("Refined requirements.txt with {} packages", package_count)
+
+            state.files_changed = True
+
+            added = {
+                line.split(">=")[0].split("==")[0].split("[")[0].strip().lower()
+                for line in refined.splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            } - current_packages
+
+            if added:
+                total_count = len([line for line in refined.splitlines() if line.strip()])
+                return (
+                    f"Refined requirements.txt based on your analysis.\n"
+                    f"Added packages: {', '.join(sorted(added))}\n"
+                    f"Total packages: {total_count}\n\n"
+                    f"The refined requirements.txt is written to {req_path.relative_to(base)}."
+                )
+            else:
+                return (
+                    "Requirements.txt reviewed. No changes needed based on your analysis.\n"
+                    "Current packages already cover the imports and anticipated evolution needs."
+                )
+
+        except Exception as e:
+            return f"Failed to refine requirements: {type(e).__name__}: {e}"
+
     def propose_plan(
         summary: str,
         description: str,
@@ -976,6 +1118,7 @@ def make_tools(
         _tool(build_task),
         _tool(rebuild_evaluator),
         _tool(revalidate),
+        _tool(refine_requirements),
         _tool(write_file),
         _tool(edit_file),
     ]
