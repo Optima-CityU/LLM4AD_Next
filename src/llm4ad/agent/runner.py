@@ -824,11 +824,11 @@ def make_tools(
 
         # Read current requirements
         current_reqs = bp.requirements_txt.strip()
-        current_packages = set(
+        current_packages = {
             line.split(">=")[0].split("==")[0].split("[")[0].strip().lower()
             for line in current_reqs.splitlines()
             if line.strip() and not line.strip().startswith("#")
-        )
+        }
 
         # Extract imports from all code files
         import re
@@ -904,28 +904,30 @@ Sort alphabetically. No comments, no code fences, no prose.
             bp.requirements_txt = refined
             if refined.strip():
                 req_path.write_text(refined, encoding="utf-8")
-                logger.info("Refined requirements.txt with {} packages",
-                           len([l for l in refined.splitlines() if l.strip()]))
+                from loguru import logger
+                package_count = len([line for line in refined.splitlines() if line.strip()])
+                logger.info("Refined requirements.txt with {} packages", package_count)
 
             state.files_changed = True
 
-            added = set(
+            added = {
                 line.split(">=")[0].split("==")[0].split("[")[0].strip().lower()
                 for line in refined.splitlines()
                 if line.strip() and not line.strip().startswith("#")
-            ) - current_packages
+            } - current_packages
 
             if added:
+                total_count = len([line for line in refined.splitlines() if line.strip()])
                 return (
                     f"Refined requirements.txt based on your analysis.\n"
                     f"Added packages: {', '.join(sorted(added))}\n"
-                    f"Total packages: {len([l for l in refined.splitlines() if l.strip()])}\n\n"
+                    f"Total packages: {total_count}\n\n"
                     f"The refined requirements.txt is written to {req_path.relative_to(base)}."
                 )
             else:
                 return (
-                    f"Requirements.txt reviewed. No changes needed based on your analysis.\n"
-                    f"Current packages already cover the imports and anticipated evolution needs."
+                    "Requirements.txt reviewed. No changes needed based on your analysis.\n"
+                    "Current packages already cover the imports and anticipated evolution needs."
                 )
 
         except Exception as e:
