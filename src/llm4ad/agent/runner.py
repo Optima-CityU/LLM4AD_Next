@@ -834,7 +834,7 @@ def make_tools(
         import re
         import_pattern = re.compile(r"^\s*(?:from|import)\s+([a-zA-Z0-9_]+)", re.MULTILINE)
 
-        all_imports = set()
+        all_imports: set[str] = set()
         for code in [bp.evaluator_code, bp.algorithm_code, bp.test_evaluator_code]:
             if code:
                 all_imports.update(m.group(1) for m in import_pattern.finditer(code))
