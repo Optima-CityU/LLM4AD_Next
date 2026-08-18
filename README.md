@@ -28,6 +28,10 @@
   </a>
 </p>
 
+<p align="center">
+  <strong>English</strong> | <a href="./README_zh.md">中文</a>
+</p>
+
 ---
 
 <p align="center">
