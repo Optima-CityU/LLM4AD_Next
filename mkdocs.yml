@@ -212,6 +212,8 @@ nav:
       - 架构:
           - 概览: zh/architecture/overview.md
           - 数据流: zh/architecture/data-flow.md
+          - CSPaper 算法进化: zh/architecture/cspaper-integration-pipeline.md
+          - 论文改写评估器: zh/architecture/paper-revision-evaluator.md
           - 编排方法: zh/guides/orchestration.md
       - 命令行与工具:
           - CLI 参考: zh/guides/cli.md

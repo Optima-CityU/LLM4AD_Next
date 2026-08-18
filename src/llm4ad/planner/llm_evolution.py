@@ -6,6 +6,7 @@ This is the default planner that coordinates the evolution process using:
 - Supports memory-based retrieval of past good solutions for inspiration.
 """
 import time
+from pathlib import Path
 
 from loguru import logger
 
@@ -300,6 +301,28 @@ class LLMEvolutionPlanner(BasePlanner):
         context["domain"] = algorithm.domain
         if algorithm.name:
             context["algorithm_name"] = algorithm.name
+        targeted_files = (
+            list(algorithm.generation_meta.targeted_files)
+            if algorithm.generation_meta
+            else []
+        )
+        if targeted_files:
+            context["targeted_files"] = targeted_files
+            context.setdefault("main_file", targeted_files[0])
+        replacement_code = algorithm.custom_metadata.get("unified_code")
+        if self.coder.agent_type.value == "custom" and replacement_code:
+            context["replacement_code"] = replacement_code
+
+        target_snapshots: dict[str, bytes] = {}
+        working_root = Path(working_dir).resolve()
+        for target in targeted_files:
+            target_path = (working_root / target).resolve()
+            try:
+                target_path.relative_to(working_root)
+            except ValueError:
+                continue
+            if target_path.is_file():
+                target_snapshots[target] = target_path.read_bytes()
 
         start_time = time.time()
 
@@ -319,6 +342,22 @@ class LLMEvolutionPlanner(BasePlanner):
         if not generate_result.is_success:
             error_msg = generate_result.error_message or "Code generation failed"
             raise RuntimeError(f"Implementation failed: {error_msg}")
+        if targeted_files:
+            changed_targets = []
+            for target in targeted_files:
+                target_path = (working_root / target).resolve()
+                try:
+                    target_path.relative_to(working_root)
+                except ValueError:
+                    continue
+                before = target_snapshots.get(target)
+                if target_path.is_file() and before is not None and target_path.read_bytes() != before:
+                    changed_targets.append(target)
+            if not changed_targets:
+                raise RuntimeError(
+                    "Implementation did not modify any targeted file: "
+                    + ", ".join(targeted_files)
+                )
 
         # Log token usage from code generation
         tokens_used = generate_result.token_used

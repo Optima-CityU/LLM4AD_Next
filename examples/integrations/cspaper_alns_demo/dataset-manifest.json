@@ -1,0 +1,101 @@
+[
+  {
+    "name": "train_uniform_020",
+    "split": "data/train",
+    "path": "data/train/train_uniform_020.tsp",
+    "dimension": 20,
+    "distribution": "uniform",
+    "seed": 1101,
+    "sha256": "fb58484980a847b49c0e397498ae40be8df474e8609c69d2316958552fad8ebd"
+  },
+  {
+    "name": "train_clustered_030",
+    "split": "data/train",
+    "path": "data/train/train_clustered_030.tsp",
+    "dimension": 30,
+    "distribution": "clustered",
+    "seed": 1102,
+    "sha256": "5fffa52fbf3d01ab14adcbfc1209e80e64f9b36ee53f54a05e8ded2dda9cca75"
+  },
+  {
+    "name": "train_ring_040",
+    "split": "data/train",
+    "path": "data/train/train_ring_040.tsp",
+    "dimension": 40,
+    "distribution": "ring",
+    "seed": 1103,
+    "sha256": "03f134ac45a774868222546c6d3977adfd970893e8de52c8a0ba459988105c5a"
+  },
+  {
+    "name": "train_grid_049",
+    "split": "data/train",
+    "path": "data/train/train_grid_049.tsp",
+    "dimension": 49,
+    "distribution": "grid",
+    "seed": 1104,
+    "sha256": "490a615be2c5347734ce5f818bbfb9887f63ea085cd1e8a6e5a15a86c5ac0eba"
+  },
+  {
+    "name": "train_mixed_060",
+    "split": "data/train",
+    "path": "data/train/train_mixed_060.tsp",
+    "dimension": 60,
+    "distribution": "mixed",
+    "seed": 1105,
+    "sha256": "89c992d8c26b62c8524df47dc1eb6917ffb1bf16ce97dee113560c688e0cac79"
+  },
+  {
+    "name": "validation_uniform_025",
+    "split": "data/validation",
+    "path": "data/validation/validation_uniform_025.tsp",
+    "dimension": 25,
+    "distribution": "uniform",
+    "seed": 2101,
+    "sha256": "60f581ece864dfb22c7a512628fe114079620e1cabdb411f6c9864f822929850"
+  },
+  {
+    "name": "validation_clustered_045",
+    "split": "data/validation",
+    "path": "data/validation/validation_clustered_045.tsp",
+    "dimension": 45,
+    "distribution": "clustered",
+    "seed": 2102,
+    "sha256": "22e55372991c4bf8527793178066e73faee105116ec546a09d8416f8f7cf98b2"
+  },
+  {
+    "name": "validation_ring_070",
+    "split": "data/validation",
+    "path": "data/validation/validation_ring_070.tsp",
+    "dimension": 70,
+    "distribution": "ring",
+    "seed": 2103,
+    "sha256": "d4cbae56e46a9d82836304eb8622695bf612d34c688eff991488ffd29ba631aa"
+  },
+  {
+    "name": "private_grid_036",
+    "split": "private-test",
+    "path": "private-test/private_grid_036.tsp",
+    "dimension": 36,
+    "distribution": "grid",
+    "seed": 3101,
+    "sha256": "ffe7642d3317a50e615fe4d2dcf452097b3b8fc2ca2bd5e28f6b3e6dbbb4dbbf"
+  },
+  {
+    "name": "private_mixed_065",
+    "split": "private-test",
+    "path": "private-test/private_mixed_065.tsp",
+    "dimension": 65,
+    "distribution": "mixed",
+    "seed": 3102,
+    "sha256": "537863f8b8c6394b66cc52497286221334db75e3cf19e9cf0dbc2e63bdd25365"
+  },
+  {
+    "name": "private_uniform_100",
+    "split": "private-test",
+    "path": "private-test/private_uniform_100.tsp",
+    "dimension": 100,
+    "distribution": "uniform",
+    "seed": 3103,
+    "sha256": "2a3c32c876d45dca919792a0b3580e11949d522a9cf1456daf64b95af4978751"
+  }
+]

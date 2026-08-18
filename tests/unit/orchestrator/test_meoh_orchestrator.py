@@ -92,6 +92,9 @@ class DummyCoder(BaseCoder):
         return "dummy"
 
     async def generate(self, prompt: str, context: dict, working_dir: str, **kwargs):
+        solve_path = Path(working_dir) / "solve.py"
+        content = solve_path.read_text(encoding="utf-8")
+        solve_path.write_text(content.replace("return 0", "return 1"), encoding="utf-8")
         return GenerateResult(
             status=GenerateStatus.SUCCESS,
             working_dir=working_dir,
