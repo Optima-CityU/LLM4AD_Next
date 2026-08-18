@@ -16,7 +16,9 @@ permissions:
 
 env:
   QR_URL: ${{ github.event.inputs.qr_url || vars.LIVE_QR_URL || 'https://llm4ad-next.cn/api/v1/live-qr/Ksndoq1l' }}
-  QR_PATH: docs/assets/live-qr.png
+  QR_DIR: docs/assets
+  QR_PREFIX: live-qr
+  README_PATH: README.md
 
 jobs:
   update-qr:
@@ -36,7 +38,7 @@ jobs:
             qr_image_url="${qr_image_url}/image"
           fi
 
-          mkdir -p "$(dirname "$QR_PATH")"
+          mkdir -p "$QR_DIR"
           curl -fsSL --retry 3 --retry-delay 2 "$qr_image_url" -o /tmp/live-qr.png
 
           mime_type="$(file --mime-type -b /tmp/live-qr.png)"
@@ -48,13 +50,29 @@ jobs:
               ;;
           esac
 
-          if [ -f "$QR_PATH" ] && cmp -s /tmp/live-qr.png "$QR_PATH"; then
+          mapfile -t qr_paths < <(
+            grep -oE "${QR_DIR}/${QR_PREFIX}(-[0-9]{8}-[0-9]{6})?\.png" "$README_PATH" |
+              sort -u
+          )
+          if [ "${#qr_paths[@]}" -ne 1 ]; then
+            echo "Expected exactly one live QR image reference in $README_PATH."
+            exit 1
+          fi
+
+          current_qr_path="${qr_paths[0]}"
+          if [ -f "$current_qr_path" ] && cmp -s /tmp/live-qr.png "$current_qr_path"; then
             echo "QR image unchanged."
             exit 0
           fi
 
-          mv /tmp/live-qr.png "$QR_PATH"
-          echo "Updated $QR_PATH from $qr_image_url."
+          timestamp="$(date -u +%Y%m%d-%H%M%S)"
+          new_qr_path="${QR_DIR}/${QR_PREFIX}-${timestamp}.png"
+          mv /tmp/live-qr.png "$new_qr_path"
+          sed -i "s#${current_qr_path}#${new_qr_path}#g" "$README_PATH"
+          find "$QR_DIR" -maxdepth 1 -type f -name "${QR_PREFIX}*.png" \
+            ! -path "$new_qr_path" -delete
+
+          echo "Updated $new_qr_path from $qr_image_url and removed old QR images."
 
       - name: Create pull request
         id: cpr
@@ -65,7 +83,8 @@ jobs:
           base: main
           title: "docs: update live QR code"
           commit-message: "docs: update live QR code"
-          body: "Automatically updates the live QR code image."
+          body: "Automatically updates the live QR code image, refreshes the README reference, and removes the old image to avoid GitHub image caching."
           add-paths: |
-            docs/assets/live-qr.png
+            README.md
+            docs/assets/live-qr*.png
           delete-branch: true
