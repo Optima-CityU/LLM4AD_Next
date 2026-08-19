@@ -237,7 +237,7 @@ test("the topic heading is prominent and keeps its edit affordance visible", () 
 
 test("document switching stays compact and document upload belongs to document actions", () => {
   expect(workspaceSource).toContain(
-    'className="w-52 max-w-[240px] flex-none overflow-hidden bg-muted/20 text-xs"',
+    'className="min-w-0 max-w-[240px] flex-1 overflow-hidden bg-muted/20 text-xs"',
   )
   const documentActions = workspaceSource.indexOf(
     'data-testid="knowledge-document-actions"',
@@ -251,6 +251,12 @@ test("document switching stays compact and document upload belongs to document a
   expect(documentActions).toBeGreaterThan(-1)
   expect(addDocument).toBeGreaterThan(documentActions)
   expect(backgroundAction).toBeGreaterThan(addDocument)
+})
+
+test("document actions stay clipped before the neighboring toolbar divider", () => {
+  expect(workspaceSource).toContain(
+    'className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1"',
+  )
 })
 
 test("document and background labels respond to the source pane width", () => {

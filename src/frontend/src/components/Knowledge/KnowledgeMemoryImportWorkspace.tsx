@@ -1195,14 +1195,14 @@ export default function KnowledgeMemoryImportWorkspace() {
               <div className="h-6 w-px shrink-0 bg-border" />
               <div
                 data-testid="knowledge-document-actions"
-                className="flex min-w-0 flex-1 items-center gap-1"
+                className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden pr-1"
               >
                 {detail.source_files.length > 0 &&
                   (editingFile ? (
                     <Input
                       value={filenameDraft}
                       onChange={(event) => setFilenameDraft(event.target.value)}
-                      className="h-8 w-52 max-w-[240px] flex-none text-xs"
+                      className="h-8 min-w-0 max-w-[240px] flex-1 text-xs"
                     />
                   ) : (
                     <Select
@@ -1216,7 +1216,7 @@ export default function KnowledgeMemoryImportWorkspace() {
                         data-testid="knowledge-source-switcher"
                         size="sm"
                         title={selectedFile?.original_filename || ""}
-                        className="w-52 max-w-[240px] flex-none overflow-hidden bg-muted/20 text-xs"
+                        className="min-w-0 max-w-[240px] flex-1 overflow-hidden bg-muted/20 text-xs"
                       >
                         <FileText className="size-3.5" />
                         <SelectValue
