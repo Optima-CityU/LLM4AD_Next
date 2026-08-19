@@ -253,6 +253,14 @@ test("document switching stays compact and document upload belongs to document a
   expect(backgroundAction).toBeGreaterThan(addDocument)
 })
 
+test("document and background labels respond to the source pane width", () => {
+  expect(workspaceSource).toContain("@container/source-pane")
+  expect(
+    workspaceSource.match(/hidden @3xl\/source-pane:inline/g)?.length,
+  ).toBe(2)
+  expect(workspaceSource).not.toContain("hidden 2xl:inline")
+})
+
 test("parser binding offers common token-limit presets with a custom fallback", () => {
   expect(workspaceSource).toContain("const modelCapacityPresets = [")
   expect(workspaceSource).toContain('id: "128k-16k"')

@@ -1160,7 +1160,7 @@ export default function KnowledgeMemoryImportWorkspace() {
         </div>
       ) : (
         <>
-          <section className="flex min-w-0 flex-[1.35] flex-col border-r">
+          <section className="@container/source-pane flex min-w-0 flex-[1.35] flex-col border-r">
             <div className="flex items-center gap-2 border-b px-3 py-2">
               <div
                 data-testid="knowledge-topic-heading"
@@ -1243,7 +1243,7 @@ export default function KnowledgeMemoryImportWorkspace() {
                   title={t("knowledge.addFiles")}
                 >
                   <Plus className="size-3.5" />
-                  <span className="ml-1 hidden 2xl:inline">
+                  <span className="ml-1 hidden @3xl/source-pane:inline">
                     {t("knowledge.addMoreFiles")}
                   </span>
                 </Button>
@@ -1315,7 +1315,7 @@ export default function KnowledgeMemoryImportWorkspace() {
                   }
                 >
                   <MessageSquareText className="size-3.5" />
-                  <span className="ml-1 hidden 2xl:inline">
+                  <span className="ml-1 hidden @3xl/source-pane:inline">
                     {t("knowledge.background.button")}
                   </span>
                   {detail.background && (
