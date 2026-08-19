@@ -42,6 +42,10 @@ All commands should be run from the repository root.
 - Show CLI help: `llm4ad --help`
 - List registered components: `llm4ad list`
 - Run design pipeline: `llm4ad run <config-file>`
+  - Automatically installs dependencies from `requirements.txt` in config directory if present
+  - Use `--skip-install` flag to disable automatic dependency installation
+  - `--output-dir/-o <path>`: Override output base directory
+  - `--resume/-r <checkpoint>`: Resume from checkpoint
 - Interactive AI builder: `llm4ad chat` (AI agent-based task package builder)
   - `--provider/-p <name>`: Use a named provider from `~/.llm4ad/settings.yaml` (default: first provider)
   - `--prompt <text>`: Provide problem description directly (skips interactive gathering)
