@@ -1040,6 +1040,181 @@ export type HTTPValidationError = {
     detail?: Array<ValidationError>;
 };
 
+export type knowledge_add_source_files = {
+    files: Array<((Blob | File))>;
+};
+
+export type KnowledgeContentResponse = {
+    content: string;
+    content_version: number;
+    content_hash: string;
+};
+
+export type KnowledgeDocumentInsertRequest = {
+    document_ids: Array<(string)>;
+};
+
+export type KnowledgeDocumentInsertResponse = {
+    inserted_document_ids?: Array<(string)>;
+    generated_memory_ids?: Array<(string)>;
+    generated_memories?: Array<MemoryCardResponse>;
+};
+
+export type KnowledgeDocumentSummary = {
+    id: string;
+    source_id: string;
+    parse_run_id: string;
+    parent_id: (string | null);
+    document_type: 'document' | 'main' | 'child';
+    title: string;
+    content_version: number;
+    content_size: number;
+    estimated_tokens: number;
+    sort_order: number;
+    user_modified: boolean;
+    updated_time: string;
+};
+
+export type document_type = 'document' | 'main' | 'child';
+
+export type KnowledgeDocumentUpdateRequest = {
+    title?: (string | null);
+    content?: (string | null);
+};
+
+export type KnowledgeParseCancelResponse = {
+    id: string;
+    status: "cancelled";
+    message: string;
+};
+
+export type KnowledgeParserBindingResponse = {
+    configured: boolean;
+    provider_id?: (string | null);
+    provider_name?: (string | null);
+    provider_type?: (string | null);
+    model_name?: (string | null);
+    context_window_tokens?: number;
+    max_output_tokens?: number;
+    error_code?: (string | null);
+    message?: string;
+};
+
+export type KnowledgeParserBindingUpdate = {
+    provider_id: string;
+    model_name: string;
+    context_window_tokens?: number;
+    max_output_tokens?: number;
+};
+
+export type KnowledgeParseRefineRequest = {
+    instruction: string;
+};
+
+export type KnowledgeParseRunResponse = {
+    id: string;
+    source_id: string;
+    source_revision: number;
+    status: 'pending' | 'running' | 'ready' | 'stale' | 'failed' | 'cancelled';
+    progress: number;
+    stage: string;
+    message: string;
+    parser_name: string;
+    parser_provider_name: (string | null);
+    parser_model: (string | null);
+    parse_mode: 'direct' | 'planned' | 'refine';
+    plan_id: (string | null);
+    plan_strategy_id: (string | null);
+    parent_run_id: (string | null);
+    session_owner_kind: 'plan' | 'run';
+    session_owner_id: (string | null);
+    can_refine?: boolean;
+    generated_memory_ids?: Array<(string)>;
+    inserted_document_ids?: Array<(string)>;
+    skill_name: string;
+    skill_version: string;
+    error_code: (string | null);
+    error: (string | null);
+    stream_cursor?: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+export type status = 'pending' | 'running' | 'ready' | 'stale' | 'failed' | 'cancelled';
+
+export type parse_mode = 'direct' | 'planned' | 'refine';
+
+export type session_owner_kind = 'plan' | 'run';
+
+export type KnowledgeParseStartRequest = {
+    background?: (string | null);
+    instruction?: (string | null);
+    mode?: "direct";
+};
+
+export type KnowledgeSourceCreateRequest = {
+    title: string;
+};
+
+export type KnowledgeSourceDetail = {
+    id: string;
+    title: string;
+    background?: (string | null);
+    source_revision: number;
+    source_file_count: number;
+    source_size: number;
+    parse_status: 'unparsed' | 'pending' | 'running' | 'ready' | 'stale' | 'failed';
+    active_parse_run_id: (string | null);
+    last_error_code: (string | null);
+    last_error: (string | null);
+    created_time: string;
+    updated_time: string;
+    source_files?: Array<KnowledgeSourceFileSummary>;
+    documents?: Array<KnowledgeDocumentSummary>;
+};
+
+export type parse_status = 'unparsed' | 'pending' | 'running' | 'ready' | 'stale' | 'failed';
+
+export type KnowledgeSourceFileSummary = {
+    id: string;
+    source_id: string;
+    original_filename: string;
+    content_version: number;
+    content_size: number;
+    sort_order: number;
+    updated_time: string;
+};
+
+export type KnowledgeSourceFileUpdateRequest = {
+    original_filename?: (string | null);
+    content?: (string | null);
+};
+
+export type KnowledgeSourceListResponse = {
+    items: Array<KnowledgeSourceSummary>;
+    total: number;
+};
+
+export type KnowledgeSourceSummary = {
+    id: string;
+    title: string;
+    background?: (string | null);
+    source_revision: number;
+    source_file_count: number;
+    source_size: number;
+    parse_status: 'unparsed' | 'pending' | 'running' | 'ready' | 'stale' | 'failed';
+    active_parse_run_id: (string | null);
+    last_error_code: (string | null);
+    last_error: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+export type KnowledgeSourceUpdateRequest = {
+    title?: (string | null);
+    background?: (string | null);
+};
+
 /**
  * 『联系我们』活码公开信息（免鉴权）。
  *
@@ -1205,6 +1380,20 @@ export type LiveCodeUpdate = {
 };
 
 /**
+ * Immutable source evidence selected by the extractor and copied by MindMemOS.
+ */
+export type MemoryCardArtifact = {
+    artifact_id: string;
+    type: 'code' | 'formula' | 'table' | 'example' | 'quote' | 'metric';
+    content: string;
+    source_hash: string;
+    language?: (string | null);
+    source_block_id?: (string | null);
+};
+
+export type type = 'code' | 'formula' | 'table' | 'example' | 'quote' | 'metric';
+
+/**
  * Confirm which extracted preview memories should become active.
  */
 export type MemoryCardExtractionCommitRequest = {
@@ -1269,6 +1458,7 @@ export type MemoryCardResponse = {
     type: string;
     title: string;
     content: string;
+    structured_content?: (MemoryCardStructuredContent | null);
     enabled?: boolean;
     source?: string;
     tags?: Array<(string)>;
@@ -1289,6 +1479,15 @@ export type MemoryCardStatusUpdate = {
 };
 
 /**
+ * LLM4AD card description plus lossless, independently editable facts.
+ */
+export type MemoryCardStructuredContent = {
+    description: string;
+    content: Array<(string)>;
+    artifacts?: Array<MemoryCardArtifact>;
+};
+
+/**
  * Create or update a MindMemOS memory from user-provided text.
  */
 export type MemoryCardUpsertRequest = {
@@ -1296,6 +1495,7 @@ export type MemoryCardUpsertRequest = {
     type?: string;
     title?: string;
     content: string;
+    structured_content?: (MemoryCardStructuredContent | null);
     enabled?: boolean;
     tags?: Array<(string)>;
     score?: (number | null);
@@ -2014,7 +2214,7 @@ export type ResearchAnalysisEntry = {
     language?: (string | null);
 };
 
-export type status = 'generating' | 'completed' | 'failed' | 'cancelled';
+export type status2 = 'generating' | 'completed' | 'failed' | 'cancelled';
 
 /**
  * 触发 LLM 生成结果分析报告的请求体。
@@ -2189,7 +2389,7 @@ export type ResearchArtifactTranslateResponse = {
     content?: (string | null);
 };
 
-export type status2 = 'cached' | 'translating';
+export type status3 = 'cached' | 'translating';
 
 /**
  * 翻译停止响应：``stopped`` 已中断在跑任务；``idle`` 无任务可停。
@@ -2204,7 +2404,7 @@ export type ResearchArtifactTranslateStopResponse = {
     status: 'stopped' | 'idle';
 };
 
-export type status3 = 'stopped' | 'idle';
+export type status4 = 'stopped' | 'idle';
 
 /**
  * 产物目录树节点。
@@ -2725,7 +2925,7 @@ export type ResearchStageSnapshot = {
     error?: (string | null);
 };
 
-export type status4 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
+export type status5 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
 
 /**
  * 会话当前状态的结构化快照。
@@ -3708,6 +3908,159 @@ export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData = {
 };
 
 export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse = (EmbeddingProviderTestResponse);
+
+export type Llm4AdKnowledgeGetParserBindingResponse = (KnowledgeParserBindingResponse);
+
+export type Llm4AdKnowledgeUpdateParserBindingData = {
+    requestBody: KnowledgeParserBindingUpdate;
+};
+
+export type Llm4AdKnowledgeUpdateParserBindingResponse = (KnowledgeParserBindingResponse);
+
+export type Llm4AdKnowledgeCreateSourceData = {
+    requestBody: KnowledgeSourceCreateRequest;
+};
+
+export type Llm4AdKnowledgeCreateSourceResponse = (KnowledgeSourceSummary);
+
+export type Llm4AdKnowledgeListSourcesData = {
+    limit?: number;
+    search?: (string | null);
+    skip?: number;
+};
+
+export type Llm4AdKnowledgeListSourcesResponse = (KnowledgeSourceListResponse);
+
+export type Llm4AdKnowledgeAddSourceFilesData = {
+    formData: knowledge_add_source_files;
+    sourceId: string;
+};
+
+export type Llm4AdKnowledgeAddSourceFilesResponse = (KnowledgeSourceDetail);
+
+export type Llm4AdKnowledgeGetSourceData = {
+    sourceId: string;
+};
+
+export type Llm4AdKnowledgeGetSourceResponse = (KnowledgeSourceDetail);
+
+export type Llm4AdKnowledgeUpdateSourceData = {
+    requestBody: KnowledgeSourceUpdateRequest;
+    sourceId: string;
+};
+
+export type Llm4AdKnowledgeUpdateSourceResponse = (KnowledgeSourceSummary);
+
+export type Llm4AdKnowledgeDeleteSourceData = {
+    sourceId: string;
+};
+
+export type Llm4AdKnowledgeDeleteSourceResponse = (void);
+
+export type Llm4AdKnowledgeGetSourceFileContentData = {
+    fileId: string;
+};
+
+export type Llm4AdKnowledgeGetSourceFileContentResponse = (KnowledgeContentResponse);
+
+export type Llm4AdKnowledgeUpdateSourceFileData = {
+    fileId: string;
+    requestBody: KnowledgeSourceFileUpdateRequest;
+};
+
+export type Llm4AdKnowledgeUpdateSourceFileResponse = (KnowledgeSourceFileSummary);
+
+export type Llm4AdKnowledgeDeleteSourceFileData = {
+    fileId: string;
+};
+
+export type Llm4AdKnowledgeDeleteSourceFileResponse = (void);
+
+export type Llm4AdKnowledgeGetDocumentContentData = {
+    documentId: string;
+};
+
+export type Llm4AdKnowledgeGetDocumentContentResponse = (KnowledgeContentResponse);
+
+export type Llm4AdKnowledgeUpdateDocumentData = {
+    documentId: string;
+    requestBody: KnowledgeDocumentUpdateRequest;
+};
+
+export type Llm4AdKnowledgeUpdateDocumentResponse = (KnowledgeDocumentSummary);
+
+export type Llm4AdKnowledgeInsertDocumentBlocksData = {
+    requestBody: KnowledgeDocumentInsertRequest;
+    runId: string;
+};
+
+export type Llm4AdKnowledgeInsertDocumentBlocksResponse = (KnowledgeDocumentInsertResponse);
+
+export type Llm4AdKnowledgeStreamInsertDocumentBlocksData = {
+    requestBody: KnowledgeDocumentInsertRequest;
+    runId: string;
+};
+
+export type Llm4AdKnowledgeStreamInsertDocumentBlocksResponse = (unknown);
+
+export type Llm4AdKnowledgeListGeneratedMemoryCardsData = {
+    runId: string;
+};
+
+export type Llm4AdKnowledgeListGeneratedMemoryCardsResponse = (Array<MemoryCardResponse>);
+
+export type Llm4AdKnowledgeStartParseData = {
+    requestBody: KnowledgeParseStartRequest;
+    sourceId: string;
+};
+
+export type Llm4AdKnowledgeStartParseResponse = (KnowledgeParseRunResponse);
+
+export type Llm4AdKnowledgeGetParseRunData = {
+    runId: string;
+};
+
+export type Llm4AdKnowledgeGetParseRunResponse = (KnowledgeParseRunResponse);
+
+export type Llm4AdKnowledgeGetLatestParseRunData = {
+    sourceId: string;
+};
+
+export type Llm4AdKnowledgeGetLatestParseRunResponse = ((KnowledgeParseRunResponse | null));
+
+export type Llm4AdKnowledgeListParseRunEventsData = {
+    runId: string;
+};
+
+export type Llm4AdKnowledgeListParseRunEventsResponse = (Array<{
+    [key: string]: unknown;
+}>);
+
+export type Llm4AdKnowledgeStreamParseRunData = {
+    lastId?: string;
+    runId: string;
+};
+
+export type Llm4AdKnowledgeStreamParseRunResponse = (unknown);
+
+export type Llm4AdKnowledgeCancelParseRunData = {
+    runId: string;
+};
+
+export type Llm4AdKnowledgeCancelParseRunResponse = (KnowledgeParseCancelResponse);
+
+export type Llm4AdKnowledgeContinueParseRunData = {
+    runId: string;
+};
+
+export type Llm4AdKnowledgeContinueParseRunResponse = (KnowledgeParseRunResponse);
+
+export type Llm4AdKnowledgeRefineParseRunData = {
+    requestBody: KnowledgeParseRefineRequest;
+    runId: string;
+};
+
+export type Llm4AdKnowledgeRefineParseRunResponse = (KnowledgeParseRunResponse);
 
 export type Llm4AdMemoryTestMemoryBackendData = {
     requestBody: MemoryTestRequest;

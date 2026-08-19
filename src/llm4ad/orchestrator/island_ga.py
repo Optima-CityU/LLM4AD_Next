@@ -1134,11 +1134,19 @@ class IslandGAOrchestrator(BaseOrchestrator):
             return
 
         results = await asyncio.gather(*coros, return_exceptions=True)
+        cards = []
         for result in results:
             if isinstance(result, Exception):
                 logger.warning(f"Memory extraction failed: {result}")
             elif result is not None:
-                await memory.add_card(result)
+                cards.append(result)
+        if cards:
+            add_cards = getattr(memory, "add_cards", None)
+            if callable(add_cards):
+                await add_cards(cards)
+            else:
+                for card in cards:
+                    await memory.add_card(card)
 
     def _log_best_metrics_comparison(self) -> None:
         """Log per-metric score comparison between current and previous generation's best."""

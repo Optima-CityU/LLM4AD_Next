@@ -66,6 +66,7 @@ class ContainerJobSpec:
         image: 镜像名称（必填）。
         command: 启动命令；``None`` 使用镜像 CMD。
         working_dir: 容器内工作目录；``None`` 使用镜像默认。
+        user: 容器运行用户（Docker ``user`` 格式）；``None`` 使用镜像默认。
         mounts: ``{宿主机路径: 容器内路径}`` 卷绑定（rw）。
         env: 注入容器的环境变量。
         mem_limit: 内存限制（如 ``"4g"``）；``None`` 取 ``settings.TASK_CONTAINER_MEMORY_LIMIT``。
@@ -83,6 +84,7 @@ class ContainerJobSpec:
     image: str = ""
     command: list[str] | None = None
     working_dir: str | None = None
+    user: str | None = None
     mounts: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     mem_limit: str | None = None
@@ -356,6 +358,8 @@ class ContainerJob:
             kwargs["command"] = self._spec.command
         if self._spec.working_dir:
             kwargs["working_dir"] = self._spec.working_dir
+        if self._spec.user:
+            kwargs["user"] = self._spec.user
         if self._spec.mounts:
             kwargs["volumes"] = {
                 host.rstrip("/").rstrip("\\"): {"bind": container, "mode": "rw"}

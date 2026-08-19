@@ -599,4 +599,3 @@ class MemoryConfig(BaseModel):
             desc_en="Whether to persist auto-extracted cards to the memory/ directory",
         ),
     )
-

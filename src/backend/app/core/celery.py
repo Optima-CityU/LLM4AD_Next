@@ -12,7 +12,7 @@ celery_app = Celery(
     "fastapi_celery",
     broker=settings.CELERY_BROKER,
     backend=settings.CELERY_BACKEND,
-    include=["app.tasks.evolution", "app.tasks.research_runner"],
+    include=["app.tasks.evolution", "app.tasks.research_runner", "app.tasks.knowledge_parser"],
 )
 
 # Celery 运行时配置
@@ -34,4 +34,7 @@ celery_app.conf.task_routes = {
     "app.tasks.evolution.*": {"queue": "evolution"},
     "research.run_turn": {"queue": "research"},
     "research.run_collab_turn": {"queue": "research"},
+    "knowledge.plan": {"queue": "research"},
+    "knowledge.parse": {"queue": "research"},
+    "knowledge.cleanup": {"queue": "research"},
 }

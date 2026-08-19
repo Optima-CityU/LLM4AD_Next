@@ -65,7 +65,13 @@ import {
   type MemoryCardDraft,
   type MemoryScope,
 } from "./types"
-import TagInput from "./TagInput"
+import {
+  MemoryCardDeleteDialog,
+  MemoryCardEditorDialog,
+  MemoryCardTile,
+  memoryCardToDraft,
+  memoryTypeLabel,
+} from "./MemoryCardPresentation"
 
 type ViewMode = "cards" | "list"
 type ExtractionPromptLanguage = "auto" | "ZH" | "EN"
@@ -107,42 +113,6 @@ const PROJECT_EXTRACTION_EXAMPLE_KEYS = [
 ] as const
 
 const ONBOARDING_DEMO_PREVIEW_ID = "__onboarding_demo_preview__"
-
-function toDraft(card: MemoryCard): MemoryCardDraft {
-  return {
-    id: card.id,
-    type: MEMORY_TYPES.includes(card.type as (typeof MEMORY_TYPES)[number])
-      ? card.type
-      : "general_insight",
-    title: card.title,
-    content: card.content,
-    enabled: card.enabled,
-    tags: card.tags,
-  }
-}
-
-function memoryTypeLabel(type: string, t: (key: string) => string) {
-  const key = `memory.cardManager.types.${type}`
-  const label = t(key)
-  return label === key ? type : label
-}
-
-function readOnlyRows(card: MemoryCard | null, t: (key: string) => string): Array<[string, string]> {
-  if (!card) return []
-  const info = card.readonly
-  const rows: Array<[string, string]> = [
-    [t("memory.cardManager.readonly.id"), card.id],
-    [t("memory.cardManager.readonly.source"), info?.source || card.source],
-    [t("memory.cardManager.readonly.status"), info?.status || (card.enabled ? "active" : "archived")],
-    [t("memory.cardManager.readonly.entity"), info?.entity_name || ""],
-    [t("memory.cardManager.readonly.property"), info?.property_name || ""],
-    [t("memory.cardManager.readonly.propertyTime"), info?.property_time || ""],
-    [t("memory.cardManager.readonly.updatedAt"), info?.last_update_at || ""],
-    [t("memory.cardManager.readonly.eventTime"), info?.event_time || ""],
-    [t("memory.cardManager.readonly.sourceTime"), info?.source_timestamp || ""],
-  ]
-  return rows.filter(([, value]) => value.trim())
-}
 
 function scopeQuery(scope: MemoryScope, projectId?: string, taskId?: string) {
   const params = new URLSearchParams({ scope })
@@ -596,7 +566,7 @@ export default function MemoryCardManager({
 
   const openEdit = (card: MemoryCard) => {
     if (disabled || interactionLocked) return
-    setDraft(toDraft(card))
+    setDraft(memoryCardToDraft(card))
     setEditingId(card.id)
     setIsEditorOpen(true)
   }
@@ -845,7 +815,7 @@ export default function MemoryCardManager({
   }
 
   const saveDraft = async () => {
-    if (!draft.title.trim() || !draft.content.trim()) {
+    if (!draft.title.trim() || !draft.structured_content.description.trim() || draft.structured_content.content.length === 0) {
       toast.error(t("memory.cardManager.messages.titleAndContentRequired"))
       return
     }
@@ -864,6 +834,7 @@ export default function MemoryCardManager({
             type: draft.type,
             title: draft.title.trim(),
             content: draft.content.trim(),
+            structured_content: draft.structured_content,
             enabled: draft.enabled,
             tags: draft.tags,
           }),
@@ -1427,52 +1398,25 @@ export default function MemoryCardManager({
         ) : (
           <div className={cn("grid gap-3", embedded ? "grid-cols-1" : "md:grid-cols-2 xl:grid-cols-3")}>
             {visibleCards.map((card) => (
-              <div
+              <MemoryCardTile
                 key={card.id}
-                data-tour={card.id === onboardingDemoCard.id ? "memory-onboarding-card" : undefined}
+                card={card}
+                embedded={embedded}
+                dataTour={card.id === onboardingDemoCard.id ? "memory-onboarding-card" : undefined}
+                leading={canPromoteTaskCards ? (
+                  <Checkbox
+                    checked={selectedPromotionIds.includes(card.id)}
+                    aria-label={t("memory.cardManager.actions.select", { title: card.title })}
+                    disabled={disabled}
+                    onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
+                  />
+                ) : undefined}
+                actions={renderActions(card)}
                 className={cn(
-                  "flex flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
-                  embedded ? "min-h-32" : "min-h-48",
-                  !card.enabled && "opacity-60",
                   canPromoteTaskCards && selectedPromotionIds.includes(card.id) && "border-primary/60 bg-primary/5",
                   togglingIds.has(card.id) && "opacity-80",
                 )}
-              >
-                <div className="flex items-start gap-2">
-                  {canPromoteTaskCards && (
-                    <Checkbox
-                      checked={selectedPromotionIds.includes(card.id)}
-                      aria-label={t("memory.cardManager.actions.select", { title: card.title })}
-                      disabled={disabled}
-                      onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-semibold">{card.title}</h3>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <Badge variant="outline">{memoryTypeLabel(card.type, t)}</Badge>
-                      {!card.enabled && <Badge variant="secondary">{t("memory.cardManager.status.disabled")}</Badge>}
-                    </div>
-                  </div>
-                  {renderActions(card)}
-                </div>
-                <p className={cn("mt-3 whitespace-pre-wrap text-sm text-muted-foreground", embedded ? "line-clamp-3" : "line-clamp-5")}>
-                  {card.content}
-                </p>
-                {card.tags.length > 0 && (
-                  <div className="mt-auto flex flex-wrap gap-1 pt-3">
-                    {card.tags.map((tag) => (
-                      <Badge
-                        key={tag}
-                        variant="secondary"
-                        className="text-[10px]"
-                      >
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
+              />
             ))}
           </div>
         )}
@@ -1781,110 +1725,26 @@ export default function MemoryCardManager({
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={isEditorOpen} onOpenChange={setIsEditorOpen}>
-        <DialogContent
-          className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"
-          inert={onboardingDemoActive}
-        >
-          <DialogHeader>
-            <DialogTitle>{editingId ? t("memory.cardManager.editor.editTitle") : t("memory.cardManager.editor.addTitle")}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-title`}>{t("memory.cardManager.editor.title")}</Label>
-              <Input
-                id={`${scope}-memory-title`}
-                value={draft.title}
-                onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                placeholder={t("memory.cardManager.editor.titlePlaceholder")}
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[220px_1fr]">
-              <div className="grid gap-2">
-                <Label htmlFor={`${scope}-memory-type`}>{t("memory.cardManager.editor.type")}</Label>
-                <Select
-                  value={draft.type}
-                  onValueChange={(value) => setDraft((current) => ({ ...current, type: value }))}
-                >
-                  <SelectTrigger id={`${scope}-memory-type`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MEMORY_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {memoryTypeLabel(type, t)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor={`${scope}-memory-tags`}>{t("memory.cardManager.editor.tags")}</Label>
-                <TagInput
-                  id={`${scope}-memory-tags`}
-                  value={draft.tags}
-                  onChange={(tags) => setDraft((current) => ({ ...current, tags }))}
-                  placeholder={t("memory.cardManager.editor.tagsPlaceholder")}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-content`}>{t("memory.cardManager.editor.content")}</Label>
-              <Textarea
-                id={`${scope}-memory-content`}
-                className="min-h-64 resize-y leading-6"
-                value={draft.content}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, content: event.target.value }))
-                }
-                placeholder={t("memory.cardManager.editor.contentPlaceholder")}
-              />
-            </div>
-            {editingCard && readOnlyRows(editingCard, t).length > 0 && (
-              <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
-                <div>
-                  <p className="text-sm font-medium">{t("memory.cardManager.editor.systemInfo")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("memory.cardManager.editor.systemInfoDescription")}
-                  </p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {readOnlyRows(editingCard, t).map(([label, value]) => (
-                    <div key={label} className="grid gap-1.5">
-                      <Label className="text-xs text-muted-foreground">{label}</Label>
-                      <Input value={value} readOnly className="h-8 bg-background/70 text-xs" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={closeEditor}>
-              {t("memory.common.cancel")}
-            </Button>
-            <Button type="button" disabled={isSaving || disabled} onClick={() => void saveDraft()}>
-              {isSaving && <Loader2 className="mr-1 size-4 animate-spin" />}
-              {editingId ? t("memory.cardManager.editor.saveChanges") : t("memory.cardManager.editor.add")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MemoryCardEditorDialog
+        open={isEditorOpen}
+        scopeId={scope}
+        draft={draft}
+        editingCard={editingCard}
+        saving={isSaving}
+        disabled={disabled}
+        interactionLocked={onboardingDemoActive}
+        onOpenChange={setIsEditorOpen}
+        onDraftChange={setDraft}
+        onCancel={closeEditor}
+        onSave={() => void saveDraft()}
+      />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent inert={onboardingDemoActive}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("memory.cardManager.delete.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("memory.cardManager.delete.description")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("memory.common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteCard()}>{t("memory.cardManager.delete.confirm")}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MemoryCardDeleteDialog
+        card={deleteTarget}
+        interactionLocked={onboardingDemoActive}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        onConfirm={() => void deleteCard()}
+      />
     </div>
   )
 }

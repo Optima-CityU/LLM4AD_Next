@@ -54,6 +54,15 @@ async def lifespan(_app: FastAPI):
     except Exception:
         logger.exception("启动时清理孤儿调参容器失败")
 
+    try:
+        from app.services.knowledge_cleanup import recover_pending_cleanup_jobs
+
+        recovered = recover_pending_cleanup_jobs()
+        if recovered:
+            logger.info("已重新投递 {} 个知识库资源清理任务", recovered)
+    except Exception:
+        logger.exception("启动时恢复知识库资源清理任务失败")
+
     cleanup_task = asyncio.create_task(run_idle_cleanup_loop())
 
     news_refresh_task = asyncio.create_task(run_news_refresh_loop())

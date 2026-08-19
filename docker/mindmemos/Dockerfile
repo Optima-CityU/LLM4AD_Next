@@ -10,7 +10,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
 WORKDIR /app/mindmemos
 ENV PATH="/app/mindmemos/.venv/bin:$PATH"
 
-ARG UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple
 
 COPY third_party/MindMemOS/pyproject.toml third_party/MindMemOS/uv.lock ./
 COPY third_party/MindMemOS/README.md ./README.md

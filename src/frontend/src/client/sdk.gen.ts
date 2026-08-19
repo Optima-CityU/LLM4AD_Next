@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryCommitMemoryCardExtractionData, Llm4AdMemoryCommitMemoryCardExtractionResponse, Llm4AdMemoryDiscardMemoryCardExtractionData, Llm4AdMemoryDiscardMemoryCardExtractionResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdResearchListFoldersResponse, Llm4AdResearchCreateFolderData, Llm4AdResearchCreateFolderResponse, Llm4AdResearchGetFolderTreeResponse, Llm4AdResearchReorderFoldersData, Llm4AdResearchReorderFoldersResponse, Llm4AdResearchUpdateFolderData, Llm4AdResearchUpdateFolderResponse, Llm4AdResearchDeleteFolderData, Llm4AdResearchDeleteFolderResponse, Llm4AdResearchListSessionsData, Llm4AdResearchListSessionsResponse, Llm4AdResearchCreateSessionData, Llm4AdResearchCreateSessionResponse, Llm4AdResearchGetSessionData, Llm4AdResearchGetSessionResponse, Llm4AdResearchUpdateSessionData, Llm4AdResearchUpdateSessionResponse, Llm4AdResearchDeleteSessionData, Llm4AdResearchDeleteSessionResponse, Llm4AdResearchListMessagesData, Llm4AdResearchListMessagesResponse, Llm4AdResearchListLogsData, Llm4AdResearchListLogsResponse, Llm4AdResearchStartTurnData, Llm4AdResearchStartTurnResponse, Llm4AdResearchListTurnsData, Llm4AdResearchListTurnsResponse, Llm4AdResearchStopTurnData, Llm4AdResearchStopTurnResponse, Llm4AdResearchRetryTurnData, Llm4AdResearchRetryTurnResponse, Llm4AdResearchStartCollabData, Llm4AdResearchStartCollabResponse, Llm4AdResearchGetTurnData, Llm4AdResearchGetTurnResponse, Llm4AdResearchStreamTurnData, Llm4AdResearchStreamTurnResponse, Llm4AdResearchInjectStageGuidanceData, Llm4AdResearchInjectStageGuidanceResponse, Llm4AdResearchListArtifactsData, Llm4AdResearchListArtifactsResponse, Llm4AdResearchArtifactTreeData, Llm4AdResearchArtifactTreeResponse, Llm4AdResearchDownloadArtifactData, Llm4AdResearchDownloadArtifactResponse, Llm4AdResearchTranslateArtifactData, Llm4AdResearchTranslateArtifactResponse, Llm4AdResearchStopTranslateArtifactData, Llm4AdResearchStopTranslateArtifactResponse, Llm4AdResearchStreamTranslateData, Llm4AdResearchStreamTranslateResponse, Llm4AdResearchDownloadArtifactsArchiveData, Llm4AdResearchDownloadArtifactsArchiveResponse, Llm4AdResearchWriteArtifactData, Llm4AdResearchWriteArtifactResponse, Llm4AdResearchListGeneratedData, Llm4AdResearchListGeneratedResponse, Llm4AdResearchGetStateData, Llm4AdResearchGetStateResponse, Llm4AdResearchDownloadArcConfigData, Llm4AdResearchDownloadArcConfigResponse, Llm4AdResearchGetAnalysisData, Llm4AdResearchGetAnalysisResponse, Llm4AdResearchGenerateAnalysisData, Llm4AdResearchGenerateAnalysisResponse, Llm4AdResearchStopAnalysisData, Llm4AdResearchStopAnalysisResponse, Llm4AdResearchStreamAnalysisData, Llm4AdResearchStreamAnalysisResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdKnowledgeGetParserBindingResponse, Llm4AdKnowledgeUpdateParserBindingData, Llm4AdKnowledgeUpdateParserBindingResponse, Llm4AdKnowledgeCreateSourceData, Llm4AdKnowledgeCreateSourceResponse, Llm4AdKnowledgeListSourcesData, Llm4AdKnowledgeListSourcesResponse, Llm4AdKnowledgeAddSourceFilesData, Llm4AdKnowledgeAddSourceFilesResponse, Llm4AdKnowledgeGetSourceData, Llm4AdKnowledgeGetSourceResponse, Llm4AdKnowledgeUpdateSourceData, Llm4AdKnowledgeUpdateSourceResponse, Llm4AdKnowledgeDeleteSourceData, Llm4AdKnowledgeDeleteSourceResponse, Llm4AdKnowledgeGetSourceFileContentData, Llm4AdKnowledgeGetSourceFileContentResponse, Llm4AdKnowledgeUpdateSourceFileData, Llm4AdKnowledgeUpdateSourceFileResponse, Llm4AdKnowledgeDeleteSourceFileData, Llm4AdKnowledgeDeleteSourceFileResponse, Llm4AdKnowledgeGetDocumentContentData, Llm4AdKnowledgeGetDocumentContentResponse, Llm4AdKnowledgeUpdateDocumentData, Llm4AdKnowledgeUpdateDocumentResponse, Llm4AdKnowledgeInsertDocumentBlocksData, Llm4AdKnowledgeInsertDocumentBlocksResponse, Llm4AdKnowledgeStreamInsertDocumentBlocksData, Llm4AdKnowledgeStreamInsertDocumentBlocksResponse, Llm4AdKnowledgeListGeneratedMemoryCardsData, Llm4AdKnowledgeListGeneratedMemoryCardsResponse, Llm4AdKnowledgeStartParseData, Llm4AdKnowledgeStartParseResponse, Llm4AdKnowledgeGetParseRunData, Llm4AdKnowledgeGetParseRunResponse, Llm4AdKnowledgeGetLatestParseRunData, Llm4AdKnowledgeGetLatestParseRunResponse, Llm4AdKnowledgeListParseRunEventsData, Llm4AdKnowledgeListParseRunEventsResponse, Llm4AdKnowledgeStreamParseRunData, Llm4AdKnowledgeStreamParseRunResponse, Llm4AdKnowledgeCancelParseRunData, Llm4AdKnowledgeCancelParseRunResponse, Llm4AdKnowledgeContinueParseRunData, Llm4AdKnowledgeContinueParseRunResponse, Llm4AdKnowledgeRefineParseRunData, Llm4AdKnowledgeRefineParseRunResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryCommitMemoryCardExtractionData, Llm4AdMemoryCommitMemoryCardExtractionResponse, Llm4AdMemoryDiscardMemoryCardExtractionData, Llm4AdMemoryDiscardMemoryCardExtractionResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdResearchListFoldersResponse, Llm4AdResearchCreateFolderData, Llm4AdResearchCreateFolderResponse, Llm4AdResearchGetFolderTreeResponse, Llm4AdResearchReorderFoldersData, Llm4AdResearchReorderFoldersResponse, Llm4AdResearchUpdateFolderData, Llm4AdResearchUpdateFolderResponse, Llm4AdResearchDeleteFolderData, Llm4AdResearchDeleteFolderResponse, Llm4AdResearchListSessionsData, Llm4AdResearchListSessionsResponse, Llm4AdResearchCreateSessionData, Llm4AdResearchCreateSessionResponse, Llm4AdResearchGetSessionData, Llm4AdResearchGetSessionResponse, Llm4AdResearchUpdateSessionData, Llm4AdResearchUpdateSessionResponse, Llm4AdResearchDeleteSessionData, Llm4AdResearchDeleteSessionResponse, Llm4AdResearchListMessagesData, Llm4AdResearchListMessagesResponse, Llm4AdResearchListLogsData, Llm4AdResearchListLogsResponse, Llm4AdResearchStartTurnData, Llm4AdResearchStartTurnResponse, Llm4AdResearchListTurnsData, Llm4AdResearchListTurnsResponse, Llm4AdResearchStopTurnData, Llm4AdResearchStopTurnResponse, Llm4AdResearchRetryTurnData, Llm4AdResearchRetryTurnResponse, Llm4AdResearchStartCollabData, Llm4AdResearchStartCollabResponse, Llm4AdResearchGetTurnData, Llm4AdResearchGetTurnResponse, Llm4AdResearchStreamTurnData, Llm4AdResearchStreamTurnResponse, Llm4AdResearchInjectStageGuidanceData, Llm4AdResearchInjectStageGuidanceResponse, Llm4AdResearchListArtifactsData, Llm4AdResearchListArtifactsResponse, Llm4AdResearchArtifactTreeData, Llm4AdResearchArtifactTreeResponse, Llm4AdResearchDownloadArtifactData, Llm4AdResearchDownloadArtifactResponse, Llm4AdResearchTranslateArtifactData, Llm4AdResearchTranslateArtifactResponse, Llm4AdResearchStopTranslateArtifactData, Llm4AdResearchStopTranslateArtifactResponse, Llm4AdResearchStreamTranslateData, Llm4AdResearchStreamTranslateResponse, Llm4AdResearchDownloadArtifactsArchiveData, Llm4AdResearchDownloadArtifactsArchiveResponse, Llm4AdResearchWriteArtifactData, Llm4AdResearchWriteArtifactResponse, Llm4AdResearchListGeneratedData, Llm4AdResearchListGeneratedResponse, Llm4AdResearchGetStateData, Llm4AdResearchGetStateResponse, Llm4AdResearchDownloadArcConfigData, Llm4AdResearchDownloadArcConfigResponse, Llm4AdResearchGetAnalysisData, Llm4AdResearchGetAnalysisResponse, Llm4AdResearchGenerateAnalysisData, Llm4AdResearchGenerateAnalysisResponse, Llm4AdResearchStopAnalysisData, Llm4AdResearchStopAnalysisResponse, Llm4AdResearchStreamAnalysisData, Llm4AdResearchStreamAnalysisResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
 
 export class FeedbackService {
     /**
@@ -36,7 +36,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 查询反馈列表
      * 查询反馈列表。
@@ -79,7 +79,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 获取反馈统计信息（管理员）
      * 获取反馈统计信息。
@@ -104,7 +104,7 @@ export class FeedbackService {
             url: '/api/v1/feedback/statistics'
         });
     }
-    
+
     /**
      * 获取反馈详情
      * 获取单个反馈的详细信息。
@@ -139,7 +139,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 更新反馈（管理员）
      * 更新反馈信息。
@@ -178,7 +178,7 @@ export class FeedbackService {
             }
         });
     }
-    
+
     /**
      * 删除反馈（管理员）
      * 删除反馈。
@@ -234,7 +234,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 分页查询活码列表
      * 分页查询全部活码（全管理员共享）。
@@ -257,7 +257,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 获取活码详情
      * 获取活码详情，包含全部真实群码及其实时有效状态。
@@ -278,7 +278,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 更新活码
      * 更新活码名称、切换策略、落地页文案、启用状态等。
@@ -302,7 +302,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 删除活码
      * 删除活码及其全部真实群码（含对象存储清理）。
@@ -323,7 +323,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 批量上传真实群码
      * 为活码批量上传真实群码图片，统一设置有效期与扫码上限。
@@ -347,7 +347,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 更新真实群码
      * 更新真实群码的备注、过期时间、扫码上限、启用状态、排序。
@@ -373,7 +373,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 删除真实群码
      * 删除某张真实群码（含对象存储清理）。
@@ -396,7 +396,7 @@ export class LiveCodesService {
             }
         });
     }
-    
+
     /**
      * 重置真实群码扫码计数
      * 将某张真实群码的扫码计数清零，便于满员后复用同一张群码。
@@ -437,7 +437,7 @@ export class LiveQrService {
             url: '/api/v1/live-qr/contact'
         });
     }
-    
+
     /**
      * 真实群码图片（公开）
      * 按 target_id 返回真实群码图片，免鉴权、内联、不计扫码数。
@@ -461,7 +461,7 @@ export class LiveQrService {
             }
         });
     }
-    
+
     /**
      * 活码落地页
      * 渲染活码落地页：展示当前有效群码与长按识别引导，永久不变。
@@ -482,7 +482,7 @@ export class LiveQrService {
             }
         });
     }
-    
+
     /**
      * 当前有效群码图片
      * 返回当前有效的真实群码图片，并累计扫码计数（同一客户端去重）。
@@ -510,7 +510,7 @@ export class LiveQrService {
             }
         });
     }
-    
+
     /**
      * 活码永久二维码 PNG（公开）
      * 返回活码的永久二维码 PNG（编码对外落地页 URL），免鉴权可直接用于 ``<img>``。
@@ -565,7 +565,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Reset chat tune history for a task
      * 清空任务的调参对话历史，会话保留并重置为初始配置。
@@ -586,7 +586,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Start a new chat tune turn for a task
      * 触发新一轮调参生成。
@@ -622,7 +622,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Stop the current chat tune turn
      * 停止指定轮次的生成。幂等：对已结束的轮次返回当前状态。
@@ -645,7 +645,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * Retry a failed or stopped chat tune turn
      * 对失败或已停止的轮次原地重跑。
@@ -684,7 +684,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * 调参对话中上传文件到任务数据目录
      * 上传文件到 ``input_data_path`` 下的第一个子目录。
@@ -720,7 +720,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * 调参对话中上传目录到任务数据目录
      * 上传目录到 ``input_data_path`` 下的第一个子目录。
@@ -757,7 +757,7 @@ export class Llm4AdChatTuneService {
             }
         });
     }
-    
+
     /**
      * SSE stream for a chat tune turn
      * SSE 端点：实时推送指定轮次的调参生成进度。
@@ -816,7 +816,7 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
-    
+
     /**
      * 创建 embedding 供应商配置
      * @param data The data for the request.
@@ -835,7 +835,7 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
-    
+
     /**
      * 分页查询 embedding 供应商配置列表
      * @param data The data for the request.
@@ -857,7 +857,7 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
-    
+
     /**
      * 获取单个 embedding 供应商配置详情
      * @param data The data for the request.
@@ -877,7 +877,7 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
-    
+
     /**
      * 更新 embedding 供应商配置
      * @param data The data for the request.
@@ -900,7 +900,7 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
-    
+
     /**
      * 删除 embedding 供应商配置
      * @param data The data for the request.
@@ -920,7 +920,7 @@ export class Llm4AdEmbeddingProvidersService {
             }
         });
     }
-    
+
     /**
      * 测试已存储 embedding 供应商配置连通性
      * @param data The data for the request.
@@ -935,6 +935,510 @@ export class Llm4AdEmbeddingProvidersService {
             url: '/api/v1/llm4ad/embedding-providers/{provider_id}/test',
             path: {
                 provider_id: data.providerId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
+export class Llm4AdKnowledgeService {
+    /**
+     * Get Parser Binding
+     * @returns KnowledgeParserBindingResponse Successful Response
+     * @throws ApiError
+     */
+    public static getParserBinding(): CancelablePromise<Llm4AdKnowledgeGetParserBindingResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/parser-binding'
+        });
+    }
+
+    /**
+     * Update Parser Binding
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns KnowledgeParserBindingResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateParserBinding(data: Llm4AdKnowledgeUpdateParserBindingData): CancelablePromise<Llm4AdKnowledgeUpdateParserBindingResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/knowledge/parser-binding',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Create Source
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns KnowledgeSourceSummary Successful Response
+     * @throws ApiError
+     */
+    public static createSource(data: Llm4AdKnowledgeCreateSourceData): CancelablePromise<Llm4AdKnowledgeCreateSourceResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/sources',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * List Sources
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @param data.search
+     * @returns KnowledgeSourceListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listSources(data: Llm4AdKnowledgeListSourcesData = {}): CancelablePromise<Llm4AdKnowledgeListSourcesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/sources',
+            query: {
+                skip: data.skip,
+                limit: data.limit,
+                search: data.search
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Add Source Files
+     * @param data The data for the request.
+     * @param data.sourceId
+     * @param data.formData
+     * @returns KnowledgeSourceDetail Successful Response
+     * @throws ApiError
+     */
+    public static addSourceFiles(data: Llm4AdKnowledgeAddSourceFilesData): CancelablePromise<Llm4AdKnowledgeAddSourceFilesResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/sources/{source_id}/files',
+            path: {
+                source_id: data.sourceId
+            },
+            formData: data.formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Source
+     * @param data The data for the request.
+     * @param data.sourceId
+     * @returns KnowledgeSourceDetail Successful Response
+     * @throws ApiError
+     */
+    public static getSource(data: Llm4AdKnowledgeGetSourceData): CancelablePromise<Llm4AdKnowledgeGetSourceResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/sources/{source_id}',
+            path: {
+                source_id: data.sourceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Update Source
+     * @param data The data for the request.
+     * @param data.sourceId
+     * @param data.requestBody
+     * @returns KnowledgeSourceSummary Successful Response
+     * @throws ApiError
+     */
+    public static updateSource(data: Llm4AdKnowledgeUpdateSourceData): CancelablePromise<Llm4AdKnowledgeUpdateSourceResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/knowledge/sources/{source_id}',
+            path: {
+                source_id: data.sourceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Delete Source
+     * @param data The data for the request.
+     * @param data.sourceId
+     * @returns void Successful Response
+     * @throws ApiError
+     */
+    public static deleteSource(data: Llm4AdKnowledgeDeleteSourceData): CancelablePromise<Llm4AdKnowledgeDeleteSourceResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/knowledge/sources/{source_id}',
+            path: {
+                source_id: data.sourceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Source File Content
+     * @param data The data for the request.
+     * @param data.fileId
+     * @returns KnowledgeContentResponse Successful Response
+     * @throws ApiError
+     */
+    public static getSourceFileContent(data: Llm4AdKnowledgeGetSourceFileContentData): CancelablePromise<Llm4AdKnowledgeGetSourceFileContentResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/source-files/{file_id}/content',
+            path: {
+                file_id: data.fileId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Update Source File
+     * @param data The data for the request.
+     * @param data.fileId
+     * @param data.requestBody
+     * @returns KnowledgeSourceFileSummary Successful Response
+     * @throws ApiError
+     */
+    public static updateSourceFile(data: Llm4AdKnowledgeUpdateSourceFileData): CancelablePromise<Llm4AdKnowledgeUpdateSourceFileResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/knowledge/source-files/{file_id}',
+            path: {
+                file_id: data.fileId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Delete Source File
+     * @param data The data for the request.
+     * @param data.fileId
+     * @returns void Successful Response
+     * @throws ApiError
+     */
+    public static deleteSourceFile(data: Llm4AdKnowledgeDeleteSourceFileData): CancelablePromise<Llm4AdKnowledgeDeleteSourceFileResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/knowledge/source-files/{file_id}',
+            path: {
+                file_id: data.fileId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Document Content
+     * @param data The data for the request.
+     * @param data.documentId
+     * @returns KnowledgeContentResponse Successful Response
+     * @throws ApiError
+     */
+    public static getDocumentContent(data: Llm4AdKnowledgeGetDocumentContentData): CancelablePromise<Llm4AdKnowledgeGetDocumentContentResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/documents/{document_id}/content',
+            path: {
+                document_id: data.documentId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Update Document
+     * @param data The data for the request.
+     * @param data.documentId
+     * @param data.requestBody
+     * @returns KnowledgeDocumentSummary Successful Response
+     * @throws ApiError
+     */
+    public static updateDocument(data: Llm4AdKnowledgeUpdateDocumentData): CancelablePromise<Llm4AdKnowledgeUpdateDocumentResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/knowledge/documents/{document_id}',
+            path: {
+                document_id: data.documentId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Insert Document Blocks
+     * @param data The data for the request.
+     * @param data.runId
+     * @param data.requestBody
+     * @returns KnowledgeDocumentInsertResponse Successful Response
+     * @throws ApiError
+     */
+    public static insertDocumentBlocks(data: Llm4AdKnowledgeInsertDocumentBlocksData): CancelablePromise<Llm4AdKnowledgeInsertDocumentBlocksResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/documents/insert',
+            path: {
+                run_id: data.runId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Stream Insert Document Blocks
+     * @param data The data for the request.
+     * @param data.runId
+     * @param data.requestBody
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static streamInsertDocumentBlocks(data: Llm4AdKnowledgeStreamInsertDocumentBlocksData): CancelablePromise<Llm4AdKnowledgeStreamInsertDocumentBlocksResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/documents/insert/stream',
+            path: {
+                run_id: data.runId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * List Generated Memory Cards
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns MemoryCardResponse Successful Response
+     * @throws ApiError
+     */
+    public static listGeneratedMemoryCards(data: Llm4AdKnowledgeListGeneratedMemoryCardsData): CancelablePromise<Llm4AdKnowledgeListGeneratedMemoryCardsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/generated-memories',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Start Parse
+     * @param data The data for the request.
+     * @param data.sourceId
+     * @param data.requestBody
+     * @returns KnowledgeParseRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static startParse(data: Llm4AdKnowledgeStartParseData): CancelablePromise<Llm4AdKnowledgeStartParseResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/sources/{source_id}/parse',
+            path: {
+                source_id: data.sourceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Parse Run
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns KnowledgeParseRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static getParseRun(data: Llm4AdKnowledgeGetParseRunData): CancelablePromise<Llm4AdKnowledgeGetParseRunResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Get Latest Parse Run
+     * @param data The data for the request.
+     * @param data.sourceId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static getLatestParseRun(data: Llm4AdKnowledgeGetLatestParseRunData): CancelablePromise<Llm4AdKnowledgeGetLatestParseRunResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/sources/{source_id}/parse-runs/latest',
+            path: {
+                source_id: data.sourceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * List Parse Run Events
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static listParseRunEvents(data: Llm4AdKnowledgeListParseRunEventsData): CancelablePromise<Llm4AdKnowledgeListParseRunEventsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/events',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Stream Parse Run
+     * @param data The data for the request.
+     * @param data.runId
+     * @param data.lastId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static streamParseRun(data: Llm4AdKnowledgeStreamParseRunData): CancelablePromise<Llm4AdKnowledgeStreamParseRunResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/stream',
+            path: {
+                run_id: data.runId
+            },
+            query: {
+                last_id: data.lastId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Cancel Parse Run
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns KnowledgeParseCancelResponse Successful Response
+     * @throws ApiError
+     */
+    public static cancelParseRun(data: Llm4AdKnowledgeCancelParseRunData): CancelablePromise<Llm4AdKnowledgeCancelParseRunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/cancel',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Continue Parse Run
+     * @param data The data for the request.
+     * @param data.runId
+     * @returns KnowledgeParseRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static continueParseRun(data: Llm4AdKnowledgeContinueParseRunData): CancelablePromise<Llm4AdKnowledgeContinueParseRunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/continue',
+            path: {
+                run_id: data.runId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+
+    /**
+     * Refine Parse Run
+     * @param data The data for the request.
+     * @param data.runId
+     * @param data.requestBody
+     * @returns KnowledgeParseRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static refineParseRun(data: Llm4AdKnowledgeRefineParseRunData): CancelablePromise<Llm4AdKnowledgeRefineParseRunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/knowledge/parse-runs/{run_id}/refine',
+            path: {
+                run_id: data.runId
             },
             body: data.requestBody,
             mediaType: 'application/json',
@@ -964,7 +1468,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 检测系统 MindMemOS 记忆服务状态
      * @returns MemoryHealthResponse Successful Response
@@ -976,7 +1480,7 @@ export class Llm4AdMemoryService {
             url: '/api/v1/llm4ad/memory/health'
         });
     }
-    
+
     /**
      * 获取当前用户 MindMemOS 供应商绑定状态
      * @returns MemoryProviderBindingResponse Successful Response
@@ -988,7 +1492,7 @@ export class Llm4AdMemoryService {
             url: '/api/v1/llm4ad/memory/provider-binding'
         });
     }
-    
+
     /**
      * 绑定当前用户 MindMemOS Chat 和 Embedding 供应商
      * @param data The data for the request.
@@ -1007,7 +1511,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 获取当前用户记忆默认配置
      * @returns UserMemoryConfigResponse Successful Response
@@ -1019,7 +1523,7 @@ export class Llm4AdMemoryService {
             url: '/api/v1/llm4ad/memory/user-config'
         });
     }
-    
+
     /**
      * 更新当前用户记忆默认配置
      * @param data The data for the request.
@@ -1038,7 +1542,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 获取项目记忆默认配置
      * @param data The data for the request.
@@ -1058,7 +1562,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 更新项目记忆默认配置
      * @param data The data for the request.
@@ -1081,7 +1585,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 按 scope 获取记忆卡片
      * @param data The data for the request.
@@ -1109,7 +1613,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 按 scope 新增记忆卡片
      * @param data The data for the request.
@@ -1136,7 +1640,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 从原始描述提取记忆预览
      * @param data The data for the request.
@@ -1163,7 +1667,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 从原始描述流式提取记忆预览
      * @param data The data for the request.
@@ -1190,7 +1694,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 将任务记忆流式提升为项目记忆预览
      * @param data The data for the request.
@@ -1209,7 +1713,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 确认保存记忆预览
      * @param data The data for the request.
@@ -1240,7 +1744,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 丢弃记忆预览
      * @param data The data for the request.
@@ -1271,7 +1775,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 按 scope 更新记忆卡片
      * @param data The data for the request.
@@ -1302,7 +1806,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 按 scope 删除记忆卡片
      * @param data The data for the request.
@@ -1330,7 +1834,7 @@ export class Llm4AdMemoryService {
             }
         });
     }
-    
+
     /**
      * 按 scope 启用或禁用记忆卡片
      * @param data The data for the request.
@@ -1391,7 +1895,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 分页查询项目列表
      * 分页查询当前用户的所有项目。
@@ -1432,7 +1936,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 获取单个项目详情
      * 获取项目详情。
@@ -1461,7 +1965,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 更新项目信息
      * 更新项目的名称或描述。
@@ -1496,7 +2000,7 @@ export class Llm4AdProjectsService {
             }
         });
     }
-    
+
     /**
      * 删除项目（同时删除其下的所有任务）
      * 删除项目及其关联的所有任务（级联删除）。
@@ -1553,7 +2057,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 创建新供应商配置（属于当前用户）
      * 创建一个新的 LLM 供应商配置，自动关联到当前登录用户。
@@ -1581,7 +2085,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 分页查询供应商配置列表
      * 分页查询当前用户的所有供应商配置。
@@ -1613,7 +2117,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 获取单个供应商配置详情
      * 获取供应商配置详情。
@@ -1642,7 +2146,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 更新供应商配置
      * 更新供应商配置信息。
@@ -1677,7 +2181,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 删除供应商配置
      * 删除指定的供应商配置。
@@ -1706,7 +2210,7 @@ export class Llm4AdProvidersService {
             }
         });
     }
-    
+
     /**
      * 测试已存储供应商的联通性（按 ID）
      * Test connectivity of a stored provider using its persisted credentials.
@@ -1765,7 +2269,7 @@ export class Llm4AdReportsService {
             url: '/api/v1/llm4ad/tasks/reports/report-templates'
         });
     }
-    
+
     /**
      * Trigger evolution insight report generation
      * 触发指定任务的报告后台生成。
@@ -1801,7 +2305,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Get a specific report
      * 从数据库读取指定类型的报告内容。
@@ -1833,7 +2337,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Stop report generation
      * 停止指定类型报告的生成过程。
@@ -1867,7 +2371,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * SSE stream for report generation progress
      * SSE 端点：实时推送报告生成进度。
@@ -1909,7 +2413,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Trigger evolve-block advise generation
      * 触发进化块分析建议的后台生成。
@@ -1946,7 +2450,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Get cached block advise result
      * 获取缓存的进化块分析建议结果。
@@ -1975,7 +2479,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Trigger evolve-block recommend generation
      * 触发进化块推荐的后台生成。
@@ -2012,7 +2516,7 @@ export class Llm4AdReportsService {
             }
         });
     }
-    
+
     /**
      * Get cached block recommend result
      * 获取缓存的进化块推荐结果。
@@ -2056,7 +2560,7 @@ export class Llm4AdResearchService {
             url: '/api/v1/llm4ad/research/folders'
         });
     }
-    
+
     /**
      * 新建科研分组文件夹
      * 创建文件夹，重名（同 parent 下）返回 409。
@@ -2076,7 +2580,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 嵌套树形返回所有文件夹（含每节点 session_count）
      * @returns ResearchFolderTreeResponse Successful Response
@@ -2088,7 +2592,7 @@ export class Llm4AdResearchService {
             url: '/api/v1/llm4ad/research/folders/tree'
         });
     }
-    
+
     /**
      * 批量重排文件夹（一次事务改多个 sort_order）
      * 全部文件夹必须归属该用户；任一不合法都会 404 整体回滚。
@@ -2108,7 +2612,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 改文件夹（改名 / 移动 / 排序）
      * PATCH 语义：字段未提供 = 不改；``parent_id`` 显式传 null 表示移到根。
@@ -2132,7 +2636,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 删除文件夹（子文件夹 / 会话不删，脱离归属）
      * 删除文件夹本体；子内容通过 ``ON DELETE SET NULL`` 保留。
@@ -2153,7 +2657,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 列出会话（可按分组或未分组过滤）
      * 会话游标分页列表，按 updated_time 倒序。
@@ -2184,7 +2688,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 创建会话（不立即启动首轮）
      * 新建后需要再调 ``POST /sessions/{id}/turns`` 触发首轮。
@@ -2204,7 +2708,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 会话详情 + 分页历史消息 + 最近一轮
      * 会话详情 + active_turn 元数据。默认不返回 messages。
@@ -2233,7 +2737,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 改会话（改名 / 移分组 / 改默认 mode/provider/model / 改 profile）
      * ``folder_id`` 显式传 null 表示移到未分组，未提供则不改。
@@ -2257,7 +2761,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 删除会话（含 run_dir 落盘产物）
      * 会话必须处于终态；``RUNNING`` / ``PAUSED`` 会返回 409。
@@ -2278,7 +2782,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 消息分页（不含 log；turn_id 可选切换会话级/单轮，支持双向游标）
      * 只查 ``research_message`` 表（对话 + stage/artifact/guidance 等系统事件，
@@ -2319,7 +2823,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 日志双端游标窗口（独立 research_log 表；turn_id 可选，可上下双向翻页）
      * 只查 ``research_log`` 表（占总量 90-95% 的 log 已从消息表拆出）。
@@ -2363,7 +2867,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 触发新一轮（首启 / 停止后继续 / 表单回填 均走这里）
      * 规则：
@@ -2391,7 +2895,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 列出会话下的所有轮次（倒序游标分页）
      * @param data The data for the request.
@@ -2417,7 +2921,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 停止指定轮次（pipeline 轮或协作轮）
      * **同步**停止：abort Celery + SIGKILL 容器 + 写 CANCELLED，返回即终态。
@@ -2443,7 +2947,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 重试失败 / 停止的轮次（复用同一 turn_id）
      * 只允许 ``FAILED`` / ``CANCELLED`` 状态重试，其它状态 409。
@@ -2469,7 +2973,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 向常驻协作 agent 发消息（答疑 / 改产物）
      * 规则：
@@ -2498,7 +3002,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 回读单轮元数据
      * 轻量端点：只返回 turn 表状态，不含消息。
@@ -2521,7 +3025,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * SSE 流：实时推送科研 pipeline 事件（支持 Last-Event-ID 断线续传）
      * 事件类型（前端按 ``type`` 分派）：
@@ -2566,7 +3070,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 为某个 stage 注入引导文本（对应 ARC CLI `researchclaw guide`）
      * 在指定 stage 目录下落一份 ``hitl_guidance.md``。
@@ -2596,7 +3100,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 扫描 run_dir，返回所有产物文件
      * 扁平文件清单 + 按名字/后缀猜的类别；前端可按 ``kind`` 分组显示。
@@ -2617,7 +3121,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 产物目录树
      * @param data The data for the request.
@@ -2637,7 +3141,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 下载单个产物文件
      * 按需下载产物。防目录穿越；仅允许 ``run_dir`` 之下的文件。
@@ -2665,7 +3169,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 翻译单个产物文件（带磁盘缓存，支持强制重译）
      * 把产物文件译成目标语言：命中缓存回 ``cached``+全文，否则 ``translating``
@@ -2699,7 +3203,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 停止在跑的产物翻译（协作式取消后台任务）
      * 中断后台翻译协程：清 generation_id 让其协作式退出、不写缓存，并给
@@ -2727,7 +3231,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * SSE：实时推送产物翻译增量
      * 订阅产物翻译的 Redis Stream，推送增量译文。
@@ -2757,7 +3261,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 打包下载全部产物（zip）
      * 把 run_dir 下全部产物打成 zip 一次性下载（跳过内部点文件）。
@@ -2780,7 +3284,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 覆写单个产物文件内容（门控编辑）
      * 门控编辑：把用户改后的全文覆写回产物文件。
@@ -2812,7 +3316,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 获取所有 generated 解（内容内联，剥离大字段，按 stage 分组）
      * 一次拿全 ``**generated*.json`` 解内容，免去前端逐个 download。
@@ -2840,7 +3344,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 会话当前状态结构化快照（不含消息）
      * @param data The data for the request.
@@ -2860,7 +3364,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 下载 ARC 使用的 config.arc.yaml
      * 便于调试；文件已在 subprocess 启动时落到 run_dir 根。
@@ -2881,7 +3385,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 结构化聚合数据 + 最近一次 LLM 分析报告
      * 一次性返回结果分析页所需的全部数据。
@@ -2905,7 +3409,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 触发结果分析报告的 LLM 后台生成
      * 触发指定会话的分析报告后台生成，立即返回 202 表示已受理。
@@ -2937,7 +3441,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * 停止进行中的分析报告生成
      * 用户主动取消正在进行中的分析报告生成。
@@ -2958,7 +3462,7 @@ export class Llm4AdResearchService {
             }
         });
     }
-    
+
     /**
      * SSE：实时推送分析报告生成进度
      * SSE 端点：订阅 Redis Stream 持续推送分析报告增量内容。
@@ -2997,7 +3501,7 @@ export class Llm4AdTasksService {
             url: '/api/v1/llm4ad/tasks/templates'
         });
     }
-    
+
     /**
      * 获取项目下的任务列表
      * 分页查询指定项目下的所有任务。
@@ -3022,7 +3526,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务详情
      * 获取单个任务的详细信息，包含存储用量。
@@ -3043,7 +3547,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 修改任务参数
      * 修改任务的名称、描述或运行参数。
@@ -3067,7 +3571,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务
      * 删除任务及其关联的存储数据。任务运行中（pending/running）时不允许操作，需先停止任务。
@@ -3088,7 +3592,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 创建任务（自动生成默认参数）
      * 创建新任务。若未提供 input_args，将自动填充 AppConfig 默认值。
@@ -3108,7 +3612,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 修改任务标签
      * 修改任务的标签。
@@ -3132,7 +3636,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 设置根任务当前选中的子任务版本
      * 设置根任务的活跃子版本。传 child_id=null 可清除选中（读取时默认回退为指向自身）。
@@ -3156,7 +3660,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务树
      * 根据根任务 ID 获取任务树，包含根任务及其所有子任务的常用信息。
@@ -3177,7 +3681,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 复制任务
      * 复制指定任务，名称加后缀，数据存在则复制一份，状态重置为未初始化。
@@ -3201,7 +3705,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务记忆卡片
      * 获取 MindMemOS 中的任务级记忆。
@@ -3228,7 +3732,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 新增或更新任务记忆卡片
      * 新增或更新 MindMemOS 中的任务级记忆。
@@ -3252,7 +3756,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务记忆使用统计
      * 聚合任务日志中的 MindMemOS 注入事件，返回任务级记忆使用统计。
@@ -3273,7 +3777,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务固定注入的共享记忆
      * 读取手动模式下任务固定注入的全局/项目记忆 id 列表。
@@ -3294,7 +3798,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 更新任务固定注入的共享记忆
      * 替换任务固定注入的记忆 id 集合；运行中的任务下一轮注入即生效。
@@ -3318,7 +3822,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 更新任务记忆卡片
      * 按 ID 更新 MindMemOS 中的任务级记忆。
@@ -3344,7 +3848,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务记忆卡片
      * 删除 MindMemOS 中的任务级记忆。
@@ -3367,7 +3871,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 运行任务（提交到Celery）
      * 运行指定任务，提交到 Celery 异步执行。
@@ -3388,7 +3892,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 停止任务
      * 停止正在运行或等待中的任务，撤销 Celery 任务并将状态置为失败。
@@ -3409,7 +3913,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务在Celery中的执行结果
      * 查询任务的 Celery 执行结果，并将状态同步回数据库。
@@ -3430,7 +3934,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务基本统计信息
      * 获取任务的基本统计信息：解的个数、解的平均分、解的最高分。
@@ -3451,7 +3955,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 生成任务结果渲染数据
      * 生成指定任务的结果渲染数据。
@@ -3478,7 +3982,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取参数配置的schema
      * 获取参数配置的schema。
@@ -3499,7 +4003,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 下载任务 IDE 工作区
      * Download the authorized task IDE workspace as a ZIP archive.
@@ -3520,7 +4024,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 批量上传任务输入数据文件
      * 批量上传任务的输入数据文件到 S3 存储。
@@ -3544,7 +4048,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务输入数据的目录树
      * 获取任务 input_data_path 对应存储中的文件目录树。
@@ -3565,7 +4069,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 在任务输入数据中创建新文件
      * 在任务输入数据目录中创建一个带 hello-world 示例的 Python 文件。
@@ -3589,7 +4093,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务输入数据中的文件内容
      * 获取任务输入数据目录中指定文件的文本内容。
@@ -3614,7 +4118,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 修改任务输入数据中的文件内容
      * 修改任务输入数据目录中指定文件的内容。内容以 UTF-8 写入；是否允许编辑由前端控制。
@@ -3638,7 +4142,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务输入数据中的文件
      * 删除任务输入数据目录中的指定文件。
@@ -3663,7 +4167,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 重命名任务输入数据中的文件
      * 重命名任务输入数据目录中的指定文件。
@@ -3687,7 +4191,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 在任务输入数据中创建子文件夹（占位文件方式）
      * 在已有目录下新建空文件夹，通过写入占位文件标记目录存在。不支持创建顶级文件夹。
@@ -3711,7 +4215,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 删除任务输入数据中的文件夹（递归）
      * 递归删除指定文件夹及其所有内容。
@@ -3736,7 +4240,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 重命名任务输入数据中的文件夹
      * 重命名任务输入数据目录中的指定文件夹（递归 copy + delete）。
@@ -3760,7 +4264,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * 获取任务日志（游标分页，倒序查询）
      * 获取任务日志，游标分页倒序查询。首次加载最新一页，后续向前翻页。
@@ -3793,7 +4297,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * SSE 实时日志流
      * SSE 端点，实时推送任务日志和状态更新。
@@ -3825,7 +4329,7 @@ export class Llm4AdTasksService {
             }
         });
     }
-    
+
     /**
      * code认证
      * 验证 code-server 请求的 cookie token，返回用户信息用于 iframe 代理。
@@ -3860,7 +4364,7 @@ export class Llm4AdUserDefaultModelsService {
             url: '/api/v1/llm4ad/user-default-models/'
         });
     }
-    
+
     /**
      * 更新当前用户的默认模型配置
      * 更新当前用户的默认模型配置。
@@ -3925,7 +4429,7 @@ export class LoginService {
             }
         });
     }
-    
+
     /**
      * 刷新token
      * 使用刷新令牌获取新的访问令牌和刷新令牌。
@@ -3958,7 +4462,7 @@ export class LoginService {
             }
         });
     }
-    
+
     /**
      * 找回密码申请
      * 发起密码找回流程，向用户邮箱发送重置链接。
@@ -3991,7 +4495,7 @@ export class LoginService {
             }
         });
     }
-    
+
     /**
      * 重置密码
      * 使用重置令牌设置新密码。
@@ -4079,7 +4583,7 @@ export class PermissionService {
             }
         });
     }
-    
+
     /**
      * Get
      * 根据主键获取单个权限（仅超级管理员）。
@@ -4107,7 +4611,7 @@ export class PermissionService {
             }
         });
     }
-    
+
     /**
      * Permissions
      * 获取所有权限列表（仅超级管理员）。
@@ -4155,7 +4659,7 @@ export class PrivacyPolicyService {
             }
         });
     }
-    
+
     /**
      * Accept Privacy Policy Authenticated
      * 已登录用户同意隐私协议。
@@ -4180,7 +4684,7 @@ export class PrivacyPolicyService {
             url: '/api/v1/privacy-policy/accept'
         });
     }
-    
+
     /**
      * Accept Privacy Policy Before Login
      * 登录前同意隐私协议。
@@ -4212,7 +4716,7 @@ export class PrivacyPolicyService {
             }
         });
     }
-    
+
     /**
      * Check Privacy Policy Status
      * 检查当前用户的隐私协议同意状态。
@@ -4266,7 +4770,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Create User
      * 管理员创建新用户，创建成功后发送欢迎邮件。
@@ -4299,7 +4803,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Read User Me
      * 获取当前登录用户信息。
@@ -4312,7 +4816,7 @@ export class UsersService {
             url: '/api/v1/users/me'
         });
     }
-    
+
     /**
      * Delete User Me
      * 删除当前登录用户账号（超级管理员不可自删）。
@@ -4335,7 +4839,7 @@ export class UsersService {
             url: '/api/v1/users/me'
         });
     }
-    
+
     /**
      * Update User Me
      * 更新当前登录用户的个人信息。
@@ -4368,7 +4872,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Update Password Me
      * 修改当前登录用户的密码。
@@ -4401,7 +4905,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Register User
      * 用户自助注册，注册后发送邮箱验证码。
@@ -4434,7 +4938,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Verify Email
      * 校验邮箱验证码，验证通过后标记用户邮箱已验证。
@@ -4464,7 +4968,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Resend Verify Code
      * 重新发送邮箱验证码。
@@ -4496,7 +5000,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Read User By Id
      * 根据 ID 获取用户信息。
@@ -4530,7 +5034,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Update User
      * 管理员更新指定用户信息。
@@ -4567,7 +5071,7 @@ export class UsersService {
             }
         });
     }
-    
+
     /**
      * Delete User
      * 管理员删除指定用户（不可删除自己）。
@@ -4632,7 +5136,7 @@ export class UtilsService {
             }
         });
     }
-    
+
     /**
      * Health Check
      * 健康检查端点。
@@ -4650,7 +5154,7 @@ export class UtilsService {
             url: '/api/v1/utils/health-check/'
         });
     }
-    
+
     /**
      * Feature Flags
      * 返回前端可见的特性开关。
@@ -4722,7 +5226,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_s3'
         });
     }
-    
+
     /**
      * 测试当前用户依赖
      * 测试 require_user 依赖注入是否正常工作。
@@ -4735,7 +5239,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_current_user_dp'
         });
     }
-    
+
     /**
      * 测试当前用户
      * 测试获取当前登录用户信息。
@@ -4748,7 +5252,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_current_user'
         });
     }
-    
+
     /**
      * 测试需要超管权限依赖
      * 测试 require_superuser 依赖注入是否正常工作。
@@ -4761,7 +5265,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_superuser_dp'
         });
     }
-    
+
     /**
      * 测试需要超管权限
      * 测试获取超级管理员用户信息。
@@ -4774,7 +5278,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_superuser'
         });
     }
-    
+
     /**
      * 测试需要特定权限依赖（超管除外）
      * 测试 require_permission 依赖注入（需 item:read 权限）。
@@ -4787,7 +5291,7 @@ export class UtilsTestingService {
             url: '/api/v1/utils/test_require_permission_dp'
         });
     }
-    
+
     /**
      * 测试获取任务信息
      * 测试查询 Celery 任务状态（注意：Celery 永远能返回结果，需自行维护任务表）。

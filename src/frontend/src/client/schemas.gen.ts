@@ -2795,6 +2795,885 @@ export const HTTPValidationErrorSchema = {
     title: 'HTTPValidationError'
 } as const;
 
+export const KnowledgeContentResponseSchema = {
+    properties: {
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        content_version: {
+            type: 'integer',
+            title: 'Content Version'
+        },
+        content_hash: {
+            type: 'string',
+            title: 'Content Hash'
+        }
+    },
+    type: 'object',
+    required: ['content', 'content_version', 'content_hash'],
+    title: 'KnowledgeContentResponse'
+} as const;
+
+export const KnowledgeDocumentInsertRequestSchema = {
+    properties: {
+        document_ids: {
+            items: {
+                type: 'string',
+                format: 'uuid'
+            },
+            type: 'array',
+            maxItems: 128,
+            minItems: 1,
+            title: 'Document Ids'
+        }
+    },
+    type: 'object',
+    required: ['document_ids'],
+    title: 'KnowledgeDocumentInsertRequest'
+} as const;
+
+export const KnowledgeDocumentInsertResponseSchema = {
+    properties: {
+        inserted_document_ids: {
+            items: {
+                type: 'string',
+                format: 'uuid'
+            },
+            type: 'array',
+            title: 'Inserted Document Ids'
+        },
+        generated_memory_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Generated Memory Ids'
+        },
+        generated_memories: {
+            items: {
+                '$ref': '#/components/schemas/MemoryCardResponse'
+            },
+            type: 'array',
+            title: 'Generated Memories'
+        }
+    },
+    type: 'object',
+    title: 'KnowledgeDocumentInsertResponse'
+} as const;
+
+export const KnowledgeDocumentSummarySchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        source_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Id'
+        },
+        parse_run_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Parse Run Id'
+        },
+        parent_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Id'
+        },
+        document_type: {
+            type: 'string',
+            enum: ['document', 'main', 'child'],
+            title: 'Document Type'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        content_version: {
+            type: 'integer',
+            title: 'Content Version'
+        },
+        content_size: {
+            type: 'integer',
+            title: 'Content Size'
+        },
+        estimated_tokens: {
+            type: 'integer',
+            title: 'Estimated Tokens'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        },
+        user_modified: {
+            type: 'boolean',
+            title: 'User Modified'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'source_id', 'parse_run_id', 'parent_id', 'document_type', 'title', 'content_version', 'content_size', 'estimated_tokens', 'sort_order', 'user_modified', 'updated_time'],
+    title: 'KnowledgeDocumentSummary'
+} as const;
+
+export const KnowledgeDocumentUpdateRequestSchema = {
+    properties: {
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 20971520,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        }
+    },
+    type: 'object',
+    title: 'KnowledgeDocumentUpdateRequest'
+} as const;
+
+export const KnowledgeParseCancelResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        status: {
+            type: 'string',
+            const: 'cancelled',
+            title: 'Status'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        }
+    },
+    type: 'object',
+    required: ['id', 'status', 'message'],
+    title: 'KnowledgeParseCancelResponse'
+} as const;
+
+export const KnowledgeParseRefineRequestSchema = {
+    properties: {
+        instruction: {
+            type: 'string',
+            maxLength: 8000,
+            minLength: 1,
+            title: 'Instruction'
+        }
+    },
+    type: 'object',
+    required: ['instruction'],
+    title: 'KnowledgeParseRefineRequest'
+} as const;
+
+export const KnowledgeParseRunResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        source_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Id'
+        },
+        source_revision: {
+            type: 'integer',
+            title: 'Source Revision'
+        },
+        status: {
+            type: 'string',
+            enum: ['pending', 'running', 'ready', 'stale', 'failed', 'cancelled'],
+            title: 'Status'
+        },
+        progress: {
+            type: 'integer',
+            title: 'Progress'
+        },
+        stage: {
+            type: 'string',
+            title: 'Stage'
+        },
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        parser_name: {
+            type: 'string',
+            title: 'Parser Name'
+        },
+        parser_provider_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parser Provider Name'
+        },
+        parser_model: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parser Model'
+        },
+        parse_mode: {
+            type: 'string',
+            enum: ['direct', 'planned', 'refine'],
+            title: 'Parse Mode'
+        },
+        plan_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Plan Id'
+        },
+        plan_strategy_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Plan Strategy Id'
+        },
+        parent_run_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Parent Run Id'
+        },
+        session_owner_kind: {
+            type: 'string',
+            enum: ['plan', 'run'],
+            title: 'Session Owner Kind'
+        },
+        session_owner_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Session Owner Id'
+        },
+        can_refine: {
+            type: 'boolean',
+            title: 'Can Refine',
+            default: false
+        },
+        generated_memory_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Generated Memory Ids'
+        },
+        inserted_document_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Inserted Document Ids'
+        },
+        skill_name: {
+            type: 'string',
+            title: 'Skill Name'
+        },
+        skill_version: {
+            type: 'string',
+            title: 'Skill Version'
+        },
+        error_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Code'
+        },
+        error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error'
+        },
+        stream_cursor: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Stream Cursor'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'source_id', 'source_revision', 'status', 'progress', 'stage', 'message', 'parser_name', 'parser_provider_name', 'parser_model', 'parse_mode', 'plan_id', 'plan_strategy_id', 'parent_run_id', 'session_owner_kind', 'session_owner_id', 'skill_name', 'skill_version', 'error_code', 'error', 'created_time', 'updated_time'],
+    title: 'KnowledgeParseRunResponse'
+} as const;
+
+export const KnowledgeParseStartRequestSchema = {
+    properties: {
+        background: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 8000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Background'
+        },
+        instruction: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 8000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Instruction'
+        },
+        mode: {
+            type: 'string',
+            const: 'direct',
+            title: 'Mode',
+            default: 'direct'
+        }
+    },
+    type: 'object',
+    title: 'KnowledgeParseStartRequest'
+} as const;
+
+export const KnowledgeParserBindingResponseSchema = {
+    properties: {
+        configured: {
+            type: 'boolean',
+            title: 'Configured'
+        },
+        provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Id'
+        },
+        provider_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Name'
+        },
+        provider_type: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Provider Type'
+        },
+        model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Model Name'
+        },
+        context_window_tokens: {
+            type: 'integer',
+            title: 'Context Window Tokens',
+            default: 128000
+        },
+        max_output_tokens: {
+            type: 'integer',
+            title: 'Max Output Tokens',
+            default: 16384
+        },
+        error_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Error Code'
+        },
+        message: {
+            type: 'string',
+            title: 'Message',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['configured'],
+    title: 'KnowledgeParserBindingResponse'
+} as const;
+
+export const KnowledgeParserBindingUpdateSchema = {
+    properties: {
+        provider_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Provider Id'
+        },
+        model_name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Model Name'
+        },
+        context_window_tokens: {
+            type: 'integer',
+            maximum: 2000000,
+            minimum: 4096,
+            title: 'Context Window Tokens',
+            default: 128000
+        },
+        max_output_tokens: {
+            type: 'integer',
+            maximum: 256000,
+            minimum: 256,
+            title: 'Max Output Tokens',
+            default: 16384
+        }
+    },
+    type: 'object',
+    required: ['provider_id', 'model_name'],
+    title: 'KnowledgeParserBindingUpdate'
+} as const;
+
+export const KnowledgeSourceCreateRequestSchema = {
+    properties: {
+        title: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Title'
+        }
+    },
+    type: 'object',
+    required: ['title'],
+    title: 'KnowledgeSourceCreateRequest'
+} as const;
+
+export const KnowledgeSourceDetailSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        background: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Background'
+        },
+        source_revision: {
+            type: 'integer',
+            title: 'Source Revision'
+        },
+        source_file_count: {
+            type: 'integer',
+            title: 'Source File Count'
+        },
+        source_size: {
+            type: 'integer',
+            title: 'Source Size'
+        },
+        parse_status: {
+            type: 'string',
+            enum: ['unparsed', 'pending', 'running', 'ready', 'stale', 'failed'],
+            title: 'Parse Status'
+        },
+        active_parse_run_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Parse Run Id'
+        },
+        last_error_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Error Code'
+        },
+        last_error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Error'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        },
+        source_files: {
+            items: {
+                '$ref': '#/components/schemas/KnowledgeSourceFileSummary'
+            },
+            type: 'array',
+            title: 'Source Files'
+        },
+        documents: {
+            items: {
+                '$ref': '#/components/schemas/KnowledgeDocumentSummary'
+            },
+            type: 'array',
+            title: 'Documents'
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'source_revision', 'source_file_count', 'source_size', 'parse_status', 'active_parse_run_id', 'last_error_code', 'last_error', 'created_time', 'updated_time'],
+    title: 'KnowledgeSourceDetail'
+} as const;
+
+export const KnowledgeSourceFileSummarySchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        source_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Id'
+        },
+        original_filename: {
+            type: 'string',
+            title: 'Original Filename'
+        },
+        content_version: {
+            type: 'integer',
+            title: 'Content Version'
+        },
+        content_size: {
+            type: 'integer',
+            title: 'Content Size'
+        },
+        sort_order: {
+            type: 'integer',
+            title: 'Sort Order'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'source_id', 'original_filename', 'content_version', 'content_size', 'sort_order', 'updated_time'],
+    title: 'KnowledgeSourceFileSummary'
+} as const;
+
+export const KnowledgeSourceFileUpdateRequestSchema = {
+    properties: {
+        original_filename: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Original Filename'
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 20971520,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        }
+    },
+    type: 'object',
+    title: 'KnowledgeSourceFileUpdateRequest'
+} as const;
+
+export const KnowledgeSourceListResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/KnowledgeSourceSummary'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        total: {
+            type: 'integer',
+            title: 'Total'
+        }
+    },
+    type: 'object',
+    required: ['items', 'total'],
+    title: 'KnowledgeSourceListResponse'
+} as const;
+
+export const KnowledgeSourceSummarySchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        background: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Background'
+        },
+        source_revision: {
+            type: 'integer',
+            title: 'Source Revision'
+        },
+        source_file_count: {
+            type: 'integer',
+            title: 'Source File Count'
+        },
+        source_size: {
+            type: 'integer',
+            title: 'Source Size'
+        },
+        parse_status: {
+            type: 'string',
+            enum: ['unparsed', 'pending', 'running', 'ready', 'stale', 'failed'],
+            title: 'Parse Status'
+        },
+        active_parse_run_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Parse Run Id'
+        },
+        last_error_code: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Error Code'
+        },
+        last_error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Last Error'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'source_revision', 'source_file_count', 'source_size', 'parse_status', 'active_parse_run_id', 'last_error_code', 'last_error', 'created_time', 'updated_time'],
+    title: 'KnowledgeSourceSummary'
+} as const;
+
+export const KnowledgeSourceUpdateRequestSchema = {
+    properties: {
+        title: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        },
+        background: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 8000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Background'
+        }
+    },
+    type: 'object',
+    title: 'KnowledgeSourceUpdateRequest'
+} as const;
+
 export const LiveCodeContactInfoSchema = {
     properties: {
         slug: {
@@ -3251,6 +4130,63 @@ export const LiveCodeUpdateSchema = {
     description: '更新活码请求体，所有字段可选。'
 } as const;
 
+export const MemoryCardArtifactSchema = {
+    properties: {
+        artifact_id: {
+            type: 'string',
+            maxLength: 512,
+            minLength: 1,
+            title: 'Artifact Id'
+        },
+        type: {
+            type: 'string',
+            enum: ['code', 'formula', 'table', 'example', 'quote', 'metric'],
+            title: 'Type'
+        },
+        content: {
+            type: 'string',
+            maxLength: 200000,
+            minLength: 1,
+            title: 'Content'
+        },
+        source_hash: {
+            type: 'string',
+            maxLength: 64,
+            minLength: 64,
+            title: 'Source Hash'
+        },
+        language: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Language'
+        },
+        source_block_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 512
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Block Id'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    required: ['artifact_id', 'type', 'content', 'source_hash'],
+    title: 'MemoryCardArtifact',
+    description: 'Immutable source evidence selected by the extractor and copied by MindMemOS.'
+} as const;
+
 export const MemoryCardExtractionCommitRequestSchema = {
     properties: {
         selected_ids: {
@@ -3482,6 +4418,16 @@ export const MemoryCardResponseSchema = {
             type: 'string',
             title: 'Content'
         },
+        structured_content: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/MemoryCardStructuredContent'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
         enabled: {
             type: 'boolean',
             title: 'Enabled',
@@ -3560,6 +4506,39 @@ export const MemoryCardStatusUpdateSchema = {
     description: 'Update whether a MindMemOS memory can be injected.'
 } as const;
 
+export const MemoryCardStructuredContentSchema = {
+    properties: {
+        description: {
+            type: 'string',
+            maxLength: 4000,
+            minLength: 1,
+            title: 'Description'
+        },
+        content: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            maxItems: 100,
+            minItems: 1,
+            title: 'Content'
+        },
+        artifacts: {
+            items: {
+                '$ref': '#/components/schemas/MemoryCardArtifact'
+            },
+            type: 'array',
+            maxItems: 100,
+            title: 'Artifacts'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    required: ['description', 'content'],
+    title: 'MemoryCardStructuredContent',
+    description: 'LLM4AD card description plus lossless, independently editable facts.'
+} as const;
+
 export const MemoryCardUpsertRequestSchema = {
     properties: {
         id: {
@@ -3586,6 +4565,16 @@ export const MemoryCardUpsertRequestSchema = {
         content: {
             type: 'string',
             title: 'Content'
+        },
+        structured_content: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/MemoryCardStructuredContent'
+                },
+                {
+                    type: 'null'
+                }
+            ]
         },
         enabled: {
             type: 'boolean',
@@ -10578,6 +11567,22 @@ export const chat_tune_chat_tune_upload_fileSchema = {
     type: 'object',
     required: ['files'],
     title: 'Body_llm4ad.chat_tune-chat_tune_upload_file'
+} as const;
+
+export const knowledge_add_source_filesSchema = {
+    properties: {
+        files: {
+            items: {
+                type: 'string',
+                format: 'binary'
+            },
+            type: 'array',
+            title: 'Files'
+        }
+    },
+    type: 'object',
+    required: ['files'],
+    title: 'Body_llm4ad.knowledge-add_source_files'
 } as const;
 
 export const tasks_upload_task_dataSchema = {

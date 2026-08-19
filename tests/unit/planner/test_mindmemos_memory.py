@@ -124,6 +124,7 @@ class FakeQueryProvider:
     """Fake planner provider used by query rewrite tests."""
 
     def __init__(self, rewritten_query: str = "focused tsp 2-opt mutation query"):
+        """Initialize the deterministic rewritten query and call log."""
         self.rewritten_query = rewritten_query
         self.generate_calls = []
 
@@ -263,6 +264,28 @@ def test_mindmemos_client_uses_independent_add_timeout():
     assert len(SharedResourceMindMemOSClient.instances) == 2
 
 
+def test_all_scopes_use_the_single_structured_mindmemos_credential():
+    """Task, project, and user recall all use the Structured credential."""
+    SharedResourceMindMemOSClient.instances = []
+    memory = MindMemOSMemory(_config(), client_factory=SharedResourceMindMemOSClient)
+
+    memory._search_remote_scope("task query", 1, "task", "task-1", "task")
+    memory._search_remote_scope("project query", 1, "project", "project-1", "project")
+    memory._search_remote_scope("user query", 1, "user", "global", "global")
+
+    assert memory.client.kwargs["api_key"] == "sk-test"
+    assert [call["query"] for call in memory.client.memory.search_calls] == [
+        "task query",
+        "project query",
+        "user query",
+    ]
+
+
+def test_memory_config_does_not_expose_a_schema_shared_credential():
+    """LLM4AD no longer exposes a second Schema data-plane credential."""
+    assert "mindmemos_shared_api_key" not in MemoryConfig.model_fields
+
+
 def test_mindmemos_zero_timeouts_disable_sdk_timeout():
     """Zero means wait indefinitely instead of falling back to default timeouts."""
     SharedResourceMindMemOSClient.instances = []
@@ -381,21 +404,93 @@ async def test_add_card_maps_memory_card_to_mindmemos_add():
     assert call["agent_id"] == "planner"
     assert call["session_id"] == "task-1"
     assert call["mode"] == "sync"
-    assert call["score"] == 0.91
     assert call["task_id"] == "task-1"
-    assert call["messages"][0].role == "assistant"
-    assert "Use constructive initialization" in call["messages"][0].content
-    assert "Seed the population" in call["messages"][0].content
+    assert "messages" not in call
+    block = call["document_blocks"][0]
+    assert block["block_id"].startswith("llm4ad-task-")
+    assert block["messages"][0]["role"] == "user"
+    assert "Use constructive initialization" in block["messages"][0]["content"]
+    assert "Seed the population" in block["messages"][0]["content"]
     assert call["metadata"]["source"] == "llm4ad"
-    assert call["metadata"]["memory_type"] == "good_algorithm"
-    assert call["metadata"]["custom"] == "value"
-    assert "llm4ad_scope" not in call["metadata"]
+    assert call["metadata"]["llm4ad_scope"] == "task"
+    assert block["metadata"]["memory_type"] == "good_algorithm"
+    assert block["metadata"]["structured_allowed_property_names"] == [
+        "good_algorithm",
+        "name",
+        "tags",
+    ]
+    assert block["metadata"]["score"] == 0.91
+    assert block["metadata"]["custom"] == "value"
     assert "project_id" not in call["metadata"]
     assert "task_id" not in call["metadata"]
     assert "session_id" not in call["metadata"]
     assert "card_id" not in call["metadata"]
     assert "card_source" not in call["metadata"]
     assert "prompt_language" not in call
+
+
+@pytest.mark.asyncio
+async def test_add_cards_sends_one_structured_document_batch():
+    """Collect one generation of task observations into one structured add."""
+    memory = MindMemOSMemory(_config(), client_factory=FakeMindMemOSClient)
+    cards = [
+        MemoryCard(
+            id="good-1",
+            type=MemoryType.GOOD_ALGORITHM,
+            title="Constructive seed",
+            content="Preserve this complete successful algorithm observation.",
+            source="auto",
+            score=0.91,
+            generation=4,
+            algorithm_id="algo-good",
+            metadata={"mindmemos_raw_extraction": True, "extraction_event": "good_algorithm"},
+        ),
+        MemoryCard(
+            id="bad-1",
+            type=MemoryType.ERROR_REFLECTION,
+            title="Invalid repair",
+            content="Preserve this complete failed algorithm observation.",
+            source="auto",
+            generation=4,
+            algorithm_id="algo-bad",
+            metadata={"mindmemos_raw_extraction": True, "extraction_event": "execution_failure"},
+        ),
+    ]
+
+    await memory.add_cards(cards)
+
+    assert len(memory.add_client.memory.add_calls) == 1
+    call = memory.add_client.memory.add_calls[0]
+    assert "messages" not in call
+    assert call["mode"] == "sync"
+    assert call["user_id"] == "user-1"
+    assert call["session_id"] == "task-1"
+    assert call["task_id"] == "task-1"
+    assert call["idempotency_key"].startswith("llm4ad-task-batch:")
+    assert all(
+        block["block_id"].startswith("llm4ad-task-")
+        for block in call["document_blocks"]
+    )
+    assert len({block["block_id"] for block in call["document_blocks"]}) == 2
+    assert call["document_blocks"][0]["messages"] == [
+        {
+            "role": "user",
+            "content": "Preserve this complete successful algorithm observation.",
+        }
+    ]
+    assert call["document_blocks"][0]["metadata"]["generation"] == 4
+    assert call["document_blocks"][0]["metadata"]["algorithm_id"] == "algo-good"
+    assert call["document_blocks"][0]["metadata"]["structured_allowed_property_names"] == [
+        "good_algorithm",
+        "name",
+        "tags",
+    ]
+    assert call["document_blocks"][1]["metadata"]["extraction_event"] == "execution_failure"
+    assert call["document_blocks"][1]["metadata"]["structured_allowed_property_names"] == [
+        "error_reflection",
+        "name",
+        "tags",
+    ]
 
 
 @pytest.mark.asyncio
@@ -460,9 +555,88 @@ async def test_mindmemos_management_uses_local_view_and_enabled_filter():
     assert memory.client.memory.delete_calls == []
 
 
+def test_list_cards_recovers_task_fields_from_structured_source_provenance():
+    """Structured memories keep card fields inside their source document evidence."""
+    memory = MindMemOSMemory(
+        _config(mindmemos_agent_id="task"),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.list_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="structured-card",
+                memory="Bound the candidate neighbourhood to avoid timeouts.",
+                memory_type="fact",
+                property_name="error_reflection",
+                metadata={
+                    "source_documents": [
+                        {
+                            "metadata": {
+                                "title": "Bounded neighbourhood",
+                                "generation": 7,
+                                "algorithm_id": "algo-7",
+                                "score": 0.42,
+                                "enabled": True,
+                                "tags": ["local-search"],
+                            }
+                        }
+                    ]
+                },
+                status="active",
+            )
+        ]
+    )
+
+    [card] = memory.list_cards()
+
+    assert card.type is MemoryType.ERROR_REFLECTION
+    assert card.title == "Bounded neighbourhood"
+    assert card.generation == 7
+    assert card.algorithm_id == "algo-7"
+    assert card.score == 0.42
+    assert card.tags == ["local-search"]
+
+
+def test_list_cards_unwraps_legacy_structured_schema_envelope():
+    """Legacy structured wrappers render as ordinary LLM4AD cards."""
+    memory = MindMemOSMemory(
+        _config(mindmemos_agent_id="task"),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.list_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="wrapped-card",
+                memory=repr(
+                    {
+                        "dynamic_property": {
+                            "good_algorithm": "Use increments 5, 3, and 1 for Shell sort.",
+                            "tags": "Shell sort, insertion sort",
+                        }
+                    }
+                ),
+                property_name="good_algorithm",
+                metadata={
+                    "source_documents": [
+                        {"metadata": {"title": "Shell sort increment strategy"}}
+                    ]
+                },
+                status="active",
+            )
+        ]
+    )
+
+    [card] = memory.list_cards()
+
+    assert card.type is MemoryType.GOOD_ALGORITHM
+    assert card.title == "Shell sort increment strategy"
+    assert card.content == "Use increments 5, 3, and 1 for Shell sort."
+    assert card.tags == ["Shell sort", "insertion sort"]
+
+
 @pytest.mark.asyncio
-async def test_remote_clear_uses_archive_only_delete_contract():
-    """Remote clear must call the strict archive-only delete API."""
+async def test_remote_clear_uses_explicit_hard_delete_contract():
+    """LLM4AD permanent clear must request physical deletion."""
     memory = MindMemOSMemory(
         _config(mindmemos_allow_remote_clear=True),
         client_factory=FakeMindMemOSClient,
@@ -470,7 +644,7 @@ async def test_remote_clear_uses_archive_only_delete_contract():
 
     await memory.delete_card("remote-card")
 
-    assert memory.client.memory.delete_calls == [{"memory_id": "remote-card"}]
+    assert memory.client.memory.delete_calls == [{"memory_id": "remote-card", "hard": True}]
 
 
 def test_empty_task_scope_skips_search_after_one_presence_probe():
@@ -618,6 +792,31 @@ def test_get_prompt_context_formats_search_results_by_memory_type():
     assert "Avoid mutating invalid tours." in context
     assert "# Domain Knowledge" in context
     assert "Distances are symmetric." in context
+
+
+def test_get_prompt_context_consumes_independent_structured_property_result():
+    """Structured search returns the stored property rather than a Schema entity string."""
+    memory = MindMemOSMemory(
+        _config(include_user_memory=False, include_project_memory=False),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+                SimpleNamespace(
+                    id="property-hit",
+                    memory="Evaluate only the first 16 candidate neighbours.",
+                    memory_type="fact",
+                    property_name="good_algorithm",
+                    entity_type="llm4ad_memory_card",
+                    metadata={"title": "Bounded neighbourhood"},
+                ),
+        ]
+    )
+
+    context = memory.get_prompt_context("reduce local-search work")
+
+    assert "# Successful Patterns" in context
+    assert "first 16 candidate neighbours" in context
 
 
 def test_get_prompt_context_injects_structured_hit_metadata():
@@ -1257,18 +1456,24 @@ async def test_add_card_sends_raw_extraction_observation_without_card_formatting
     await memory.add_card(card)
 
     call = memory.add_client.memory.add_calls[0]
-    assert call["messages"][0].content == card.content
-    assert "Title:" not in call["messages"][0].content
-    assert "memory_type" not in call["metadata"]
-    assert call["metadata"]["mindmemos_raw_extraction"] is True
-    assert call["metadata"]["extraction_event"] == "good_algorithm"
-    assert "llm4ad_scope" not in call["metadata"]
+    block = call["document_blocks"][0]
+    assert block["messages"][0]["content"] == card.content
+    assert "Title:" not in block["messages"][0]["content"]
+    assert block["metadata"]["memory_type"] == "good_algorithm"
+    assert block["metadata"]["structured_allowed_property_names"] == [
+        "good_algorithm",
+        "name",
+        "tags",
+    ]
+    assert block["metadata"]["mindmemos_raw_extraction"] is True
+    assert block["metadata"]["extraction_event"] == "good_algorithm"
+    assert call["metadata"]["llm4ad_scope"] == "task"
     assert "project_id" not in call["metadata"]
     assert "task_id" not in call["metadata"]
     assert "session_id" not in call["metadata"]
     logs = "\n".join(log_messages)
-    assert "[long-term memory] inserted task memory" in logs
-    assert "type=good algorithm" in logs
+    assert "[long-term memory] inserted structured task-memory batch" in logs
+    assert "cards=1" in logs
     assert "task=task-1" in logs
 
 

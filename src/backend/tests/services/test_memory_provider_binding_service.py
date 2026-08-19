@@ -30,6 +30,7 @@ def _create_chat_provider(
     user_id: uuid.UUID,
     *,
     model: str = "qwen-plus;qwen-max",
+    timeout: float = 60.0,
 ) -> models.LLMProvider:
     provider = models.LLMProvider(
         name="chat",
@@ -38,6 +39,7 @@ def _create_chat_provider(
         model=model,
         api_key="sk-chat",
         base_url="https://llm.example/v1",
+        timeout=timeout,
     )
     db.add(provider)
     db.commit()
@@ -51,6 +53,7 @@ def _create_embedding_provider(
     *,
     model: str = "jina-embeddings-v4",
     dim: int = 1024,
+    timeout: float = 60.0,
 ) -> models.EmbeddingProvider:
     provider = models.EmbeddingProvider(
         name=f"embedding-{dim}",
@@ -60,6 +63,7 @@ def _create_embedding_provider(
         dim=dim,
         api_key="sk-embed",
         base_url="https://api.jinaai.cn/v1",
+        timeout=timeout,
     )
     db.add(provider)
     db.commit()
@@ -98,8 +102,27 @@ def test_upsert_memory_provider_binding_stores_embedding_identity(db: Session, m
     assert calls[0]["payload"]["scope"] == {"user_id": str(user.id)}
     chat_endpoint = calls[0]["payload"]["routers"]["chat_model_router"]["endpoints"][0]
     assert chat_endpoint["model"] == "openai/qwen-plus"
-    assert chat_endpoint["timeout"] == 30
+    assert chat_endpoint["timeout"] == 60.0
     assert chat_endpoint["num_retries"] == 1
+
+
+def test_memory_provider_routers_preserve_configured_timeouts(
+    db: Session,
+):
+    user = create_random_user(db)
+    chat_provider = _create_chat_provider(db, user.id, timeout=120.0)
+    embedding_provider = _create_embedding_provider(db, user.id, timeout=90.0)
+
+    routers = memory_service._memory_provider_routers(  # noqa: SLF001
+        chat_provider,
+        "qwen-plus",
+        embedding_provider,
+    )
+
+    chat_endpoint = routers["chat_model_router"]["endpoints"][0]
+    embedding_endpoint = routers["embed_model_router"]["endpoints"][0]
+    assert chat_endpoint["timeout"] == 120.0
+    assert embedding_endpoint["timeout"] == 90.0
 
 
 def test_ensure_memory_provider_binding_recreates_missing_remote_binding(
@@ -124,7 +147,8 @@ def test_ensure_memory_provider_binding_recreates_missing_remote_binding(
 
     posts: list[dict] = []
 
-    def fake_get(_current_user, _path, *, _scopes):
+    def fake_get(_current_user, _path, *, scopes):
+        del scopes
         return {"code": "ok", "data": {"items": []}}
 
     def fake_post(_current_user, path, payload, *, scopes):
@@ -166,7 +190,8 @@ def test_ensure_memory_provider_binding_refreshes_stale_router(
 
     patches: list[dict] = []
 
-    def fake_get(_current_user, _path, *, _scopes):
+    def fake_get(_current_user, _path, *, scopes):
+        del scopes
         return {
             "code": "ok",
             "data": {
@@ -218,7 +243,8 @@ def test_ensure_memory_provider_binding_replaces_stale_embedding_identity(
 
     posts: list[dict] = []
 
-    def fake_get(_current_user, _path, *, _scopes):
+    def fake_get(_current_user, _path, *, scopes):
+        del scopes
         routers = memory_service._memory_provider_routers(chat_provider, "qwen-plus", embedding_provider)
         routers["embed_model_router"]["endpoints"][0]["model"] = "openai/jina-embeddings-v4"
         return {"code": "ok", "data": {"items": [{"binding_id": "pb_stale_embedding", "routers": routers}]}}
@@ -259,7 +285,8 @@ def test_ensure_memory_provider_binding_refreshes_changed_api_key(
 
     patches: list[dict] = []
 
-    def fake_get(_current_user, _path, *, _scopes):
+    def fake_get(_current_user, _path, *, scopes):
+        del scopes
         expected = memory_service._memory_provider_routers(chat_provider, "qwen-plus", embedding_provider)  # noqa: SLF001
         stale = {
             router_name: {

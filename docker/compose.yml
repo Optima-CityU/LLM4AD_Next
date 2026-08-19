@@ -225,6 +225,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download}
     restart: "no"
     entrypoint: ["true"]
 

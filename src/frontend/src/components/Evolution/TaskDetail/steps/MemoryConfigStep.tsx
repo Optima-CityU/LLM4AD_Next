@@ -951,9 +951,11 @@ function ManualScopePickerList({
       {cards.map((card) => (
         <label
           key={card.id}
+          htmlFor={`memory-card-${card.id}`}
           className="flex cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2"
         >
           <Checkbox
+            id={`memory-card-${card.id}`}
             checked={pinnedIds.includes(card.id)}
             disabled={readOnly}
             onCheckedChange={(checked) => onToggle(card.id, checked === true)}

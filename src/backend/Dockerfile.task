@@ -8,6 +8,29 @@
 #   - 研究协作     app/tasks/research_collab_container_runner.py（需 research extra）
 # 故装 research extra（researchclaw，公开 git 依赖；git 由 bookworm 基础镜像自带）。
 
+# ---------- 知识文档解析协议代理 ----------
+ARG CC_SWITCH_DOWNLOAD_IMAGE=docker.1ms.run/curlimages/curl:8.16.0
+# cc-switch 在每个知识解析容器内独立运行，将 Anthropic Messages 转换为平台
+# 已支持的 OpenAI Chat Completions 协议。固定版本并校验归档，避免 latest 漂移。
+FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS cc-switch-runtime
+
+USER root
+ARG TARGETARCH=amd64
+ARG CC_SWITCH_VERSION=5.10.1
+ARG CC_SWITCH_RELEASE_BASE=https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download
+RUN case "${TARGETARCH}" in \
+      amd64) CC_SWITCH_ARCH=x64; CC_SWITCH_SHA256=be6836eb42cf6747b3830b15d87902fc6a1331c35263aa7590ed0a37a4430790 ;; \
+      arm64) CC_SWITCH_ARCH=arm64; CC_SWITCH_SHA256=10277f9e7aa76125ab4035e08ac15a52bc43d2c485f677b5ffec2055436d59e5 ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && CC_SWITCH_ARCHIVE="cc-switch-cli-v${CC_SWITCH_VERSION}-linux-${CC_SWITCH_ARCH}-musl.tar.gz" \
+    && curl -fL --retry 3 \
+      "${CC_SWITCH_RELEASE_BASE}/v${CC_SWITCH_VERSION}/${CC_SWITCH_ARCHIVE}" \
+      -o /tmp/cc-switch.tar.gz \
+    && echo "${CC_SWITCH_SHA256}  /tmp/cc-switch.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/cc-switch.tar.gz -C /tmp \
+    && install -m 0755 /tmp/cc-switch /usr/local/bin/cc-switch
+
 # ---------- 基础镜像 ----------
 FROM python:3.12-bookworm
 
@@ -87,12 +110,23 @@ RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     uv sync --extra research
 
+# Python Claude Agent SDK 由 uv 安装并自带 Claude Code CLI，无需额外 Node 运行时。
+COPY --from=cc-switch-runtime /usr/local/bin/cc-switch /usr/local/bin/cc-switch
+
 # ---------- 复制容器入口脚本（editable 安装无需其内容，故放最后：改脚本只失效本层，不重跑 uv sync）----------
 COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
 COPY ./src/backend/app/tasks/chat_tune_runner.py             /app/backend/app/tasks/chat_tune_runner.py
 COPY ./src/backend/app/tasks/research_container_runner.py    /app/backend/app/tasks/research_container_runner.py
 COPY ./src/backend/app/tasks/research_collab_container_runner.py /app/backend/app/tasks/research_collab_container_runner.py
 COPY ./src/backend/app/tasks/task_config_crypto.py           /app/backend/app/tasks/task_config_crypto.py
+COPY ./docker/knowledge-parser/runner.py                      /app/knowledge-parser/runner.py
+COPY ./docker/knowledge-parser/plan_store.py                  /app/knowledge-parser/plan_store.py
+COPY ./docker/knowledge-parser/sdk_events.py                  /app/knowledge-parser/sdk_events.py
+COPY ./docker/knowledge-parser/PROMPT.md                      /app/knowledge-parser/PROMPT.md
+COPY ./docker/knowledge-parser/PLAN_PROMPT.md                 /app/knowledge-parser/PLAN_PROMPT.md
+COPY ./docker/knowledge-parser/REFINEMENT_PROMPT.md           /app/knowledge-parser/REFINEMENT_PROMPT.md
+COPY ./docker/knowledge-parser/PLAN_SCHEMA.json               /app/knowledge-parser/PLAN_SCHEMA.json
+COPY ./docker/knowledge-parser/CC-SWITCH-LICENSE              /usr/share/licenses/cc-switch/LICENSE
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner

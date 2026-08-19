@@ -93,7 +93,7 @@ def resolve_host_path(docker_path: str) -> str:
     return docker_path
 
 
-def kill_container_by_name(name: str) -> None:
+def kill_container_by_name(name: str, *, raise_on_error: bool = False) -> None:
     """按容器名 SIGKILL 并 remove；不存在则 no-op。失败仅记日志、不抛。
 
     跳过优雅期立即终止，适用于用户点"停止"等需快速响应的场景。调用方自行用
@@ -109,6 +109,8 @@ def kill_container_by_name(name: str) -> None:
         logger.debug(f"容器 {name} 不存在，无需停止")
     except Exception as e:
         logger.error(f"强制终止容器 {name} 失败: {e}")
+        if raise_on_error:
+            raise
 
 
 # ---- 调参（chat-tune）隔离容器生命周期 ----

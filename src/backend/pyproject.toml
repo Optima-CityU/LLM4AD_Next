@@ -35,6 +35,8 @@ dependencies = [
     # agentscope-runtime, whose sandbox spins up its own Docker containers
     # (container-in-container) since the agent already runs in an isolated container.
     "agentscope>=2.0,<3.0",
+    # Knowledge parser runs the official Python SDK in the task-runner image.
+    "claude-agent-sdk>=0.1.80,<0.2",
 ]
 
 [project.optional-dependencies]

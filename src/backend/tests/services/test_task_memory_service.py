@@ -1,5 +1,9 @@
 """Tests for task-scoped memory card management."""
 
+# Test doubles intentionally accept the production ``scopes`` keyword even
+# when a particular assertion does not inspect it.
+# ruff: noqa: ARG001
+
 import uuid
 
 import anyio
@@ -13,6 +17,7 @@ from app.schemas.memory import (
     MemoryCardExtractionCommitRequest,
     MemoryCardExtractionRequest,
     MemoryCardResponse,
+    MemoryCardStructuredContent,
     MemoryCardUpsertRequest,
     TaskMemoryPromotionRequest,
 )
@@ -91,10 +96,15 @@ def _fake_mindmemos(
         memory_id: dict((initial_metadata or {}).get(memory_id) or {})
         for memory_id in store
     }
+    property_names = {
+        memory_id: str(metadata_by_id[memory_id].get("memory_type") or "general_insight")
+        for memory_id in store
+    }
     calls: list[tuple[str, dict]] = []
     counter = 0
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        del scopes
         nonlocal counter
         calls.append((path, payload))
         if path == "/v1/memory/list":
@@ -108,7 +118,7 @@ def _fake_mindmemos(
                             "memory": content,
                             "status": statuses.get(memory_id, "active"),
                             "mem_type": "fact",
-                            "property_name": "general_insight",
+                            "property_name": property_names.get(memory_id, "general_insight"),
                             "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
                             "entity_id": memory_id,
                             "metadata": {
@@ -132,6 +142,7 @@ def _fake_mindmemos(
             store[memory_id] = payload["messages"][0]["content"]
             statuses[memory_id] = "active"
             metadata_by_id[memory_id] = dict(payload.get("metadata") or {})
+            property_names[memory_id] = "good_algorithm"
             return {
                 "code": "ok",
                 "data": {
@@ -155,10 +166,11 @@ def _fake_mindmemos(
             metadata_by_id.setdefault(payload["memory_id"], {}).update(payload.get("metadata_patch") or {})
             return {"code": "ok", "data": None}
         if path == "/v1/memory/delete":
-            assert payload == {"memory_id": payload["memory_id"]}
+            assert payload == {"memory_id": payload["memory_id"], "hard": True}
             store.pop(payload["memory_id"], None)
             statuses.pop(payload["memory_id"], None)
             metadata_by_id.pop(payload["memory_id"], None)
+            property_names.pop(payload["memory_id"], None)
             return {"code": "ok", "data": None}
         raise AssertionError(f"unexpected MindMemOS path: {path}")
 
@@ -215,6 +227,7 @@ def test_mindmemos_stream_add_uses_add_timeout(monkeypatch: pytest.MonkeyPatch):
 
     assert captured["timeout"] == 120.0
     assert events[-1]["event"] == "completed"
+    assert events[-1]["data"] == {"memories": []}
 
 
 def test_mindmemos_stream_add_treats_zero_timeout_as_infinite(monkeypatch: pytest.MonkeyPatch):
@@ -346,7 +359,7 @@ def test_task_memory_scope_uses_root_task_for_child_versions(
     _mark_user_memory_bound(db, user.id)
     calls: list[dict] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         assert path == "/v1/memory/list"
         calls.append(payload)
         return {
@@ -409,6 +422,12 @@ def test_task_memory_crud_uses_mindmemos_when_enabled(
     )
     assert created.id
     assert created.source == "mindmemos"
+    create_payload = [payload for path, payload in calls if path == "/v1/memory/add"][-1]
+    assert create_payload["metadata"]["structured_allowed_property_names"] == [
+        "good_algorithm",
+        "name",
+        "tags",
+    ]
 
     updated = memory_service.upsert_task_memory_card(
         db,
@@ -609,11 +628,290 @@ def test_memory_card_response_does_not_synthesize_title_from_content():
     assert card.title == "未命名记忆"
 
 
+def test_memory_card_response_prefers_an_explicit_user_title_override():
+    card = memory_service._remote_memory_to_card(  # noqa: SLF001
+        {
+            "id": "remote-edited",
+            "memory": "Edited content.",
+            "status": "active",
+            "property_name": "domain_knowledge",
+            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            "metadata": {
+                "entity_name": "Original extracted entity",
+                "title": "User edited title",
+                "llm4ad_title_overridden": True,
+            },
+        }
+    )
+
+    assert card.title == "User edited title"
+
+
+def test_memory_card_response_formats_structured_string_card_content_without_python_repr():
+    card = memory_service._remote_memory_to_card(  # noqa: SLF001
+        {
+            "id": "remote-rich-content",
+            "memory": repr(
+                {
+                    "description": "Shell sort complexity depends on its increment sequence.",
+                    "content": [
+                        "The final increment must be 1.",
+                        "The increments must not share a common divisor other than 1.",
+                    ],
+                }
+            ),
+            "property_name": "domain_knowledge",
+            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            "metadata": {"entity_name": "Shell sort"},
+        }
+    )
+
+    assert card.content == (
+        "Shell sort complexity depends on its increment sequence.\n\n"
+        "- The final increment must be 1.\n"
+        "- The increments must not share a common divisor other than 1."
+    )
+    assert not card.content.startswith("{")
+
+
+def test_memory_card_response_exposes_typed_content_from_memory_metadata():
+    card = memory_service._remote_memory_to_card(  # noqa: SLF001
+        {
+            "id": "remote-typed-content",
+            "memory": "Derived search projection.",
+            "property_name": "domain_knowledge",
+            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            "metadata": {
+                "entity_name": "Shell sort",
+                "structured_content": {
+                    "description": "Shell sort complexity depends on the increment sequence.",
+                    "content": [
+                        "The final increment must be 1.",
+                        "Increment choice controls the observed complexity.",
+                    ],
+                },
+            },
+        }
+    )
+
+    assert card.structured_content is not None
+    assert card.structured_content.model_dump() == {
+        "description": "Shell sort complexity depends on the increment sequence.",
+        "content": [
+            "The final increment must be 1.",
+            "Increment choice controls the observed complexity.",
+        ],
+        "artifacts": [],
+    }
+    assert card.content == (
+        "Shell sort complexity depends on the increment sequence.\n\n"
+        "- The final increment must be 1.\n"
+        "- Increment choice controls the observed complexity."
+    )
+
+
+def test_memory_card_structured_content_preserves_and_renders_exact_code_artifacts():
+    code = "for (k = 0; k < t; ++ k)\n    ShellInsert(L, dlta[k]);"
+
+    value = MemoryCardStructuredContent.model_validate(
+        {
+            "description": "ShellSort implementation.",
+            "content": ["ShellSort applies each configured increment."],
+            "artifacts": [
+                {
+                    "artifact_id": "block-a:artifact-1",
+                    "type": "code",
+                    "language": "cpp",
+                    "content": code,
+                    "source_hash": "a" * 64,
+                    "source_block_id": "block-a",
+                }
+            ],
+        }
+    )
+
+    assert value.artifacts[0].content == code
+    assert f"```cpp\n{code}\n```" in value.as_text()
+
+
+def test_remote_card_edit_updates_typed_source_and_derived_projection(monkeypatch: pytest.MonkeyPatch):
+    user = models.User(id=uuid.uuid4(), email="typed-card@example.com", hashed_password="x")
+    calls: list[tuple[str, dict]] = []
+
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        calls.append((path, payload))
+        return {"code": "ok", "data": {}}
+
+    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
+    monkeypatch.setattr(memory_service, "_remote_fetch_cards_by_ids", lambda *_args, **_kwargs: {})
+    request = memory_service.MemoryCardUpsertRequest(
+        id="remote-typed-content",
+        type="domain_knowledge",
+        title="Shell sort",
+        content="ignored derived text",
+        structured_content={
+            "description": "Updated Shell-sort guidance.",
+            "content": ["The final increment must remain 1.", "Use a valid diminishing sequence."],
+        },
+        tags=["Shell sort"],
+    )
+
+    result = memory_service._remote_upsert_card(  # noqa: SLF001
+        user,
+        {"user_id": "u", "app_id": "a", "session_id": "s", "agent_id": "g"},
+        "global",
+        request,
+    )
+
+    update = next(payload for path, payload in calls if path == "/v1/memory/update")
+    assert update["content"] == (
+        "Updated Shell-sort guidance.\n\n"
+        "- The final increment must remain 1.\n"
+        "- Use a valid diminishing sequence."
+    )
+    assert update["metadata_patch"]["structured_content"] == request.structured_content.model_dump()
+    assert result.structured_content == request.structured_content
+
+
+def test_remote_items_to_cards_uses_grounded_title_when_extractor_omits_tags():
+    cards = memory_service._remote_items_to_cards(  # noqa: SLF001
+        [
+            {
+                "id": "remote-tag-fallback",
+                "memory": "The final Shell-sort increment must equal 1.",
+                "property_name": "domain_knowledge",
+                "entity_id": "shell-sort",
+                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                "metadata": {"entity_name": "Shell sort"},
+            }
+        ]
+    )
+
+    assert cards[0].tags == ["Shell sort"]
+
+
+def test_remote_items_to_cards_keeps_user_edited_tags_over_extracted_sibling_tags():
+    cards = memory_service._remote_items_to_cards(  # noqa: SLF001
+        [
+            {
+                "id": "remote-edited-tags",
+                "memory": "Edited card body.",
+                "property_name": "domain_knowledge",
+                "entity_id": "shell-sort",
+                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                "metadata": {
+                    "entity_name": "Shell sort",
+                    "tags": ["user-selected"],
+                    "llm4ad_tags_overridden": True,
+                },
+            },
+            {
+                "id": "remote-original-tags",
+                "memory": "Shell sort, increment sequence",
+                "property_name": "tags",
+                "entity_id": "shell-sort",
+                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            },
+        ]
+    )
+
+    assert cards[0].tags == ["user-selected"]
+
+
+def test_remote_list_cards_keeps_user_edited_tags_when_loading_sibling_tags(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = models.User(id=uuid.uuid4(), email="typed-card@example.com", hashed_password="x")
+
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        assert path == "/v1/memory/list"
+        property_filter = payload["filters"]["property_name"]
+        if property_filter == memory_service.LLM4AD_MEMORY_CARD_PROPERTY_FILTER:
+            return {
+                "code": "ok",
+                "data": {
+                    "memories": [
+                        {
+                            "id": "remote-edited-tags",
+                            "memory": "Edited card body.",
+                            "property_name": "domain_knowledge",
+                            "entity_id": "shell-sort",
+                            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                            "metadata": {
+                                "entity_name": "Shell sort",
+                                "tags": ["user-selected"],
+                                "llm4ad_tags_overridden": True,
+                            },
+                        }
+                    ],
+                    "page": 1,
+                    "page_size": 20,
+                    "total": 1,
+                    "has_more": False,
+                },
+            }
+        return {
+            "code": "ok",
+            "data": {
+                "memories": [
+                    {
+                        "id": "remote-original-tags",
+                        "memory": "Shell sort, increment sequence",
+                        "property_name": "tags",
+                        "entity_id": "shell-sort",
+                        "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                    }
+                ]
+            },
+        }
+
+    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
+
+    page = memory_service._remote_list_cards(  # noqa: SLF001
+        user,
+        {"user_id": "u", "app_id": "a", "session_id": "s", "agent_id": "g"},
+        page=1,
+        page_size=20,
+    )
+
+    assert page.items[0].tags == ["user-selected"]
+
+
+def test_remote_memory_to_card_unwraps_legacy_schema_envelope_and_recovers_presentation_fields():
+    card = memory_service._remote_memory_to_card(  # noqa: SLF001
+        {
+            "id": "legacy-wrapped-card",
+            "memory": repr(
+                {
+                    "dynamic_property": {
+                        "good_algorithm": "Use increments 5, 3, and 1 for Shell sort.",
+                        "tags": "Shell sort, insertion sort, increment sequence",
+                    }
+                }
+            ),
+            "status": "active",
+            "property_name": "good_algorithm",
+            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            "entity_id": "shell-sort-entity",
+            "metadata": {
+                "source_documents": [
+                    {"metadata": {"title": "Shell sort increment strategy"}}
+                ]
+            },
+        }
+    )
+
+    assert card.type == "good_algorithm"
+    assert card.content == "Use increments 5, 3, and 1 for Shell sort."
+    assert card.title == "Shell sort increment strategy"
+    assert card.tags == ["Shell sort", "insertion sort", "increment sequence"]
+
+
 def test_remote_list_merges_schema_tags_without_rendering_tag_rows(monkeypatch: pytest.MonkeyPatch):
     user = models.User(id=uuid.uuid4(), email="tags@example.com", hashed_password="x")
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         assert path == "/v1/memory/list"
         return {
@@ -693,7 +991,7 @@ async def test_stream_extract_memory_cards_emits_progress_and_completed_cards(
     user = create_random_user(db)
     progress_payloads: list[dict] = []
 
-    async def fake_stream(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    async def fake_stream(_current_user, path: str, payload: dict, *, scopes: list[str]):
         assert path == "/v1/memory/add/stream"
         assert payload["messages"][0]["content"] == "Use 2-opt after nearest-neighbor construction."
         progress_payloads.append(payload)
@@ -772,7 +1070,7 @@ async def test_stream_extract_memory_cards_reports_empty_completion_message(
 ):
     user = create_random_user(db)
 
-    async def fake_stream(_current_user, path: str, _payload: dict, *, _scopes: list[str]):
+    async def fake_stream(_current_user, path: str, _payload: dict, *, scopes: list[str]):
         assert path == "/v1/memory/add/stream"
         yield {
             "event": "completed",
@@ -828,7 +1126,23 @@ async def test_stream_promote_task_memory_cards_uses_structured_sources_and_proj
     }
     captured: dict[str, object] = {}
 
-    def fake_fetch(_current_user, scope_data: dict[str, str], memory_ids: list[str]):
+    def fake_fetch(
+        _current_user,
+        scope_data: dict[str, str],
+        memory_ids: list[str],
+        *,
+        include_tags: bool = False,
+    ):
+        del include_tags
+        if memory_ids == ["project-preview-1"]:
+            return {
+                "project-preview-1": MemoryCardResponse(
+                    id="project-preview-1",
+                    type="good_algorithm",
+                    title="Bounded 2-opt",
+                    content="Use 2-opt with a bounded neighborhood for TSP.",
+                )
+            }
         captured["source_scope"] = scope_data
         assert memory_ids == ["task-card-1", "task-card-2"]
         return source_cards
@@ -954,7 +1268,7 @@ async def test_stream_promote_task_memory_cards_rejects_missing_task_scope_card(
 def test_remote_list_groups_llm4ad_schema_properties_into_lightweight_cards(monkeypatch: pytest.MonkeyPatch):
     user = models.User(id=uuid.uuid4(), email="schema-card@example.com", hashed_password="x")
 
-    def fake_post(_current_user, path: str, _payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, _payload: dict, *, scopes: list[str]):
         assert path == "/v1/memory/list"
         return {
             "code": "ok",
@@ -1027,7 +1341,7 @@ def test_remote_list_uses_renderable_card_count_when_raw_rows_do_not_form_cards(
 ):
     user = models.User(id=uuid.uuid4(), email="schema-empty@example.com", hashed_password="x")
 
-    def fake_post(_current_user, path: str, _payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, _payload: dict, *, scopes: list[str]):
         assert path == "/v1/memory/list"
         return {
             "code": "ok",
@@ -1067,7 +1381,7 @@ def test_remote_list_merges_schema_tags_by_entity_name_metadata(monkeypatch: pyt
     user = models.User(id=uuid.uuid4(), email="entity-name-tags@example.com", hashed_password="x")
     calls: list[dict] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append(payload)
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
@@ -1151,7 +1465,7 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
     user = models.User(id=uuid.uuid4(), email="tag-filter@example.com", hashed_password="x")
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
@@ -1237,7 +1551,7 @@ def test_remote_list_cards_by_scope_pagination_with_tags_metadata(monkeypatch: p
 def test_remote_list_cards_uses_remote_total_when_available(monkeypatch: pytest.MonkeyPatch):
     user = models.User(id=uuid.uuid4(), email="page-total@example.com", hashed_password="x")
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
             return {
@@ -1296,7 +1610,7 @@ def test_remote_list_cards_merges_entity_name_tags_metadata(monkeypatch: pytest.
     user = models.User(id=uuid.uuid4(), email="tag-filter-entity-name@example.com", hashed_password="x")
     calls: list[dict] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append(payload)
         assert path == "/v1/memory/list"
         if payload.get("filters", {}).get("property_name") == "tags":
@@ -1410,6 +1724,46 @@ def test_remote_items_to_cards_includes_archived_generated_memories_by_default()
     assert cards[0].enabled is False
 
 
+def test_structured_direct_add_events_do_not_render_auxiliary_tag_as_a_card(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = models.User(id=uuid.uuid4(), email="structured-events@example.com", hashed_password="x")
+    card = MemoryCardResponse(
+        id="content-1",
+        type="good_algorithm",
+        title="Shell sort increment strategy",
+        content="Use increments 7, 3, and 1.",
+        tags=["Shell sort"],
+    )
+
+    def fake_fetch(_current_user, _scope_data, memory_ids, *, include_tags=False):
+        assert memory_ids == ["content-1", "tags-1"]
+        assert include_tags is True
+        return {card.id: card}
+
+    monkeypatch.setattr(memory_service, "_remote_fetch_cards_by_ids", fake_fetch)
+    monkeypatch.setattr(
+        memory_service,
+        "_archive_generated_card",
+        lambda _current_user, _scope_data, value, **_kwargs: value.model_copy(update={"enabled": False}),
+    )
+
+    cards = memory_service._remote_generated_cards_from_add_memories(  # noqa: SLF001
+        user,
+        {"user_id": str(user.id), "app_id": "llm4ad", "session_id": "global", "agent_id": "global"},
+        "user",
+        [
+            {"operation": "add", "memory_id": "content-1", "content": card.content},
+            {"operation": "add", "memory_id": "tags-1", "content": "Shell sort"},
+        ],
+        generation_id="preview-1",
+        project_id=None,
+        task_id=None,
+    )
+
+    assert [value.id for value in cards] == ["content-1"]
+
+
 def test_remote_items_to_cards_ignores_fact_items_without_schema_property_projection():
     cards = memory_service._remote_items_to_cards(  # noqa: SLF001
         [
@@ -1489,7 +1843,10 @@ def test_task_memory_update_does_not_echo_readonly_metadata(
     assert update_payload["metadata_patch"] == {
         "source": "llm4ad",
         "memory_type": "general_insight",
+        "structured_allowed_property_names": ["general_insight", "name", "tags"],
         "title": "Editable title",
+        "llm4ad_title_overridden": True,
+        "llm4ad_tags_overridden": True,
         "enabled": True,
         "tags": ["editable"],
     }
@@ -1664,7 +2021,7 @@ def test_memory_card_extraction_uses_related_memory_ids_from_schema_events(
     _mark_user_memory_bound(db, user.id)
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/add":
             return {
@@ -1747,7 +2104,7 @@ def test_memory_card_extraction_merges_related_schema_tags(
     _enable_system_mindmemos(monkeypatch)
     _mark_user_memory_bound(db, user.id)
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         if path == "/v1/memory/add":
             return {
                 "code": "ok",
@@ -1825,7 +2182,7 @@ def test_memory_card_extraction_merges_related_schema_tags_by_entity_name(
     _enable_system_mindmemos(monkeypatch)
     _mark_user_memory_bound(db, user.id)
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         if path == "/v1/memory/add":
             return {
                 "code": "ok",
@@ -1909,7 +2266,7 @@ def test_memory_card_extraction_keeps_502_when_add_times_out(
     _mark_user_memory_bound(db, user.id)
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/add":
             raise HTTPException(status_code=502, detail="MindMemOS request failed: timed out")
@@ -1941,7 +2298,7 @@ def test_memory_card_extraction_keeps_502_when_timeout_recovery_misses(
     _enable_system_mindmemos(monkeypatch)
     _mark_user_memory_bound(db, user.id)
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         if path == "/v1/memory/add":
             raise HTTPException(status_code=502, detail="MindMemOS request failed: timed out")
         if path == "/v1/memory/list":
@@ -2035,7 +2392,7 @@ def test_memory_card_extraction_commit_can_activate_disabled_generated_cards(
     calls: list[tuple[str, dict]] = []
     preview_id = "generation-test"
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/list":
             _assert_task_scope_filters(payload["filters"], user, task, ["keep-card"])
@@ -2103,7 +2460,7 @@ def test_memory_card_extraction_commit_activates_scope_cards_without_preview_gat
     _mark_user_memory_bound(db, user.id)
     calls: list[tuple[str, dict]] = []
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
         calls.append((path, payload))
         if path == "/v1/memory/list":
             return {
@@ -2180,8 +2537,8 @@ def test_memory_card_extraction_discard_hard_deletes_preview_memories(
 
     assert _store == {}
     assert [payload for path, payload in calls if path == "/v1/memory/delete"] == [
-        {"memory_id": "preview-card-a"},
-        {"memory_id": "preview-card-b"},
+        {"memory_id": "preview-card-a", "hard": True},
+        {"memory_id": "preview-card-b", "hard": True},
     ]
 
 

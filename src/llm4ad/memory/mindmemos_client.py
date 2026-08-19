@@ -64,7 +64,7 @@ class MindMemOSClient:
             "account_id": self.CLI_USER_ID,
             "project_id": self.CLI_PROJECT_ID,
             "api_key_uuid": f"llm4ad-cli-{self.CLI_USER_ID}",
-            "memory_algorithm": "schema",
+            "memory_algorithm": "structured",
             "scopes": scopes or ["memory:read", "memory:write"],
             "iat": now,
             "exp": now + 600,  # 10 minutes

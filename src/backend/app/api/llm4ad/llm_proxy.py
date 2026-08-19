@@ -84,6 +84,20 @@ def _build_auth_headers(provider_type: str, api_key: str, auth_token: str) -> di
     return headers
 
 
+def _join_upstream_url(base_url: str, path: str) -> str:
+    """Join a provider base URL with a proxy path without duplicating ``/v1``.
+
+    OpenAI clients normally receive a base URL ending in ``/v1``.  Protocol
+    adapters such as cc-switch send the full ``/v1/chat/completions`` path, so
+    a plain string join would otherwise produce ``/v1/v1/chat/completions``.
+    """
+    normalized_base = base_url.rstrip("/")
+    normalized_path = path.lstrip("/")
+    if normalized_base.lower().endswith("/v1") and normalized_path.lower().startswith("v1/"):
+        normalized_path = normalized_path[3:]
+    return f"{normalized_base}/{normalized_path}" if normalized_path else normalized_base
+
+
 @router.api_route(
     "/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -116,7 +130,7 @@ async def proxy_llm(path: str, request: Request) -> Response:
             status_code=502,
         )
 
-    upstream_url = f"{base_url}/{path}" if path else base_url
+    upstream_url = _join_upstream_url(base_url, path)
 
     # 组装转发请求头：保留原头，剔除逐跳/鉴权头，再注入真实凭据。
     fwd_headers = {

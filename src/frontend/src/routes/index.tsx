@@ -34,9 +34,10 @@ import {
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { NewsService } from "@/client"
+import { FooterMetadataLinks } from "@/components/Common/Footer"
+import { GithubFeedbackLink } from "@/components/Common/GithubFeedbackLink"
 import IslandBackground from "@/components/Common/IslandBackground"
 import LanguageToggle from "@/components/Common/LanguageToggle"
-import { FooterMetadataLinks } from "@/components/Common/Footer"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
@@ -315,9 +316,9 @@ function Navbar() {
           : "border-transparent bg-background/60"
       }`}
     >
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 2xl:max-w-[1536px]">
+        <div className="flex h-16 items-center gap-4">
+          <div className="flex shrink-0 items-center gap-3">
             <img
               src={icon}
               alt="OpenLoopX"
@@ -328,12 +329,12 @@ function Navbar() {
             </span>
           </div>
 
-          <div className="hidden md:flex items-center gap-6">
+          <div className="hidden min-w-0 flex-1 items-center justify-center gap-4 lg:flex xl:gap-6">
             {navLinks.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
-                className="text-sm text-muted-foreground hover:text-primary transition-colors relative group"
+                className="group relative whitespace-nowrap text-sm text-muted-foreground transition-colors hover:text-primary"
               >
                 {link.label}
                 <span className="absolute -bottom-1 left-0 h-px w-0 bg-primary transition-all duration-300 group-hover:w-full" />
@@ -341,7 +342,8 @@ function Navbar() {
             ))}
           </div>
 
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden shrink-0 items-center gap-2 lg:flex">
+            <GithubFeedbackLink labelClassName="hidden 2xl:inline" />
             <LanguageToggle />
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1" />
@@ -372,7 +374,7 @@ function Navbar() {
 
           <button
             type="button"
-            className="md:hidden text-muted-foreground p-2"
+            className="ml-auto p-2 text-muted-foreground lg:hidden"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label={mobileOpen ? "Close menu" : "Open menu"}
             aria-expanded={mobileOpen}
@@ -388,8 +390,10 @@ function Navbar() {
 
       {/* Mobile menu */}
       <div
-        className={`md:hidden border-t border-border/50 px-4 bg-background/95 backdrop-blur-xl overflow-hidden transition-all duration-300 ease-out ${
-          mobileOpen ? "max-h-80 py-4 opacity-100" : "max-h-0 py-0 opacity-0"
+        className={`overflow-hidden border-t border-border/50 bg-background/95 px-4 backdrop-blur-xl transition-all duration-300 ease-out lg:hidden ${
+          mobileOpen
+            ? "max-h-[calc(100dvh-4rem)] overflow-y-auto py-4 opacity-100"
+            : "max-h-0 py-0 opacity-0"
         }`}
       >
         <div className="space-y-3">
@@ -403,6 +407,10 @@ function Navbar() {
               {link.label}
             </a>
           ))}
+          <GithubFeedbackLink
+            className="w-full"
+            onClick={() => setMobileOpen(false)}
+          />
           <div className="flex items-center gap-2 pt-2 border-t border-border/50">
             <LanguageToggle />
             <ThemeToggle />

@@ -60,6 +60,7 @@ export type MemoryCard = {
   type: string
   title: string
   content: string
+  structured_content?: MemoryCardStructuredContent | null
   enabled: boolean
   source: string
   tags: string[]
@@ -68,6 +69,21 @@ export type MemoryCard = {
   algorithm_id?: string | null
   metadata?: Record<string, unknown>
   "readonly"?: MemoryCardReadonlyInfo
+}
+
+export type MemoryCardStructuredContent = {
+  description: string
+  content: string[]
+  artifacts: MemoryCardArtifact[]
+}
+
+export type MemoryCardArtifact = {
+  artifact_id: string
+  type: "code" | "formula" | "table" | "example" | "quote" | "metric"
+  content: string
+  source_hash: string
+  language?: string | null
+  source_block_id?: string | null
 }
 
 export type MemoryCardReadonlyInfo = {
@@ -120,6 +136,7 @@ export type MemoryCardDraft = {
   type: string
   title: string
   content: string
+  structured_content: MemoryCardStructuredContent
   enabled: boolean
   tags: string[]
 }
@@ -128,6 +145,7 @@ export const DEFAULT_MEMORY_DRAFT: MemoryCardDraft = {
   type: "general_insight",
   title: "",
   content: "",
+  structured_content: { description: "", content: [], artifacts: [] },
   enabled: true,
   tags: [],
 }

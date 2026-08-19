@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.llm4ad import sse_utils
+from app.api.llm4ad import knowledge, sse_utils
 
 
 class FakeRedis:
@@ -47,3 +47,26 @@ async def test_redis_sse_stream_resumes_after_last_id_and_emits_sse_ids(monkeypa
     assert not any("data: old" in frame for frame in frames)
     assert any(frame.startswith("id: 2-0\n") and "data: new" in frame for frame in frames)
     assert any(frame.startswith("id: 3-0\n") and "data: end" in frame for frame in frames)
+
+
+def test_knowledge_progress_stream_uses_short_heartbeats(monkeypatch):
+    """Knowledge parsing should stay alive during a quiet first model response."""
+
+    captured: dict = {}
+    job = type("Job", (), {"id": "job-1", "status": "running"})()
+
+    monkeypatch.setattr(knowledge.knowledge_service, "get_parse_run", lambda *_args: job)
+
+    async def empty_stream():
+        if False:
+            yield ""
+
+    def fake_redis_sse_stream(**kwargs):
+        captured.update(kwargs)
+        return empty_stream()
+
+    monkeypatch.setattr(knowledge, "redis_sse_stream", fake_redis_sse_stream)
+
+    knowledge.stream_parse_run(run_id="job-1", db=object(), current_user=object())
+
+    assert captured["heartbeat_interval"] == 5.0

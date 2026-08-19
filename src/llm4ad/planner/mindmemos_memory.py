@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 import time
 from collections.abc import Callable
@@ -505,6 +507,7 @@ class MindMemOSMemory(BaseMemory):
         # prevents accidental cross-user reuse if the cache scope changes later.
         self._scope_presence: dict[tuple[str, str, str, str, str], tuple[bool, float]] = {}
 
+        injected_client_factory = client_factory is not None
         if client_factory is None:
             try:
                 from mindmemos_sdk import MindMemOSClient
@@ -535,6 +538,26 @@ class MindMemOSMemory(BaseMemory):
                 "session_id": self.session_id or None,
             },
             self.add_timeout,
+        )
+        # mindmemos-sdk 0.1.x predates the structured ``document_blocks``
+        # contract. Keep it for reads, but use the small HTTP-compatible client
+        # for structured writes until the public SDK exposes that field. Tests
+        # and callers that inject a client factory retain their observable fake.
+        self.structured_add_client = (
+            self.add_client
+            if injected_client_factory or client_factory is _HttpMindMemOSClient
+            else _create_client_with_timeout(
+                _HttpMindMemOSClient,
+                {
+                    "base_url": self.base_url,
+                    "api_key": self.api_key,
+                    "user_id": self.user_id,
+                    "app_id": self.app_id or None,
+                    "agent_id": self.agent_id or None,
+                    "session_id": self.session_id or None,
+                },
+                self.add_timeout,
+            )
         )
 
     def set_memory_dir(self, memory_dir: Path) -> None:
@@ -578,61 +601,131 @@ class MindMemOSMemory(BaseMemory):
             logger.info("[long-term memory] static card sync is disabled; ignoring {} inline cards", len(inline_cards))
 
     async def add_card(self, card: MemoryCard, persist: bool | None = None) -> None:
-        """Add a card to MindMemOS through the SDK."""
+        """Add one task observation through the structured batch contract."""
+        await self.add_cards([card], persist=persist)
+
+    async def add_cards(
+        self,
+        cards: list[MemoryCard],
+        persist: bool | None = None,
+    ) -> None:
+        """Insert one generation of task observations in one structured request."""
         del persist
+        if not cards:
+            return
         started_at = time.perf_counter()
-        metadata = self._card_metadata(card)
-        event = str(metadata.get("extraction_event") or metadata.get("memory_type") or card.type.value)
-        try:
-            message = self._dialogue_message(
-                role="assistant",
-                content=self._format_card_content(card),
+        blocks: list[dict[str, Any]] = []
+        idempotency_blocks: list[dict[str, Any]] = []
+        for index, card in enumerate(cards):
+            metadata = self._card_metadata(card)
+            content = self._format_card_content(card)
+            event = str(
+                metadata.get("extraction_event")
+                or metadata.get("memory_type")
+                or card.type.value
             )
+            stable_identity = {
+                "task_id": self.session_id or "",
+                "generation": card.generation,
+                "algorithm_id": card.algorithm_id,
+                "extraction_event": event,
+                "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            }
+            block_digest = hashlib.sha256(
+                json.dumps(
+                    stable_identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            block_id = f"llm4ad-task-{block_digest[:32]}"
+            if any(item["block_id"] == block_id for item in blocks):
+                block_id = f"{block_id}-{index + 1}"
+            idempotency_blocks.append({**stable_identity, "block_id": block_id})
+            blocks.append(
+                {
+                    "block_id": block_id,
+                    "document_id": str(card.algorithm_id or card.id or block_id),
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": content,
+                        }
+                    ],
+                    "locator": {
+                        "task_id": self.session_id or "",
+                        "generation": card.generation,
+                        "algorithm_id": card.algorithm_id,
+                        "card_id": card.id,
+                    },
+                    "metadata": metadata,
+                }
+            )
+        idempotency_source = json.dumps(
+            {
+                "user_id": self.user_id,
+                "session_id": self.session_id,
+                "blocks": idempotency_blocks,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        idempotency_key = (
+            "llm4ad-task-batch:"
+            + hashlib.sha256(idempotency_source.encode("utf-8")).hexdigest()
+        )
+        try:
             add_payload = {
-                "messages": [message],
+                "document_blocks": blocks,
                 "user_id": self.user_id,
                 "app_id": self.app_id or None,
                 "agent_id": self.agent_id or None,
                 "session_id": self.session_id or None,
                 "mode": "sync",
-                "metadata": metadata,
-                "score": card.score,
+                "metadata": {
+                    "source": "llm4ad",
+                    "llm4ad_scope": "task",
+                    "batch_size": len(blocks),
+                },
+                "idempotency_key": idempotency_key,
                 "task_id": self.session_id or None,
             }
             if self.extraction_prompt_language in {"ZH", "EN"}:
                 add_payload["prompt_language"] = self.extraction_prompt_language
-            result = self.add_client.memory.add(**add_payload)
-            self._stats["add_count"] += 1
+            result = self.structured_add_client.memory.add(**add_payload)
+            self._stats["add_count"] += len(cards)
             self._mark_task_scope_present()
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             memory_id = _memory_id_from_add_result(result)
             logger.info(
-                "🧠 [long-term memory] inserted task memory: type={} generation={} "
+                "🧠 [long-term memory] inserted structured task-memory batch: cards={} "
                 "task={} elapsed_ms={:.0f}",
-                _memory_event_label(event),
-                card.generation,
+                len(cards),
                 self.session_id or None,
                 elapsed_ms,
             )
+            first_card = cards[0]
             logger.bind(
                 event_type="memory_card_created",
                 scope="task",
                 task_id=self.session_id or None,
                 project_id=self.project_id or None,
                 memory_id=memory_id,
-                generation=card.generation,
-                algorithm_id=card.algorithm_id,
-                memory_type=card.type.value,
-            ).info("🧠 long-term memory inserted")
+                generation=first_card.generation,
+                algorithm_id=first_card.algorithm_id,
+                memory_type=first_card.type.value,
+                batch_size=len(cards),
+            ).info("🧠 long-term memory batch inserted")
         except Exception as exc:  # noqa: BLE001
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             self._record_error(exc)
             if not self.fail_open:
                 raise
             logger.warning(
-                "🧠 [long-term memory] insert failed: type={} fail_open={} "
+                "🧠 [long-term memory] structured batch insert failed: cards={} fail_open={} "
                 "elapsed_ms={:.0f}: {}",
-                _memory_event_label(event),
+                len(cards),
                 self.fail_open,
                 elapsed_ms,
                 exc,
@@ -681,7 +774,7 @@ class MindMemOSMemory(BaseMemory):
         if delete is None or not self.allow_remote_clear:
             return
         try:
-            delete(memory_id=card_id)
+            delete(memory_id=card_id, hard=True)
             self._invalidate_task_scope_presence()
         except Exception as exc:  # noqa: BLE001
             self._record_error(exc)
@@ -1034,7 +1127,8 @@ class MindMemOSMemory(BaseMemory):
         if not pinned_ids:
             return []
         pinned = set(pinned_ids)
-        list_method = getattr(self.client.memory, "list", None)
+        client = self.client
+        list_method = getattr(client.memory, "list", None)
         if list_method is None:
             return []
         filters = {
@@ -1090,7 +1184,8 @@ class MindMemOSMemory(BaseMemory):
         if cached is not None and now - cached[1] < _SCOPE_PRESENCE_TTL_SECONDS:
             return cached[0]
 
-        list_method = getattr(self.client.memory, "list", None)
+        client = self.client
+        list_method = getattr(client.memory, "list", None)
         if list_method is None:
             return True
         filters: dict[str, Any] = {
@@ -1265,6 +1360,8 @@ class MindMemOSMemory(BaseMemory):
         if card.metadata.get("mindmemos_raw_extraction") is True:
             metadata = {
                 "source": "llm4ad",
+                "memory_type": card.type.value,
+                "structured_allowed_property_names": [card.type.value, "name", "tags"],
                 "generation": card.generation,
                 "algorithm_id": card.algorithm_id,
                 "score": card.score,
@@ -1275,6 +1372,7 @@ class MindMemOSMemory(BaseMemory):
         metadata = {
             "source": "llm4ad",
             "memory_type": card.type.value,
+            "structured_allowed_property_names": [card.type.value, "name", "tags"],
             "title": card.title,
             "generation": card.generation,
             "algorithm_id": card.algorithm_id,
@@ -1383,7 +1481,29 @@ def _hit_get(hit: Any, key: str, default: Any = None) -> Any:
 
 def _hit_metadata(hit: Any) -> dict[str, Any]:
     metadata = _hit_get(hit, "metadata", None)
-    return dict(metadata) if isinstance(metadata, dict) else {}
+    if not isinstance(metadata, dict):
+        return {}
+    # ``structured_add`` keeps each original block's lossless provenance in
+    # ``source_documents``. Recover the latest source metadata for LLM4AD's
+    # card view while preserving explicit aggregate fields as authoritative.
+    source_metadata: dict[str, Any] = {}
+    source_documents = metadata.get("source_documents")
+    if isinstance(source_documents, list):
+        for source_document in source_documents:
+            if not isinstance(source_document, dict):
+                continue
+            value = source_document.get("metadata")
+            if isinstance(value, dict):
+                source_metadata.update(value)
+    source_metadata.update(metadata)
+    wrapped = _llm4ad_wrapped_fields(_raw_memory_text(hit))
+    if wrapped:
+        if wrapped.get("title") or wrapped.get("name"):
+            source_metadata["title"] = wrapped.get("title") or wrapped.get("name")
+        tags = _normalize_llm4ad_tags(wrapped.get("tags"))
+        if tags:
+            source_metadata["tags"] = tags
+    return source_metadata
 
 
 def _hit_is_enabled(hit: Any) -> bool:
@@ -1437,17 +1557,93 @@ def _optional_hit_int(value: Any) -> int | None:
         return None
 
 
-def _memory_text(hit: Any) -> str:
+def _raw_memory_text(hit: Any) -> str:
     return str(_hit_get(hit, "memory", None) or _hit_get(hit, "content", None) or hit).strip()
 
 
-def _memory_type_from_hit(hit: Any) -> MemoryType:
-    metadata = _hit_metadata(hit)
-    raw = _hit_get(hit, "memory_type", None) or metadata.get("memory_type") or "general_insight"
+def _parse_memory_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    text = str(value or "").strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
     try:
-        return MemoryType(str(raw))
+        parsed = json.loads(text)
     except ValueError:
-        return MemoryType.GENERAL_INSIGHT
+        try:
+            parsed = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _llm4ad_wrapped_fields(value: Any) -> dict[str, Any]:
+    parsed = _parse_memory_mapping(value)
+    if parsed is None:
+        return {}
+    nested = parsed.get("dynamic_property")
+    if isinstance(nested, dict):
+        parsed = nested
+    recognized = {*_MEMORY_EVENT_LABELS, "tags", "name", "title"}
+    return {str(key): field_value for key, field_value in parsed.items() if str(key) in recognized}
+
+
+def _normalize_llm4ad_tags(value: Any) -> list[str]:
+    if value is None:
+        return []
+    values = value if isinstance(value, (list, tuple, set)) else str(value).replace("，", ",").split(",")
+    return list(dict.fromkeys(tag for raw in values if (tag := str(raw).strip())))
+
+
+def _wrapped_memory_type_and_text(hit: Any) -> tuple[MemoryType | None, str | None]:
+    fields = _llm4ad_wrapped_fields(_raw_memory_text(hit))
+    property_name = str(
+        _hit_get(hit, "property_name", None) or _hit_metadata_without_wrapper(hit).get("property_name") or ""
+    )
+    candidates = [property_name, *_MEMORY_EVENT_LABELS]
+    for candidate in dict.fromkeys(candidates):
+        try:
+            memory_type = MemoryType(candidate)
+        except ValueError:
+            continue
+        value = fields.get(candidate)
+        if value is None or isinstance(value, (dict, list)):
+            continue
+        text = str(value).strip()
+        if text:
+            return memory_type, text
+    return None, None
+
+
+def _hit_metadata_without_wrapper(hit: Any) -> dict[str, Any]:
+    metadata = _hit_get(hit, "metadata", None)
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _memory_text(hit: Any) -> str:
+    _memory_type, content = _wrapped_memory_type_and_text(hit)
+    return content or _raw_memory_text(hit)
+
+
+def _memory_type_from_hit(hit: Any) -> MemoryType:
+    wrapped_type, _content = _wrapped_memory_type_and_text(hit)
+    if wrapped_type is not None:
+        return wrapped_type
+    metadata = _hit_metadata(hit)
+    # MindMemOS labels first-order properties as the generic ``fact`` memory
+    # type. Prefer the first value that is an actual LLM4AD card type,
+    # including the property name selected by Structured extraction.
+    for raw in (
+        _hit_get(hit, "memory_type", None),
+        metadata.get("memory_type"),
+        _hit_get(hit, "property_name", None),
+        metadata.get("property_name"),
+    ):
+        try:
+            return MemoryType(str(raw))
+        except ValueError:
+            continue
+    return MemoryType.GENERAL_INSIGHT
 
 
 def _hit_key(hit: Any) -> str:
@@ -1542,12 +1738,20 @@ def _build_retrieval_query(query: str, context: dict[str, Any] | None) -> str:
 
 def _card_from_hit(hit: Any) -> MemoryCard | None:
     memory_id = str(_hit_get(hit, "id", "") or _hit_get(hit, "memory_id", "") or "")
-    content = str(_hit_get(hit, "memory", "") or _hit_get(hit, "content", "") or "")
+    content = _memory_text(hit)
     if not memory_id or not content:
         return None
     metadata = _hit_metadata(hit)
+    raw_metadata = _hit_metadata_without_wrapper(hit)
     memory_type = _memory_type_from_hit(hit)
-    title = str(metadata.get("title") or content.splitlines()[0][:80] or "MindMemOS memory")
+    title = str(
+        raw_metadata.get("entity_name")
+        or metadata.get("entity_name")
+        or raw_metadata.get("title")
+        or metadata.get("title")
+        or content.splitlines()[0][:80]
+        or "MindMemOS memory"
+    )
     status = str(_hit_get(hit, "status", "") or metadata.get("status") or "active")
     tags = metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
     return MemoryCard(
@@ -1589,20 +1793,21 @@ class _HttpMindMemOSMemoryResource:
 
     def add(self, **kwargs: Any) -> Any:
         payload = dict(kwargs)
-        messages = []
-        for message in payload.get("messages") or []:
-            if hasattr(message, "model_dump"):
-                messages.append(message.model_dump(exclude_none=True))
-            elif isinstance(message, dict):
-                messages.append(message)
-            else:
-                messages.append(
-                    {
-                        "role": getattr(message, "role", "user"),
-                        "content": getattr(message, "content", ""),
-                    }
-                )
-        payload["messages"] = messages
+        if "messages" in payload:
+            messages = []
+            for message in payload.get("messages") or []:
+                if hasattr(message, "model_dump"):
+                    messages.append(message.model_dump(exclude_none=True))
+                elif isinstance(message, dict):
+                    messages.append(message)
+                else:
+                    messages.append(
+                        {
+                            "role": getattr(message, "role", "user"),
+                            "content": getattr(message, "content", ""),
+                        }
+                    )
+            payload["messages"] = messages
         return self._parent.post("/v1/memory/add", payload)
 
     def search(self, query: str, **kwargs: Any) -> Any:
@@ -1617,7 +1822,10 @@ class _HttpMindMemOSMemoryResource:
 
     def delete(self, **kwargs: Any) -> Any:
         memory_id = kwargs.get("memory_id") or kwargs.get("id")
-        return self._parent.post("/v1/memory/delete", {"memory_id": memory_id})
+        return self._parent.post(
+            "/v1/memory/delete",
+            {"memory_id": memory_id, "hard": bool(kwargs.get("hard", False))},
+        )
 
     def update(self, memory_id: str, content: str, **kwargs: Any) -> Any:
         return self._parent.post("/v1/memory/update", {"memory_id": memory_id, "content": content, **kwargs})

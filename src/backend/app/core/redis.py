@@ -16,6 +16,10 @@ TASK_LOGS_PREFIX = "task_logs:"
 TASK_LOGS_DB = 2
 TASK_LOGS_TTL = 7 * 24 * 3600  # 7 days
 TASK_EXECUTION_LOCK_PREFIX = "task_execution_lock:"
+KNOWLEDGE_PARSE_STREAM_PREFIX = "knowledge_parse_stream:"
+KNOWLEDGE_PARSE_CONTEXT_PREFIX = "knowledge_parse_context:"
+KNOWLEDGE_PARSE_STREAM_TTL = 24 * 3600
+KNOWLEDGE_PARSE_STREAM_MAXLEN = 2000
 
 _RELEASE_TASK_EXECUTION_LOCK_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -48,15 +52,9 @@ def task_execution_lock_key(task_id: str | uuid.UUID) -> str:
     return f"{TASK_EXECUTION_LOCK_PREFIX}{task_id}"
 
 
-def acquire_task_execution_lock(
-    task_id: str | uuid.UUID, owner_token: str, ttl_seconds: int
-) -> bool:
+def acquire_task_execution_lock(task_id: str | uuid.UUID, owner_token: str, ttl_seconds: int) -> bool:
     """原子获取业务任务执行锁，避免重复投递并发执行同一任务。"""
-    return bool(
-        get_sync_redis().set(
-            task_execution_lock_key(task_id), owner_token, nx=True, ex=ttl_seconds
-        )
-    )
+    return bool(get_sync_redis().set(task_execution_lock_key(task_id), owner_token, nx=True, ex=ttl_seconds))
 
 
 def release_task_execution_lock(task_id: str | uuid.UUID, owner_token: str) -> bool:
@@ -151,6 +149,84 @@ def delete_task_logs(task_id: str | uuid.UUID) -> None:
     """删除指定任务的日志 Stream key。"""
     r = get_sync_redis()
     r.delete(task_logs_key(task_id))
+
+
+# ---- Knowledge document parsing stream ----
+
+
+def knowledge_parse_stream_key(run_id: str | uuid.UUID) -> str:
+    return f"{KNOWLEDGE_PARSE_STREAM_PREFIX}{run_id}"
+
+
+def knowledge_parse_context_key(run_id: str | uuid.UUID) -> str:
+    return f"{KNOWLEDGE_PARSE_CONTEXT_PREFIX}{run_id}"
+
+
+def store_knowledge_parse_context(run_id: str | uuid.UUID, context: str, ttl_seconds: int) -> None:
+    """Store optional parse context briefly without placing it in Celery args."""
+    get_sync_redis().set(
+        knowledge_parse_context_key(run_id),
+        context,
+        ex=max(1, ttl_seconds),
+    )
+
+
+def pop_knowledge_parse_context(run_id: str | uuid.UUID) -> str:
+    """Atomically consume the one-run context so it is not retained."""
+    return get_sync_redis().getdel(knowledge_parse_context_key(run_id)) or ""
+
+
+def delete_knowledge_parse_context(run_id: str | uuid.UUID) -> None:
+    get_sync_redis().delete(knowledge_parse_context_key(run_id))
+
+
+def push_knowledge_parse_event(run_id: str | uuid.UUID, entry: dict) -> None:
+    """Append one parser progress/terminal event for the knowledge SSE view."""
+    try:
+        r = get_sync_redis()
+        key = knowledge_parse_stream_key(run_id)
+        r.xadd(
+            key,
+            {"data": json.dumps(entry, ensure_ascii=False, default=str)},
+            maxlen=KNOWLEDGE_PARSE_STREAM_MAXLEN,
+            approximate=True,
+        )
+        if r.ttl(key) == -1:
+            r.expire(key, KNOWLEDGE_PARSE_STREAM_TTL)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("Failed to push knowledge parse event, run_id=%s", run_id, exc_info=True)
+
+
+def read_knowledge_parse_events(run_id: str | uuid.UUID) -> list[dict]:
+    """Read retained parser progress so a refreshed client can rebuild its timeline."""
+    entries = get_sync_redis().xrange(knowledge_parse_stream_key(run_id))
+    events: list[dict] = []
+    for _entry_id, fields in entries:
+        try:
+            event = json.loads(fields["data"])
+        except (KeyError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def latest_knowledge_parse_event_id(run_id: str | uuid.UUID) -> str:
+    """Return the cursor immediately before a resumed parser attempt."""
+    entries = get_sync_redis().xrevrange(
+        knowledge_parse_stream_key(run_id),
+        count=1,
+    )
+    if not entries:
+        return "0-0"
+    entry_id = entries[0][0]
+    return entry_id.decode() if isinstance(entry_id, bytes) else str(entry_id)
+
+
+def delete_knowledge_parse_stream(run_id: str | uuid.UUID) -> None:
+    get_sync_redis().delete(knowledge_parse_stream_key(run_id))
 
 
 # ---- Report generation ID & stream ----
@@ -261,16 +337,12 @@ def chat_tune_gen_key(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> 
     return f"{CHAT_TUNE_GEN_PREFIX}{session_id}:{turn_id}"
 
 
-def chat_tune_stream_key(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> str:
+def chat_tune_stream_key(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> str:
     """构造调参 SSE Stream 在 Redis 中的 key。"""
     return f"{CHAT_TUNE_STREAM_PREFIX}{session_id}:{turn_id}"
 
 
-def set_chat_tune_generation_id(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID, generation_id: str
-) -> None:
+def set_chat_tune_generation_id(session_id: str | uuid.UUID, turn_id: str | uuid.UUID, generation_id: str) -> None:
     """保存当前调参生成 ID，覆盖之前的值。
 
     用于在并发触发同一轮调参时，识别仅最新一次的输出有效。
@@ -280,25 +352,19 @@ def set_chat_tune_generation_id(
     r.set(key, generation_id, ex=CHAT_TUNE_GEN_TTL)
 
 
-def get_chat_tune_generation_id(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> str | None:
+def get_chat_tune_generation_id(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> str | None:
     """获取当前调参生成 ID，未设置时返回 None。"""
     r = get_sync_redis()
     return r.get(chat_tune_gen_key(session_id, turn_id))
 
 
-def clear_chat_tune_generation_id(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> None:
+def clear_chat_tune_generation_id(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> None:
     """清除当前调参生成 ID。"""
     r = get_sync_redis()
     r.delete(chat_tune_gen_key(session_id, turn_id))
 
 
-def push_chat_tune_chunk(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID, entry: dict
-) -> None:
+def push_chat_tune_chunk(session_id: str | uuid.UUID, turn_id: str | uuid.UUID, entry: dict) -> None:
     """向调参 Stream 追加一条增量数据（XADD）。
 
     使用近似 MAXLEN 限流，并在首次写入时设置 TTL。失败仅记录日志，
@@ -308,9 +374,7 @@ def push_chat_tune_chunk(
         r = get_sync_redis()
         key = chat_tune_stream_key(session_id, turn_id)
         payload = json.dumps(entry, ensure_ascii=False, default=str)
-        r.xadd(
-            key, {"data": payload}, maxlen=CHAT_TUNE_STREAM_MAXLEN, approximate=True
-        )
+        r.xadd(key, {"data": payload}, maxlen=CHAT_TUNE_STREAM_MAXLEN, approximate=True)
         if r.ttl(key) == -1:
             r.expire(key, CHAT_TUNE_STREAM_TTL)
     except Exception:
@@ -324,9 +388,7 @@ def push_chat_tune_chunk(
         )
 
 
-def delete_chat_tune_stream(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> None:
+def delete_chat_tune_stream(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> None:
     """删除指定调参轮次的 Stream key。"""
     r = get_sync_redis()
     r.delete(chat_tune_stream_key(session_id, turn_id))
@@ -364,23 +426,17 @@ RESEARCH_GATE_REPLY_PREFIX = "research_gate:"
 RESEARCH_GATE_REPLY_TTL = 86400  # 24h，覆盖用户离开后再回来的情况
 
 
-def research_gen_key(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> str:
+def research_gen_key(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> str:
     """构造科研生成 ID 在 Redis 中的 key。"""
     return f"{RESEARCH_GEN_PREFIX}{session_id}:{turn_id}"
 
 
-def research_stream_key(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> str:
+def research_stream_key(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> str:
     """构造科研 SSE Stream 在 Redis 中的 key。"""
     return f"{RESEARCH_STREAM_PREFIX}{session_id}:{turn_id}"
 
 
-def research_gate_reply_key(
-    session_id: str | uuid.UUID, message_id: str | uuid.UUID
-) -> str:
+def research_gate_reply_key(session_id: str | uuid.UUID, message_id: str | uuid.UUID) -> str:
     """构造 gate 唤醒（用户回填表单）的 Redis 键。
 
     键内容是 JSON 字符串：``{"submission": {...}, "message_id": "..."}``；
@@ -403,9 +459,7 @@ def set_research_generation_id(
     )
 
 
-def clear_research_generation_id(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> None:
+def clear_research_generation_id(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> None:
     """清除当前生成 ID。"""
     r = get_sync_redis()
     r.delete(research_gen_key(session_id, turn_id))
@@ -450,17 +504,13 @@ def push_research_event(
         return None
 
 
-def delete_research_stream(
-    session_id: str | uuid.UUID, turn_id: str | uuid.UUID
-) -> None:
+def delete_research_stream(session_id: str | uuid.UUID, turn_id: str | uuid.UUID) -> None:
     """删除指定科研轮次的 Stream key。"""
     r = get_sync_redis()
     r.delete(research_stream_key(session_id, turn_id))
 
 
-def clear_research_gate_reply(
-    session_id: str | uuid.UUID, message_id: str | uuid.UUID
-) -> None:
+def clear_research_gate_reply(session_id: str | uuid.UUID, message_id: str | uuid.UUID) -> None:
     """清除某条 gate 回填载荷。"""
     r = get_sync_redis()
     r.delete(research_gate_reply_key(session_id, message_id))
@@ -531,9 +581,7 @@ def touch_code_user_active(user_id: str | uuid.UUID, ts: float | None = None) ->
     except Exception:
         import logging
 
-        logging.getLogger(__name__).warning(
-            "Failed to touch code-server active for user_id=%s", user_id, exc_info=True
-        )
+        logging.getLogger(__name__).warning("Failed to touch code-server active for user_id=%s", user_id, exc_info=True)
 
 
 def pop_idle_code_users(threshold_ts: float) -> list[str]:
@@ -582,9 +630,7 @@ def set_cached_news(lang: str, payload: dict) -> None:
     except Exception:
         import logging
 
-        logging.getLogger(__name__).warning(
-            "Failed to write news cache to Redis, lang=%s", lang, exc_info=True
-        )
+        logging.getLogger(__name__).warning("Failed to write news cache to Redis, lang=%s", lang, exc_info=True)
 
 
 def get_cached_news(lang: str) -> dict | None:
@@ -598,7 +644,5 @@ def get_cached_news(lang: str) -> dict | None:
     except Exception:
         import logging
 
-        logging.getLogger(__name__).warning(
-            "Failed to read news cache from Redis, lang=%s", lang, exc_info=True
-        )
+        logging.getLogger(__name__).warning("Failed to read news cache from Redis, lang=%s", lang, exc_info=True)
         return None

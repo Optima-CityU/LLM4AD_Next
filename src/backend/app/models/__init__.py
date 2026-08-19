@@ -49,6 +49,21 @@ from app.models.item import (  # noqa: F401
     ItemUpdate,
 )
 
+# 文档知识库元数据模型（正文存储在 RustFS）
+from app.models.knowledge import (  # noqa: F401
+    DEFAULT_KNOWLEDGE_CONTEXT_WINDOW_TOKENS,
+    DEFAULT_KNOWLEDGE_MAX_OUTPUT_TOKENS,
+    KnowledgeCleanupJob,
+    KnowledgeDocument,
+    KnowledgeDocumentType,
+    KnowledgeParsePlan,
+    KnowledgeParserBinding,
+    KnowledgeParseRun,
+    KnowledgeParseStatus,
+    KnowledgeSource,
+    KnowledgeSourceFile,
+)
+
 # 微信群活码模型
 from app.models.live_code import (  # noqa: F401
     ContactDisplay,

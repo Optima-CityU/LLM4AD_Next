@@ -264,6 +264,15 @@ class BaseMemory(ABC, Registrable):
         """Add a memory card to the module."""
         ...
 
+    async def add_cards(
+        self,
+        cards: list[MemoryCard],
+        persist: bool | None = None,
+    ) -> None:
+        """Add a group of cards, preserving legacy backends through a serial fallback."""
+        for card in cards:
+            await self.add_card(card, persist=persist)
+
     @abstractmethod
     def list_cards(self) -> list[MemoryCard]:
         """Return memory cards managed by this module."""

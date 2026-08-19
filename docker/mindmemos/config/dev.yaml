@@ -67,11 +67,23 @@ algo_config:
   common:
     prompt_language: EN
   add:
+    structured:
+      extraction:
+        selection_enabled: true
+        coverage_validation_enabled: true
+        max_coverage_items: 12
+      dedup:
+        # Detailed source artifacts can embed below a shorter historical
+        # summary even when both describe the same card. Keep those candidates
+        # eligible for the bounded relation classifier.
+        create_below: 0.70
     schema:
       entity_modeling_path: config/mindmemos/presets/llm4ad_memory_card.json
     vanilla:
       enable_entities: false
   search:
+    structured:
+      min_relevance_score: 0.35
     vanilla:
       use_reranker: false
       graph_enabled: false

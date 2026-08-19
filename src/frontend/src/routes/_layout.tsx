@@ -9,6 +9,7 @@ import { LogOut, RotateCcw, Settings } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Footer } from "@/components/Common/Footer"
+import { GithubFeedbackLink } from "@/components/Common/GithubFeedbackLink"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { resetAllTours } from "@/components/Onboarding/tourStorage"
@@ -78,7 +79,8 @@ function HeaderUserMenu() {
     resetAllTours()
     showSuccessToast(
       t("layout.replayTourReset", {
-        defaultValue: "Walkthroughs reset — they'll show up again as you visit each page.",
+        defaultValue:
+          "Walkthroughs reset — they'll show up again as you visit each page.",
       }),
     )
   }
@@ -145,16 +147,17 @@ function Layout() {
       <SidebarInset className="flex flex-col h-screen overflow-hidden">
         <header className="shrink-0 z-10 flex h-14 items-center justify-between px-4 bg-background/95 backdrop-blur border-b border-border shadow-sm">
           {/* Left: sidebar trigger + page title */}
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger className="-ml-1 text-muted-foreground hover:text-primary" />
             <div className="w-px h-5 bg-border" />
-            <h1 className="text-sm font-semibold text-foreground tracking-wide">
+            <h1 className="truncate text-sm font-semibold tracking-wide text-foreground">
               {pageTitle}
             </h1>
           </div>
 
           {/* Right: toggles + role + avatar */}
-          <div className="flex items-center gap-1 text-xs">
+          <div className="flex shrink-0 items-center gap-1 text-xs">
+            <GithubFeedbackLink labelClassName="hidden xl:inline" />
             <LanguageToggle />
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1.5" />

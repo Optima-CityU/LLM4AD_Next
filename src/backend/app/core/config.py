@@ -214,11 +214,11 @@ class Settings(BaseSettings):
 
     # ---- 内置试用供应商（如 LiteLLM 网关） ----
     BUILTIN_PROVIDER_NAME: str = "builtin-trial"
-    BUILTIN_PROVIDER_BASE_URL: str = "" # 为空则跳过 seed，可以包含变量{accessToken}
+    BUILTIN_PROVIDER_BASE_URL: str = ""  # 为空则跳过 seed，可以包含变量{accessToken}
     BUILTIN_PROVIDER_API_KEY: str = ""
-    BUILTIN_PROVIDER_MODELS: str = "" # 多模型分号分隔
+    BUILTIN_PROVIDER_MODELS: str = ""  # 多模型分号分隔
     BUILTIN_PROVIDER_MAX_TOKENS: int = 16384
-    BUILTIN_PROVIDER_DEFAULT_MODEL: str = "" # 为空则取 MODELS 中的第一个
+    BUILTIN_PROVIDER_DEFAULT_MODEL: str = ""  # 为空则取 MODELS 中的第一个
 
     # ---- Docker 连接配置 ----
     DOCKER_HOST: str = ""  # Docker daemon address; empty = local socket, e.g. ssh://user@remote-host
@@ -230,27 +230,34 @@ class Settings(BaseSettings):
     # ---- 任务容器隔离配置 ----
     TASK_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 任务运行镜像名称
     TASK_CONTAINER_MEMORY_LIMIT: str = "4g"  # 容器内存限制
-    TASK_CONTAINER_CPU_LIMIT: float = 2.0                  # 容器 CPU 核心数限制
+    TASK_CONTAINER_CPU_LIMIT: float = 2.0  # 容器 CPU 核心数限制
 
     # ---- AutoResearch（researchclaw pipeline）隔离容器配置 ----
     # 研究 pipeline 执行 LLM 生成的代码，多用户下必须容器隔离；默认复用任务镜像（一镜多入口）。
     RESEARCH_RUNNER_IMAGE: str = "llm4ad-task-runner:latest"  # 研究运行镜像（默认复用任务镜像）
-    RESEARCH_CONTAINER_MEMORY_LIMIT: str = "4g"   # 研究容器内存限制
-    RESEARCH_CONTAINER_CPU_LIMIT: float = 2.0     # 研究容器 CPU 核心数限制
+    RESEARCH_CONTAINER_MEMORY_LIMIT: str = "4g"  # 研究容器内存限制
+    RESEARCH_CONTAINER_CPU_LIMIT: float = 2.0  # 研究容器 CPU 核心数限制
     # 研究容器执行硬超时（秒）。不设则 ContainerJobSpec 回落到 TASK_TIME_LIMIT（默认 7 天），
     # 一个卡死的研究容器会挂满 7 天，故此处收一个 backstop。定值须高于健康长任务的内部
     # 墙钟预算之和：experiment.time_budget_sec 默认 7200（2h）+ REFINE 阶段另有 1.5×
     # time_budget_sec（≈3h）的独立墙钟上限，再加 build/figure/9 段文档 stage，健康长任务
     # 可逼近 5~6h。取 12h 作 backstop——远低于 7 天（卡死容器不再挂一周），又舒适高于任何
     # 现实健康 pipeline 的总预算，不会误杀长任务。超时容器被 stop/kill 收 TIMED_OUT。
-    RESEARCH_CONTAINER_TIMEOUT: int = 12 * 3600   # 研究容器执行硬超时（秒），默认 12 小时
+    RESEARCH_CONTAINER_TIMEOUT: int = 12 * 3600  # 研究容器执行硬超时（秒），默认 12 小时
+
+    # ---- 文档知识库 Claude Agent SDK 解析容器 ----
+    KNOWLEDGE_PARSER_IMAGE: str = "llm4ad-task-runner:latest"
+    KNOWLEDGE_PARSER_TIMEOUT: int = 1800
+    KNOWLEDGE_PARSER_MEMORY_LIMIT: str = "2g"
+    KNOWLEDGE_PARSER_CPU_LIMIT: float = 1.0
+    KNOWLEDGE_PLAN_QUESTION_TIMEOUT: int = 900
 
     # ---- 调参（chat-tune）隔离容器配置 ----
-    CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）
-    CHAT_TUNE_CONTAINER_MEMORY_LIMIT: str = "1g"      # 调参容器内存限制
-    CHAT_TUNE_CONTAINER_CPU_LIMIT: float = 1.0        # 调参容器 CPU 核心数限制
-    CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0   # 等待容器 SSE 服务就绪的超时（秒）
-    CHAT_TUNE_CONTAINER_NETWORK: bool = True           # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
+    CHAT_TUNE_CONTAINER_PORT: int = 8800  # 容器内 SSE 服务监听端口（不发布到宿主）
+    CHAT_TUNE_CONTAINER_MEMORY_LIMIT: str = "1g"  # 调参容器内存限制
+    CHAT_TUNE_CONTAINER_CPU_LIMIT: float = 1.0  # 调参容器 CPU 核心数限制
+    CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0  # 等待容器 SSE 服务就绪的超时（秒）
+    CHAT_TUNE_CONTAINER_NETWORK: bool = True  # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
 
     # ---- MindMemOS 系统级记忆后端配置 ----
     LLM4AD_MINDMEMOS_ENABLED: bool = False
@@ -326,8 +333,8 @@ class Settings(BaseSettings):
 
     # ---- Celery 任务超时 ----
     # 单一来源：Celery 配置与 LLM 代理 token TTL 均由此派生，避免多处魔法数字漂移。
-    TASK_TIME_LIMIT: int = 7 * 24 * 3600        # 任务硬超时（秒），默认 7 天
-    TASK_SOFT_TIME_LIMIT: int = 1 * 24 * 3600   # 任务软超时（秒），默认 1 天，超时抛 SoftTimeLimitExceeded
+    TASK_TIME_LIMIT: int = 7 * 24 * 3600  # 任务硬超时（秒），默认 7 天
+    TASK_SOFT_TIME_LIMIT: int = 1 * 24 * 3600  # 任务软超时（秒），默认 1 天，超时抛 SoftTimeLimitExceeded
 
     # ---- LLM 凭据代理（credential broker）----
     # 演化任务在隔离容器内 import 执行用户提供的评测脚本，恶意脚本可从环境变量、
@@ -341,8 +348,8 @@ class Settings(BaseSettings):
     LLM_PROXY_BASE_URL: str = ""
 
     # ---- 任务文件存储限制 ----
-    TASK_MAX_FILE_SIZE_MB: int = 50   # 单文件上传大小上限（MB）
-    TASK_MAX_STORAGE_MB: int = 100    # 单任务输入数据总存储上限（MB）
+    TASK_MAX_FILE_SIZE_MB: int = 50  # 单文件上传大小上限（MB）
+    TASK_MAX_STORAGE_MB: int = 100  # 单任务输入数据总存储上限（MB）
 
     # ---- 任务运行时其它限制 ----
     # 容器内依赖安装（uv pip install -r requirements.txt）的超时（秒）
