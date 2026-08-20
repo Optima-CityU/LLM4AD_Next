@@ -32,6 +32,16 @@ test("the Markdown editor fills the remaining document panel height", () => {
   )
 })
 
+test("the source preview shrinks with its panel without clipping Markdown", () => {
+  expect(workspaceSource).toContain('data-testid="knowledge-source-preview"')
+  expect(workspaceSource).toContain(
+    'className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"',
+  )
+  expect(workspaceSource).toContain(
+    'className="prose prose-sm w-full min-w-0 max-w-full break-words p-5 dark:prose-invert [&_pre]:max-w-full [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto"',
+  )
+})
+
 test("source documents use a compact toolbar switcher instead of a fixed sidebar", () => {
   expect(workspaceSource).toContain('data-testid="knowledge-source-switcher"')
   expect(workspaceSource).not.toContain(

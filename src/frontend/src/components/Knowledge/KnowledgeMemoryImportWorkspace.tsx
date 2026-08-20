@@ -1352,8 +1352,11 @@ export default function KnowledgeMemoryImportWorkspace() {
                     />
                   </div>
                 ) : (
-                  <ScrollArea className="min-h-0 flex-1 overscroll-contain">
-                    <article className="prose prose-sm max-w-none p-5 dark:prose-invert">
+                  <div
+                    data-testid="knowledge-source-preview"
+                    className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+                  >
+                    <article className="prose prose-sm w-full min-w-0 max-w-full break-words p-5 dark:prose-invert [&_pre]:max-w-full [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
                       <Markdown
                         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                         rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
@@ -1362,7 +1365,7 @@ export default function KnowledgeMemoryImportWorkspace() {
                         {content.content}
                       </Markdown>
                     </article>
-                  </ScrollArea>
+                  </div>
                 )
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center text-xs text-muted-foreground">
