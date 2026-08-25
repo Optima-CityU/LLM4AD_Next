@@ -1,0 +1,15 @@
+# FunSearch (Program Search) - Recommended Parameters
+# Paper: Romera-Paredes et al., Nature 2024
+
+evolution:
+  type: "funsearch"
+  max_generations: 50          # increase for harder problems
+  population_size: 20          # programs kept in database
+  samples_per_generation: 4    # number of variants generated per parent
+  num_samplers: 4              # parallel samplers
+  num_evaluators: 4            # parallel evaluators
+  max_sample_nums: 100         # LLM call budget cap
+  seed_path: null              # optional path to a seed program
+
+planner:
+  type: "funsearch_evolution"
