@@ -1,0 +1,17 @@
+# MCTS-AHD (Monte Carlo Tree Search for AHD) - Recommended Parameters
+# Paper: Zheng et al., ICML 2025
+
+evolution:
+  type: "mcts_ahd"
+  max_generations: 1000        # MCTS iterations (not generations)
+  init_size: 4                 # initial child nodes expanded under root
+  population_size: 10          # active algorithm pool size
+  selection_num: 2             # parents per e1/e2 operator
+  max_sample_nums: 100         # LLM call budget cap for the search
+  alpha: 0.5                   # UCT progressive-widening parameter
+  lambda_0: 0.1                # UCT exploration constant (decays with budget)
+  max_depth: 10                # maximum tree depth
+  seed_path: null              # optional path to a seed heuristic file
+
+planner:
+  type: "mcts_ahd_evolution"
