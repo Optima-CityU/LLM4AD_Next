@@ -280,7 +280,7 @@ This project is licensed under the BSD 3-Clause License - see the [LICENSE](LICE
 Scan the QR code with WeChat to join the LLM4AD_Next community group.
 
 <div align="center">
-  <img src="docs/assets/live-qr-20260818-033420.png"
+  <img src="docs/assets/live-qr-20260827-080736.png"
        alt="LLM4AD_Next WeChat community QR code"
        width="220">
 </div>
