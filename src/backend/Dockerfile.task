@@ -31,6 +31,29 @@ RUN case "${TARGETARCH}" in \
     && tar -xzf /tmp/cc-switch.tar.gz -C /tmp \
     && install -m 0755 /tmp/cc-switch /usr/local/bin/cc-switch
 
+# ---------- OpenCode CLI ----------
+# opencode 是 Bun 编译的独立二进制（release 资产为单个可执行文件），运行时不需 Node。
+# 走 gh-proxy 镜像下载，固定版本 + SHA256 校验，避免 latest 漂移。策略与 cc-switch 一致。
+FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS opencode-runtime
+
+USER root
+ARG TARGETARCH=amd64
+ARG OPENCODE_VERSION=1.18.25
+# 用与 cc-switch 相同的 gh-proxy 前缀；官方仓库已迁移至 anomalyco/opencode。
+ARG OPENCODE_RELEASE_BASE=https://gh-proxy.org/https://github.com/anomalyco/opencode/releases/download
+RUN case "${TARGETARCH}" in \
+      amd64) OPENCODE_ARCH=x64; OPENCODE_SHA256=58a3729a6f3432dd6d2917fcc4a949788891a035818646ad480e12c947f56e78 ;; \
+      arm64) OPENCODE_ARCH=arm64; OPENCODE_SHA256=35ef77897425e41b5183a2c21ac4fb1d4d944d82a94e3c920f57b5490af11ac5 ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && OPENCODE_ARCHIVE="opencode-linux-${OPENCODE_ARCH}.tar.gz" \
+    && curl -fL --retry 3 \
+      "${OPENCODE_RELEASE_BASE}/v${OPENCODE_VERSION}/${OPENCODE_ARCHIVE}" \
+      -o /tmp/opencode.tar.gz \
+    && echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/opencode.tar.gz -C /tmp \
+    && install -m 0755 /tmp/opencode /usr/local/bin/opencode
+
 # ---------- 基础镜像 ----------
 FROM python:3.12-bookworm
 
@@ -112,6 +135,8 @@ RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
 
 # Python Claude Agent SDK 由 uv 安装并自带 Claude Code CLI，无需额外 Node 运行时。
 COPY --from=cc-switch-runtime /usr/local/bin/cc-switch /usr/local/bin/cc-switch
+# OpenCode CLI：独立二进制，置于 PATH 供 llm4ad.coder.opencode 以 `opencode run ...` 调用。
+COPY --from=opencode-runtime /usr/local/bin/opencode /usr/local/bin/opencode
 
 # ---------- 复制容器入口脚本（editable 安装无需其内容，故放最后：改脚本只失效本层，不重跑 uv sync）----------
 COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
