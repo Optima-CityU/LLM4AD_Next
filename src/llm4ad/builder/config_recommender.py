@@ -176,9 +176,7 @@ class ConfigRecommender:
                     sorted(_VALID_TIERS),
                 )
             else:
-                logger.info(
-                    "No complexity_tier provided, defaulting to 'simple'."
-                )
+                logger.info("No complexity_tier provided, defaulting to 'simple'.")
             tier = "simple"
 
         logger.info(

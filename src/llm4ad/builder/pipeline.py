@@ -40,6 +40,7 @@ class BuildError(Exception):
 # Primary async API
 # ======================================================================
 
+
 async def build_task(
     description: str,
     output_dir: str = "./",
@@ -142,7 +143,9 @@ async def build_task(
     # Stage 3: Validate & repair
     _progress(3, "Validating generated code...")
     validator = TaskValidator(provider)
-    blueprint = await validator.validate(blueprint, max_attempts=max_repair_attempts, multimodal=multimodal)
+    blueprint = await validator.validate(
+        blueprint, max_attempts=max_repair_attempts, multimodal=multimodal
+    )
 
     if not blueprint.is_valid():
         errors_summary = "\n".join(f"  - {e}" for e in blueprint.validation_errors)
@@ -161,6 +164,7 @@ async def build_task(
 # ======================================================================
 # Synchronous frontend API
 # ======================================================================
+
 
 def build_task_sync(
     description: str,
@@ -231,6 +235,7 @@ def build_task_sync(
 # Config-based API (multi-user platform)
 # ======================================================================
 
+
 async def build_from_config(
     config_path: str | Path,
     *,
@@ -292,9 +297,7 @@ def build_from_config_sync(
 
     All parameters are identical to :func:`build_from_config`.
     """
-    return asyncio.run(
-        build_from_config(config_path, on_progress=on_progress)
-    )
+    return asyncio.run(build_from_config(config_path, on_progress=on_progress))
 
 
 def _resolve_description(description: str) -> str:
@@ -394,8 +397,7 @@ def _resolve_from_global_settings(provider_name: str) -> BaseProvider:
     if provider_name not in providers_by_name:
         available = ", ".join(providers_by_name.keys())
         raise BuildError(
-            f"Provider '{provider_name}' not found in global settings.\n"
-            f"Available: {available}"
+            f"Provider '{provider_name}' not found in global settings.\n" f"Available: {available}"
         )
 
     cfg = providers_by_name[provider_name]

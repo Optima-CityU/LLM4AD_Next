@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
+import sys
 import traceback
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
@@ -513,9 +514,9 @@ def make_tools(
             return f"Error: Access denied, path escapes workspace: {path}"
         if not resolved.is_file():
             return f"Error: File not found: {path}"
-        cmd = ["python", str(resolved), *args.split()] if args else ["python", str(resolved)]
+        cmd = [sys.executable, str(resolved), *args.split()] if args else [sys.executable, str(resolved)]
         try:
-            proc = subprocess.run(  # noqa: S603 - fixed interpreter, sandboxed path
+            proc = subprocess.run(  # noqa: S603 - agent's own interpreter, sandboxed path
                 cmd,
                 cwd=str(resolved.parent),
                 capture_output=True,

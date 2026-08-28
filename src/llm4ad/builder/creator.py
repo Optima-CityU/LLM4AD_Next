@@ -11,7 +11,6 @@ import ast
 import json
 import re
 import textwrap
-from typing import Any
 
 from loguru import logger
 
@@ -20,14 +19,23 @@ from llm4ad.builder.config_recommender import render_default_evolution_yaml
 from llm4ad.builder.prompts import (
     CODER_PROMPT_TEMPLATE,
     CONFIG_YAML_TEMPLATE,
-    CREATE_TASK_FROM_DRIVER_PROMPT,
+    CREATE_ALGORITHM_POLICY_PROMPT,
+    CREATE_ALGORITHM_PROMPT,
+    CREATE_EVALUATOR_FROM_DRIVER_PROMPT,
+    CREATE_EVALUATOR_PROMPT,
+    CREATE_EVALUATOR_SELF_SPAWN_PROMPT,
+    CREATE_SAMPLE_DATA_PROMPT,
     CREATE_TASK_MULTIMODAL_PROMPT,
-    CREATE_TASK_PROMPT,
+    DEBUG_RUN_SELF_SPAWN_TEMPLATE,
+    DEBUG_RUN_TEMPLATE,
     GENERATE_DRIVER_PROMPT,
+    TEST_EVALUATOR_TEMPLATE,
     get_algorithm_template,
     get_evaluator_template,
     get_multimodal_algorithm_template,
     get_multimodal_evaluator_template,
+    get_self_spawn_algorithm_template,
+    get_self_spawn_evaluator_template,
 )
 from llm4ad.infra.provider.base import BaseProvider
 
@@ -60,77 +68,112 @@ class TaskCreator:
             return await self._create_reuse_algorithm(analysis, description, multimodal=multimodal)
 
         evaluator_register_name = analysis.project_name.replace("-", "_") + "_evaluator"
-        metrics_json = json.dumps(analysis.metrics, indent=2)
+        evaluator_file_name = evaluator_register_name + ".py"
+        derived_class_name = self._derive_evaluator_class_name(analysis)
 
         if multimodal:
-            evaluator_template = get_multimodal_evaluator_template()
-            algorithm_template = get_multimodal_algorithm_template()
-            viz_spec = analysis.visualization_spec or {}
-            prompt = CREATE_TASK_MULTIMODAL_PROMPT.format(
-                project_name=analysis.project_name,
-                background=analysis.background,
-                function_name=analysis.function_name,
-                function_signature=analysis.function_signature,
-                function_description=analysis.function_description,
-                input_format=analysis.input_format,
-                output_format=analysis.output_format,
-                metrics_json=metrics_json,
-                algorithm_dir_name=analysis.algorithm_dir_name,
-                algorithm_file_name=analysis.algorithm_file_name,
-                evaluator_register_name=evaluator_register_name,
-                evaluator_template=evaluator_template,
-                algorithm_template=algorithm_template,
-                visualization_spec_json=json.dumps(viz_spec, indent=2),
+            # Multimodal keeps the single dedicated evaluator call (self-spawn +
+            # in-process rendering), but algorithm/sample/boilerplate are still
+            # generated/rendered separately to relieve truncation pressure.
+            algorithm_code, sample_data = await self._generate_multimodal_algorithm_and_data(
+                analysis,
+                evaluator_register_name,
+                derived_class_name,
+            )
+            evaluator_code = await self._generate_multimodal_evaluator(
+                analysis,
+                evaluator_register_name,
             )
         else:
-            evaluator_template = get_evaluator_template()
-            algorithm_template = get_algorithm_template()
-            prompt = CREATE_TASK_PROMPT.format(
+            # Split-call flow with a checkpoint after each artifact: generate,
+            # validate it against the earliest meaningful check, and repair in
+            # place before moving on. The whole-blueprint validate() pass later
+            # remains the authoritative gate.
+            checkpoint = self._checkpointer()
+
+            algorithm_code = await self._generate_algorithm(analysis)
+
+            # Construct a minimal partial blueprint for checkpoint_algorithm
+            partial_blueprint = TaskBlueprint(
                 project_name=analysis.project_name,
-                background=analysis.background,
-                function_name=analysis.function_name,
-                function_signature=analysis.function_signature,
-                function_description=analysis.function_description,
-                input_format=analysis.input_format,
-                output_format=analysis.output_format,
-                metrics_json=metrics_json,
+                task_description=analysis.background,
+                evaluator_file_name="",
+                evaluator_code="",
+                algorithm_code=algorithm_code,
+                config_yaml="",
+                debug_run_code="",
+                evaluator_class_name="",
                 algorithm_dir_name=analysis.algorithm_dir_name,
                 algorithm_file_name=analysis.algorithm_file_name,
-                evaluator_register_name=evaluator_register_name,
-                evaluator_template=evaluator_template,
-                algorithm_template=algorithm_template,
+                function_to_evolve=analysis.function_name,
+                metrics=analysis.metrics,
+                evaluation_pattern=analysis.evaluation_pattern,
             )
 
-        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
-        sections = self._parse_sections(result.text)
+            if checkpoint is not None:
+                algorithm_code = await checkpoint.checkpoint_algorithm(
+                    algorithm_code, blueprint=partial_blueprint, analysis=analysis
+                )
 
-        evaluator_code = sections.get("EVALUATOR_CODE", "")
-        algorithm_code = sections.get("ALGORITHM_CODE", "")
-        debug_run_code = sections.get("DEBUG_RUN", "")
-        test_evaluator_code = sections.get("TEST_EVALUATOR", "")
-        sample_data_raw = sections.get("SAMPLE_DATA", "")
-        metadata_raw = sections.get("METADATA", "{}")
+            sample_data = await self._generate_sample_data(analysis, algorithm_code)
+            if checkpoint is not None:
+                sample_data = await checkpoint.checkpoint_sample_data(
+                    sample_data,
+                    algorithm_code=algorithm_code,
+                    function_to_evolve=analysis.function_name,
+                    project_name=analysis.project_name,
+                )
+                algorithm_code, sample_data = await checkpoint.checkpoint_algorithm_trial(
+                    algorithm_code=algorithm_code,
+                    sample_data=sample_data,
+                    algorithm_dir_name=analysis.algorithm_dir_name,
+                    algorithm_file_name=analysis.algorithm_file_name,
+                    function_to_evolve=analysis.function_name,
+                    project_name=analysis.project_name,
+                    evaluation_pattern=analysis.evaluation_pattern,
+                )
 
-        # Parse metadata
-        metadata = self._parse_json_safe(metadata_raw)
+            evaluator_code = await self._generate_evaluator(
+                analysis,
+                algorithm_code,
+                sample_data,
+                evaluator_register_name,
+                derived_class_name,
+            )
+            if checkpoint is not None:
+                evaluator_code = await checkpoint.checkpoint_evaluator(
+                    evaluator_code=evaluator_code,
+                    evaluator_file_name=evaluator_file_name,
+                    evaluator_class_name=derived_class_name,
+                    algorithm_dir_name=analysis.algorithm_dir_name,
+                    algorithm_file_name=analysis.algorithm_file_name,
+                    algorithm_code=algorithm_code,
+                    evaluation_pattern=analysis.evaluation_pattern,
+                )
+
+        # Class name: prefer the AST-extracted name from the real code, fall
+        # back to the deterministically derived name we dictated.
         evaluator_class_name_raw = self._extract_evaluator_class_name(evaluator_code)
-        evaluator_class_name: str = (
-            evaluator_class_name_raw
-            if evaluator_class_name_raw
-            else metadata.get("evaluator_class_name", "TaskEvaluator")
+        evaluator_class_name: str = evaluator_class_name_raw or derived_class_name
+
+        # Deterministic boilerplate.
+        debug_run_code = self._render_debug_run(analysis)
+        test_evaluator_code = self._render_test_evaluator(
+            analysis,
+            evaluator_file_name,
+            evaluator_class_name,
+            multimodal=multimodal,
         )
 
-        # Build dataset files
         dataset_files: dict[str, str] = {}
-        if sample_data_raw.strip() and sample_data_raw.strip().upper() != "NONE":
-            dataset_files["data/sample/instance_001.json"] = sample_data_raw.strip()
+        if sample_data.strip() and sample_data.strip().upper() != "NONE":
+            dataset_files["data/sample/instance_001.json"] = sample_data.strip()
 
-        # Build evaluator filename
-        evaluator_file_name = evaluator_register_name + ".py"
-
-        # Build config YAML (programmatic, not LLM-generated)
         config_yaml = self._build_config_yaml(
-            analysis, evaluator_class_name, evaluator_file_name, multimodal=multimodal,
+            analysis,
+            evaluator_class_name,
+            evaluator_file_name,
+            multimodal=multimodal,
         )
 
         return TaskBlueprint(
@@ -146,9 +189,215 @@ class TaskCreator:
             algorithm_file_name=analysis.algorithm_file_name,
             function_to_evolve=analysis.function_name,
             metrics=analysis.metrics,
+            evaluation_pattern=analysis.evaluation_pattern,
             dataset_files=dataset_files,
             source_code_path=None,
             test_evaluator_code=test_evaluator_code,
+        )
+
+    # ------------------------------------------------------------------
+    # Per-artifact checkpointing
+    # ------------------------------------------------------------------
+
+    def _checkpointer(self):
+        """Build a TaskValidator for in-place per-artifact checkpoints.
+
+        Returns ``None`` when no provider is available (e.g. unit tests that
+        construct ``TaskCreator(provider=None)``), so the split-call flow still
+        runs without live checkpoint repairs. Imported lazily to avoid a
+        circular import (validator imports from this module).
+        """
+        if self._provider is None:
+            return None
+        from llm4ad.builder.validator import TaskValidator
+
+        return TaskValidator(self._provider)
+
+    # ------------------------------------------------------------------
+    # Split-call generation helpers (one artifact per LLM call)
+    # ------------------------------------------------------------------
+
+    async def _generate_algorithm(self, analysis: AnalysisResult) -> str:
+        """Generate the algorithm file (single artifact).
+
+        Routes to the correct template and prompt based on evaluation_pattern:
+        - separate_script (Variant A): one-shot solver with main() reading argv
+        - self_spawn (Variant B): policy function called in an environment loop
+        """
+        if analysis.evaluation_pattern == "self_spawn":
+            prompt = CREATE_ALGORITHM_POLICY_PROMPT.format(
+                project_name=analysis.project_name,
+                background=analysis.background,
+                function_name=analysis.function_name,
+                function_signature=analysis.function_signature,
+                function_description=analysis.function_description,
+                input_format=analysis.input_format,
+                output_format=analysis.output_format,
+                algorithm_file_name=analysis.algorithm_file_name,
+                algorithm_template=get_self_spawn_algorithm_template(),
+            )
+        else:
+            prompt = CREATE_ALGORITHM_PROMPT.format(
+                project_name=analysis.project_name,
+                background=analysis.background,
+                function_name=analysis.function_name,
+                function_signature=analysis.function_signature,
+                function_description=analysis.function_description,
+                input_format=analysis.input_format,
+                output_format=analysis.output_format,
+                algorithm_file_name=analysis.algorithm_file_name,
+                algorithm_template=get_algorithm_template(),
+            )
+        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
+        return _strip_code_fences(result.text.strip())
+
+    async def _generate_sample_data(
+        self,
+        analysis: AnalysisResult,
+        algorithm_code: str,
+    ) -> str:
+        """Generate one sample data instance matching the algorithm's input.
+
+        For self_spawn tasks, returns a deterministic seed (no LLM call needed).
+        For separate_script tasks, generates via LLM.
+        """
+        if analysis.evaluation_pattern == "self_spawn":
+            return '{"seed": 0}'
+
+        prompt = CREATE_SAMPLE_DATA_PROMPT.format(
+            input_format=analysis.input_format,
+            algorithm_code=algorithm_code,
+        )
+        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=2048)
+        return _strip_code_fences(result.text.strip())
+
+    async def _generate_evaluator(
+        self,
+        analysis: AnalysisResult,
+        algorithm_code: str,
+        sample_data: str,
+        evaluator_register_name: str,
+        evaluator_class_name: str,
+    ) -> str:
+        """Generate the evaluator file (single artifact).
+
+        Routes to the correct template and prompt based on evaluation_pattern:
+        - separate_script (Variant A): spawns `python algo.py '<instance>'`
+        - self_spawn (Variant B): spawns itself, loads policy via importlib
+        """
+        if analysis.evaluation_pattern == "self_spawn":
+            prompt = CREATE_EVALUATOR_SELF_SPAWN_PROMPT.format(
+                project_name=analysis.project_name,
+                background=analysis.background,
+                function_name=analysis.function_name,
+                metrics_json=json.dumps(analysis.metrics, indent=2),
+                input_format=analysis.input_format,
+                output_format=analysis.output_format,
+                algorithm_dir_name=analysis.algorithm_dir_name,
+                algorithm_file_name=analysis.algorithm_file_name,
+                algorithm_code=algorithm_code,
+                sample_data=sample_data,
+                evaluator_register_name=evaluator_register_name,
+                evaluator_class_name=evaluator_class_name,
+                evaluator_template=get_self_spawn_evaluator_template(),
+            )
+        else:
+            prompt = CREATE_EVALUATOR_PROMPT.format(
+                project_name=analysis.project_name,
+                background=analysis.background,
+                metrics_json=json.dumps(analysis.metrics, indent=2),
+                output_format=analysis.output_format,
+                algorithm_dir_name=analysis.algorithm_dir_name,
+                algorithm_file_name=analysis.algorithm_file_name,
+                algorithm_code=algorithm_code,
+                sample_data=sample_data,
+                evaluator_register_name=evaluator_register_name,
+                evaluator_class_name=evaluator_class_name,
+                evaluator_template=get_evaluator_template(),
+            )
+        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
+        return _strip_code_fences(result.text.strip())
+
+    async def _generate_multimodal_algorithm_and_data(
+        self,
+        analysis: AnalysisResult,
+        evaluator_register_name: str,
+        evaluator_class_name: str,
+    ) -> tuple[str, str]:
+        """Generate the multimodal algorithm file and a matching sample instance."""
+        algorithm_code = await self._generate_algorithm(analysis)
+        sample_data = await self._generate_sample_data(analysis, algorithm_code)
+        return algorithm_code, sample_data
+
+    async def _generate_multimodal_evaluator(
+        self,
+        analysis: AnalysisResult,
+        evaluator_register_name: str,
+    ) -> str:
+        """Generate the multimodal evaluator via its dedicated single call."""
+        viz_spec = analysis.visualization_spec or {}
+        prompt = CREATE_TASK_MULTIMODAL_PROMPT.format(
+            project_name=analysis.project_name,
+            background=analysis.background,
+            function_name=analysis.function_name,
+            function_signature=analysis.function_signature,
+            function_description=analysis.function_description,
+            input_format=analysis.input_format,
+            output_format=analysis.output_format,
+            metrics_json=json.dumps(analysis.metrics, indent=2),
+            algorithm_dir_name=analysis.algorithm_dir_name,
+            algorithm_file_name=analysis.algorithm_file_name,
+            evaluator_register_name=evaluator_register_name,
+            evaluator_template=get_multimodal_evaluator_template(),
+            algorithm_template=get_multimodal_algorithm_template(),
+            visualization_spec_json=json.dumps(viz_spec, indent=2),
+        )
+        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=16384)
+        sections = self._parse_sections(result.text)
+        return sections.get("EVALUATOR_CODE", _strip_code_fences(result.text))
+
+    # ------------------------------------------------------------------
+    # Deterministic boilerplate rendering
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _derive_evaluator_class_name(analysis: AnalysisResult) -> str:
+        """Derive a PascalCase evaluator class name from the project name."""
+        slug = analysis.project_name.replace("-", "_")
+        parts = [p for p in slug.split("_") if p]
+        pascal = "".join(word[:1].upper() + word[1:] for word in parts)
+        return (pascal or "Task") + "Evaluator"
+
+    @staticmethod
+    def _render_debug_run(analysis: AnalysisResult) -> str:
+        """Render debug_run.py deterministically."""
+        if analysis.evaluation_pattern == "self_spawn":
+            return DEBUG_RUN_SELF_SPAWN_TEMPLATE.format(
+                algorithm_dir_name=analysis.algorithm_dir_name,
+                algorithm_file_name=analysis.algorithm_file_name,
+                function_name=analysis.function_name,
+            )
+        return DEBUG_RUN_TEMPLATE.format(
+            algorithm_dir_name=analysis.algorithm_dir_name,
+            algorithm_file_name=analysis.algorithm_file_name,
+        )
+
+    @staticmethod
+    def _render_test_evaluator(
+        analysis: AnalysisResult,
+        evaluator_file_name: str,
+        evaluator_class_name: str,
+        *,
+        multimodal: bool = False,
+    ) -> str:
+        """Render test_evaluator.py deterministically."""
+        expected_metrics = [m["name"] for m in analysis.metrics]
+        behavior_kwarg = 'behavior_storage="rendered",' if multimodal else ""
+        return TEST_EVALUATOR_TEMPLATE.format(
+            evaluator_module_name=evaluator_file_name.removesuffix(".py"),
+            evaluator_class_name=evaluator_class_name,
+            expected_metrics_list=json.dumps(expected_metrics),
+            behavior_storage_kwarg=behavior_kwarg,
         )
 
     # ------------------------------------------------------------------
@@ -181,66 +430,85 @@ class TaskCreator:
             # sub_function or helper: generate driver via LLM
             algorithm_code = await self._generate_driver_via_llm(analysis, description)
 
-        # Generate evaluator + supporting files using the algorithm/driver as contract
-        input_schema_json = json.dumps(analysis.input_schema or {}, indent=2)
-        output_schema_json = json.dumps(analysis.output_schema or {}, indent=2)
+        # Generate supporting artifacts using the algorithm/driver as contract.
+        evaluator_file_name = evaluator_register_name + ".py"
+        derived_class_name = self._derive_evaluator_class_name(analysis)
 
-        prompt = CREATE_TASK_FROM_DRIVER_PROMPT.format(
-            project_name=analysis.project_name,
-            background=analysis.background,
-            function_name=analysis.function_name,
-            metrics_json=metrics_json,
-            algorithm_dir_name=analysis.algorithm_dir_name,
-            algorithm_file_name=analysis.algorithm_file_name,
-            driver_code=algorithm_code,
-            input_schema_json=input_schema_json,
-            output_schema_json=output_schema_json,
-            evaluator_register_name=evaluator_register_name,
-            evaluator_template=evaluator_template,
-        )
+        # Sample data first (grounded in the assembled algorithm/driver), then
+        # the evaluator (grounded in both algorithm and sample data). Each is
+        # checkpointed in place before the next step. The algorithm itself is
+        # not repaired here in reuse mode: for user-provided code we must not
+        # rewrite it, and the assembled/driver code is derived from it.
+        checkpoint = None if multimodal else self._checkpointer()
+
+        sample_data = await self._generate_sample_data(analysis, algorithm_code)
+        if checkpoint is not None:
+            sample_data = await checkpoint.checkpoint_sample_data(
+                sample_data,
+                algorithm_code=algorithm_code,
+                function_to_evolve=analysis.function_name,
+                project_name=analysis.project_name,
+            )
+            # No algorithm_trial checkpoint in reuse mode: the algorithm file
+            # embeds user-provided EVOLVE code that must not be rewritten. The
+            # final validate() pass still runs the trial (and skips algorithm
+            # repair via its reuse_algorithm guard).
 
         if multimodal:
-            viz_spec = analysis.visualization_spec or {}
-            prompt += (
-                "\n\n## IMPORTANT: Multimodal Evaluator Requirements\n"
-                "The evaluator MUST be a **multimodal** evaluator that generates "
-                "visualization images alongside metrics.\n\n"
-                f"Visualization spec: {json.dumps(viz_spec, indent=2)}\n\n"
-                "Additional requirements:\n"
-                "1. Import `BehaviorData`, `BehaviorVisualization` from `llm4ad.evaluator.behavior`\n"
-                "2. Import `BaseRenderer` from `llm4ad.evaluator.renderer`\n"
-                "3. Implement `_render_result_image()` that produces a base64 PNG visualization\n"
-                "4. Implement `_build_observation_text()` for LLM-readable text summary\n"
-                "5. Register a `BaseRenderer` subclass with `@BaseRenderer.register(...)`\n"
-                "6. Handle `cfg.behavior_storage` modes: 'rendered', 'raw', 'none'\n"
-                "7. Build `BehaviorData` with observation text + `BehaviorVisualization`\n"
+            evaluator_code = await self._generate_multimodal_evaluator(
+                analysis,
+                evaluator_register_name,
             )
+        else:
+            input_schema_json = json.dumps(analysis.input_schema or {}, indent=2)
+            output_schema_json = json.dumps(analysis.output_schema or {}, indent=2)
+            prompt = CREATE_EVALUATOR_FROM_DRIVER_PROMPT.format(
+                project_name=analysis.project_name,
+                background=analysis.background,
+                function_name=analysis.function_name,
+                metrics_json=metrics_json,
+                algorithm_dir_name=analysis.algorithm_dir_name,
+                algorithm_file_name=analysis.algorithm_file_name,
+                driver_code=algorithm_code,
+                input_schema_json=input_schema_json,
+                output_schema_json=output_schema_json,
+                sample_data=sample_data,
+                evaluator_register_name=evaluator_register_name,
+                evaluator_class_name=derived_class_name,
+                evaluator_template=evaluator_template,
+            )
+            result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
+            evaluator_code = _strip_code_fences(result.text.strip())
+            if checkpoint is not None:
+                evaluator_code = await checkpoint.checkpoint_evaluator(
+                    evaluator_code=evaluator_code,
+                    evaluator_file_name=evaluator_file_name,
+                    evaluator_class_name=derived_class_name,
+                    algorithm_dir_name=analysis.algorithm_dir_name,
+                    algorithm_file_name=analysis.algorithm_file_name,
+                    algorithm_code=algorithm_code,
+                    evaluation_pattern=analysis.evaluation_pattern,
+                )
 
-        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=16384)
-        sections = self._parse_sections(result.text)
-
-        evaluator_code = sections.get("EVALUATOR_CODE", "")
-        debug_run_code = sections.get("DEBUG_RUN", "")
-        test_evaluator_code = sections.get("TEST_EVALUATOR", "")
-        sample_data_raw = sections.get("SAMPLE_DATA", "")
-        metadata_raw = sections.get("METADATA", "{}")
-
-        metadata = self._parse_json_safe(metadata_raw)
         evaluator_class_name_raw = self._extract_evaluator_class_name(evaluator_code)
-        evaluator_class_name: str = (
-            evaluator_class_name_raw
-            if evaluator_class_name_raw
-            else metadata.get("evaluator_class_name", "TaskEvaluator")
+        evaluator_class_name = evaluator_class_name_raw or derived_class_name
+
+        debug_run_code = self._render_debug_run(analysis)
+        test_evaluator_code = self._render_test_evaluator(
+            analysis,
+            evaluator_file_name,
+            evaluator_class_name,
+            multimodal=multimodal,
         )
 
         dataset_files: dict[str, str] = {}
-        if sample_data_raw.strip() and sample_data_raw.strip().upper() != "NONE":
-            dataset_files["data/sample/instance_001.json"] = sample_data_raw.strip()
-
-        evaluator_file_name = evaluator_register_name + ".py"
+        if sample_data.strip() and sample_data.strip().upper() != "NONE":
+            dataset_files["data/sample/instance_001.json"] = sample_data.strip()
 
         config_yaml = self._build_config_yaml(
-            analysis, evaluator_class_name, evaluator_file_name,
+            analysis,
+            evaluator_class_name,
+            evaluator_file_name,
             multimodal=multimodal,
             algorithm_code_override=algorithm_code,
         )
@@ -258,6 +526,7 @@ class TaskCreator:
             algorithm_file_name=analysis.algorithm_file_name,
             function_to_evolve=analysis.function_name,
             metrics=analysis.metrics,
+            evaluation_pattern=analysis.evaluation_pattern,
             dataset_files=dataset_files,
             source_code_path=None,
             test_evaluator_code=test_evaluator_code,
@@ -269,13 +538,16 @@ class TaskCreator:
         description: str,
     ) -> str:
         """Generate a driver script via LLM for sub_function/helper roles."""
-        classifier_output = json.dumps({
-            "function_role": analysis.function_role,
-            "input_schema": analysis.input_schema,
-            "output_schema": analysis.output_schema,
-            "needed_helpers": analysis.needed_helpers,
-            "driver_strategy": analysis.driver_strategy,
-        }, indent=2)
+        classifier_output = json.dumps(
+            {
+                "function_role": analysis.function_role,
+                "input_schema": analysis.input_schema,
+                "output_schema": analysis.output_schema,
+                "needed_helpers": analysis.needed_helpers,
+                "driver_strategy": analysis.driver_strategy,
+            },
+            indent=2,
+        )
 
         prompt = GENERATE_DRIVER_PROMPT.format(
             description=description,
@@ -344,7 +616,7 @@ class TaskCreator:
         # If schema has a single key, pass that value directly; otherwise use **input_data
         if len(input_schema) == 1:
             single_key = list(input_schema.keys())[0]
-            solve_call = f"result = {func_name}(input_data[\"{single_key}\"])"
+            solve_call = f'result = {func_name}(input_data["{single_key}"])'
         else:
             solve_call = f"result = {func_name}(**input_data)"
 
@@ -369,13 +641,13 @@ class TaskCreator:
             f"    {solve_call}\n"
             f"    if isinstance(result, dict):\n"
             f"        return result\n"
-            f"    return {{\"result\": result}}\n"
+            f'    return {{"result": result}}\n'
             "\n"
             "\n"
             "def main():\n"
             '    """Entry point: read JSON from sys.argv[1], run algorithm, print JSON result."""\n'
             "    if len(sys.argv) < 2:\n"
-            '        print("Usage: python solve.py \'<input_json>\'")\n'
+            "        print(\"Usage: python solve.py '<input_json>'\")\n"
             "        sys.exit(1)\n"
             "\n"
             "    input_data = json.loads(sys.argv[1])\n"
@@ -433,10 +705,10 @@ class TaskCreator:
             multimodal_config_yaml = (
                 "# ===== Multimodal Configuration =====\n"
                 "multimodal:\n"
-                '  enabled: true\n'
-                '  max_images_per_prompt: 3\n'
-                '  image_max_size_kb: 512\n'
-                '  include_observation_text: true\n'
+                "  enabled: true\n"
+                "  max_images_per_prompt: 3\n"
+                "  image_max_size_kb: 512\n"
+                "  include_observation_text: true\n"
                 '  behavior_storage: "rendered"\n'
                 "\n"
             )
@@ -447,8 +719,7 @@ class TaskCreator:
         else:
             multimodal_config_yaml = ""
             planner_samplers_yaml = (
-                '    - name: "mutation_sampler"\n'
-                '    - name: "crossover_sampler"'
+                '    - name: "mutation_sampler"\n' '    - name: "crossover_sampler"'
             )
 
         # Evolution parameters (rule-based or default)
@@ -456,7 +727,8 @@ class TaskCreator:
 
         # Build coder prompt_template
         prompt_template = self._build_coder_prompt(
-            analysis, algorithm_code_override=algorithm_code_override,
+            analysis,
+            algorithm_code_override=algorithm_code_override,
         )
         prompt_template_indented = textwrap.indent(prompt_template, "    ")
 
@@ -499,24 +771,24 @@ class TaskCreator:
         else:
             # Build a placeholder algorithm code block for the prompt
             algorithm_code_for_prompt = (
-            f"import json\nimport sys\n\n"
-            f"# EVOLVE_START\n"
-            f"{analysis.function_signature}\n"
-            f"    \"\"\"{analysis.function_description}\"\"\"\n"
-            f"    pass\n"
-            f"# EVOLVE_END\n\n"
-            f"def process(data):\n"
-            f"    result = {analysis.function_name}(data)\n"
-            f"    return {{\"result\": result}}\n\n"
-            f"def main():\n"
-            f"    if len(sys.argv) < 2:\n"
-            f"        sys.exit(1)\n"
-            f"    input_data = json.loads(sys.argv[1])\n"
-            f"    result = process(input_data)\n"
-            f"    print(json.dumps(result))\n\n"
-            f"if __name__ == \"__main__\":\n"
-            f"    main()"
-        )
+                f"import json\nimport sys\n\n"
+                f"# EVOLVE_START\n"
+                f"{analysis.function_signature}\n"
+                f'    """{analysis.function_description}"""\n'
+                f"    pass\n"
+                f"# EVOLVE_END\n\n"
+                f"def process(data):\n"
+                f"    result = {analysis.function_name}(data)\n"
+                f'    return {{"result": result}}\n\n'
+                f"def main():\n"
+                f"    if len(sys.argv) < 2:\n"
+                f"        sys.exit(1)\n"
+                f"    input_data = json.loads(sys.argv[1])\n"
+                f"    result = process(input_data)\n"
+                f"    print(json.dumps(result))\n\n"
+                f'if __name__ == "__main__":\n'
+                f"    main()"
+            )
 
         return CODER_PROMPT_TEMPLATE.format(
             task_description=analysis.project_name.replace("_", " "),
@@ -553,45 +825,52 @@ class TaskCreator:
             i += 2
 
         if not sections:
-            logger.warning("No delimited sections found in response, treating as single evaluator block")
+            logger.warning(
+                "No delimited sections found in response, treating as single evaluator block"
+            )
             sections["EVALUATOR_CODE"] = _strip_code_fences(text)
 
         return sections
 
     @staticmethod
-    def _parse_json_safe(text: str) -> dict[str, Any]:
-        """Parse JSON from text, handling common LLM formatting issues."""
-        text = text.strip()
-        text = _strip_code_fences(text)
-        try:
-            result = json.loads(text)
-            return result if isinstance(result, dict) else {}
-        except json.JSONDecodeError:
-            # Try to find JSON object
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                try:
-                    result = json.loads(text[start:end + 1])
-                    return result if isinstance(result, dict) else {}
-                except json.JSONDecodeError:
-                    pass
-        return {}
-
-    @staticmethod
     def _extract_evaluator_class_name(evaluator_code: str) -> str | None:
-        """Extract the evaluator class name from generated code using AST."""
+        """Extract the evaluator class name from generated code using AST.
+
+        Prefers the class decorated with ``@BaseEvaluator.register(...)``, then
+        falls back to any class whose base is ``BaseEvaluator`` (handling both
+        ``BaseEvaluator`` and ``<module>.BaseEvaluator`` forms). This keeps the
+        config's ``module`` reference aligned with whatever name the LLM chose.
+        """
         try:
             tree = ast.parse(evaluator_code)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    # Check if it's a BaseEvaluator subclass
-                    for base in node.bases:
-                        if isinstance(base, ast.Name) and base.id == "BaseEvaluator":
-                            return node.name
-            return None
         except SyntaxError:
             return None
+
+        def _is_base_evaluator(base: ast.expr) -> bool:
+            if isinstance(base, ast.Name):
+                return base.id == "BaseEvaluator"
+            if isinstance(base, ast.Attribute):
+                return base.attr == "BaseEvaluator"
+            return False
+
+        # First pass: a class carrying @BaseEvaluator.register(...).
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                for dec in node.decorator_list:
+                    if (
+                        isinstance(dec, ast.Call)
+                        and isinstance(dec.func, ast.Attribute)
+                        and dec.func.attr == "register"
+                    ):
+                        return node.name
+
+        # Second pass: any class directly inheriting from BaseEvaluator.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and any(
+                _is_base_evaluator(base) for base in node.bases
+            ):
+                return node.name
+        return None
 
 
 def _strip_code_fences(text: str) -> str:
@@ -623,7 +902,8 @@ def _strip_code_fences(text: str) -> str:
     cleaned = "\n".join(lines).strip()
     # Defensive: drop any remaining bare ``` lines so they don't cause SyntaxError.
     cleaned_lines = [
-        line for line in cleaned.split("\n")
+        line
+        for line in cleaned.split("\n")
         if line.strip() != "```" and not line.strip().startswith("```")
     ]
     return "\n".join(cleaned_lines).strip()
