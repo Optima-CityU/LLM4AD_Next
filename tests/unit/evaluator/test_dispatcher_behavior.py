@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from llm4ad.config.evaluator import CustomEvaluatorConfig
-from llm4ad.evaluator.base import EvaluationResult
+from llm4ad.evaluator.base import BaseBatchEvaluator, EvaluationResult, Metric
 from llm4ad.evaluator.behavior import BehaviorData, BehaviorVisualization
 from llm4ad.evaluator.dispatcher import EvaluationDispatcher
 
@@ -48,6 +48,25 @@ class _TimeoutRecordingEvaluator:
     async def evaluate(self, cfg):
         self.contexts.append(cfg)
         return _make_result(1.0)
+
+
+class _BatchRecordingEvaluator(BaseBatchEvaluator):
+    """Comparative evaluator used to verify one-call cohort dispatch."""
+
+    def __init__(self) -> None:
+        self.batches = []
+
+    @property
+    def name(self) -> str:
+        return "batch_recording"
+
+    @property
+    def metrics(self) -> list[Metric]:
+        return []
+
+    async def evaluate_batch(self, cfgs):
+        self.batches.append(cfgs)
+        return [_make_result(float(index + 1)) for index, _cfg in enumerate(cfgs)]
 
 
 class TestDispatcherBehaviorAggregation:
@@ -132,3 +151,37 @@ def test_dispatch_batch_uses_configured_evaluator_timeout():
 
     assert results[0].success is True
     assert [context.timeout for context in evaluator.contexts] == [600]
+
+
+def test_dispatch_batch_calls_comparative_evaluator_once_per_dataset():
+    """A batch evaluator must receive the same-generation cohort in one call."""
+    dispatcher = EvaluationDispatcher.__new__(EvaluationDispatcher)
+    dispatcher.config = CustomEvaluatorConfig(module="example.py:ExampleEvaluator", timeout=120)
+    dispatcher._parallel = True
+    dispatcher._data_files = ["/tmp/paper-task.json"]
+    dispatcher._behavior_storage = "none"
+    dispatcher._semaphore = asyncio.Semaphore(2)
+    dispatcher._eval_cls = _BatchRecordingEvaluator
+    evaluator = _BatchRecordingEvaluator()
+    dispatcher._create_evaluator = lambda: evaluator
+
+    algorithms = [
+        SimpleNamespace(
+            id="candidate-a",
+            generation=2,
+            parent_ids=["parent"],
+            worktree=SimpleNamespace(path="/tmp/a"),
+        ),
+        SimpleNamespace(
+            id="candidate-b",
+            generation=2,
+            parent_ids=["parent"],
+            worktree=SimpleNamespace(path="/tmp/b"),
+        ),
+    ]
+    results = asyncio.run(dispatcher.dispatch_batch(algorithms))
+
+    assert [result.score for result in results] == [1.0, 2.0]
+    assert len(evaluator.batches) == 1
+    assert [cfg.candidate_id for cfg in evaluator.batches[0]] == ["candidate-a", "candidate-b"]
+    assert all(cfg.generation == 2 for cfg in evaluator.batches[0])

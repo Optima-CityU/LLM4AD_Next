@@ -173,6 +173,7 @@ _UNIFIED_JSON_SUFFIX = (
     "The code after EVOLVE_END calls the function by name and depends on these imports, "
     "so keep the exact function name from 'Current block content'. "
     "Do not include markdown fences or the EVOLVE markers themselves in the code field.\n"
-    "IMPORTANT: The function receives 'nodes' as a Python list of (x, y) tuples (from json.loads), "
-    "NOT a numpy array. You must convert it with np.array(nodes) before doing any numpy operations."
+    "IMPORTANT: Infer the function's input types and data contract only from the task background, "
+    "repository context, and current EVOLVE block. Do not introduce assumptions from unrelated "
+    "problem domains."
 )

@@ -528,6 +528,7 @@ class IslandGAOrchestrator(BaseOrchestrator):
         return EvolutionResult(
             state=self.state,
             best_individual=self.global_best_individual,
+            final_population=self._get_global_population(),
             final_generation=self.current_generation,
             total_evaluations=self._get_total_evaluations(),
             history=self.history,

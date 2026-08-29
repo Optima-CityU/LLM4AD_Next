@@ -152,6 +152,36 @@ class BaseEvaluator(Registrable, ABC, registry_name="evaluator"):
         return total / total_weight if total_weight > 0 else 0.0
 
 
+class BaseBatchEvaluator(BaseEvaluator, ABC):
+    """Evaluator interface for strategies that compare candidates together.
+
+    Normal evaluators receive one :class:`EvalContext` at a time. Comparative
+    strategies, such as a debate or tournament, need all candidates from the
+    same generation in one call. The dispatcher only uses this interface for
+    subclasses of ``BaseBatchEvaluator``, so existing evaluators keep their
+    current construction and concurrency semantics.
+    """
+
+    async def evaluate(self, cfg: EvalContext) -> EvaluationResult:
+        """Evaluate one candidate through the batch implementation."""
+        results = await self.evaluate_batch([cfg])
+        if len(results) != 1:
+            raise ValueError(
+                "Batch evaluator must return exactly one result for one context"
+            )
+        return results[0]
+
+    @abstractmethod
+    async def evaluate_batch(
+        self, cfgs: list[EvalContext]
+    ) -> list[EvaluationResult]:
+        """Evaluate a same-generation candidate cohort.
+
+        Results must be returned in the same order as ``cfgs``.
+        """
+        ...
+
+
 class PythonEvaluator(BaseEvaluator, ABC):
     """Base class for Python-based evaluation.
 

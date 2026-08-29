@@ -1,0 +1,65 @@
+project_name: real_paper_optimization
+base_dir: ./runs
+random_seed: 42
+
+providers:
+  - name: default
+    type: openai_compatible
+    base_url: ${LLM_BASE_URL}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL}
+    timeout: 300
+    max_retries: 2
+
+planner:
+  type: llm_evolution
+  provider: default
+  samplers:
+    - name: init_sampler
+    - name: mutation_sampler
+    - name: crossover_sampler
+
+coder:
+  type: custom
+  provider: default
+  default_extension: py
+
+evaluator:
+  type: custom
+  module: task_evaluator.py:AlnsTspDestroyEvaluator
+  metrics:
+    - relative_tour_gap_pct
+    - runtime_ms
+  timeout: 60
+  dataset:
+    mode: directory
+    path: data/train
+    recursive: false
+
+evolution:
+  type: meoh
+  population_size: 2
+  max_sample_nums: 6
+  num_samplers: 1
+
+version_control:
+  enabled: true
+  type: git_worktree
+  local_path: algorithm/ALNS-master
+  auto_initialize: true
+  auto_cleanup: false
+
+repo_analyzer:
+  type: evolve_detector
+  include:
+    - "solve.py"
+  exclude:
+    - ".git/**"
+    - "__pycache__/**"
+    - "*.pyc"
+    - ".pytest_cache/**"
+    - "tests/**"
+    - "docs/**"
+    - "examples/**"
+    - "build/**"
+    - "dist/**"

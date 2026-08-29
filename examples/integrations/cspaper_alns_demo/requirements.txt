@@ -1,0 +1,4 @@
+alns==7.0.0
+numpy==1.25.2; python_version < "3.12"
+numpy==1.26.4; python_version >= "3.12"
+tsplib95==0.7.1

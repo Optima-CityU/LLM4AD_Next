@@ -201,15 +201,24 @@ Return the code in a fenced code block with file path annotation:
 
         try:
             parent_code = context.get("parent_code")
+            replacement_code = context.get("replacement_code")
 
-            mode = "mutation" if parent_code is not None else "initial"
+            mode = (
+                "replacement"
+                if replacement_code is not None
+                else "mutation" if parent_code is not None else "initial"
+            )
             logger.debug(
                 f"[Coder] mode={mode} model={self.provider.model} "
                 f"temperature={self.temperature} parent_code={'yes' if parent_code else 'no'} "
                 f"working_dir={working_path.name}"
             )
 
-            if parent_code is not None:
+            if replacement_code is not None:
+                result = self._apply_replacement_code(
+                    str(replacement_code), context, working_path
+                )
+            elif parent_code is not None:
                 # Mutation mode: replace EVOLVE blocks in parent code
                 result = await self._generate_mutation(prompt, context, working_path, **kwargs)
             else:
@@ -226,6 +235,179 @@ Return the code in a fenced code block with file path annotation:
                 error_message=f"Generation failed: {str(e)}",
                 timing=ExecutionTiming(wall_time_ms=(time.time() - start_time) * 1000),
             )
+
+    def _apply_replacement_code(
+        self,
+        replacement_code: str,
+        context: dict[str, Any],
+        working_path: Path,
+    ) -> GenerateResult:
+        """Apply planner-produced code directly to one targeted EVOLVE block."""
+        targets = [str(item) for item in context.get("targeted_files", []) if str(item)]
+        if not targets:
+            targets = self._discover_evolve_targets(working_path)
+        if len(targets) != 1:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=(
+                    "Planner replacement requires exactly one EVOLVE target; "
+                    f"found {len(targets)}: {targets}"
+                ),
+            )
+
+        try:
+            relative_path, target_path = self._safe_target_path(working_path, targets[0])
+        except ValueError as exc:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=str(exc),
+            )
+        if not target_path.is_file():
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=f"EVOLVE target does not exist: {relative_path}",
+            )
+        extension = target_path.suffix.lstrip(".")
+        language = self._extension_to_language(extension) or context.get("language", "python")
+
+        original_content = target_path.read_text(encoding="utf-8")
+        evolve_blocks = self._find_evolve_blocks(original_content)
+        if len(evolve_blocks) != 1:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=(
+                    f"EVOLVE target {relative_path} must contain exactly one block; "
+                    f"found {len(evolve_blocks)}"
+                ),
+            )
+
+        extracted = self._extract_code(replacement_code)
+        if not extracted:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message="Planner replacement code is empty",
+            )
+        nested_blocks = self._find_evolve_blocks(extracted)
+        if len(nested_blocks) == 1:
+            extracted = nested_blocks[0][3]
+        elif len(nested_blocks) > 1:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message="Planner replacement contains multiple EVOLVE blocks",
+            )
+        new_block = self._sanitize_evolve_block(extracted, language)
+
+        _pattern, comment_style, start_match, original_block = evolve_blocks[0]
+        if new_block.strip() == original_block.strip():
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=f"Planner replacement did not change EVOLVE block in {relative_path}",
+            )
+
+        candidate_content = self._replace_single_evolve_block(
+            original_content,
+            original_block,
+            new_block,
+            comment_style,
+            start_match,
+        )
+        if candidate_content == original_content:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=f"Failed to replace EVOLVE block in {relative_path}",
+            )
+        is_valid, error = self.validate_code(candidate_content, language)
+        if not is_valid:
+            return GenerateResult(
+                status=GenerateStatus.FAILED,
+                working_dir=str(working_path),
+                error_message=f"Full file after EVOLVE replacement is invalid: {error}",
+            )
+
+        target_path.write_text(candidate_content, encoding="utf-8")
+        logger.info("Applied planner replacement directly to EVOLVE target {}", relative_path)
+        return GenerateResult(
+            status=GenerateStatus.SUCCESS,
+            working_dir=str(working_path),
+            generated_files=[relative_path],
+            main_file=relative_path,
+            metadata={"direct_replacement": True, "targeted_file": relative_path},
+        )
+
+    def _discover_evolve_targets(self, working_path: Path) -> list[str]:
+        """Find source files containing EVOLVE blocks below a worktree."""
+        targets: list[str] = []
+        for path in sorted(working_path.rglob("*")):
+            if not path.is_file() or ".git" in path.parts:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if self._find_evolve_blocks(content):
+                targets.append(path.relative_to(working_path).as_posix())
+        return targets
+
+    @staticmethod
+    def _safe_target_path(working_path: Path, target: str) -> tuple[str, Path]:
+        """Resolve a relative target and reject paths outside the worktree."""
+        root = working_path.resolve()
+        raw_path = Path(target)
+        candidate = raw_path.resolve() if raw_path.is_absolute() else (root / raw_path).resolve()
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"EVOLVE target escapes worktree: {target}") from exc
+        return relative.as_posix(), candidate
+
+    def _replace_single_evolve_block(
+        self,
+        content: str,
+        original_block: str,
+        new_block: str,
+        comment_style: str,
+        start_match: str,
+    ) -> str:
+        """Replace one detected EVOLVE block while retaining its markers."""
+        orig_stripped = original_block.rstrip("\n")
+        if comment_style in {"#", "//"}:
+            full_original = (
+                f"{comment_style} EVOLVE_START{start_match}\n"
+                f"{orig_stripped}\n{comment_style} EVOLVE_END"
+            )
+            full_new = (
+                f"{comment_style} EVOLVE_START{start_match}\n"
+                f"{new_block}\n{comment_style} EVOLVE_END"
+            )
+        elif comment_style == "/* */":
+            full_original = (
+                f"/* EVOLVE_START{start_match} */\n{orig_stripped}\n/* EVOLVE_END */"
+            )
+            full_new = f"/* EVOLVE_START{start_match} */\n{new_block}\n/* EVOLVE_END */"
+        elif comment_style == "<!-- -->":
+            full_original = (
+                f"<!-- EVOLVE_START{start_match} -->\n"
+                f"{orig_stripped}\n<!-- EVOLVE_END -->"
+            )
+            full_new = (
+                f"<!-- EVOLVE_START{start_match} -->\n"
+                f"{new_block}\n<!-- EVOLVE_END -->"
+            )
+        else:
+            return content
+        if full_original in content:
+            return content.replace(full_original, full_new, 1)
+        return self._replace_block_fuzzy(
+            content, original_block, new_block, comment_style, start_match
+        )
 
     async def _generate_initial(
         self, prompt: str, context: dict[str, Any], working_path: Path, **kwargs
@@ -441,6 +623,8 @@ Return the code in a fenced code block with file path annotation:
                     errors.append(f"[{file_path}] Failed to extract code for block '{block_name}'")
                     continue
 
+                new_block = self._sanitize_evolve_block(new_block, language)
+
                 # Validate new block
                 is_valid, error = self.validate_code(new_block, language)
                 if not is_valid:
@@ -475,12 +659,18 @@ Return the code in a fenced code block with file path annotation:
                     full_new = ""
 
                 if full_original in modified_content:
-                    modified_content = modified_content.replace(full_original, full_new)
+                    candidate_content = modified_content.replace(full_original, full_new)
                 else:
                     # Exact match not found, try with different whitespace
-                    modified_content = self._replace_block_fuzzy(
+                    candidate_content = self._replace_block_fuzzy(
                         modified_content, original_block, new_block, comment_style, start_match
                     )
+
+                is_valid, error = self.validate_code(candidate_content, language)
+                if not is_valid:
+                    errors.append(f"[{file_path}] Full file after block '{block_name}': {error}")
+                    continue
+                modified_content = candidate_content
 
             # Write modified file
             output_path = working_path / file_path
@@ -609,6 +799,17 @@ Return the code in a fenced code block with file path annotation:
             return {f"implementation.{ext}": single}
 
         return {}
+
+    @staticmethod
+    def _sanitize_evolve_block(code: str, language: str) -> str:
+        """Remove Python module-only statements that cannot live inside an EVOLVE block."""
+        if language.lower() not in {"python", "py"}:
+            return code
+        return re.sub(
+            r"(?m)^\s*from\s+__future__\s+import\s+[^\r\n]+(?:\r?\n|$)",
+            "",
+            code,
+        ).strip()
 
     def _collect_project_context(
         self, working_dir: str, max_chars: int | None = None, mask_evolve_blocks: bool = False

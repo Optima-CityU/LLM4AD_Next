@@ -7,9 +7,11 @@
 | Symbol | Purpose | Source |
 |---|---|---|
 | `BaseEvaluator` | Root class for custom Python evaluators; subclass and implement `evaluate(...)` | `src/llm4ad/evaluator/base.py` |
+| `BaseBatchEvaluator` | Base for evaluators that compare a same-generation cohort via `evaluate_batch(...)` | `src/llm4ad/evaluator/base.py` |
 | `PythonEvaluator` | Convenience subclass that calls a Python function directly | `src/llm4ad/evaluator/base.py` |
 | `BenchmarkEvaluator` | Multi-instance aggregation (one evaluation per dataset file) | `src/llm4ad/evaluator/base.py` |
 | `LLMJudgeEvaluator` | LLM-as-a-judge evaluator for outputs you cannot measure directly | `src/llm4ad/evaluator/llm_judge.py` |
+| `PaperRevisionEvaluator` | Static protection plus multi-LLM panel or debate evaluation for selected paper sections | `src/llm4ad/evaluator/paper_revision/` |
 | `ExecutableEvaluator` | Runs an external command and extracts metrics from stdout via regex | `src/llm4ad/evaluator/base.py` |
 | `EvaluationDispatcher` | Dispatches to the concrete evaluator based on `evaluator.type` + `module:` | `src/llm4ad/evaluator/dispatcher.py` |
 | `EvaluationResult` | Standard return envelope: `score`, `metrics`, `metadata`, `success`, … | `src/llm4ad/evaluator/base.py` |
@@ -25,11 +27,13 @@ from llm4ad.evaluator import PythonEvaluator
 from llm4ad.evaluator.base import EvaluationResult, Metric, MetricType
 
 class SortEvaluator(PythonEvaluator):
-    metrics = [Metric(name="comparisons", type=MetricType.MINIMIZE)]
+    @property
+    def metrics(self):
+        return [Metric(name="comparisons", type=MetricType.MINIMIZE)]
 
-    async def evaluate(self, algorithm, ctx) -> EvaluationResult:
-        # Run the algorithm at ctx.project_root and collect stats
-        n_cmp = run_algorithm_and_count(ctx.project_root, ctx.data_path)
+    async def evaluate(self, cfg) -> EvaluationResult:
+        # Run the algorithm at cfg.project_root and collect stats
+        n_cmp = run_algorithm_and_count(cfg.project_root, cfg.data_path)
         return EvaluationResult(
             score=-n_cmp,            # evolution always maximizes score
             metrics={"comparisons": n_cmp},
@@ -55,7 +59,7 @@ evaluator:
 
 ## EvalContext
 
-Each `evaluate(algorithm, ctx)` call receives an `EvalContext`:
+Each `evaluate(cfg)` call receives an `EvalContext`:
 
 | Field | Meaning |
 |---|---|
@@ -63,6 +67,35 @@ Each `evaluate(algorithm, ctx)` call receives an `EvalContext`:
 | `data_path` | One instance path resolved from `DatasetConfig` (mode-dependent) |
 | `timeout` | Soft timeout in seconds |
 | `behavior_storage` | `"rendered"` / `"raw"` / `"none"` — hints whether evaluators should capture behavior data |
+| `candidate_id` | Current candidate ID; legacy evaluators may ignore it |
+| `generation` | Evolution generation used for reproducible assignment and provenance |
+| `parent_ids` | Parent candidate IDs used to trace revision lineage |
+
+## Paper revision evaluator
+
+`PaperRevisionEvaluator` evaluates normalized selected-section revisions. It does not parse PDF/TeX, generate text, replace source, or persist memory. The upstream parser writes a task JSON containing `task_id`, `section_id`, `original_text`, neighboring context, relevant `cspaper_findings`, constraints, and an optional rubric. Each candidate worktree contains `candidate.json` with `candidate_id`, `section_id`, and `revised_text`.
+
+Configure it as a custom evaluator:
+
+```yaml
+evaluator:
+  type: custom
+  provider: judge_openai
+  module: llm4ad.evaluator.paper_revision:PaperRevisionEvaluator
+  mode: panel                  # panel or debate
+  judges: [judge_openai, judge_claude]
+  panel_size: 2
+  min_judges: 2
+  candidate_file: candidate.json
+  random_seed: 42
+  dataset:
+    mode: files
+    files: [paper-task.json]
+```
+
+`panel` anonymizes and deterministically swaps original/revision order before independent scoring. `debate` uses `BaseBatchEvaluator` to review a same-generation cohort, cross-examine anonymous reviews, and cast final ballots.
+
+Stable metrics are `baseline_score`, `revised_score`, `score_delta`, `judge_agreement`, and `static_valid`. Dimension details, judge reports, ballots, static checks, and side-effect-free `memory_candidates` are stored in `EvaluationResult.metadata`. Persist recommended memory only after the winning candidate has been selected and accepted.
 
 ## Multi-instance / benchmark evaluation
 

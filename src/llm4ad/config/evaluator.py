@@ -271,3 +271,12 @@ class EvalContext(BaseModel):
         "'rendered' (pre-rendered images), 'raw' (compact JSON for deferred rendering), "
         "or 'none' (no behavior data).",
     )
+    candidate_id: str = Field(
+        default="", description="Identifier of the candidate being evaluated"
+    )
+    generation: int = Field(
+        default=0, ge=0, description="Evolution generation of the candidate"
+    )
+    parent_ids: list[str] = Field(
+        default_factory=list, description="Parent candidate identifiers"
+    )

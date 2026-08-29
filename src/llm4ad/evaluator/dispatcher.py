@@ -16,7 +16,7 @@ from llm4ad.config.schema import (
     EvalContext,
     EvaluatorConfig,
 )
-from llm4ad.evaluator.base import BaseEvaluator, EvaluationResult
+from llm4ad.evaluator.base import BaseBatchEvaluator, BaseEvaluator, EvaluationResult
 
 if TYPE_CHECKING:
     from llm4ad.planner.base import Algorithm
@@ -48,6 +48,7 @@ class EvaluationDispatcher:
         behavior_storage: str = "rendered",
         config_dir: str | None = None,
         provider_config: Any = None,
+        providers: dict[str, Any] | None = None,
     ):
         """Initialize the dispatcher with an evaluator instance.
 
@@ -65,6 +66,8 @@ class EvaluationDispatcher:
             provider_config: Resolved provider configuration for custom
                 evaluators that need LLM access. Passed through to the
                 evaluator constructor.
+            providers: Initialized provider instances keyed by configured name.
+                Batch LLM evaluators use this to compose heterogeneous panels.
         """
         self.config: EvaluatorConfig = config
         self._parallel = config.parallel
@@ -72,6 +75,7 @@ class EvaluationDispatcher:
         self._behavior_storage = behavior_storage
         self._config_dir = config_dir
         self._provider_config = provider_config
+        self._providers = providers or {}
 
         # Concurrency limit for parallel evaluation subprocesses
         effective_workers = config.batch_size or os.cpu_count() or 4
@@ -179,6 +183,8 @@ class EvaluationDispatcher:
                 kwargs: dict[str, Any] = {"config": self.config}
                 if "provider_config" in params and self._provider_config is not None:
                     kwargs["provider_config"] = self._provider_config
+                if "providers" in params:
+                    kwargs["providers"] = self._providers
                 return self._eval_cls(**kwargs)
             return self._eval_cls()
         return self._eval_cls(self.config)
@@ -373,6 +379,11 @@ class EvaluationDispatcher:
         TODO: Now → Means, maybe can update to more configuration（算术平均，几何平均，最大值，最小值之类的）
         """
         kwargs.setdefault("timeout", self.config.timeout)
+
+        eval_cls = getattr(self, "_eval_cls", None)
+        if eval_cls is not None and issubclass(eval_cls, BaseBatchEvaluator):
+            return await self._dispatch_comparative_batch(algorithms, **kwargs)
+
         n_files = len(self._data_files)
 
         if n_files == 0:
@@ -445,4 +456,54 @@ class EvaluationDispatcher:
             alg_results = raw_results[start:end]
             aggregated.append(self._aggregate_results(alg_results))
 
+        return aggregated
+
+    async def _dispatch_comparative_batch(
+        self,
+        algorithms: list[Algorithm],
+        **kwargs: Any,
+    ) -> list[EvaluationResult]:
+        """Evaluate candidate cohorts with a ``BaseBatchEvaluator``.
+
+        A cohort is evaluated once per dataset file. Per-file results are then
+        transposed and aggregated back into one result per candidate.
+        """
+        data_files = self._data_files or [""]
+
+        def _context(algorithm: Algorithm, data_path: str) -> EvalContext:
+            return EvalContext(
+                data_path=data_path,
+                project_root=algorithm.worktree.path if algorithm.worktree else "",
+                behavior_storage=self._behavior_storage,
+                candidate_id=getattr(algorithm, "id", ""),
+                generation=getattr(algorithm, "generation", 0),
+                parent_ids=list(getattr(algorithm, "parent_ids", [])),
+                **kwargs,
+            )
+
+        async def _evaluate_file(data_path: str) -> list[EvaluationResult]:
+            evaluator = self._create_evaluator()
+            if not isinstance(evaluator, BaseBatchEvaluator):
+                raise TypeError("Comparative dispatcher requires BaseBatchEvaluator")
+            contexts = [_context(algorithm, data_path) for algorithm in algorithms]
+            async with self._semaphore:
+                results = await evaluator.evaluate_batch(contexts)
+            if len(results) != len(algorithms):
+                raise ValueError(
+                    "Batch evaluator returned "
+                    f"{len(results)} results for {len(algorithms)} candidates"
+                )
+            return results
+
+        if self._parallel:
+            per_file = list(await asyncio.gather(*[_evaluate_file(path) for path in data_files]))
+        else:
+            per_file = []
+            for path in data_files:
+                per_file.append(await _evaluate_file(path))
+
+        aggregated: list[EvaluationResult] = []
+        for candidate_index in range(len(algorithms)):
+            candidate_results = [results[candidate_index] for results in per_file]
+            aggregated.append(self._aggregate_results(candidate_results))
         return aggregated
