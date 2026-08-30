@@ -1314,6 +1314,31 @@ async def _run_agent_build(
         }
 
         stream_done = False
+
+        # The agent container can work silently for many minutes (LLM thinking /
+        # codegen) without emitting any chunk, which would trip the SSE bridge's
+        # max_idle on the frontend. Push a lightweight progress event on a fixed
+        # interval to keep the stream's "last data" timestamp fresh; the frontend
+        # also renders it as an elapsed-time indicator.
+        async def _push_progress_loop() -> None:
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            while True:
+                await asyncio.sleep(settings.CHAT_TUNE_PROGRESS_INTERVAL)
+                if cancelled or _is_cancelled():
+                    return
+                elapsed = int(loop.time() - started)
+                push_chat_tune_chunk(
+                    session_id,
+                    turn_id,
+                    {
+                        "type": "progress",
+                        "stage": "build" if allow_build else "gathering",
+                        "elapsed_seconds": elapsed,
+                    },
+                )
+
+        progress_task = asyncio.create_task(_push_progress_loop())
         try:
             async with aconnect_sse(
                 client, "POST", f"{base_url}/agent", json=body
@@ -1389,6 +1414,9 @@ async def _run_agent_build(
         except httpx.RemoteProtocolError:
             if not stream_done:
                 raise
+        finally:
+            progress_task.cancel()
+            await asyncio.gather(progress_task, return_exceptions=True)
 
         # Sync produced files: the agent wrote the package under
         # {project_name}/ in the mounted dir. Upload only that subdir and clear

@@ -2099,6 +2099,8 @@
       "loadMore": "Load earlier messages",
       "loadingMore": "Loading...",
       "generating": "AI is thinking...",
+      "buildInProgress": "Building in progress · elapsed {{elapsed}}",
+      "gatherInProgress": "Gathering requirements · elapsed {{elapsed}}",
       "cancelled": "Generation stopped",
       "failed": "Generation failed",
       "retry": "Retry",

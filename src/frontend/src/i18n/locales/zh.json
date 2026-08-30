@@ -2100,6 +2100,8 @@
       "loadMore": "加载更早的消息",
       "loadingMore": "加载中...",
       "generating": "AI 正在思考...",
+      "buildInProgress": "构建进行中 · 已耗时 {{elapsed}}",
+      "gatherInProgress": "需求收集进行中 · 已耗时 {{elapsed}}",
       "cancelled": "已停止生成",
       "failed": "生成失败",
       "retry": "重试",
