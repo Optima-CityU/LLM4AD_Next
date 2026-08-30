@@ -225,6 +225,7 @@ async def test_validate_runs_final_pass_after_last_repair(monkeypatch):
         history_section="",
         multimodal=False,
         evaluation_pattern="separate_script",
+        blueprint=None,
     ):
         return good_evaluator
 

@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -219,6 +220,40 @@ class TaskValidator:
             if new_error is None:
                 return repaired
             algorithm_code = repaired
+        # Deterministic last resort: if the LLM never produced the EVOLVE
+        # markers, wrap the first top-level function ourselves. The markers are
+        # mandatory for the platform to evolve the code, and a missing-marker
+        # policy is a generation failure we can repair without another LLM call.
+        if self._check_evolve_markers(algorithm_code) is not None:
+            algorithm_code = self._ensure_evolve_markers(algorithm_code)
+        return algorithm_code
+
+    @staticmethod
+    def _ensure_evolve_markers(algorithm_code: str) -> str:
+        """Wrap the first top-level function in EVOLVE markers if they are missing.
+
+        Only mutates code that is already missing the markers; returns
+        ``algorithm_code`` unchanged otherwise. Used as a deterministic fallback
+        when the LLM keeps generating a policy file without the markers.
+        """
+        if "EVOLVE_START" in algorithm_code and "EVOLVE_END" in algorithm_code:
+            return algorithm_code
+        try:
+            tree = ast.parse(algorithm_code)
+        except SyntaxError:
+            return algorithm_code
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                lines = algorithm_code.splitlines()
+                start = node.lineno - 1
+                end = node.end_lineno if node.end_lineno is not None else len(lines)
+                return "\n".join(
+                    lines[:start]
+                    + ["# EVOLVE_START"]
+                    + lines[start:end]
+                    + ["# EVOLVE_END"]
+                    + lines[end:]
+                )
         return algorithm_code
 
     async def checkpoint_sample_data(
@@ -340,6 +375,8 @@ class TaskValidator:
         algorithm_dir_name: str,
         algorithm_file_name: str,
         algorithm_code: str,
+        function_to_evolve: str = "solve",
+        metrics: list[dict[str, Any]] | None = None,
         multimodal: bool = False,
         evaluation_pattern: str = "separate_script",
         max_repairs: int = 2,
@@ -353,6 +390,16 @@ class TaskValidator:
         Returns:
             The (possibly repaired) evaluator source.
         """
+        repair_blueprint = self._make_partial_blueprint(
+            evaluator_code=evaluator_code,
+            algorithm_code=algorithm_code,
+            evaluator_file_name=evaluator_file_name,
+            evaluator_class_name=evaluator_class_name,
+            algorithm_dir_name=algorithm_dir_name,
+            algorithm_file_name=algorithm_file_name,
+            function_to_evolve=function_to_evolve,
+            metrics=metrics,
+        )
         for _ in range(max_repairs + 1):
             error = self._check_syntax("evaluator", evaluator_code)
             if error is None:
@@ -382,6 +429,7 @@ class TaskValidator:
                 error,
                 multimodal=multimodal,
                 evaluation_pattern=evaluation_pattern,
+                blueprint=repair_blueprint,
             )
         return evaluator_code
 
@@ -411,6 +459,7 @@ class TaskValidator:
         algorithm_dir_name: str = "algorithm",
         algorithm_file_name: str = "algorithm.py",
         function_to_evolve: str = "solve",
+        metrics: list[dict[str, Any]] | None = None,
         project_name: str = "_checkpoint",
     ) -> TaskBlueprint:
         """Build a minimal blueprint for writing a partial package to temp.
@@ -438,7 +487,7 @@ class TaskValidator:
             algorithm_dir_name=algorithm_dir_name,
             algorithm_file_name=algorithm_file_name,
             function_to_evolve=function_to_evolve,
-            metrics=[],
+            metrics=metrics or [],
             dataset_files=({"data/sample/instance_001.json": sample_data} if sample_data else {}),
         )
 
@@ -906,6 +955,7 @@ class TaskValidator:
                     history_section=history_section,
                     multimodal=multimodal,
                     evaluation_pattern=blueprint.evaluation_pattern,
+                    blueprint=blueprint,
                 )
                 blueprint.test_evaluator_code = await self._repair_test_evaluator(
                     blueprint,
@@ -922,6 +972,7 @@ class TaskValidator:
                 history_section=history_section,
                 multimodal=multimodal,
                 evaluation_pattern=blueprint.evaluation_pattern,
+                blueprint=blueprint,
             )
         elif any(error.startswith(p) for p in algorithm_repair_prefixes):
             # Check if the error is actually a JSON parsing issue in sample data
@@ -952,6 +1003,7 @@ class TaskValidator:
                 history_section=history_section,
                 multimodal=multimodal,
                 evaluation_pattern=blueprint.evaluation_pattern,
+                blueprint=blueprint,
             )
 
         return blueprint
@@ -964,19 +1016,47 @@ class TaskValidator:
         history_section: str = "",
         multimodal: bool = False,
         evaluation_pattern: str = "separate_script",
+        blueprint: TaskBlueprint | None = None,
     ) -> str:
         """Send repair prompt for evaluator code.
 
         Dispatches to the pattern-correct prompt/template so a self-spawn
         evaluator is repaired as self-spawn (not rewritten to the
-        separate-script contract).
+        separate-script contract). When a blueprint is available, its
+        task-specific context (function name, metrics, algorithm code, class /
+        register names) is included so the LLM can rebuild the evaluator
+        correctly instead of guessing.
         """
+        if blueprint is not None:
+            context = {
+                "project_name": blueprint.project_name,
+                "evaluator_class_name": blueprint.evaluator_class_name,
+                "evaluator_register_name": blueprint.evaluator_file_name.removesuffix(".py"),
+                "function_name": blueprint.function_to_evolve,
+                "metrics_json": json.dumps(blueprint.metrics, indent=2),
+                "algorithm_dir_name": blueprint.algorithm_dir_name,
+                "algorithm_file_name": blueprint.algorithm_file_name,
+                "algorithm_code": blueprint.algorithm_code,
+            }
+        else:
+            context = {
+                "project_name": "",
+                "evaluator_class_name": "",
+                "evaluator_register_name": "",
+                "function_name": "",
+                "metrics_json": "[]",
+                "algorithm_dir_name": "",
+                "algorithm_file_name": "",
+                "algorithm_code": "",
+            }
+
         if multimodal:
             prompt = REPAIR_EVALUATOR_MULTIMODAL_PROMPT.format(
                 evaluator_code=evaluator_code,
                 error_message=error,
                 history_section=history_section,
                 evaluator_template=get_multimodal_evaluator_template(),
+                **context,
             )
         elif evaluation_pattern == "self_spawn":
             prompt = REPAIR_EVALUATOR_SELF_SPAWN_PROMPT.format(
@@ -984,6 +1064,7 @@ class TaskValidator:
                 error_message=error,
                 history_section=history_section,
                 evaluator_template=get_self_spawn_evaluator_template(),
+                **context,
             )
         else:
             prompt = REPAIR_EVALUATOR_PROMPT.format(
@@ -991,8 +1072,9 @@ class TaskValidator:
                 error_message=error,
                 history_section=history_section,
                 evaluator_template=get_evaluator_template(),
+                **context,
             )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=8192)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_algorithm(
@@ -1038,7 +1120,7 @@ class TaskValidator:
                 algorithm_template=get_algorithm_template("separate_script"),
             )
 
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=4096)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_debug_run(
@@ -1060,7 +1142,7 @@ class TaskValidator:
             algorithm_module=algo_module,
             function_name=blueprint.function_to_evolve,
         )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=4096)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_test_evaluator(
@@ -1080,7 +1162,7 @@ class TaskValidator:
             evaluator_class_name=blueprint.evaluator_class_name,
             metric_names=json.dumps(metric_names),
         )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=4096)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_dataset(self, blueprint: TaskBlueprint, error: str) -> str:
@@ -1092,7 +1174,7 @@ class TaskValidator:
             output_format="JSON result",
             algorithm_code=blueprint.algorithm_code,
         )
-        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=2048)
+        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=16384)
         text = _strip_code_fences(result.text.strip())
 
         # Validate and clean JSON
@@ -1140,7 +1222,7 @@ class TaskValidator:
             evaluator_template=eval_template,
             algorithm_template=algo_template,
         )
-        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=8192)
+        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=16384)
         sections = _parse_repair_sections(result.text)
 
         if "EVALUATOR_CODE" in sections:

@@ -148,6 +148,8 @@ class TaskCreator:
                     algorithm_dir_name=analysis.algorithm_dir_name,
                     algorithm_file_name=analysis.algorithm_file_name,
                     algorithm_code=algorithm_code,
+                    function_to_evolve=analysis.function_name,
+                    metrics=analysis.metrics,
                     evaluation_pattern=analysis.evaluation_pattern,
                 )
 
@@ -248,7 +250,7 @@ class TaskCreator:
                 algorithm_file_name=analysis.algorithm_file_name,
                 algorithm_template=get_algorithm_template(),
             )
-        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
+        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _generate_sample_data(
@@ -268,7 +270,7 @@ class TaskCreator:
             input_format=analysis.input_format,
             algorithm_code=algorithm_code,
         )
-        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=2048)
+        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _generate_evaluator(
@@ -315,7 +317,7 @@ class TaskCreator:
                 evaluator_class_name=evaluator_class_name,
                 evaluator_template=get_evaluator_template(),
             )
-        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
+        result = await self._provider.generate(prompt, temperature=0.4, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _generate_multimodal_algorithm_and_data(
@@ -477,7 +479,7 @@ class TaskCreator:
                 evaluator_class_name=derived_class_name,
                 evaluator_template=evaluator_template,
             )
-            result = await self._provider.generate(prompt, temperature=0.4, max_tokens=8192)
+            result = await self._provider.generate(prompt, temperature=0.4, max_tokens=16384)
             evaluator_code = _strip_code_fences(result.text.strip())
             if checkpoint is not None:
                 evaluator_code = await checkpoint.checkpoint_evaluator(
@@ -487,6 +489,8 @@ class TaskCreator:
                     algorithm_dir_name=analysis.algorithm_dir_name,
                     algorithm_file_name=analysis.algorithm_file_name,
                     algorithm_code=algorithm_code,
+                    function_to_evolve=analysis.function_name,
+                    metrics=analysis.metrics,
                     evaluation_pattern=analysis.evaluation_pattern,
                 )
 

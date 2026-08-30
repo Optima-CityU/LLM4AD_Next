@@ -1062,7 +1062,21 @@ if __name__ == "__main__":
 REPAIR_EVALUATOR_PROMPT = """\
 The following LLM4AD evaluator code has an error. Fix it.
 
-## Current Code
+## Task context (use these exact values)
+- Project: {project_name}
+- Evaluator class name: {evaluator_class_name}
+- Evaluator register name: {evaluator_register_name}
+- Algorithm function to evolve: {function_name}
+- Metrics to define: {metrics_json}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Algorithm File (the code your evaluator runs and parses)
+```python
+{algorithm_code}
+```
+
+## Current (broken) evaluator code
 ```python
 {evaluator_code}
 ```
@@ -1073,14 +1087,16 @@ The following LLM4AD evaluator code has an error. Fix it.
 {history_section}
 ## Requirements
 1. Must subclass `BaseEvaluator` from `llm4ad.evaluator.base`
-2. Must use `@BaseEvaluator.register(...)` decorator
-3. Must define `_metrics` in `__init__` and expose via `metrics` property
-4. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-5. Must use the SEPARATE-SCRIPT contract: spawn the algorithm file as a
+2. Register with `@BaseEvaluator.register("{evaluator_register_name}")`
+3. Name the evaluator class EXACTLY `{evaluator_class_name}`
+4. Define the metrics listed above in `__init__` and expose them via the
+   `metrics` property
+5. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
+6. Must use the SEPARATE-SCRIPT contract: spawn the algorithm file as a
    subprocess via `python <algo_file> '<instance_json>'` (do NOT self-spawn,
    do NOT use importlib). Pass the instance file text as argv[1].
-6. Must handle worktree paths (check both nested and flat directory layouts)
-7. Must parse the single JSON object printed to stdout; an `"error"` key means
+7. Must handle worktree paths (check both nested and flat directory layouts)
+8. Must parse the single JSON object printed to stdout; an `"error"` key means
    failure. Use `asyncio.wait_for` + `proc.kill()` for the timeout.
 
 ## Reference Template
@@ -1094,7 +1110,21 @@ Output ONLY the fixed complete Python source code. No explanations.
 REPAIR_EVALUATOR_SELF_SPAWN_PROMPT = """\
 The following LLM4AD evaluator code has an error. Fix it.
 
-## Current Code
+## Task context (use these exact values)
+- Project: {project_name}
+- Evaluator class name: {evaluator_class_name}
+- Evaluator register name: {evaluator_register_name}
+- Policy function the evaluator loads and calls: {function_name}
+- Metrics to define: {metrics_json}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Policy Algorithm File (the code your evaluator will load and call)
+```python
+{algorithm_code}
+```
+
+## Current (broken) evaluator code
 ```python
 {evaluator_code}
 ```
@@ -1105,10 +1135,12 @@ The following LLM4AD evaluator code has an error. Fix it.
 {history_section}
 ## Requirements
 1. Must subclass `BaseEvaluator` from `llm4ad.evaluator.base`
-2. Must use `@BaseEvaluator.register(...)` decorator
-3. Must define `_metrics` in `__init__` and expose via `metrics` property
-4. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-5. Must use the SELF-SPAWN contract: `evaluate()` spawns THIS FILE as a
+2. Register with `@BaseEvaluator.register("{evaluator_register_name}")`
+3. Name the evaluator class EXACTLY `{evaluator_class_name}`
+4. Define the metrics listed above in `__init__` and expose them via the
+   `metrics` property
+5. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
+6. Must use the SELF-SPAWN contract: `evaluate()` spawns THIS FILE as a
    subprocess via `asyncio.create_subprocess_exec`, with `asyncio.wait_for` +
    `proc.kill()` for the timeout. The `__main__` block is the subprocess entry
    point: it loads the policy module via
@@ -1117,11 +1149,11 @@ The following LLM4AD evaluator code has an error. Fix it.
    (`<algorithm_dir>/<algorithm_file>`) and flat (`<algorithm_file>`) layouts,
    and runs episode(s) calling the policy function each step. Do NOT switch to
    the separate-script `python algo.py '<instance>'` contract.
-6. The instance file is a SEED (and optional episode settings), NOT a full
+7. The instance file is a SEED (and optional episode settings), NOT a full
    input. Read the seed from it and run the episode(s) with that seed.
-7. Parse the single JSON object printed to stdout; an `"error"` key means
+8. Parse the single JSON object printed to stdout; an `"error"` key means
    failure.
-8. Never let `evaluate` raise: wrap the body in try/except and return an
+9. Never let `evaluate` raise: wrap the body in try/except and return an
    `EvaluationResult(metrics={{}}, success=False, error_message=...)` on error.
 
 ## Reference Template
@@ -1346,7 +1378,21 @@ Output ONLY the fixed complete Python source code. No explanations.
 REPAIR_EVALUATOR_MULTIMODAL_PROMPT = """\
 The following LLM4AD **multimodal** evaluator code has an error. Fix it.
 
-## Current Code
+## Task context (use these exact values)
+- Project: {project_name}
+- Evaluator class name: {evaluator_class_name}
+- Evaluator register name: {evaluator_register_name}
+- Policy function the evaluator loads and calls: {function_name}
+- Metrics to define: {metrics_json}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Policy Algorithm File (the code your evaluator will load and call)
+```python
+{algorithm_code}
+```
+
+## Current (broken) evaluator code
 ```python
 {evaluator_code}
 ```
@@ -1357,18 +1403,19 @@ The following LLM4AD **multimodal** evaluator code has an error. Fix it.
 {history_section}
 ## Requirements
 1. Must subclass `BaseEvaluator` from `llm4ad.evaluator.base`
-2. Must use `@BaseEvaluator.register(...)` decorator
-3. Must define `_metrics` in `__init__` and expose via `metrics` property
-4. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-5. Must use subprocess isolation (spawn self as subprocess via `__main__`)
-6. Must handle worktree paths (check both nested and flat directory layouts)
-7. Must import `BehaviorData`, `BehaviorVisualization` from `llm4ad.evaluator.behavior`
-8. Must import `BaseRenderer` from `llm4ad.evaluator.renderer`
-9. Must register a `BaseRenderer` subclass with `@BaseRenderer.register(...)`
-10. Must implement `_render_result_image()` for visualization
-11. Must implement `_build_observation_text()` for LLM-readable summaries
-12. Must handle `cfg.behavior_storage` modes ("rendered"/"raw"/"none")
-13. Must build `BehaviorData` with observation text + `BehaviorVisualization`
+2. Register with `@BaseEvaluator.register("{evaluator_register_name}")`
+3. Name the evaluator class EXACTLY `{evaluator_class_name}`
+4. Define the metrics listed above in `__init__` and expose them via the `metrics` property
+5. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
+6. Must use subprocess isolation (spawn self as subprocess via `__main__`)
+7. Must handle worktree paths (check both nested and flat directory layouts)
+8. Must import `BehaviorData`, `BehaviorVisualization` from `llm4ad.evaluator.behavior`
+9. Must import `BaseRenderer` from `llm4ad.evaluator.renderer`
+10. Must register a `BaseRenderer` subclass with `@BaseRenderer.register(...)`
+11. Must implement `_render_result_image()` for visualization
+12. Must implement `_build_observation_text()` for LLM-readable summaries
+13. Must handle `cfg.behavior_storage` modes ("rendered"/"raw"/"none")
+14. Must build `BehaviorData` with observation text + `BehaviorVisualization`
 
 ## Reference Template
 ```python
