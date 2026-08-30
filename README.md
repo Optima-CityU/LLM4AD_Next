@@ -28,6 +28,10 @@
   </a>
 </p>
 
+<p align="center">
+  <strong>English</strong> | <a href="./README_zh.md">中文</a>
+</p>
+
 ---
 
 <p align="center">
@@ -280,7 +284,7 @@ The AutoResearch module is based on / adapted from [AutoResearchClaw](https://gi
 Scan the QR code with WeChat to join the LLM4AD_Next community group.
 
 <div align="center">
-  <img src="docs/assets/live-qr.png"
+  <img src="docs/assets/live-qr-20260818-033420.png"
        alt="LLM4AD_Next WeChat community QR code"
        width="220">
 </div>
