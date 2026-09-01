@@ -1,5 +1,6 @@
 """Tests for the MindMemOS memory backend."""
 
+import sys
 import time
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from llm4ad.config.memory import MemoryConfig
 from llm4ad.planner.base import Algorithm, CodeArtifact, GenerationMetadata, InsightType
 from llm4ad.planner.memory import MemoryCard, MemoryType, create_memory, create_memory_extractor
 from llm4ad.planner.mindmemos_memory import MindMemOSMemory
+from llm4ad.planner.task_memory_selector import create_task_memory_selector
 
 
 class FakeMindMemOSMemoryResource:
@@ -380,6 +382,101 @@ async def test_add_card_emits_task_memory_created_event():
 
 
 @pytest.mark.asyncio
+async def test_add_cards_counts_and_logs_structured_operations_without_auxiliary_properties():
+    """Count only substantive structured card operations and expose their real action."""
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="INFO")
+    try:
+        memory = MindMemOSMemory(_config(), client_factory=FakeMindMemOSClient)
+        memory.add_client.memory.add = lambda **_kwargs: SimpleNamespace(
+            code="ok",
+            memories=[
+                SimpleNamespace(
+                    operation="add",
+                    memory_id="memory-add",
+                    property_name="good_algorithm",
+                    source_block_ids=["block-add"],
+                ),
+                SimpleNamespace(
+                    operation="update",
+                    memory_id="memory-update",
+                    property_name="error_reflection",
+                    related_memory_ids=["memory-update-old"],
+                    source_block_ids=["block-update"],
+                ),
+                SimpleNamespace(
+                    operation="reinforcement",
+                    memory_id="memory-reinforced",
+                    property_name="domain_knowledge",
+                    source_block_ids=["block-reinforced"],
+                ),
+                SimpleNamespace(
+                    operation="add",
+                    memory_id="memory-name",
+                    property_name="name",
+                    source_block_ids=["block-add"],
+                ),
+            ],
+        )
+        cards = [
+            MemoryCard(
+                id=f"card-{index}",
+                type=memory_type,
+                title=f"Card {index}",
+                content=f"Observation {index}",
+                source="auto",
+                generation=3,
+            )
+            for index, memory_type in enumerate(
+                [
+                    MemoryType.GOOD_ALGORITHM,
+                    MemoryType.ERROR_REFLECTION,
+                    MemoryType.DOMAIN_KNOWLEDGE,
+                ],
+                start=1,
+            )
+        ]
+
+        await memory.add_cards(cards)
+    finally:
+        logger.remove(sink_id)
+
+    stats = memory.get_stats()
+    assert stats["add_count"] == 1
+    assert stats["update_count"] == 1
+    assert stats["reinforcement_count"] == 1
+    operation_events = [
+        record["extra"]
+        for record in records
+        if str(record["extra"].get("event_type", "")).startswith("memory_card_")
+    ]
+    assert [event["event_type"] for event in operation_events] == [
+        "memory_card_created",
+        "memory_card_updated",
+        "memory_card_reinforced",
+    ]
+    assert [event["memory_id"] for event in operation_events] == [
+        "memory-add",
+        "memory-update",
+        "memory-reinforced",
+    ]
+
+
+def test_default_structured_client_uses_http_even_when_optional_sdk_is_installed(monkeypatch):
+    """Structured reads must not lose property/status metadata through an old SDK model."""
+    from llm4ad.planner.mindmemos_memory import _HttpMindMemOSClient
+
+    fake_sdk = type(sys)("mindmemos_sdk")
+    fake_sdk.MindMemOSClient = FakeMindMemOSClient
+    monkeypatch.setitem(sys.modules, "mindmemos_sdk", fake_sdk)
+
+    memory = MindMemOSMemory(_config())
+
+    assert isinstance(memory.client, _HttpMindMemOSClient)
+    assert isinstance(memory.structured_add_client, _HttpMindMemOSClient)
+
+
+@pytest.mark.asyncio
 async def test_add_card_maps_memory_card_to_mindmemos_add():
     """Map an LLM4AD memory card to the MindMemOS add API."""
     memory = MindMemOSMemory(_config(), client_factory=FakeMindMemOSClient)
@@ -466,6 +563,7 @@ async def test_add_cards_sends_one_structured_document_batch():
     assert call["user_id"] == "user-1"
     assert call["session_id"] == "task-1"
     assert call["task_id"] == "task-1"
+    assert call["metadata"]["structured_history_scope"] == "session"
     assert call["idempotency_key"].startswith("llm4ad-task-batch:")
     assert all(
         block["block_id"].startswith("llm4ad-task-")
@@ -491,6 +589,20 @@ async def test_add_cards_sends_one_structured_document_batch():
         "name",
         "tags",
     ]
+
+
+def test_memory_config_exposes_mindmemos_context_character_budget():
+    config = MemoryConfig()
+
+    assert config.mindmemos_context_char_budget == 20000
+    assert MemoryConfig(mindmemos_context_char_budget=12000).mindmemos_context_char_budget == 12000
+
+
+def test_memory_config_exposes_elite_code_injection_budget():
+    config = MemoryConfig()
+
+    assert config.mindmemos_elite_code_slots == 1
+    assert config.mindmemos_elite_code_char_budget == 12000
 
 
 @pytest.mark.asyncio
@@ -899,6 +1011,368 @@ def test_get_prompt_context_surfaces_actionable_evidence_metadata():
     assert "Reuse guidance: Cap the 2-opt neighborhood to avoid excessive runtime." in context
 
 
+def test_get_prompt_context_includes_exact_good_algorithm_source_artifact():
+    """A recalled excellent design should expose its implementation to descendants."""
+    source = "MODEL_SPEC = {'phase': 0.375, 'rows': [5, 4, 4, 4, 4, 5]}\n"
+    memory = MindMemOSMemory(
+        _config(
+            include_user_memory=False,
+            include_project_memory=False,
+            task_memory_limit=5,
+            mindmemos_context_char_budget=20000,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="excellent",
+                memory="Use phase-aligned staggered rows.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Phase aligned rows",
+                    "structured_content": {
+                        "description": "Phase-aligned staggered construction.",
+                        "content": ["Reuse the optimized phase as the next search center."],
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:model_spec.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": source,
+                            }
+                        ],
+                    },
+                },
+            )
+        ]
+    )
+
+    context = memory.get_prompt_context("packing")
+
+    assert "Inherited implementation evidence" in context
+    assert source.strip() in context
+
+
+def test_topk_elite_code_uses_quality_aware_selection_from_wider_recall_pool():
+    """The dedicated code lane must not inherit the first lower-quality recall hit."""
+    lower_code = "MODEL_SPEC = {'strategy': 'lower_retrieval_match'}\n"
+    elite_code = "MODEL_SPEC = {'strategy': 'higher_objective_elite'}\n"
+    memory = MindMemOSMemory(
+        _config(
+            include_user_memory=False,
+            include_project_memory=False,
+            task_memory_limit=1,
+            task_candidate_pool=20,
+            task_injection_mode="topk",
+            mindmemos_context_char_budget=2000,
+            mindmemos_elite_code_slots=1,
+            mindmemos_elite_code_char_budget=1000,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="closest-lower-score",
+                score=0.99,
+                memory="The closest semantic match uses a conservative lattice.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Closest lower score",
+                    "score": 2.49,
+                    "algorithm_id": "algorithm-lower",
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:lower.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": lower_code,
+                            }
+                        ]
+                    },
+                },
+            ),
+            SimpleNamespace(
+                id="slightly-less-similar-elite",
+                score=0.90,
+                memory="A stronger implementation reaches the best measured objective.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Higher objective elite",
+                    "score": 2.62,
+                    "algorithm_id": "algorithm-elite",
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:elite.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": elite_code,
+                            }
+                        ]
+                    },
+                },
+            ),
+        ]
+    )
+
+    context = memory.get_prompt_context("improve circle packing")
+
+    assert "Algorithm ID: algorithm-elite" in context
+    assert elite_code.strip() in context
+    assert lower_code.strip() not in context
+
+
+def test_elite_code_selects_best_source_version_inside_merged_memory_card():
+    """A merged card should inject one best source version, not every historical version."""
+    older_code = "OLD_IMPLEMENTATION = True\n" + "x = 1\n" * 80
+    elite_code = "ELITE_IMPLEMENTATION = True\n" + "x = 2\n" * 60
+    elite_helper_code = "ELITE_HELPER = 'preserved with the selected version'\n"
+    memory = MindMemOSMemory(
+        _config(
+            include_user_memory=False,
+            include_project_memory=False,
+            task_memory_limit=1,
+            task_injection_mode="topk",
+            mindmemos_context_char_budget=1100,
+            mindmemos_elite_code_slots=1,
+            mindmemos_elite_code_char_budget=900,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="merged-elite-card",
+                score=0.95,
+                memory="A consolidated family of increasingly strong implementations.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Merged implementation family",
+                    "source_documents": [
+                        {
+                            "block_id": "source-old",
+                            "metadata": {
+                                "algorithm_id": "algorithm-old",
+                                "score": 2.49,
+                            },
+                        },
+                        {
+                            "block_id": "source-elite",
+                            "metadata": {
+                                "algorithm_id": "algorithm-elite",
+                                "score": 2.62,
+                            },
+                        },
+                    ],
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "source_block_id": "source-old",
+                                "artifact_id": "source-old:code-1:solve.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": older_code,
+                            },
+                            {
+                                "source_block_id": "source-elite",
+                                "artifact_id": "source-elite:code-1:solve.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": elite_code,
+                            },
+                            {
+                                "source_block_id": "source-elite",
+                                "artifact_id": "source-elite:code-2:helper.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": elite_helper_code,
+                            },
+                        ]
+                    },
+                },
+            )
+        ]
+    )
+
+    context = memory.get_prompt_context("improve circle packing")
+
+    assert "Algorithm ID: algorithm-elite" in context
+    assert "Objective score: 2.620000" in context
+    assert elite_code.strip() in context
+    assert elite_helper_code.strip() in context
+    assert older_code.strip() not in context
+    assert memory.get_stats()["last_elite_code_complete"] is True
+
+
+def test_success_island_elite_slot_respects_weighted_memory_selection():
+    """The code slot must consume the configured selector result, not force the highest score."""
+    highest_score_code = "MODEL_SPEC = {'strategy': 'highest_objective_score'}\n"
+    weighted_code = (
+        "MODEL_SPEC = {'strategy': 'weighted_selector_choice'}\n"
+        "WEIGHTED_SOURCE_TAIL = True\n"
+    )
+    memory = MindMemOSMemory(
+        _config(
+            include_user_memory=False,
+            include_project_memory=False,
+            task_memory_limit=5,
+            task_candidate_pool=20,
+            task_injection_mode="weight",
+            mindmemos_context_char_budget=1200,
+            mindmemos_elite_code_slots=1,
+            mindmemos_elite_code_char_budget=600,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory._task_selector = create_task_memory_selector(
+        "weight",
+        {"lambda": 1.0, "seed": 4},
+    )
+    memory._elite_code_selector = create_task_memory_selector(
+        "weight",
+        {"lambda": 1.0, "seed": 4},
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="first-recall",
+                score=0.99,
+                memory="Semantically close and highest-scoring implementation.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Highest score",
+                    "score": 9.0,
+                    "algorithm_id": "algorithm-highest",
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:model_spec.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": highest_score_code,
+                            }
+                        ]
+                    },
+                },
+            ),
+            SimpleNamespace(
+                id="best-objective",
+                score=0.75,
+                memory="A weighted alternative retained for diversity.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Weighted alternative",
+                    "score": 2.1,
+                    "algorithm_id": "algorithm-weighted",
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:model_spec.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": weighted_code,
+                            }
+                        ]
+                    },
+                },
+            ),
+        ]
+    )
+
+    context = memory._build_prompt_context(
+        "packing",
+        context={"island_strategy": {"memory_policy": "success_only"}},
+    )
+
+    assert "# Historical Elite Implementation" in context
+    assert "Objective score: 2.100000" in context
+    assert weighted_code.strip() in context
+    assert highest_score_code.strip() not in context
+    assert "WEIGHTED_SOURCE_TAIL = True" in context
+    assert "[Memory context truncated]" not in context
+    assert len(context) <= 1200
+
+
+def test_corrective_island_separates_elite_code_from_failure_code_evidence():
+    """Successful source is inheritable; failed source is labeled as bounded diagnostic evidence."""
+    memory = MindMemOSMemory(
+        _config(
+            include_user_memory=False,
+            include_project_memory=False,
+            task_memory_limit=2,
+            mindmemos_context_char_budget=2200,
+            mindmemos_elite_code_slots=1,
+            mindmemos_elite_code_char_budget=800,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="good",
+                memory="Reuse the feasible parameterization.",
+                memory_type="good_algorithm",
+                metadata={
+                    "title": "Feasible elite",
+                    "score": 2.5,
+                    "algorithm_id": "good-algorithm",
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:good.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": "GOOD_MODEL = {'feasible': True}\n",
+                            }
+                        ]
+                    },
+                },
+            ),
+            SimpleNamespace(
+                id="bad",
+                memory="This parameter domain produced no feasible geometry.",
+                memory_type="error_reflection",
+                metadata={
+                    "title": "Infeasible domain",
+                    "score": 1.2,
+                    "algorithm_id": "bad-algorithm",
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:bad.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": "BAD_MODEL = {'feasible': False}\n",
+                            }
+                        ]
+                    },
+                },
+            ),
+        ]
+    )
+
+    context = memory._build_prompt_context(
+        "packing",
+        context={
+            "island_strategy": {
+                "memory_policy": "corrective",
+                "success_memory_ratio": 0.5,
+                "error_memory_ratio": 0.5,
+            }
+        },
+    )
+
+    assert "Historical Elite Implementation" in context
+    assert "Objective score: 2.500000" in context
+    assert "GOOD_MODEL = {'feasible': True}" in context
+    assert "Failure implementation evidence (do not inherit verbatim)" in context
+    assert "BAD_MODEL = {'feasible': False}" in context
+    assert "objective_score: 1.2000" in context
+
+
 def test_get_prompt_context_forwards_score_threshold_to_mindmemos_search():
     """Let MindMemOS query/rerank enforce score threshold semantics."""
     memory = MindMemOSMemory(
@@ -1009,7 +1483,9 @@ async def test_async_prompt_context_rewrites_query_only_for_agentic_search():
     assert search_call["search_strategy"] == "agentic"
     assert search_call["agent_id"] == "task"
     assert search_call["session_id"] == "task-1"
-    assert search_call["top_k"] == 2
+    # Task recall deliberately fetches a wider pool; prompt injection is still
+    # capped at task_memory_limit after deduplication/type balancing.
+    assert search_call["top_k"] == 8
     assert search_call["filters"]["user_id"] == "user-1"
     assert search_call["filters"]["app_id"] == "llm4ad"
     assert search_call["filters"]["agent_id"] == "task"
@@ -1054,6 +1530,126 @@ async def test_async_prompt_context_fast_search_does_not_rewrite_query():
 
 
 @pytest.mark.asyncio
+async def test_fast_search_query_keeps_island_generation_and_parent_population_context():
+    """Island and population state must change the fast retrieval query across rounds."""
+    memory = MindMemOSMemory(
+        _config(
+            mindmemos_search_strategy="fast",
+            include_project_memory=False,
+            include_user_memory=False,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+
+    await memory.aget_prompt_context(
+        "circle packing",
+        context={
+            "sampler": "summary",
+            "generation": 4,
+            "island_id": 2,
+            "parents": [
+                {"score": 0.81, "description": "Hexagonal interior packing"},
+                {"score": 0.79, "description": "Boundary-aware radius repair"},
+            ],
+        },
+    )
+
+    query = memory.client.memory.search_calls[0]["query"]
+    assert "generation: 4" in query
+    assert "island_id: 2" in query
+    assert "Hexagonal interior packing" in query
+    assert "Boundary-aware radius repair" in query
+
+
+def test_task_topk_uses_wider_pool_and_keeps_successful_designs_among_many_errors():
+    """Repeated errors must not crowd successful algorithm memories out of Top-K."""
+    memory = MindMemOSMemory(
+        _config(
+            include_project_memory=False,
+            include_user_memory=False,
+            task_memory_limit=5,
+            task_candidate_pool=20,
+            task_injection_mode="topk",
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    error_hits = [
+        SimpleNamespace(
+            id=f"error-{index}",
+            memory=f"Repeated invalid-layout failure {index}.",
+            memory_type="error_reflection",
+        )
+        for index in range(1, 6)
+    ]
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            *error_hits,
+            SimpleNamespace(
+                id="successful-design",
+                memory="Reuse the boundary-aware hexagonal packing layout.",
+                memory_type="good_algorithm",
+            ),
+            SimpleNamespace(
+                id="domain-constraint",
+                memory="Every circle must remain inside the unit square.",
+                memory_type="domain_knowledge",
+            ),
+        ]
+    )
+
+    context = memory.get_prompt_context("improve circle packing")
+
+    assert memory.client.memory.search_calls[0]["top_k"] == 20
+    assert "Reuse the boundary-aware hexagonal packing layout." in context
+    assert "Every circle must remain inside the unit square." in context
+    assert sum(text in context for text in [hit.memory for hit in error_hits]) == 3
+
+
+def test_task_candidates_deduplicate_identical_memory_content_before_injection():
+    """Legacy duplicate rows should consume only one prompt slot."""
+    memory = MindMemOSMemory(
+        _config(
+            include_project_memory=False,
+            include_user_memory=False,
+            task_memory_limit=3,
+            task_candidate_pool=12,
+            task_injection_mode="topk",
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="duplicate-error-1",
+                memory="Reject layouts with overlapping circles.",
+                memory_type="error_reflection",
+            ),
+            SimpleNamespace(
+                id="duplicate-error-2",
+                memory="  reject   layouts with OVERLAPPING circles.  ",
+                memory_type="error_reflection",
+            ),
+            SimpleNamespace(
+                id="successful-design",
+                memory="Reuse a feasible hexagonal seed.",
+                memory_type="good_algorithm",
+            ),
+            SimpleNamespace(
+                id="domain-constraint",
+                memory="Respect square boundary constraints.",
+                memory_type="domain_knowledge",
+            ),
+        ]
+    )
+
+    context = memory.get_prompt_context("improve circle packing")
+
+    assert context.lower().count("reject layouts with overlapping circles.") == 1
+    assert "Reuse a feasible hexagonal seed." in context
+    assert "Respect square boundary constraints." in context
+
+
+@pytest.mark.asyncio
 async def test_async_prompt_context_searches_task_project_user_with_scope_limits():
     """Remote recall should honor task, project, and user scope identifiers and limits."""
     memory = MindMemOSMemory(
@@ -1073,7 +1669,9 @@ async def test_async_prompt_context_searches_task_project_user_with_scope_limits
     assert calls_by_agent["task"]["session_id"] == "task-1"
     assert calls_by_agent["project"]["session_id"] == "project-1"
     assert calls_by_agent["global"]["session_id"] == "global"
-    assert calls_by_agent["task"]["top_k"] == 1
+    # Task scope fetches a wider candidate pool before applying its injection
+    # limit, while shared scopes still request their final configured limits.
+    assert calls_by_agent["task"]["top_k"] == 4
     assert calls_by_agent["project"]["top_k"] == 2
     assert calls_by_agent["global"]["top_k"] == 3
     for call in calls:
@@ -1434,6 +2032,128 @@ async def test_mindmemos_raw_extractor_adds_generation_parent_and_code_evidence(
     assert "File: solver.py" in card.content
     assert "two_opt(route, max_swaps=64)" in card.content
     assert "Do not extract a memory that only says performance improved" in card.content
+
+
+@pytest.mark.asyncio
+async def test_raw_algorithm_code_is_sent_as_complete_independent_source_artifact():
+    """Long source code must be preserved separately instead of storing a truncated artifact."""
+    config = SimpleNamespace(
+        type="mindmemos_raw_extractor",
+        module=None,
+        enabled=True,
+        extract_good=True,
+        extract_bad=True,
+        extract_on_failure=True,
+        max_cards_per_generation=3,
+        good_score_threshold=None,
+        bad_score_threshold=None,
+        good_relative_threshold=0.5,
+        bad_relative_threshold=0.5,
+    )
+    extractor = create_memory_extractor(provider=SimpleNamespace(), config=config)
+    full_source = "def solve():\n" + "    value += 1\n" * 200 + "    return 'FULL_SOURCE_TAIL'\n"
+    algorithm = Algorithm(
+        id="algo-full-source",
+        insight_type=InsightType.MUTATION,
+        name="Full source evidence",
+        description="Keep the complete implementation as immutable evidence.",
+        code_artifacts=[
+            CodeArtifact(
+                file_path="solver.py",
+                language="python",
+                content=full_source,
+                content_mode="full",
+                is_entrypoint=True,
+            )
+        ],
+    )
+    algorithm.set_evaluation_result(1.0, metrics={"validity": 1.0})
+    card = await extractor.extract_from_good(
+        algorithm,
+        [algorithm],
+        generation=1,
+        background="Evidence preservation",
+    )
+    assert card is not None
+
+    memory = MindMemOSMemory(_config(), client_factory=FakeMindMemOSClient)
+    await memory.add_card(card)
+
+    block = memory.add_client.memory.add_calls[0]["document_blocks"][0]
+    assert block["source_artifacts"] == [
+        {
+            "artifact_id": "code-1:solver.py",
+            "type": "code",
+            "language": "python",
+            "content": full_source,
+        }
+    ]
+    assert full_source not in block["messages"][0]["content"]
+    assert "[truncated]" not in block["messages"][0]["content"]
+    assert "_mindmemos_source_artifacts" not in block["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_solver_candidate_memory_focuses_on_formulas_constraints_and_solver_evidence():
+    """Structured candidates should produce reusable modeling knowledge, not code trivia."""
+    config = SimpleNamespace(
+        type="mindmemos_raw_extractor",
+        module=None,
+        enabled=True,
+        extract_good=True,
+        extract_bad=True,
+        extract_on_failure=True,
+        max_cards_per_generation=3,
+        good_score_threshold=None,
+        bad_score_threshold=None,
+        good_relative_threshold=0.5,
+        bad_relative_threshold=0.5,
+    )
+    extractor = create_memory_extractor(provider=SimpleNamespace(), config=config)
+    model_spec = "MODEL_SPEC = {'groups': [{'count': 26, 'x': 'cx + dx * i', 'y': 'cy'}]}\n"
+    algorithm = Algorithm(
+        id="solver-formula",
+        insight_type=InsightType.MUTATION,
+        name="Expression candidate",
+        description="Use a parameterized center construction.",
+        code_artifacts=[
+            CodeArtifact(
+                file_path="model_spec.py",
+                language="python",
+                content=model_spec,
+                content_mode="full",
+            )
+        ],
+    )
+    algorithm.set_evaluation_result(
+        2.4,
+        metrics={
+            "sum_radii": 2.4,
+            "validity": 1.0,
+            "solver_gap": 0.0,
+            "solver_nodes": 1.0,
+        },
+    )
+
+    card = await extractor.extract_from_good(
+        algorithm,
+        [algorithm],
+        generation=2,
+        background="Solver-assisted mathematical optimization",
+    )
+
+    assert card is not None
+    assert "Structured mathematical candidate" in card.content
+    assert "formula families, parameterization, structural constraints, or symmetry" in card.content
+    assert "solver_gap: 0.0" in card.content
+    assert card.metadata["_mindmemos_source_artifacts"] == [
+        {
+            "artifact_id": "code-1:model_spec.py",
+            "type": "code",
+            "language": "python",
+            "content": model_spec,
+        }
+    ]
 
 
 @pytest.mark.asyncio

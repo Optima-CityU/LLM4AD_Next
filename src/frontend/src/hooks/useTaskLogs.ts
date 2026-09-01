@@ -25,6 +25,7 @@ export interface UseTaskLogsOptions {
   onResetTask?: () => void
   onStatusChange?: (status: string) => void
   onGenerated?: (entry: Record<string, unknown>) => void
+  onMigration?: (entry: Record<string, unknown>) => void
   onMemoryCardCreated?: (entry: Record<string, unknown>) => void
   onMemoryInjected?: (entry: Record<string, unknown>) => void
 }
@@ -43,7 +44,7 @@ export function normalizeLogEntries(
   return raw
     .filter((e) => {
       const t = e.type as string | undefined
-      return t !== "generated" && t !== "status"
+      return t !== "generated" && t !== "migration" && t !== "status"
     })
     .map((e): LogEntry => {
       const t = e.type as string | undefined
@@ -75,6 +76,8 @@ export function useTaskLogs(
   onStatusChangeRef.current = options?.onStatusChange
   const onGeneratedRef = useRef(options?.onGenerated)
   onGeneratedRef.current = options?.onGenerated
+  const onMigrationRef = useRef(options?.onMigration)
+  onMigrationRef.current = options?.onMigration
   const onMemoryCardCreatedRef = useRef(options?.onMemoryCardCreated)
   onMemoryCardCreatedRef.current = options?.onMemoryCardCreated
   const onMemoryInjectedRef = useRef(options?.onMemoryInjected)
@@ -271,6 +274,10 @@ export function useTaskLogs(
 
                       case "generated":
                         if (!cancelled) onGeneratedRef.current?.(parsed)
+                        break
+
+                      case "migration":
+                        if (!cancelled) onMigrationRef.current?.(parsed)
                         break
 
                       case "memory_card_created":

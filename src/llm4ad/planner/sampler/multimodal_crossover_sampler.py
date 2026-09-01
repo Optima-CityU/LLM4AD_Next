@@ -25,6 +25,7 @@ from llm4ad.planner.sampler.base import BaseSampler
 from llm4ad.planner.sampler.prompt_templates import (
     CROSSOVER_ALGORITHM,
     build_multimodal_crossover_prompt,
+    format_parent_algorithm_context,
 )
 
 
@@ -137,8 +138,10 @@ class MultimodalCrossoverSampler(BaseSampler):
                 memory_context="",
                 score1=score1,
                 description1=parent1.description,
+                parent_context1=format_parent_algorithm_context(parent1),
                 score2=score2,
                 description2=parent2.description,
+                parent_context2=format_parent_algorithm_context(parent2),
             )
             response = await self.provider.generate(
                 prompt,

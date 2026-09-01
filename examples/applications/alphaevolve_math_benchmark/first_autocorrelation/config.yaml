@@ -1,0 +1,73 @@
+project_name: "alphaevolve_first_autocorrelation"
+path_resolution: "cwd"
+description_en: "Evolve a non-negative step function that minimizes the first autocorrelation upper bound."
+description_zh: "进化非负阶梯函数，最小化第一自相关不等式上界。"
+random_seed: 42
+background: |
+  Act as an expert software developer and inequality specialist specializing in creating step functions with certain properties.
+  Your task is to generate the sequence of non-negative heights of a step functions, that minimizes the following evaluation function(keeping in mind that in this task we will want the returned value to be as small as possible, as we are improving the upper bound):
+
+  <evaluation function>
+  import numpy as np
+
+  def evaluate_sequence(sequence: list[float]) -> float:
+    """
+    Evaluates a sequence of coefficients with enhanced security checks.
+    Returns np.inf if the input is invalid.
+    """
+    # --- Security Checks ---
+
+    # Verify that the input is a list
+    if not isinstance(sequence, list):
+      return np.inf
+
+    # Reject empty lists
+    if not sequence:
+      return np.inf
+
+    # Check each element in the list for validity
+    for x in sequence:
+      # Reject boolean types (as they are a subclass of int) and
+      # any other non-integer/non-float types (like strings or complex numbers).
+      if isinstance(x, bool) or not isinstance(x, (int, float)):
+          return np.inf
+
+      # Reject Not-a-Number (NaN) and infinity values.
+      if np.isnan(x) or np.isinf(x):
+          return np.inf
+
+    # Convert all elements to float for consistency
+    sequence = [float(x) for x in sequence]
+
+    # Protect against negative numbers
+    sequence = [max(0, x) for x in sequence]
+
+    # Protect against numbers that are too large
+    sequence = [min(1000.0, x) for x in sequence]
+
+    n = len(sequence)
+    b_sequence = np.convolve(sequence, sequence)
+    max_b = max(b_sequence)
+    sum_a = np.sum(sequence)
+
+    # Protect against the case where the sum is too close to zero
+    if sum_a < 0.01:
+      return np.inf
+
+    return float(2 * n * max_b / (sum_a**2))
+  </evaluation function>
+
+  Your task is to write the search function run_search_for_best_sequence() that searches for the best sequence of coefficients. Your function will have 1000 seconds to run, and after that it has to have returned the best sequence it found. If after 1000 seconds it has not returned anything, it will be terminated with negative infinity points. All numbers in your sequence have to be positive or zero.
+  Currently, The step function run_search_for_best_sequence() has been found with 600 equally-spaced intervals on [-1/4, 1/4] that gives a better upper bound <= 1.5053. You should try to improve this upper bound, find a smaller value.
+  You may code up any search method you want, but you must have to code up the run_search_for_best_sequence() function and the evaluate_sequence() function in your result, since you can use the evaluate_sequence() function to evaluate the run_search_for_best_sequence() function as many times as you want.
+
+  Your solution should be written in Python.
+
+  You got this! I believe in you!!!
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE_START/EVOLVE_END block in solve.py. Preserve run_search_for_best_sequence(), evaluate_sequence(), and the final JSON adapter used by the platform."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "first_autocorrelation/evaluator.py:FirstAutocorrelationEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: ["upper_bound", "target_ratio", "validity", "eval_time"]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "first_autocorrelation/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

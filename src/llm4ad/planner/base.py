@@ -1,6 +1,7 @@
 """Base planner interface for LLM4AD."""
 
 import base64 as _base64
+import hashlib
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -97,6 +98,8 @@ class EvaluationResult(BaseModel):
     evaluation_time_ms: float = 0.0  # Time taken to evaluate
     evaluator_version: str = "1.0"  # Version of evaluator used
     hardware_info: dict[str, Any] = {}  # Hardware info where evaluation ran
+    evolution_feedback: dict[str, Any] = Field(default_factory=dict)
+    """Evaluator findings intentionally retained for descendant generation."""
     timing: ExecutionTiming = Field(default_factory=ExecutionTiming)  # Execution timing breakdown
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -139,6 +142,7 @@ class Algorithm(BaseModel):
 
     # Evaluation results
     evaluation: EvaluationResult | None = None
+    evaluation_failure: str | None = None
 
     # Diff-based workflow metadata
     changed_files: list[str] = []  # List of files modified from parents
@@ -207,6 +211,52 @@ class Algorithm(BaseModel):
         """Check if this insight has generated code."""
         return len(self.code_artifacts) > 0
 
+    def code_fingerprint(self) -> str | None:
+        """Return a stable identity for the stored code representation.
+
+        Full artifacts are identified by their path, language, and complete
+        content. Diff artifacts additionally include their base metadata so an
+        identical patch against two different bases is not treated as the same
+        algorithm. Insights without non-empty code deliberately have no code
+        identity and therefore are never collapsed together.
+        """
+        parts: list[str] = []
+        for artifact in sorted(
+            self.code_artifacts,
+            key=lambda item: (item.file_path, item.language),
+        ):
+            content = artifact.content.strip()
+            if not content:
+                continue
+            base_identity = ""
+            if artifact.content_mode == "diff":
+                lineage_fallback = (
+                    ""
+                    if artifact.base_commit_hash or artifact.base_file_hash
+                    else ",".join(self.parent_ids)
+                )
+                base_identity = "\n".join(
+                    (
+                        artifact.base_commit_hash or "",
+                        artifact.base_file_hash or "",
+                        lineage_fallback,
+                    )
+                )
+            parts.append(
+                "\n".join(
+                    (
+                        artifact.file_path,
+                        artifact.language,
+                        artifact.content_mode,
+                        base_identity,
+                        content,
+                    )
+                )
+            )
+        if not parts:
+            return None
+        return hashlib.sha256("\n\0\n".join(parts).encode("utf-8")).hexdigest()
+
     def get_code(self, file_path: str | None = None) -> str | None:
         """Get stored content (diff or full) for a specific file or the main entrypoint.
 
@@ -253,6 +303,13 @@ class Algorithm(BaseModel):
             **kwargs: Additional EvaluationResult parameters
         """
         self.evaluation = EvaluationResult(score=score, **kwargs)
+        self.evaluation_failure = None
+        self.updated_at = time.time()
+
+    def set_evaluation_failure(self, error: str) -> None:
+        """Record an evaluation failure without manufacturing a numeric score."""
+        self.evaluation = None
+        self.evaluation_failure = error
         self.updated_at = time.time()
 
     def update_timing(self, timing: ExecutionTiming) -> None:
@@ -625,6 +682,12 @@ class Algorithm(BaseModel):
                 for name, value in self.evaluation.metrics.items():
                     lines.append(f"- **{name}:** {value}")
             lines.append("")
+        elif stage == "evaluation" and self.evaluation_failure:
+            lines.append("## Evaluation Results")
+            lines.append("")
+            lines.append("**Status:** Failed before a valid score was produced")
+            lines.append(f"**Error:** {self.evaluation_failure}")
+            lines.append("")
 
         # Generation metadata
         if self.generation_meta:
@@ -725,6 +788,32 @@ class Algorithm(BaseModel):
                             viz.raw_data = json.load(rf)
 
         return algorithm
+
+
+def deduplicate_algorithms_by_code(population: list[Algorithm]) -> list[Algorithm]:
+    """Keep the best individual for each ID and exact code identity.
+
+    Evaluated individuals outrank failed or unevaluated ones, then fitness is
+    used. Codeless insights are only de-duplicated by ID because their textual
+    descriptions are not algorithm implementations.
+    """
+    ranked = sorted(
+        population,
+        key=lambda item: (item.is_evaluated(), item.score),
+        reverse=True,
+    )
+    unique: list[Algorithm] = []
+    seen_ids: set[str] = set()
+    seen_code: set[str] = set()
+    for individual in ranked:
+        fingerprint = individual.code_fingerprint()
+        if individual.id in seen_ids or (fingerprint is not None and fingerprint in seen_code):
+            continue
+        unique.append(individual)
+        seen_ids.add(individual.id)
+        if fingerprint is not None:
+            seen_code.add(fingerprint)
+    return unique
 
 
 class ComponentDependency(BaseModel):
@@ -1151,6 +1240,8 @@ class BasePlanner(ABC, Registrable):
         population: list[Algorithm],
         n_parents: int = 2,
         strategy: str = "tournament",
+        *,
+        deduplicate_code: bool = True,
     ) -> list[Algorithm]:
         """Select parent(s) from population for reproduction.
 
@@ -1160,73 +1251,72 @@ class BasePlanner(ABC, Registrable):
             population: Current population
             n_parents: Number of parents to select
             strategy: Selection strategy (tournament, roulette, random)
+            deduplicate_code: Whether distinct IDs with identical code are treated as one parent
 
         Returns:
             Selected parents
         """
         import random
 
-        if not population:
+        if not population or n_parents <= 0:
             return []
 
-        parents = []
+        # A crossover between the same algorithm twice is just a disguised
+        # mutation. De-duplicate first and sample without replacement for every
+        # strategy; callers can explicitly fall back when too few remain.
+        unique_population = (
+            deduplicate_algorithms_by_code(population)
+            if deduplicate_code
+            else list({individual.id: individual for individual in population}.values())
+        )
+        requested = min(n_parents, len(unique_population))
+        parents: list[Algorithm] = []
 
         if strategy == "tournament":
             # Tournament selection
-            tournament_size = min(3, len(population))
-            for _ in range(n_parents):
-                tournament = random.sample(population, tournament_size)
+            available = unique_population.copy()
+            for _ in range(requested):
+                tournament_size = min(3, len(available))
+                tournament = random.sample(available, tournament_size)
                 # Select best by score (or random if no scores)
-                evaluated = [p for p in tournament if p.score is not None]
+                evaluated = [p for p in tournament if p.is_evaluated()]
                 winner = max(evaluated, key=lambda p: p.score) if evaluated else random.choice(tournament)
                 parents.append(winner)
+                available.remove(winner)
 
         elif strategy == "roulette":
             # Roulette wheel selection (fitness proportionate)
-            evaluated = [p for p in population if p.score is not None]
+            evaluated = [p for p in unique_population if p.is_evaluated()]
             if not evaluated:
                 # Fall back to random if no scores
-                return random.sample(population, min(n_parents, len(population)))
+                return random.sample(unique_population, requested)
 
-            # Use scores as fitness (assume higher is better)
-            total_fitness = sum(p.score for p in evaluated)
-
-            for _ in range(n_parents):
-                pick = random.uniform(0, total_fitness)
-                current = 0.0
-                for individual in evaluated:
-                    current += individual.score
-                    if current >= pick:
-                        parents.append(individual)
-                        break
+            available = evaluated.copy()
+            for _ in range(min(requested, len(available))):
+                # Shift non-positive fitness values while preserving ordering.
+                minimum = min(individual.score for individual in available)
+                weights = [individual.score - minimum + 1e-12 for individual in available]
+                winner = random.choices(available, weights=weights, k=1)[0]
+                parents.append(winner)
+                available.remove(winner)
 
         elif strategy == "rank":
             # Rank-based selection
-            evaluated = [p for p in population if p.score is not None]
+            evaluated = [p for p in unique_population if p.is_evaluated()]
             if not evaluated:
-                return random.sample(population, min(n_parents, len(population)))
+                return random.sample(unique_population, requested)
 
             # Sort by score (descending)
-            sorted_pop = sorted(evaluated, key=lambda p: p.score, reverse=True)
-
-            # Selection probability proportional to rank
-            n = len(sorted_pop)
-            total_rank = n * (n + 1) / 2  # Sum of 1..n
-
-            for _ in range(n_parents):
-                pick = random.uniform(0, total_rank)
-                current = 0.0
-                for i, individual in enumerate(sorted_pop):
-                    # Rank 1 (best) gets n, rank n (worst) gets 1
-                    rank_weight = n - i
-                    current += rank_weight
-                    if current >= pick:
-                        parents.append(individual)
-                        break
+            available = sorted(evaluated, key=lambda p: p.score, reverse=True)
+            for _ in range(min(requested, len(available))):
+                weights = list(range(len(available), 0, -1))
+                winner = random.choices(available, weights=weights, k=1)[0]
+                parents.append(winner)
+                available.remove(winner)
 
         elif strategy == "random":
             # Random selection
-            parents = random.sample(population, min(n_parents, len(population)))
+            parents = random.sample(unique_population, requested)
 
         else:
             raise ValueError(f"Unknown selection strategy: {strategy}")
@@ -1255,6 +1345,7 @@ class BasePlanner(ABC, Registrable):
         if not population or n_survivors <= 0:
             return []
 
+        population = deduplicate_algorithms_by_code(population)
         n_survivors = min(n_survivors, len(population))
 
         if strategy == "truncation":

@@ -1,0 +1,30 @@
+project_name: "alphaevolve_second_autocorrelation"
+path_resolution: "cwd"
+description_en: "Evolve a non-negative 50-step function that maximizes the second autocorrelation lower bound."
+description_zh: "进化由 50 段非负高度组成的阶梯函数，最大化第二自相关不等式下界。"
+random_seed: 42
+background: |
+  # Second autocorrelation inequality Problem
+  You are a professional mathematics researcher specializing in the study of second-order autocorrelation inequalities.
+
+  Let  𝐶2  be the smallest constant for which one has
+      ‖𝑓∗𝑓‖22≤𝐶2‖𝑓∗𝑓‖1‖𝑓∗𝑓‖∞
+  for all non-negative  𝑓:ℝ→ℝ . It is known that
+      0.88922≤𝐶2≤1,
+  with the lower bound coming from a step function construction by Matolcsi and Vinuesa (2010).
+
+  Your task is to find a step function with 50 equally-spaced intervals on  [−1/4,1/4]  that gives a slightly better lower bound 0.8962≤𝐶2 .
+
+  Requirement:
+  1. Fully implement the optimize_lower_bound function. The return result of optimize_lower_bound needs to be able to pass the verification of the verify_heights_sequence function. Ensure that the input and output parameters of optimize_lower_bound remain unchanged.
+  2. Do not rewrite the cal_lower_bound and verify_heights_sequence functions. Keep them unchanged.
+  3. Optimize the algorithm to the extreme, striving to raise c_lower_bound to beyond 0.8962.
+
+  We need to achieve breakthroughs in this problem through algorithmic innovation, focusing more on fundamental algorithmic innovations rather than merely attempting to find the optimal value through existing optimization algorithms such as SQP/BFGS.
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the optimize_lower_bound() entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "second_autocorrelation/evaluator.py:SecondAutocorrelationEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [c_lower_bound, target_ratio, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "second_autocorrelation/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

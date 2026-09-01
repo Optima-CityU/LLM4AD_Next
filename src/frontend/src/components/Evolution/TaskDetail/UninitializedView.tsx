@@ -21,8 +21,9 @@ import { useEvolution } from "@/hooks/useEvolution"
 
 import Stepper from "./Stepper"
 import StorageUsageBadge from "./StorageUsageBadge"
+import { isMemoryEnabled } from "./schema-form/islandStrategyPreview"
 import type { JsonSchema } from "./schema-form/resolveSchema"
-import { getDefaultValue } from "./schema-form/resolveSchema"
+import { mergeSchemaDefaults } from "./schema-form/resolveSchema"
 import AdvancedStep from "./steps/AdvancedStep"
 import ConfirmStep from "./steps/ConfirmStep"
 import DataPreparationStep from "./steps/DataPreparationStep"
@@ -162,26 +163,31 @@ export default function UninitializedView({
   useEffect(() => {
     if (!rootSchema) return
     setConfigValues((prev) => {
-      if (Object.keys(prev).length > 0) return prev
-      const defaults = getDefaultValue(rootSchema, rootSchema)
-      if (defaults && typeof defaults === "object") {
-        return defaults as Record<string, unknown>
-      }
-      return prev
+      const merged = mergeSchemaDefaults(rootSchema, rootSchema, prev)
+      if (!merged || typeof merged !== "object") return prev
+      const next = merged as Record<string, unknown>
+      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next
     })
   }, [rootSchema])
 
   // Sync from task.input_args when it updates externally
   useEffect(() => {
     if (task.input_args && Object.keys(task.input_args).length > 0) {
+      const merged = rootSchema
+        ? (mergeSchemaDefaults(
+            rootSchema,
+            rootSchema,
+            task.input_args,
+          ) as Record<string, unknown>)
+        : { ...task.input_args }
       setConfigValues((prev) => {
-        if (JSON.stringify(prev) !== JSON.stringify(task.input_args)) {
-          return { ...task.input_args }
+        if (JSON.stringify(prev) !== JSON.stringify(merged)) {
+          return merged
         }
         return prev
       })
     }
-  }, [task.input_args])
+  }, [task.input_args, rootSchema])
 
   // Auto-save config on step change via updateTask
   const saveConfig = useCallback(async () => {
@@ -321,6 +327,9 @@ export default function UninitializedView({
           root={rootSchema}
           value={configValues[schemaKey]}
           onChange={(v) => handleSchemaChange(schemaKey, v)}
+          memoryEnabled={isMemoryEnabled(
+            configValues.memory as Record<string, unknown> | undefined,
+          )}
           title={steps[currentStep].label}
           description={
             STEP_DESCRIPTIONS_KEYS[currentStep]

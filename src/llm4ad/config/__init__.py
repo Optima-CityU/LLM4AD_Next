@@ -23,8 +23,11 @@ from llm4ad.config.evaluator import (
     EvaluatorConfig,
     ExecutableEvaluatorConfig,
     MetricPatternConfig,
+    SolverEvaluatorConfig,
+    SolverMetricConfig,
 )
 from llm4ad.config.evolution import (
+    DiverseIslandGAConfig,
     DyCAConfig,
     EvolutionConfig,
     IslandGAConfig,
@@ -60,6 +63,8 @@ __all__ = [
     "EvaluatorConfig",
     "CustomEvaluatorConfig",
     "ExecutableEvaluatorConfig",
+    "SolverEvaluatorConfig",
+    "SolverMetricConfig",
     "EvalContext",
     # coder
     "CoderConfig",
@@ -78,6 +83,7 @@ __all__ = [
     "EvolutionConfig",
     "DyCAConfig",
     "IslandGAConfig",
+    "DiverseIslandGAConfig",
     # settings
     "MEoHConfig",
     "get_default_settings_path",

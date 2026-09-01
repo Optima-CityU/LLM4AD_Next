@@ -134,6 +134,61 @@ def test_user_can_save_background_knowledge_on_a_topic(monkeypatch) -> None:
     assert result.background == "Vehicle routing domain"
 
 
+def test_editing_an_inserted_document_makes_it_pending_again(monkeypatch) -> None:
+    document_id = uuid.uuid4()
+    other_document_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    document = SimpleNamespace(
+        id=document_id,
+        source_id=uuid.uuid4(),
+        parse_run_id=run_id,
+        title="旧标题",
+        object_key="knowledge/old.md",
+        content_version=1,
+        content_hash="a" * 64,
+        content_size=3,
+        estimated_tokens=1,
+        user_modified=False,
+        updated_time=None,
+    )
+    source = SimpleNamespace(id=document.source_id)
+    run = SimpleNamespace(
+        id=run_id,
+        inserted_document_ids=[str(document_id), str(other_document_id)],
+    )
+
+    class DocumentSession(_CreateTopicSession):
+        def get(self, model, object_id):
+            if model is models.KnowledgeParseRun and object_id == run_id:
+                return run
+            return None
+
+    monkeypatch.setattr(knowledge_service, "_get_owned_document", lambda *_args: document)
+    monkeypatch.setattr(knowledge_service, "_get_owned_source", lambda *_args: source)
+
+    knowledge_service.update_document(
+        DocumentSession(),
+        SimpleNamespace(id=uuid.uuid4()),
+        document_id,
+        knowledge_schemas.KnowledgeDocumentUpdateRequest(title="新标题"),
+    )
+
+    assert run.inserted_document_ids == [str(other_document_id)]
+
+
+def test_parse_run_with_existing_generated_memories_cannot_refine() -> None:
+    run = models.KnowledgeParseRun(
+        source_id=uuid.uuid4(),
+        source_revision=1,
+        status=models.KnowledgeParseStatus.READY.value,
+        manifest_object_key="knowledge/manifest.json",
+        inserted_document_ids=[],
+        generated_memory_ids=["memory-existing"],
+    )
+
+    assert run.can_refine is False
+
+
 def test_parse_uses_the_topic_background_when_the_request_does_not_override_it() -> None:
     resolve_background = getattr(knowledge_service, "resolve_parse_background", None)
 
@@ -451,6 +506,60 @@ def test_insert_selected_documents_uses_one_structured_batch(monkeypatch) -> Non
     assert run.inserted_document_ids == [str(document.id) for document in documents]
 
 
+def test_document_insert_update_replaces_predecessor_and_keeps_operation(monkeypatch) -> None:
+    from app.schemas.memory import MemoryCardResponse
+
+    user = SimpleNamespace(id=uuid.uuid4())
+    document = SimpleNamespace(id=uuid.uuid4())
+    run = SimpleNamespace(
+        id=uuid.uuid4(),
+        inserted_document_ids=[],
+        generated_memory_ids=["memory-old"],
+        generated_memory_operations={"memory-old": "add"},
+        message="预提取文档块已就绪",
+        updated_time=None,
+    )
+    updated_card = MemoryCardResponse(
+        id="memory-new",
+        type="domain_knowledge",
+        title="更新后的容量约束",
+        content="容量约束已更新。",
+        source="mindmemos",
+        operation="update",
+    )
+    monkeypatch.setattr(
+        knowledge_service,
+        "_generated_memory_cards",
+        lambda _user, memory_ids: [
+            updated_card.model_copy(update={"operation": None})
+        ]
+        if memory_ids == ["memory-new"]
+        else [],
+    )
+
+    result = knowledge_service._complete_document_block_insert(
+        _CreateTopicSession(),
+        user,
+        run,
+        [document],
+        [],
+        [
+            {
+                "operation": "update",
+                "memory_id": "memory-new",
+                "related_memory_ids": ["memory-old"],
+            }
+        ],
+    )
+
+    assert run.generated_memory_ids == ["memory-new"]
+    assert run.generated_memory_operations == {"memory-new": "update"}
+    assert result.generated_memory_ids == ["memory-new"]
+    assert [(card.id, card.operation) for card in result.generated_memories] == [
+        ("memory-new", "update")
+    ]
+
+
 @pytest.mark.asyncio
 async def test_insert_selected_documents_streams_progress_before_committing(monkeypatch) -> None:
     user = SimpleNamespace(id=uuid.uuid4())
@@ -561,6 +670,7 @@ async def test_insert_selected_documents_streams_progress_before_committing(monk
                     "score": None,
                     "generation": None,
                     "algorithm_id": None,
+                    "operation": "add",
                     "metadata": {
                         "title": "容量约束",
                         "entity_id": "entity-1",
@@ -587,7 +697,10 @@ async def test_insert_selected_documents_streams_progress_before_committing(monk
 def test_generated_memories_can_be_rehydrated_after_refresh(monkeypatch) -> None:
     user = SimpleNamespace(id=uuid.uuid4())
     run_id = uuid.uuid4()
-    run = SimpleNamespace(generated_memory_ids=["deleted-memory", "memory-1"])
+    run = SimpleNamespace(
+        generated_memory_ids=["deleted-memory", "memory-1"],
+        generated_memory_operations={"memory-1": "reinforcement"},
+    )
     monkeypatch.setattr(knowledge_service, "get_parse_run", lambda *_args: run)
 
     from app.services import memory_service
@@ -624,6 +737,7 @@ def test_generated_memories_can_be_rehydrated_after_refresh(monkeypatch) -> None
 
     assert [card.id for card in cards] == ["memory-1"]
     assert cards[0].title == "刷新验证"
+    assert cards[0].operation == "reinforcement"
 
 
 def test_parser_output_is_saved_as_editable_document_blocks(
@@ -1208,28 +1322,6 @@ def test_parse_plan_accepts_flat_document_descriptions() -> None:
     parsed = knowledge_service.validate_parse_plan_payload(payload)
 
     assert parsed.strategies[0].documents[0].title == "求解器总览"
-
-
-@pytest.mark.skip(reason="task-level knowledge document injection was removed")
-def test_runtime_resolution_does_not_mutate_persisted_memory_config(monkeypatch) -> None:
-    document_id = uuid.uuid4()
-    persisted_memory = {"knowledge_document_refs": [{"document_id": str(document_id), "content_version": 1}]}
-    input_args = {"memory": persisted_memory}
-    monkeypatch.setattr(
-        knowledge_service,
-        "build_task_knowledge_cards",
-        lambda *_args, **_kwargs: [{"title": "Resolved", "content": "Body"}],
-    )
-
-    _apply_knowledge_runtime_config(
-        None,
-        input_args,
-        current_user=SimpleNamespace(id=uuid.uuid4()),
-    )
-
-    assert input_args["memory"] is not persisted_memory
-    assert "knowledge_documents" in input_args["memory"]
-    assert "knowledge_documents" not in persisted_memory
 
 
 @pytest.mark.skip(reason="task-level knowledge document injection was removed")

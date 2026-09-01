@@ -12,6 +12,12 @@ export interface SchemaUi {
   hidden?: boolean
   user_required?: boolean
   multiline?: boolean
+  widget?: string
+  slider?: {
+    min: number
+    max: number
+    step: number
+  }
 }
 
 export interface JsonSchema {
@@ -86,6 +92,35 @@ export function isUiRequired(schema: JsonSchema): boolean {
 
 export function isMultiline(schema: JsonSchema): boolean {
   return schema.ui?.multiline === true
+}
+
+export function getUiSlider(
+  schema: JsonSchema,
+): { min: number; max: number; step: number } | undefined {
+  if (schema.ui?.widget !== "slider") return undefined
+  const slider = schema.ui.slider
+  if (
+    !slider ||
+    !Number.isFinite(slider.min) ||
+    !Number.isFinite(slider.max) ||
+    !Number.isFinite(slider.step) ||
+    slider.max <= slider.min ||
+    slider.step <= 0
+  ) {
+    return undefined
+  }
+  return slider
+}
+
+export function fitSliderToValue(
+  slider: { min: number; max: number; step: number },
+  value: number,
+): { min: number; max: number; step: number } {
+  return {
+    ...slider,
+    min: Math.min(slider.min, value),
+    max: Math.max(slider.max, value),
+  }
 }
 
 /**
@@ -243,6 +278,99 @@ export function getDefaultValue(schema: JsonSchema, root: JsonSchema): unknown {
   if (resolved.type === "boolean") return resolved.default ?? false
 
   return undefined
+}
+
+/**
+ * Extract only defaults explicitly declared by the schema.
+ * Unlike getDefaultValue(), this never manufactures UI placeholders such as
+ * empty strings, false, or empty arrays for fields that have no real default.
+ */
+function getDeclaredDefaultValue(
+  schema: JsonSchema,
+  root: JsonSchema,
+): unknown {
+  if (schema.default !== undefined) return schema.default
+  if (schema.const !== undefined) return schema.const
+
+  const { schema: resolved } = resolveSchema(schema, root)
+  if (resolved.default !== undefined) return resolved.default
+  if (resolved.const !== undefined) return resolved.const
+
+  if (resolved.type === "object" && resolved.properties) {
+    const value: Record<string, unknown> = {}
+    for (const [key, propertySchema] of Object.entries(resolved.properties)) {
+      const propertyDefault = getDeclaredDefaultValue(propertySchema, root)
+      if (propertyDefault !== undefined) value[key] = propertyDefault
+    }
+    return Object.keys(value).length > 0 ? value : undefined
+  }
+
+  return undefined
+}
+
+/**
+ * Recursively fill schema defaults into an existing value.
+ * Existing values always win, including explicit false, zero, empty strings,
+ * arrays, and null. For discriminated unions, defaults come from the variant
+ * selected by the existing discriminator value.
+ */
+export function mergeSchemaDefaults(
+  schema: JsonSchema,
+  root: JsonSchema,
+  current: unknown,
+): unknown {
+  const { schema: resolved } = resolveSchema(schema, root)
+
+  if (current === null) return null
+  if (
+    resolved.enum &&
+    current !== undefined &&
+    !resolved.enum.some((option) => Object.is(option, current))
+  ) {
+    const declaredDefault = getDeclaredDefaultValue(schema, root)
+    if (declaredDefault !== undefined) return declaredDefault
+  }
+
+  const discriminator = getDiscriminatorInfo(resolved, root)
+  if (discriminator) {
+    const currentObject =
+      current && typeof current === "object" && !Array.isArray(current)
+        ? (current as Record<string, unknown>)
+        : {}
+    const currentType = currentObject[discriminator.propertyName]
+    const selected =
+      discriminator.options.find((option) => option.value === currentType) ??
+      discriminator.options[0]
+    if (!selected) return current
+    const merged = mergeSchemaDefaults(selected.schema, root, currentObject)
+    return {
+      ...(merged as Record<string, unknown>),
+      [discriminator.propertyName]: selected.value,
+    }
+  }
+
+  if (current === undefined) return getDeclaredDefaultValue(schema, root)
+
+  if (
+    resolved.type === "object" &&
+    resolved.properties &&
+    typeof current === "object" &&
+    !Array.isArray(current)
+  ) {
+    const currentObject = current as Record<string, unknown>
+    const merged: Record<string, unknown> = { ...currentObject }
+    for (const [key, propertySchema] of Object.entries(resolved.properties)) {
+      const value = mergeSchemaDefaults(
+        propertySchema,
+        root,
+        currentObject[key],
+      )
+      if (value !== undefined) merged[key] = value
+    }
+    return merged
+  }
+
+  return current
 }
 
 /**

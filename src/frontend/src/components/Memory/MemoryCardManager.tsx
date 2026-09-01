@@ -17,16 +17,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -60,7 +50,6 @@ import {
   DEFAULT_MEMORY_DRAFT,
   MEMORY_TYPES,
   type MemoryCard,
-  type MemoryCardExtractionResponse,
   type MemoryCardPage,
   type MemoryCardDraft,
   type MemoryScope,
@@ -112,7 +101,6 @@ const PROJECT_EXTRACTION_EXAMPLE_KEYS = [
   "reflection",
 ] as const
 
-const ONBOARDING_DEMO_PREVIEW_ID = "__onboarding_demo_preview__"
 
 function scopeQuery(scope: MemoryScope, projectId?: string, taskId?: string) {
   const params = new URLSearchParams({ scope })
@@ -294,9 +282,7 @@ export default function MemoryCardManager({
   const [extractionContent, setExtractionContent] = useState("")
   const [extractionPromptLanguage, setExtractionPromptLanguage] =
     useState<ExtractionPromptLanguage>("auto")
-  const [previewId, setPreviewId] = useState<string | null>(null)
   const [previewItems, setPreviewItems] = useState<MemoryCard[]>([])
-  const [selectedPreviewIds, setSelectedPreviewIds] = useState<string[]>([])
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false)
   const [isCancellingPreview, setIsCancellingPreview] = useState(false)
   const [extractionProgress, setExtractionProgress] = useState<{
@@ -306,13 +292,10 @@ export default function MemoryCardManager({
   } | null>(null)
   const [extractionLogs, setExtractionLogs] = useState<string[]>([])
   const [isCommittingPreview, setIsCommittingPreview] = useState(false)
-  const [isExtractionCloseConfirmOpen, setIsExtractionCloseConfirmOpen] = useState(false)
   const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([])
   const [isPromotionMode, setIsPromotionMode] = useState(false)
-  const [previewTargetScope, setPreviewTargetScope] = useState<MemoryScope>(scope)
   const togglingIdsRef = useRef<Set<string>>(new Set())
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
-  const skipNextPreviewDiscard = useRef(false)
   const extractionAbortRef = useRef<AbortController | null>(null)
   const onboardingDemoTimerRef = useRef<number | null>(null)
 
@@ -320,7 +303,6 @@ export default function MemoryCardManager({
   const mutationEndpoint = `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/memory/cards`
   const extractionEndpoint = `${mutationEndpoint}/extractions`
   const query = scopeQuery(scope, projectId, taskId)
-  const projectPreviewQuery = scopeQuery("project", promotionProjectId)
   const scopeKey = `${scope}:${projectId ?? ""}:${taskId ?? ""}`
   const canPromoteTaskCards = scope === "task" && Boolean(promotionProjectId && taskId)
   const interactionLocked = onboardingDemoActive || onboardingLocked
@@ -418,16 +400,6 @@ export default function MemoryCardManager({
     void loadCards()
   }, [refreshSignal, loadCards])
 
-  useEffect(() => {
-    if (previewItems.length === 0 || isCommittingPreview) return
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [isCommittingPreview, previewItems.length])
-
   const visibleCards = useMemo(() => {
     const needle = searchText.trim().toLowerCase()
     return [...cards]
@@ -472,18 +444,14 @@ export default function MemoryCardManager({
   const resetExtraction = useCallback(() => {
     setExtractionContent("")
     setExtractionPromptLanguage(normalizedDefaultExtractionPromptLanguage)
-    setPreviewId(null)
     setPreviewItems([])
-    setSelectedPreviewIds([])
     setIsGeneratingPreview(false)
     setIsCancellingPreview(false)
     setExtractionProgress(null)
     setExtractionLogs([])
     extractionAbortRef.current = null
     setIsCommittingPreview(false)
-    setIsExtractionCloseConfirmOpen(false)
     setIsPromotionMode(false)
-    setPreviewTargetScope(scope)
     setSelectedPromotionIds([])
   }, [normalizedDefaultExtractionPromptLanguage, scope])
 
@@ -503,19 +471,6 @@ export default function MemoryCardManager({
       const next = current.filter((card) => card.id !== cardId)
       if (next.length !== current.length) {
         setTotal((value) => (value === null ? value : Math.max(0, value - 1)))
-      }
-      return next
-    })
-  }, [])
-
-  const removeCards = useCallback((cardIds: string[]) => {
-    const ids = new Set(cardIds)
-    if (ids.size === 0) return
-    setCards((current) => {
-      const next = current.filter((card) => !ids.has(card.id))
-      const removedCount = current.length - next.length
-      if (removedCount > 0) {
-        setTotal((value) => (value === null ? value : Math.max(0, value - removedCount)))
       }
       return next
     })
@@ -586,50 +541,10 @@ export default function MemoryCardManager({
     setTogglingIds(new Set(togglingIdsRef.current))
   }
 
-  const discardPreview = useCallback(async () => {
-    const ids = previewItems.map((item) => item.id)
-    if (!previewId || ids.length === 0) {
-      resetExtraction()
-      setIsExtractionOpen(false)
-      return
-    }
-    try {
-      const response = await authFetch(
-        `${extractionEndpoint}/${previewId}?${previewTargetScope === "project" ? projectPreviewQuery : query}`,
-        {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ memory_ids: ids }),
-        },
-      )
-      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.deleteGeneratedFailed")))
-      if (previewTargetScope !== "project") removeCards(ids)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.deleteGeneratedFailed"))
-    } finally {
-      resetExtraction()
-      setIsExtractionOpen(false)
-    }
-  }, [
-    extractionEndpoint,
-    previewId,
-    previewItems,
-    previewTargetScope,
-    projectPreviewQuery,
-    query,
-    removeCards,
-    resetExtraction,
-    t,
-  ])
-
   const closeExtractionImmediately = useCallback(() => {
     resetExtraction()
     setIsExtractionOpen(false)
   }, [resetExtraction])
-
-  const keepGeneratedCardsAndClose = useCallback(() => {
-    closeExtractionImmediately()
-  }, [closeExtractionImmediately])
 
   const requestCloseExtraction = useCallback(() => {
     if (isGeneratingPreview) {
@@ -647,29 +562,21 @@ export default function MemoryCardManager({
       toast.info(t("memory.cardManager.messages.savingInProgress"))
       return
     }
-    if (previewId && previewItems.length > 0) {
-      setIsExtractionCloseConfirmOpen(true)
-      return
-    }
     closeExtractionImmediately()
   }, [
     closeExtractionImmediately,
     isCommittingPreview,
     isGeneratingPreview,
     isPersistingPreview,
-    previewId,
-    previewItems.length,
     t,
   ])
 
   const handleExtractionOpenChange = (open: boolean) => {
     if (open) {
-      skipNextPreviewDiscard.current = false
       setIsExtractionOpen(true)
       return
     }
-    if (skipNextPreviewDiscard.current) skipNextPreviewDiscard.current = false
-    else requestCloseExtraction()
+    requestCloseExtraction()
   }
 
   const generatePreview = async () => {
@@ -744,14 +651,9 @@ export default function MemoryCardManager({
         if (event.event === "completed") {
           completed = true
           const items = event.items ?? []
-          setPreviewId(event.preview_id ?? null)
           setPreviewItems(items)
-          setSelectedPreviewIds(items.map((item) => item.id))
-          setPreviewTargetScope(isPromotionMode ? "project" : scope)
           if (!isPromotionMode) {
             mergeCards(items)
-          }
-          if (items.length > 0 && !isPromotionMode) {
             refreshFirstPage()
           }
           setExtractionProgress({ stage: "completed", message, percent: event.percent ?? 100 })
@@ -775,42 +677,6 @@ export default function MemoryCardManager({
       setIsGeneratingPreview(false)
       setIsCancellingPreview(false)
       extractionAbortRef.current = null
-    }
-  }
-
-  const commitPreview = async () => {
-    if (!previewId) return
-    if (selectedPreviewIds.length === 0) {
-      toast.error(t("memory.cardManager.messages.selectPreview"))
-      return
-    }
-    setIsCommittingPreview(true)
-    try {
-      const response = await authFetch(
-        `${extractionEndpoint}/${previewId}/commit?${previewTargetScope === "project" ? projectPreviewQuery : query}`,
-        {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selected_ids: selectedPreviewIds,
-          all_ids: previewItems.map((item) => item.id),
-        }),
-        },
-      )
-      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.enableSelectedFailed")))
-      const payload = (await response.json()) as MemoryCardExtractionResponse
-      toast.success(t("memory.cardManager.messages.selectedEnabled"))
-      skipNextPreviewDiscard.current = true
-      setIsExtractionOpen(false)
-      resetExtraction()
-      if (previewTargetScope !== "project") {
-        mergeCards(payload.items ?? [])
-        refreshFirstPage()
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.enableSelectedFailed"))
-    } finally {
-      setIsCommittingPreview(false)
     }
   }
 
@@ -914,10 +780,7 @@ export default function MemoryCardManager({
       setExtractionPromptLanguage("ZH")
       setIsPromotionMode(false)
       setIsExtractionOpen(true)
-      setPreviewId(ONBOARDING_DEMO_PREVIEW_ID)
       setPreviewItems([onboardingDemoCard])
-      setSelectedPreviewIds([onboardingDemoCard.id])
-      setPreviewTargetScope(scope)
       setIsGeneratingPreview(false)
       setIsCommittingPreview(false)
       setExtractionProgress({ stage: "completed", message: extractionStageLabel("completed"), percent: 100 })
@@ -946,9 +809,7 @@ export default function MemoryCardManager({
       setIsExtractionOpen(true)
       setExtractionContent(onboardingDemoCard.content)
       setExtractionPromptLanguage("ZH")
-      setPreviewId(null)
       setPreviewItems([])
-      setSelectedPreviewIds([])
       setIsGeneratingPreview(true)
       setExtractionProgress({ stage: "llm_extracting", message: extractionStageLabel("llm_extracting"), percent: 58 })
       setExtractionLogs([extractionStageLabel("chunking"), extractionStageLabel("llm_extracting")])
@@ -1002,7 +863,6 @@ export default function MemoryCardManager({
     if (!interactionLocked) return
     setIsEditorOpen(false)
     setDeleteTarget(null)
-    setIsExtractionCloseConfirmOpen(false)
   }, [interactionLocked])
 
   const iconAction = (
@@ -1603,127 +1463,88 @@ export default function MemoryCardManager({
                         : t("memory.cardManager.preview.description")}
                     </p>
                   </div>
-                  <Badge variant="secondary">{t("memory.cardManager.preview.selected", { selected: selectedPreviewIds.length, total: previewItems.length })}</Badge>
+                  <Badge variant="secondary">{previewItems.length}</Badge>
                 </div>
                 <div className="grid gap-2">
-                  {previewItems.map((item) => {
-                    const checked = selectedPreviewIds.includes(item.id)
-                    return (
-                      <label
-                        key={item.id}
-                        className={cn(
-                          "flex cursor-pointer items-start gap-3 rounded-md border bg-background p-3 transition",
-                          checked ? "border-primary/50" : "opacity-70",
-                        )}
-                      >
-                          <Checkbox
-                            checked={checked}
-                            disabled={onboardingDemoActive}
-                          onCheckedChange={(value) => {
-                            setSelectedPreviewIds((current) =>
-                              value === true
-                                ? Array.from(new Set([...current, item.id]))
-                                : current.filter((id) => id !== item.id),
-                            )
-                          }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="min-w-0 truncate text-sm font-semibold">{item.title}</p>
-                            <Badge variant="outline">{memoryTypeLabel(item.type, t)}</Badge>
-                          </div>
-                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                            {item.content}
-                          </p>
-                          {item.tags.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {item.tags.map((tag) => (
-                                <Badge key={tag} variant="secondary" className="text-[10px]">
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
+                  {previewItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-start gap-3 rounded-md border bg-background p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="min-w-0 truncate text-sm font-semibold">{item.title}</p>
+                          <Badge variant="outline">{memoryTypeLabel(item.type, t)}</Badge>
+                          {item.operation && (
+                            <Badge variant="secondary">
+                              {t(`memory.cardManager.operations.${item.operation}`)}
+                            </Badge>
                           )}
                         </div>
-                      </label>
-                    )
-                  })}
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                          {item.content}
+                        </p>
+                        {item.tags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {item.tags.map((tag) => (
+                              <Badge key={tag} variant="secondary" className="text-[10px]">
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
           </div>
 
           <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={onboardingDemoActive || isCommittingPreview || isCancellingPreview || isPersistingPreview}
-              onClick={requestCloseExtraction}
-            >
-              {isGeneratingPreview || isCancellingPreview ? (
-                <Loader2 className="mr-1 size-4 animate-spin" />
-              ) : (
-                <X className="mr-1 size-4" />
-              )}
-              {isGeneratingPreview
-                ? isCancellingPreview
-                  ? t("memory.cardManager.actions.cancelling")
-                  : t("memory.cardManager.actions.cancelGeneration")
-                : isCommittingPreview
-                  ? t("memory.cardManager.actions.saving")
-                  : t("memory.common.cancel")}
-            </Button>
-            {previewItems.length === 0 ? (
+            {!isExtractionCompleted && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={onboardingDemoActive || isCommittingPreview || isCancellingPreview || isPersistingPreview}
+                onClick={requestCloseExtraction}
+              >
+                {isGeneratingPreview || isCancellingPreview ? (
+                  <Loader2 className="mr-1 size-4 animate-spin" />
+                ) : (
+                  <X className="mr-1 size-4" />
+                )}
+                {isGeneratingPreview
+                  ? isCancellingPreview
+                    ? t("memory.cardManager.actions.cancelling")
+                    : t("memory.cardManager.actions.cancelGeneration")
+                  : isCommittingPreview
+                    ? t("memory.cardManager.actions.saving")
+                    : t("memory.common.cancel")}
+              </Button>
+            )}
+            {!isExtractionCompleted ? (
               <Button
                 type="button"
                 disabled={onboardingDemoActive || isGeneratingPreview || disabled}
                 onClick={() => void generatePreview()}
               >
                 {isGeneratingPreview && <Loader2 className="mr-1 size-4 animate-spin" />}
-                {isPromotionMode ? t("memory.cardManager.actions.generateProjectPreview") : t("memory.cardManager.actions.generatePreview")}
+                {isPromotionMode ? t("memory.cardManager.actions.promote") : t("memory.cardManager.actions.extractAndSave")}
               </Button>
             ) : (
               <Button
                 type="button"
-                disabled={onboardingDemoActive || isCommittingPreview || disabled || selectedPreviewIds.length === 0}
-                onClick={() => void commitPreview()}
+                disabled={onboardingDemoActive || isCommittingPreview}
+                onClick={requestCloseExtraction}
               >
-                {isCommittingPreview ? (
-                  <Loader2 className="mr-1 size-4 animate-spin" />
-                ) : (
-                  <Check className="mr-1 size-4" />
-                )}
-                {t("memory.cardManager.actions.enableSelected")}
+                <Check className="mr-1 size-4" />
+                {t("memory.common.close")}
               </Button>
             )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog
-        open={isExtractionCloseConfirmOpen}
-        onOpenChange={setIsExtractionCloseConfirmOpen}
-      >
-        <AlertDialogContent inert={onboardingDemoActive}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{isPromotionMode ? t("memory.cardManager.close.promoteTitle") : t("memory.cardManager.close.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {isPromotionMode
-                ? t("memory.cardManager.close.promoteDescription")
-                : t("memory.cardManager.close.description")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("memory.cardManager.close.continueEditing")}</AlertDialogCancel>
-            <Button type="button" variant="outline" onClick={keepGeneratedCardsAndClose}>
-              {t("memory.cardManager.close.keepDisabled")}
-            </Button>
-            <AlertDialogAction onClick={() => void discardPreview()}>
-              {t("memory.cardManager.close.deleteGenerated")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <MemoryCardEditorDialog
         open={isEditorOpen}

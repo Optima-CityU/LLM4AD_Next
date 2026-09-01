@@ -327,6 +327,71 @@ class BaseMemory(ABC, Registrable):
         ...
 
 
+class NullMemory(BaseMemory):
+    """No-op memory used when a task explicitly disables memory.
+
+    Keeping the regular memory interface lets planners and samplers remain
+    unaware of the ablation mode while guaranteeing that no cards are loaded,
+    persisted, retrieved, injected, or extracted.
+    """
+
+    @property
+    def extractor(self) -> None:
+        """Return no extractor while memory is disabled."""
+        return None
+
+    @extractor.setter
+    def extractor(self, value: Any) -> None:
+        del value
+
+    def set_memory_dir(self, memory_dir: Path) -> None:
+        """Ignore persistence directory configuration."""
+        del memory_dir
+
+    def load_static_cards(self, inline_cards: list[Any]) -> None:
+        """Ignore static cards so they cannot enter disabled tasks."""
+        del inline_cards
+
+    async def add_card(self, card: MemoryCard, persist: bool | None = None) -> None:
+        """Discard a card instead of storing it."""
+        del card, persist
+
+    def list_cards(self) -> list[MemoryCard]:
+        """Return an empty card collection."""
+        return []
+
+    async def upsert_card(
+        self,
+        card: MemoryCard,
+        persist: bool | None = None,
+    ) -> MemoryCard:
+        """Return the supplied card without storing it."""
+        del persist
+        return card
+
+    async def delete_card(self, card_id: str) -> None:
+        """Ignore deletion because disabled memory stores no cards."""
+        del card_id
+
+    async def set_card_enabled(self, card_id: str, enabled: bool) -> MemoryCard:
+        """Reject updates because disabled memory has no cards."""
+        del enabled
+        raise KeyError(f"Memory is disabled; card '{card_id}' is unavailable")
+
+    def get_prompt_context(self, query: str = "", max_cards: int | None = None) -> str:
+        """Return no prompt context."""
+        del query, max_cards
+        return ""
+
+    def get_stats(self) -> dict[str, Any]:
+        """Report the disabled, empty state."""
+        return {"enabled": False, "total_cards": 0}
+
+    def clear(self) -> None:
+        """Keep the empty state unchanged."""
+        return None
+
+
 @BaseMemoryExtractor.register("llm_card_extractor")
 class MemoryExtractor(BaseMemoryExtractor):
     """LLM-based extraction of memory cards from evaluated algorithms.
@@ -1024,7 +1089,12 @@ class Memory(BaseMemory):
             query=context, k=k, memory_types=[MemoryType.ERROR_REFLECTION]
         )
 
-    def get_prompt_context(self, query: str = "", max_cards: int | None = None) -> str:
+    def get_prompt_context(
+        self,
+        query: str = "",
+        max_cards: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
         """Build formatted memory context for injection into sampler prompts.
 
         Organizes cards into three sections:
@@ -1035,11 +1105,18 @@ class Memory(BaseMemory):
         Args:
             query: Optional query for relevance filtering.
             max_cards: Maximum cards to include. None uses self.max_prompt_cards.
+            context: Optional sampler and island strategy metadata.
 
         Returns:
             Formatted memory context string. Empty string if no cards.
         """
-        if not self._cards:
+        profile = context.get("island_strategy") if context else None
+        memory_policy = (
+            str(profile.get("memory_policy", "")).strip().lower()
+            if isinstance(profile, dict)
+            else ""
+        )
+        if memory_policy == "none" or not self._cards:
             return ""
 
         if not self.include_task_memory:
@@ -1055,10 +1132,13 @@ class Memory(BaseMemory):
         bad_cards: list[MemoryCard] = []
         domain_cards: list[MemoryCard] = []
 
+        explicit_island_policy = memory_policy in {"success_only", "corrective"}
         for card in self._cards:
             if not card.enabled:
                 continue
-            if card.type == MemoryType.GOOD_ALGORITHM or card.type == MemoryType.GENERAL_INSIGHT:
+            if card.type == MemoryType.GOOD_ALGORITHM or (
+                not explicit_island_policy and card.type == MemoryType.GENERAL_INSIGHT
+            ):
                 good_cards.append(card)
             elif card.type == MemoryType.ERROR_REFLECTION:
                 bad_cards.append(card)
@@ -1069,12 +1149,32 @@ class Memory(BaseMemory):
         good_cards.sort(key=lambda c: c.score if c.score is not None else 0.0, reverse=True)
         bad_cards.sort(key=lambda c: c.score if c.score is not None else float("inf"))
 
-        # Distribute budget across sections
-        remaining = max_cards
-        n_domain = min(len(domain_cards), max(1, remaining // 3))
-        remaining -= n_domain
-        n_good = min(len(good_cards), max(1, remaining // 2))
-        n_bad = min(len(bad_cards), remaining - n_good)
+        if memory_policy == "success_only":
+            n_domain = 0
+            n_good = min(len(good_cards), max_cards)
+            n_bad = 0
+        elif memory_policy == "corrective" and isinstance(profile, dict):
+            try:
+                success_ratio = max(0.0, float(profile.get("success_memory_ratio", 0.6)))
+                error_ratio = max(0.0, float(profile.get("error_memory_ratio", 0.4)))
+            except (TypeError, ValueError):
+                success_ratio, error_ratio = 0.6, 0.4
+            ratio_total = success_ratio + error_ratio
+            if ratio_total <= 0:
+                return ""
+            success_slots = min(max_cards, round(max_cards * success_ratio / ratio_total))
+            error_slots = max(0, max_cards - success_slots)
+            n_domain = 0
+            n_good = min(len(good_cards), success_slots)
+            n_bad = min(len(bad_cards), error_slots)
+        else:
+            # Preserve the legacy balanced local-memory layout when no island
+            # strategy is supplied by older orchestrators or direct callers.
+            remaining = max_cards
+            n_domain = min(len(domain_cards), max(1, remaining // 3))
+            remaining -= n_domain
+            n_good = min(len(good_cards), max(1, remaining // 2))
+            n_bad = min(len(bad_cards), remaining - n_good)
 
         sections: list[str] = []
 
@@ -1110,8 +1210,9 @@ class Memory(BaseMemory):
         # ⏳ marks short-term (local) memory. Local memory only injects task-scope
         # cards ranked by score, so the strategy is fixed to score-topk.
         logger.info(
-            "⏳ [short-term memory] injection completed: task_injection=score-topk "
+            "⏳ [short-term memory] injection completed: task_injection={} "
             "good={} bad={} domain={} injected_chars={}",
+            memory_policy or "score-topk",
             len(good_cards[:n_good]),
             len(bad_cards[:n_bad]),
             len(domain_cards[:n_domain]),
@@ -1120,13 +1221,26 @@ class Memory(BaseMemory):
         logger.bind(
             event_type="local_memory_injected",
             memory_kind="short_term",
-            task_injection_mode="score-topk",
+            task_injection_mode=memory_policy or "score-topk",
             good_cards=len(good_cards[:n_good]),
             bad_cards=len(bad_cards[:n_bad]),
             domain_cards=len(domain_cards[:n_domain]),
             injected_chars=len(prompt_context),
         ).info("⏳ short-term memory injection event")
         return prompt_context
+
+    async def aget_prompt_context(
+        self,
+        query: str = "",
+        max_cards: int | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Build local prompt context with the same island policy as remote memory."""
+        return self.get_prompt_context(
+            query=query,
+            max_cards=max_cards,
+            context=context,
+        )
 
     async def summarize(self, max_tokens: int = 2000) -> str:
         """Summarize memory into a prompt for LLM.
@@ -1278,11 +1392,14 @@ def create_memory(config: Any) -> BaseMemory:
     Returns:
         Registered memory implementation.
     """
+    config_dict = config if isinstance(config, dict) else config.model_dump()
+    if not bool(_config_get(config, "enabled", True)):
+        return NullMemory(config=config_dict)
+
     import_memory_module(_config_get(config, "module"))
     memory_type = _config_get(config, "type", "local_yaml")
     if memory_type == "mindmemos_cloud":
         import_memory_module("llm4ad.planner.mindmemos_memory")
-    config_dict = config if isinstance(config, dict) else config.model_dump()
     return BaseMemory.create(memory_type, config=config_dict)
 
 

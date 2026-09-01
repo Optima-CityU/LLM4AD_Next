@@ -726,7 +726,11 @@ function Layout() {
   }, [effectiveTask, effectiveTaskId])
 
   // Real evolution data from REST (terminal) / fed by SSE (active)
-  const { data: evolutionData, feedGenerated } = useEvolutionNodes(
+  const {
+    data: evolutionData,
+    feedGenerated,
+    feedMigration,
+  } = useEvolutionNodes(
     effectiveTaskId ?? undefined,
     effectiveStatus,
     !!effectiveTaskId,
@@ -741,6 +745,7 @@ function Layout() {
     onResetTask: handleResetTask,
     onStatusChange: handleStatusChange,
     onGenerated: feedGenerated,
+    onMigration: feedMigration,
     onMemoryCardCreated: (event) => {
       setTaskMemoryCreatedSignal({ event, nonce: Date.now() })
     },

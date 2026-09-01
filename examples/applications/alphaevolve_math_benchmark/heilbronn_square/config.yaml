@@ -1,0 +1,48 @@
+project_name: "alphaevolve_heilbronn_square_n13"
+path_resolution: "cwd"
+description_en: "Evolve 13 points in a unit square to maximize the minimum triangle area."
+description_zh: "进化单位正方形内的 13 个点，最大化任意三点形成三角形的最小面积。"
+random_seed: 42
+background: |
+  Act as an expert in computational geometry and algorithmic optimization. Your goal is to iteratively improve a Python program that solves the Heilbronn Problem for a square.
+
+  # Objective
+  The task is to solve the Heilbronn Problem for a square: place n points within the unit square $[0, 1] \times [0, 1]$ to maximize the value $A_{min}$, where $A_{min}$ is the minimum area of all possible triangles formed by any three distinct points.
+
+  For n=13, the current known optimum is approximately 0.0306. Your goal is to approach or exceed this value.
+
+  ## Refined Constraints & Definitions:
+  - **Area Calculation**: For any three points $P_i, P_j, P_k$, the area is defined as:$$Area = \frac{1}{2} |x_i(y_j - y_k) + x_j(y_k - y_i) + x_k(y_i - y_j)|$$
+  - **Objective**: Maximize $\min_{1 \le i < j < k \le n} \{Area(P_i, P_j, P_k)\}$.
+  - **Points: All points $(x, y)$ must satisfy $0 \le x, y \le 1$.
+
+  # Code Structure & Evaluation
+  Your code will be evaluated through a fixed entry point, `run_search_point(n)`, which you must not change. This function should call your main logic, which must be implemented in a function with the following signature:
+  `points, min_area = find_best_placement(n)`
+
+  This function must return:
+  1.  `points`: A `numpy.ndarray` of shape `(n, 2)`, containing the `(x, y)` coordinates of the `n` points.
+  2.  `min_area`: A `float` representing the absolute minimum area of the smallest triangle found. The evaluation script will handle scoring and normalization.
+
+  # Constraints
+  The returned solution MUST adhere to these rules:
+  - **Containment**: All points must be within the closed interval `[0, 1]` for both x and y coordinates.
+  - **Uniqueness**: All `n` points must be distinct.
+  - **Non-Collinearity**: No three points can be collinear (i.e., they must form a non-degenerate triangle).
+  - **Performance**: The entire process must complete within a 1200-second time limit.
+
+  # Strategic Guidance for Optimization (Enhanced)
+  To achieve a high-performing solution, consider these advanced strategies:
+  - **Efficiency**: Since there are $\binom{n}{3}$ triangles, use scipy.optimize or vectorized numpy operations to speed up the bottleneck (finding the minimum area).
+  - **Initialization**: Many optimal configurations for small $n$ exhibit rotational or reflective symmetry. Consider starting with points near the edges or in semi-regular patterns.
+  - **Structured Initialization**: Instead of purely random starting points, explore structured patterns like a hexagonal lattice, points on a circle, or vertices of a regular polygon inside the square. This can lead to better starting configurations.
+  - **Symmetry Exploitation**: The unit square has inherent symmetries. Exploring solutions that respect these symmetries might reduce the search space.
+
+  Focus on evolving the core logic within `find_best_placement`. Good luck!
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the run_search_point(n=13) entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "heilbronn_square/evaluator.py:HeilbronnSquareEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [best_area_ratio, target_ratio, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "heilbronn_square/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

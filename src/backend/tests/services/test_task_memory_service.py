@@ -14,7 +14,6 @@ from sqlmodel import Session, select
 from app import models
 from app.core.db import engine
 from app.schemas.memory import (
-    MemoryCardExtractionCommitRequest,
     MemoryCardExtractionRequest,
     MemoryCardResponse,
     MemoryCardStructuredContent,
@@ -460,6 +459,61 @@ def test_task_memory_crud_uses_mindmemos_when_enabled(
     assert [card.id for card in memory_service.list_task_memory_cards(db, task.id, user).items] == [
         "existing-card"
     ]
+
+
+def test_manual_card_add_returns_the_actual_reinforced_memory(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    user = create_random_user(db)
+    task = _create_task_for_user(db, user.id)
+    _enable_system_mindmemos(monkeypatch)
+    _mark_user_memory_bound(db, user.id)
+    existing = MemoryCardResponse(
+        id="existing-card",
+        type="good_algorithm",
+        title="Canonical 2-opt",
+        content="Use bounded 2-opt after nearest-neighbor construction.",
+        enabled=True,
+    )
+
+    monkeypatch.setattr(
+        memory_service,
+        "_mindmemos_post",
+        lambda *_args, **_kwargs: {
+            "data": {
+                "memories": [
+                    {
+                        "operation": "reinforcement",
+                        "memory_id": existing.id,
+                        "content": existing.content,
+                        "property_name": "good_algorithm",
+                    }
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(
+        memory_service,
+        "_remote_fetch_cards_by_ids",
+        lambda *_args, **_kwargs: {existing.id: existing},
+    )
+    monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda *_args, **_kwargs: None)
+
+    result = memory_service.upsert_task_memory_card(
+        db,
+        task.id,
+        user,
+        MemoryCardUpsertRequest(
+            type="good_algorithm",
+            title="Another 2-opt title",
+            content="Use bounded 2-opt after nearest-neighbor construction.",
+        ),
+    )
+
+    assert result.id == existing.id
+    assert result.title == "Canonical 2-opt"
+    assert result.operation == "reinforcement"
 
 
 def test_filter_active_task_pinned_memory_ids_excludes_disabled_cards(
@@ -1008,7 +1062,7 @@ async def test_stream_extract_memory_cards_emits_progress_and_completed_cards(
             "data": {
                 "memories": [
                     {
-                        "operation": "add",
+                        "operation": "reinforcement",
                         "memory_id": "remote-card-1",
                         "content": "Use 2-opt after nearest-neighbor construction.",
                         "property_name": "good_algorithm",
@@ -1019,20 +1073,21 @@ async def test_stream_extract_memory_cards_emits_progress_and_completed_cards(
             },
         }
 
-    updated_statuses: list[dict] = []
-
-    def fake_update_status(_current_user, memory_id: str, *, scope_data: dict, status: str, metadata_patch: dict):
-        updated_statuses.append(
-            {
-                "memory_id": memory_id,
-                "scope_data": scope_data,
-                "status": status,
-                "metadata_patch": metadata_patch,
-            }
-        )
+    def fake_fetch(_current_user, _scope_data, memory_ids, *, include_tags=False):
+        assert include_tags is True
+        assert memory_ids == ["remote-card-1"]
+        return {
+            "remote-card-1": MemoryCardResponse(
+                id="remote-card-1",
+                type="good_algorithm",
+                title="2-opt refinement",
+                content="Use 2-opt after nearest-neighbor construction.",
+                enabled=True,
+            )
+        }
 
     monkeypatch.setattr(memory_service, "_mindmemos_stream_post", fake_stream)
-    monkeypatch.setattr(memory_service, "_remote_update_card_status", fake_update_status)
+    monkeypatch.setattr(memory_service, "_remote_fetch_cards_by_ids", fake_fetch)
     monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda *_args, **_kwargs: None)
 
     events = [
@@ -1052,15 +1107,16 @@ async def test_stream_extract_memory_cards_emits_progress_and_completed_cards(
     assert events[0]["stage"] == "llm_extracting"
     assert events[1]["stage"] == "finalizing"
     assert events[1]["percent"] == 96
-    assert events[1]["message_i18n"]["zh"] == "正在整理记忆预览"
-    assert events[-1]["preview_id"].startswith("llm4ad-preview-")
+    assert events[1]["message_i18n"]["zh"] == "正在整理记忆处理结果"
+    assert events[-1]["preview_id"].startswith("llm4ad-operation-")
     assert events[-1]["stage"] == "completed"
     assert events[-1]["percent"] == 100
-    assert events[-1]["message_i18n"]["zh"] == "记忆提取完成"
+    assert events[-1]["message_i18n"]["zh"] == "记忆处理完成"
     assert events[-1]["items"][0]["id"] == "remote-card-1"
-    assert events[-1]["items"][0]["enabled"] is False
+    assert events[-1]["items"][0]["enabled"] is True
+    assert events[-1]["items"][0]["operation"] == "reinforcement"
     assert progress_payloads[0]["prompt_language"] == "EN"
-    assert updated_statuses[0]["status"] == "archived"
+    assert progress_payloads[0]["metadata"]["enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -1114,6 +1170,10 @@ async def test_stream_promote_task_memory_cards_uses_structured_sources_and_proj
             type="good_algorithm",
             title="2-opt refinement",
             content="Apply 2-opt after nearest-neighbor construction.",
+            structured_content=MemoryCardStructuredContent(
+                description="Nearest-neighbor construction benefits from bounded 2-opt.",
+                content=["Apply 2-opt after nearest-neighbor construction."],
+            ),
             tags=["TSP", "local-search"],
         ),
         "task-card-2": MemoryCardResponse(
@@ -1134,14 +1194,20 @@ async def test_stream_promote_task_memory_cards_uses_structured_sources_and_proj
         include_tags: bool = False,
     ):
         del include_tags
-        if memory_ids == ["project-preview-1"]:
+        if memory_ids == ["project-updated-1", "project-existing-2"]:
             return {
-                "project-preview-1": MemoryCardResponse(
-                    id="project-preview-1",
+                "project-updated-1": MemoryCardResponse(
+                    id="project-updated-1",
                     type="good_algorithm",
                     title="Bounded 2-opt",
                     content="Use 2-opt with a bounded neighborhood for TSP.",
-                )
+                ),
+                "project-existing-2": MemoryCardResponse(
+                    id="project-existing-2",
+                    type="error_reflection",
+                    title="Large instance limit",
+                    content="For large instances, restrict the neighborhood size.",
+                ),
             }
         captured["source_scope"] = scope_data
         assert memory_ids == ["task-card-1", "task-card-2"]
@@ -1156,32 +1222,27 @@ async def test_stream_promote_task_memory_cards_uses_structured_sources_and_proj
             "data": {
                 "memories": [
                     {
-                        "operation": "add",
-                        "memory_id": "project-preview-1",
+                        "operation": "update",
+                        "memory_id": "project-updated-1",
                         "content": "Use 2-opt with a bounded neighborhood for TSP.",
                         "property_name": "good_algorithm",
                         "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
                         "entity_id": "project-entity-1",
-                    }
+                    },
+                    {
+                        "operation": "reinforcement",
+                        "memory_id": "project-existing-2",
+                        "content": "For large instances, restrict the neighborhood size.",
+                        "property_name": "error_reflection",
+                        "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                        "entity_id": "project-entity-2",
+                    },
                 ]
             },
         }
 
-    archived: list[dict] = []
-
-    def fake_archive(_current_user, memory_id: str, *, scope_data: dict, status: str, metadata_patch: dict):
-        archived.append(
-            {
-                "memory_id": memory_id,
-                "scope_data": scope_data,
-                "status": status,
-                "metadata": metadata_patch,
-            }
-        )
-
     monkeypatch.setattr(memory_service, "_remote_fetch_cards_by_ids", fake_fetch)
     monkeypatch.setattr(memory_service, "_mindmemos_stream_post", fake_stream)
-    monkeypatch.setattr(memory_service, "_remote_update_card_status", fake_archive)
     monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda *_args, **_kwargs: None)
 
     events = [
@@ -1209,32 +1270,50 @@ async def test_stream_promote_task_memory_cards_uses_structured_sources_and_proj
     }
     assert payload["agent_id"] == "project"
     assert payload["session_id"] == str(task.project_id)
-    assert payload["messages"] == [
+    assert "messages" not in payload
+    assert payload["structured_items"] == [
         {
-            "role": "user",
-            "content": "User explicitly confirms and requests promotion of the following selected task-memory cards into reusable project memory.",
+            "source_id": "task-card-1",
+            "entity_name": "2-opt refinement",
+            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            "description": "Nearest-neighbor construction benefits from bounded 2-opt.",
+            "properties": [
+                {
+                    "property_name": "good_algorithm",
+                    "value": {
+                        "description": "Nearest-neighbor construction benefits from bounded 2-opt.",
+                        "content": ["Apply 2-opt after nearest-neighbor construction."],
+                        "artifacts": [],
+                    },
+                },
+                {"property_name": "tags", "value": "TSP, local-search"},
+            ],
+            "metadata": {"source_scope": "task", "source_task_id": str(task.id)},
         },
         {
-            "role": "assistant",
-            "content": "Selected task memory card (ID: task-card-1)\nTitle: 2-opt refinement\nType: good_algorithm\nTags: TSP, local-search\nContent:\nApply 2-opt after nearest-neighbor construction.",
-        },
-        {
-            "role": "assistant",
-            "content": "Selected task memory card (ID: task-card-2)\nTitle: Large instance limit\nType: error_reflection\nTags: TSP\nContent:\nFor large instances, restrict the neighborhood size.",
+            "source_id": "task-card-2",
+            "entity_name": "Large instance limit",
+            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+            "description": "Large instance limit",
+            "properties": [
+                {
+                    "property_name": "error_reflection",
+                    "value": {
+                        "description": "Large instance limit",
+                        "content": ["For large instances, restrict the neighborhood size."],
+                    },
+                },
+                {"property_name": "tags", "value": "TSP"},
+            ],
+            "metadata": {"source_scope": "task", "source_task_id": str(task.id)},
         },
     ]
+    assert payload["idempotency_key"].startswith(f"task-memory-promotion:{task.id}:")
     assert payload["metadata"]["llm4ad_source_task_id"] == str(task.id)
     assert payload["metadata"]["llm4ad_source_memory_ids"] == ["task-card-1", "task-card-2"]
     assert "task_id" not in payload
-    assert events[-1]["items"][0]["enabled"] is False
-    assert archived[0]["scope_data"] == {
-        "user_id": str(user.id),
-        "app_id": "llm4ad",
-        "agent_id": "project",
-        "session_id": str(task.project_id),
-    }
-    assert archived[0]["metadata"]["llm4ad_source_task_id"] == str(task.id)
-    assert archived[0]["metadata"]["llm4ad_source_memory_ids"] == ["task-card-1", "task-card-2"]
+    assert [item["operation"] for item in events[-1]["items"]] == ["update", "reinforcement"]
+    assert all(item["enabled"] is True for item in events[-1]["items"])
 
 
 @pytest.mark.asyncio
@@ -1940,7 +2019,7 @@ def test_task_memory_update_falls_back_when_refetch_misses(
     assert card.tags == ["editable"]
 
 
-def test_memory_card_extraction_archives_new_memories_as_visible_disabled_cards(
+def test_memory_card_extraction_saves_new_memories_as_active_cards(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1962,7 +2041,7 @@ def test_memory_card_extraction_archives_new_memories_as_visible_disabled_cards(
 
     assert preview.preview_id
     assert [item.id for item in preview.items] == ["remote-card-1"]
-    assert preview.items[0].enabled is False
+    assert preview.items[0].enabled is True
     assert preview.items[0].type == "good_algorithm"
     assert preview.items[0].content == "在 TSP 中，2-opt 对中小规模实例稳定，但大规模实例需要限制邻域数量。"
 
@@ -1973,16 +2052,11 @@ def test_memory_card_extraction_archives_new_memories_as_visible_disabled_cards(
         {"role": "user", "content": "在 TSP 中，2-opt 对中小规模实例稳定，但大规模实例需要限制邻域数量。"}
     ]
     assert "prompt_language" not in add_calls[0]
-    assert update_calls[-1]["memory_id"] == "remote-card-1"
-    assert update_calls[-1]["status"] == "archived"
-    assert "content" not in update_calls[-1]
-    assert "llm4ad_preview_pending" not in update_calls[-1]["metadata_patch"]
-    assert update_calls[-1]["metadata_patch"]["enabled"] is False
-    assert update_calls[-1]["metadata_patch"]["memory_type"] == "good_algorithm"
+    assert update_calls == []
 
     listed = memory_service.list_task_memory_cards(db, task.id, user)
     assert [item.id for item in listed.items] == ["remote-card-1"]
-    assert listed.items[0].enabled is False
+    assert listed.items[0].enabled is True
 
 
 def test_memory_card_extraction_passes_prompt_language_to_mindmemos(
@@ -2039,38 +2113,41 @@ def test_memory_card_extraction_uses_related_memory_ids_from_schema_events(
                 },
             }
         if path == "/v1/memory/list":
-            _assert_task_scope_filters(payload["filters"], user, task, ["prop-good", "prop-error"])
-            return {
-                "code": "ok",
-                "data": {
-                    "memories": [
-                        {
-                            "id": "prop-good",
-                            "memory": "Use 2-opt after nearest-neighbor seeding.",
-                            "status": "active",
-                            "mem_type": "fact",
-                            "property_name": "good_algorithm",
-                            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-                            "entity_id": "entity-1",
-                            "metadata": {"property_name": "good_algorithm"},
-                        },
-                        {
-                            "id": "prop-error",
-                            "memory": "Avoid very high mutation rates on small populations.",
-                            "status": "active",
-                            "mem_type": "fact",
-                            "property_name": "error_reflection",
-                            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-                            "entity_id": "entity-2",
-                            "metadata": {"property_name": "error_reflection"},
-                        },
-                    ],
-                    "page": 1,
-                    "page_size": 2,
-                    "total": 2,
-                    "has_more": False,
-                },
-            }
+            if "memory_id" in payload["filters"]:
+                _assert_task_scope_filters(payload["filters"], user, task, ["prop-good", "prop-error"])
+                return {
+                    "code": "ok",
+                    "data": {
+                        "memories": [
+                            {
+                                "id": "prop-good",
+                                "memory": "Use 2-opt after nearest-neighbor seeding.",
+                                "status": "active",
+                                "mem_type": "fact",
+                                "property_name": "good_algorithm",
+                                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                                "entity_id": "entity-1",
+                                "metadata": {"property_name": "good_algorithm"},
+                            },
+                            {
+                                "id": "prop-error",
+                                "memory": "Avoid very high mutation rates on small populations.",
+                                "status": "active",
+                                "mem_type": "fact",
+                                "property_name": "error_reflection",
+                                "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
+                                "entity_id": "entity-2",
+                                "metadata": {"property_name": "error_reflection"},
+                            },
+                        ],
+                        "page": 1,
+                        "page_size": 2,
+                        "total": 2,
+                        "has_more": False,
+                    },
+                }
+            assert payload["filters"]["property_name"] == "tags"
+            return {"code": "ok", "data": {"memories": [], "page": 1, "page_size": 2}}
         if path == "/v1/memory/update":
             return {"code": "ok", "data": None}
         if path == "/v1/memory/delete":
@@ -2091,8 +2168,7 @@ def test_memory_card_extraction_uses_related_memory_ids_from_schema_events(
     assert [item.id for item in preview.items] == ["prop-good", "prop-error"]
     assert [item.type for item in preview.items] == ["good_algorithm", "error_reflection"]
     update_ids = [payload["memory_id"] for path, payload in calls if path == "/v1/memory/update"]
-    assert update_ids == ["prop-good", "prop-error"]
-    assert "entity-1" not in update_ids
+    assert update_ids == []
 
 
 def test_memory_card_extraction_merges_related_schema_tags(
@@ -2328,218 +2404,6 @@ def test_memory_card_extraction_keeps_502_when_timeout_recovery_misses(
 
     assert exc.value.status_code == 502
     assert "timed out" in str(exc.value.detail)
-
-
-def test_memory_card_extraction_commit_activates_selected_and_keeps_rejected_disabled(
-    db: Session,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    user = create_random_user(db)
-    task = _create_task_for_user(db, user.id)
-    _enable_system_mindmemos(monkeypatch)
-    _mark_user_memory_bound(db, user.id)
-    _store, calls = _fake_mindmemos(
-        monkeypatch,
-        {
-            "keep-card": "Keep this extracted memory.",
-            "drop-card": "Drop this extracted memory.",
-        },
-        {
-            "keep-card": {
-                "llm4ad_generation_id": "preview-test",
-                "memory_type": "general_insight",
-            },
-            "drop-card": {
-                "llm4ad_generation_id": "preview-test",
-                "memory_type": "general_insight",
-            },
-        },
-    )
-
-    result = memory_service.commit_memory_card_extraction(
-        db,
-        current_user=user,
-        scope="task",
-        task_id=task.id,
-        preview_id="preview-test",
-        request=MemoryCardExtractionCommitRequest(
-            selected_ids=["keep-card"],
-            all_ids=["keep-card", "drop-card"],
-        ),
-    )
-
-    assert [item.id for item in result.items] == ["keep-card"]
-    assert result.items[0].enabled is True
-    assert "drop-card" in _store
-    assert [path for path, _payload in calls].count("/v1/memory/add") == 0
-    update_calls = [payload for path, payload in calls if path == "/v1/memory/update"]
-    delete_calls = [payload for path, payload in calls if path == "/v1/memory/delete"]
-    assert update_calls[-1]["memory_id"] == "keep-card"
-    assert update_calls[-1]["status"] == "active"
-    assert "content" not in update_calls[-1]
-    assert "llm4ad_preview_pending" not in update_calls[-1]["metadata_patch"]
-    assert delete_calls == []
-
-
-def test_memory_card_extraction_commit_can_activate_disabled_generated_cards(
-    db: Session,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    user = create_random_user(db)
-    task = _create_task_for_user(db, user.id)
-    _enable_system_mindmemos(monkeypatch)
-    _mark_user_memory_bound(db, user.id)
-    calls: list[tuple[str, dict]] = []
-    preview_id = "generation-test"
-
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
-        calls.append((path, payload))
-        if path == "/v1/memory/list":
-            _assert_task_scope_filters(payload["filters"], user, task, ["keep-card"])
-            return {
-                "code": "ok",
-                "data": {
-                    "memories": [
-                        {
-                            "id": "keep-card",
-                            "memory": "Keep this extracted memory.",
-                            "status": "archived",
-                            "property_name": "good_algorithm",
-                            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-                            "entity_id": "keep-entity",
-                            "metadata": {
-                                "memory_type": "good_algorithm",
-                                "title": "Generated keep",
-                                "llm4ad_generation_id": preview_id,
-                            },
-                        },
-                    ],
-                    "page": 1,
-                    "page_size": 1,
-                    "total": 1,
-                    "has_more": False,
-                },
-            }
-        if path == "/v1/memory/update":
-            return {"code": "ok", "data": None}
-        if path == "/v1/memory/delete":
-            return {"code": "ok", "data": None}
-        raise AssertionError(f"unexpected MindMemOS path: {path}")
-
-    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
-    monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda db, current_user: None)
-
-    result = memory_service.commit_memory_card_extraction(
-        db,
-        current_user=user,
-        scope="task",
-        task_id=task.id,
-        preview_id=preview_id,
-        request=MemoryCardExtractionCommitRequest(
-            selected_ids=["keep-card"],
-            all_ids=["keep-card", "drop-card"],
-        ),
-    )
-
-    assert [item.id for item in result.items] == ["keep-card"]
-    assert result.items[0].enabled is True
-    update_calls = [payload for path, payload in calls if path == "/v1/memory/update"]
-    delete_calls = [payload for path, payload in calls if path == "/v1/memory/delete"]
-    assert update_calls[-1]["memory_id"] == "keep-card"
-    assert "llm4ad_preview_pending" not in update_calls[-1]["metadata_patch"]
-    assert delete_calls == []
-
-
-def test_memory_card_extraction_commit_activates_scope_cards_without_preview_gate(
-    db: Session,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    user = create_random_user(db)
-    task = _create_task_for_user(db, user.id)
-    _enable_system_mindmemos(monkeypatch)
-    _mark_user_memory_bound(db, user.id)
-    calls: list[tuple[str, dict]] = []
-
-    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
-        calls.append((path, payload))
-        if path == "/v1/memory/list":
-            return {
-                "code": "ok",
-                "data": {
-                    "memories": [
-                        {
-                            "id": "other-preview-card",
-                            "memory": "This belongs to another preview.",
-                            "status": "archived",
-                            "property_name": "good_algorithm",
-                            "entity_type": memory_service.LLM4AD_MEMORY_ENTITY_TYPE,
-                            "entity_id": "other-preview-entity",
-                            "metadata": {
-                                "memory_type": "good_algorithm",
-                                "llm4ad_generation_id": "other-generation",
-                            },
-                        }
-                    ],
-                    "page": 1,
-                    "page_size": 1,
-                    "total": 1,
-                    "has_more": False,
-                },
-            }
-        if path == "/v1/memory/update":
-            return {"code": "ok", "data": None}
-        raise AssertionError(f"unexpected MindMemOS path: {path}")
-
-    monkeypatch.setattr(memory_service, "_mindmemos_post", fake_post)
-    monkeypatch.setattr(memory_service, "_ensure_mindmemos_provider_binding", lambda db, current_user: None)
-
-    result = memory_service.commit_memory_card_extraction(
-        db,
-        current_user=user,
-        scope="task",
-        task_id=task.id,
-        preview_id="current-generation",
-        request=MemoryCardExtractionCommitRequest(
-            selected_ids=["other-preview-card"],
-            all_ids=["other-preview-card"],
-        ),
-    )
-
-    assert [item.id for item in result.items] == ["other-preview-card"]
-    assert result.items[0].enabled is True
-    assert [path for path, _payload in calls] == ["/v1/memory/list", "/v1/memory/update"]
-
-
-def test_memory_card_extraction_discard_hard_deletes_preview_memories(
-    db: Session,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    user = create_random_user(db)
-    task = _create_task_for_user(db, user.id)
-    _enable_system_mindmemos(monkeypatch)
-    _mark_user_memory_bound(db, user.id)
-    _store, calls = _fake_mindmemos(
-        monkeypatch,
-        {
-            "preview-card-a": "Temporary memory A.",
-            "preview-card-b": "Temporary memory B.",
-        },
-    )
-
-    memory_service.discard_memory_card_extraction(
-        db,
-        current_user=user,
-        scope="task",
-        task_id=task.id,
-        preview_id="preview-test",
-        memory_ids=["preview-card-a", "preview-card-b"],
-    )
-
-    assert _store == {}
-    assert [payload for path, payload in calls if path == "/v1/memory/delete"] == [
-        {"memory_id": "preview-card-a", "hard": True},
-        {"memory_id": "preview-card-b", "hard": True},
-    ]
 
 
 def test_task_memory_crud_checks_task_authorization(db: Session, monkeypatch: pytest.MonkeyPatch):

@@ -15,7 +15,10 @@ from llm4ad.infra.repo_analyzer.base import AnalyzedRepository
 from llm4ad.planner.base import Algorithm, GenerationMetadata, InsightType
 from llm4ad.planner.memory import Memory
 from llm4ad.planner.sampler.base import BaseSampler
-from llm4ad.planner.sampler.prompt_templates import CROSSOVER_ALGORITHM
+from llm4ad.planner.sampler.prompt_templates import (
+    CROSSOVER_ALGORITHM,
+    format_parent_algorithm_context,
+)
 
 
 @BaseSampler.register("crossover_sampler")
@@ -86,6 +89,8 @@ class CrossoverSampler(BaseSampler):
         """
         if len(parents) < 2:
             raise ValueError("CrossoverSampler requires at least two parent algorithms")
+        if parents[0].id == parents[1].id:
+            raise ValueError("CrossoverSampler requires two distinct parent algorithms")
 
         parent1, parent2 = parents[0], parents[1]
 
@@ -97,16 +102,21 @@ class CrossoverSampler(BaseSampler):
         background: str = kwargs.get("background", "")
 
         # Build memory context
-        memory_context = await self.memory.aget_prompt_context(
-            query=background,
-            context={
-                "sampler": "crossover",
-                "parent_1_score": score1,
-                "parent_1_description": parent1.description,
-                "parent_2_score": score2,
-                "parent_2_description": parent2.description,
-            },
-        ) if self.memory else ""
+        memory_context = ""
+        if self.memory and not bool(kwargs.get("disable_memory", False)):
+            memory_context = await self.memory.aget_prompt_context(
+                query=background,
+                context={
+                    "sampler": "crossover",
+                    "generation": generation,
+                    "island_id": kwargs.get("island_id"),
+                    "island_strategy": kwargs.get("island_strategy"),
+                    "parent_1_score": score1,
+                    "parent_1_description": parent1.description,
+                    "parent_2_score": score2,
+                    "parent_2_description": parent2.description,
+                },
+            )
 
         # Track generation time
         start_time = time.time()
@@ -117,26 +127,15 @@ class CrossoverSampler(BaseSampler):
             memory_context=memory_context,
             score1=score1,
             description1=parent1.description,
+            parent_context1=format_parent_algorithm_context(parent1),
             score2=score2,
             description2=parent2.description,
+            parent_context2=format_parent_algorithm_context(parent2),
         )
-
-        # Track generation time
-        start_time = time.time()
 
         class AlgorithmSchema(BaseModel):
             name: str = Field(..., description="Concise name for the child algorithm")
             description: str = Field(..., description="Detailed description of the combined algorithm")
-
-        # Text-only crossover prompt
-        prompt = self.prompt_template.format(
-            background=background,
-            memory_context=memory_context,
-            score1=score1,
-            description1=parent1.description,
-            score2=score2,
-            description2=parent2.description,
-        )
 
         response = await self.provider.generate(
             prompt,

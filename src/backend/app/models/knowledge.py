@@ -163,10 +163,14 @@ class KnowledgeParseRun(SQLModel, TimeMixin, table=True):
     )
     session_owner_kind: str = Field(default="run", max_length=8)
     session_owner_id: uuid.UUID | None = Field(default=None, index=True)
-    skill_name: str = Field(default="global-memory-card-extractor", max_length=128)
+    skill_name: str = Field(default="document-knowledge-organizer", max_length=128)
     skill_version: str = Field(default="1", max_length=64)
     manifest_object_key: str | None = Field(default=None, max_length=1024)
     generated_memory_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    generated_memory_operations: dict[str, str] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
     inserted_document_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     container_id: str | None = Field(default=None, max_length=128)
     error_code: str | None = Field(default=None, max_length=64)
@@ -178,6 +182,7 @@ class KnowledgeParseRun(SQLModel, TimeMixin, table=True):
             self.status == KnowledgeParseStatus.READY.value
             and bool(self.manifest_object_key)
             and not self.inserted_document_ids
+            and not self.generated_memory_ids
         )
 
 

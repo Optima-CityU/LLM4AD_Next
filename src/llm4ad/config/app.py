@@ -11,8 +11,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from llm4ad.config.coder import ClaudeCodeConfig, CustomCoderConfig, OpenCodeConfig
-from llm4ad.config.evaluator import CustomEvaluatorConfig, ExecutableEvaluatorConfig
+from llm4ad.config.evaluator import (
+    CustomEvaluatorConfig,
+    ExecutableEvaluatorConfig,
+    SolverEvaluatorConfig,
+)
 from llm4ad.config.evolution import (
+    DiverseIslandGAConfig,
     DyCAConfig,
     EoHConfig,
     IslandGAConfig,
@@ -440,22 +445,22 @@ class AppConfig(BaseModel):
         ),
     )
 
-    evaluator: CustomEvaluatorConfig | ExecutableEvaluatorConfig = Field(
+    evaluator: CustomEvaluatorConfig | ExecutableEvaluatorConfig | SolverEvaluatorConfig = Field(
         discriminator="type", default_factory=CustomEvaluatorConfig,
         description="Evaluator configuration",
         json_schema_extra=ui(
             label_zh="评估器", label_en="Evaluator",
-            desc_zh="配置算法评估方式，支持自定义 Python 评估器或可执行文件评估器",
-            desc_en="Configure how algorithms are evaluated; supports custom or executable evaluators",
+            desc_zh="配置算法评估方式，支持自定义、可执行文件或求解器评估器",
+            desc_en="Configure evaluation using custom, executable, or solver-backed evaluators",
         ),
     )
-    evolution: IslandGAConfig | DyCAConfig | MEoHConfig | EoHConfig | ReEvoConfig | MCTSAHDConfig = Field(
+    evolution: IslandGAConfig | DiverseIslandGAConfig | DyCAConfig | MEoHConfig | EoHConfig | ReEvoConfig | MCTSAHDConfig = Field(
         default_factory=DyCAConfig,
         discriminator="type",
         json_schema_extra=ui(
             label_zh="进化算法", label_en="Evolution",
-            desc_zh="选择并配置进化算法策略：岛屿遗传算法、DyCA、MEoH、EoH、ReEvo 或 MCTS-AHD",
-            desc_en="Select evolution strategy: Island GA, DyCA, MEoH, EoH, ReEvo, or MCTS-AHD",
+            desc_zh="选择并配置进化算法策略：岛屿遗传算法、多样性岛屿遗传算法、DyCA、MEoH、EoH、ReEvo 或 MCTS-AHD",
+            desc_en="Select evolution strategy: Island GA, Diverse Island GA, DyCA, MEoH, EoH, ReEvo, or MCTS-AHD",
         ),
     )
     coder: CustomCoderConfig | ClaudeCodeConfig | OpenCodeConfig = Field(

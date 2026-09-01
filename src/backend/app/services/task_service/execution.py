@@ -188,6 +188,10 @@ def _resolve_providers(
             code_config.get("model") or "",
         )
     else:
+        # The runtime embedding source of truth is the user's default-model
+        # binding. Remove stale task-form remnants (including legacy empty
+        # strings) so they cannot fail AppConfig validation in the container.
+        input_args.pop("embedding", None)
         logger.info("Task embedding config not resolved; evaluation trace embeddings are disabled")
 
     # 启用凭据代理：把下发到容器的真实凭据替换为一次性代理 token + 代理 base_url。

@@ -44,6 +44,9 @@ class TaskMemoryCandidate:
     Attributes:
         key: Stable dedup/identity key for the candidate.
         score: Retrieval relevance score if available, otherwise ``None``.
+        objective_score: Original algorithm evaluation score. This is kept
+            separate from retrieval relevance so an elite implementation can
+            be selected by measured quality after semantic recall.
         timestamp: Epoch seconds for the candidate's recency (larger = newer).
             ``None`` when no timestamp is available; used by the ``weight``
             strategy's recency term.
@@ -54,6 +57,7 @@ class TaskMemoryCandidate:
 
     key: str
     score: float | None = None
+    objective_score: float | None = None
     timestamp: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     payload: Any = None

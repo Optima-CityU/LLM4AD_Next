@@ -15,6 +15,7 @@ import {
   Clock,
   Copy,
   FolderOpen,
+  Layers3,
   Loader2,
   MoreVertical,
   Pencil,
@@ -29,6 +30,8 @@ import { useTranslation } from "react-i18next"
 import { z } from "zod"
 
 import {
+  type ExampleTemplateConfigItem,
+  type ExampleTemplateItem,
   Llm4AdTasksService,
   type TaskCreate,
   type TaskResponse,
@@ -74,7 +77,10 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -89,6 +95,14 @@ import { getDemoState, setDemoPhase, useDemoState } from "@/hooks/useDemoMode"
 import { useEvolution } from "@/hooks/useEvolution"
 import { formatDateTime } from "@/lib/utils"
 import { handleError } from "@/utils"
+
+import {
+  getTemplateCaseKey,
+  getTemplateGroupKey,
+  humanizeConfigName,
+  isExampleTemplateGroup,
+  splitExampleTemplates,
+} from "./exampleTemplateGroups"
 
 const AUTO_COLLAPSE_WIDTH = 1600
 
@@ -237,6 +251,10 @@ export function CreateTaskDialog({
     queryFn: () => Llm4AdTasksService.listExampleTemplates(),
     enabled: isOpen,
   })
+  const templateBuckets = useMemo(
+    () => splitExampleTemplates(templateList?.templates ?? []),
+    [templateList?.templates],
+  )
 
   const form = useForm<CreateTaskFormData>({
     resolver: zodResolver(createTaskSchema) as any,
@@ -273,6 +291,92 @@ export function CreateTaskDialog({
       : (effectiveConfigItem.description_en ??
         effectiveConfigItem.description_zh)
     : undefined
+  const selectedTemplateIsGroup = selectedTemplate
+    ? isExampleTemplateGroup(selectedTemplate)
+    : false
+
+  const templateDisplayName = (template: ExampleTemplateItem) => {
+    const groupKey = getTemplateGroupKey(template.name)
+    return groupKey ? t(`evolution.templateGroups.${groupKey}`) : template.name
+  }
+
+  const configDisplayName = (
+    templateName: string,
+    config: ExampleTemplateConfigItem,
+  ) => {
+    const caseKey = getTemplateCaseKey(templateName, config.name)
+    return caseKey
+      ? t(`evolution.templateCases.${caseKey}`)
+      : humanizeConfigName(config.name)
+  }
+
+  const renderTemplateOption = (
+    template: ExampleTemplateItem,
+    index: number,
+    grouped: boolean,
+  ) => {
+    const configCount = template.configs?.length ?? 0
+    return (
+      <Tooltip key={template.name}>
+        <TooltipTrigger asChild>
+          <SelectItem
+            value={template.name}
+            textValue={templateDisplayName(template)}
+          >
+            <span className="flex w-full min-w-0 items-center gap-2">
+              {grouped ? (
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                  <Layers3 className="size-3.5" />
+                </span>
+              ) : (
+                <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground/60">
+                  {index + 1}.
+                </span>
+              )}
+              <span className="truncate">{templateDisplayName(template)}</span>
+              {grouped && (
+                <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary/80">
+                  {t("evolution.templateCaseCount", { count: configCount })}
+                </span>
+              )}
+            </span>
+          </SelectItem>
+        </TooltipTrigger>
+        <TooltipContent
+          side="right"
+          sideOffset={8}
+          className="max-w-xs space-y-1.5 p-3"
+        >
+          <p className="text-xs font-medium">
+            {grouped
+              ? t("evolution.templateCaseCount", { count: configCount })
+              : t("evolution.templateConfigCount", { count: configCount })}
+          </p>
+          {template.configs?.map((config) => {
+            const description = isZh
+              ? (config.description_zh ?? config.description_en)
+              : (config.description_en ?? config.description_zh)
+            return (
+              <div
+                key={config.name}
+                className="text-[11px] leading-relaxed opacity-90"
+              >
+                <span className="font-medium">
+                  {configDisplayName(template.name, config)}
+                </span>
+                {description && (
+                  <span className="opacity-75">
+                    {" — "}
+                    {description}
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
 
   useEffect(() => {
     if (effectiveConfigName && effectiveConfigName !== selectedConfigName) {
@@ -573,66 +677,37 @@ export function CreateTaskDialog({
                               )}
                             </SelectTrigger>
                           </FormControl>
-                          <SelectContent>
-                            {templateList?.templates?.map((tpl, idx) => {
-                              const cfgCount = tpl.configs?.length ?? 0
-                              return (
-                                <Tooltip key={tpl.name}>
-                                  <TooltipTrigger asChild>
-                                    <SelectItem
-                                      value={tpl.name}
-                                      textValue={tpl.name}
-                                    >
-                                      <span className="flex items-center gap-2">
-                                        <span className="text-muted-foreground/60 text-xs tabular-nums">
-                                          {idx + 1}.
-                                        </span>
-                                        {tpl.name}
-                                        {cfgCount > 1 && (
-                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary/80">
-                                            {cfgCount} configs
-                                          </span>
-                                        )}
-                                      </span>
-                                    </SelectItem>
-                                  </TooltipTrigger>
-                                  <TooltipContent
-                                    side="right"
-                                    sideOffset={8}
-                                    className="max-w-xs p-3 space-y-1.5"
-                                  >
-                                    <p className="font-medium text-xs">
-                                      {t("evolution.templateConfigCount", {
-                                        count: cfgCount,
-                                      })}
-                                    </p>
-                                    {tpl.configs?.map((cfg) => {
-                                      const desc = isZh
-                                        ? (cfg.description_zh ??
-                                          cfg.description_en)
-                                        : (cfg.description_en ??
-                                          cfg.description_zh)
-                                      return (
-                                        <div
-                                          key={cfg.name}
-                                          className="text-[11px] leading-relaxed opacity-90"
-                                        >
-                                          <span className="font-medium">
-                                            {cfg.name}
-                                          </span>
-                                          {desc && (
-                                            <span className="opacity-75">
-                                              {" — "}
-                                              {desc}
-                                            </span>
-                                          )}
-                                        </div>
-                                      )
-                                    })}
-                                  </TooltipContent>
-                                </Tooltip>
-                              )
-                            })}
+                          <SelectContent className="w-[min(32rem,calc(100vw-2rem))]">
+                            {templateBuckets.groups.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel className="flex items-center gap-2 py-2 font-medium text-foreground/70">
+                                  <Layers3 className="size-3.5 text-primary" />
+                                  {t("evolution.templateGroupLabel")}
+                                </SelectLabel>
+                                {templateBuckets.groups.map((template, index) =>
+                                  renderTemplateOption(template, index, true),
+                                )}
+                              </SelectGroup>
+                            )}
+                            {templateBuckets.groups.length > 0 &&
+                              templateBuckets.standalone.length > 0 && (
+                                <SelectSeparator />
+                              )}
+                            {templateBuckets.standalone.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel className="py-2 font-medium text-foreground/70">
+                                  {t("evolution.standaloneTemplateLabel")}
+                                </SelectLabel>
+                                {templateBuckets.standalone.map(
+                                  (template, index) =>
+                                    renderTemplateOption(
+                                      template,
+                                      index,
+                                      false,
+                                    ),
+                                )}
+                              </SelectGroup>
+                            )}
                           </SelectContent>
                         </Select>
                         {!field.value && (
@@ -650,14 +725,25 @@ export function CreateTaskDialog({
                       name="config_name"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>{t("evolution.configLabel")}</FormLabel>
+                          <FormLabel>
+                            {selectedTemplateIsGroup
+                              ? t("evolution.caseLabel")
+                              : t("evolution.configLabel")}
+                          </FormLabel>
                           <Select
                             value={effectiveConfigName ?? ""}
                             onValueChange={(v) => field.onChange(v)}
                           >
                             <FormControl>
                               <SelectTrigger className="w-full">
-                                <SelectValue />
+                                <SelectValue>
+                                  {effectiveConfigItem
+                                    ? configDisplayName(
+                                        selectedTemplateName,
+                                        effectiveConfigItem,
+                                      )
+                                    : undefined}
+                                </SelectValue>
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -669,7 +755,10 @@ export function CreateTaskDialog({
                                   <Tooltip key={cfg.name}>
                                     <TooltipTrigger asChild>
                                       <SelectItem value={cfg.name}>
-                                        {cfg.name}
+                                        {configDisplayName(
+                                          selectedTemplateName,
+                                          cfg,
+                                        )}
                                       </SelectItem>
                                     </TooltipTrigger>
                                     <TooltipContent
@@ -682,7 +771,10 @@ export function CreateTaskDialog({
                                   </Tooltip>
                                 ) : (
                                   <SelectItem key={cfg.name} value={cfg.name}>
-                                    {cfg.name}
+                                    {configDisplayName(
+                                      selectedTemplateName,
+                                      cfg,
+                                    )}
                                   </SelectItem>
                                 )
                               })}

@@ -280,6 +280,7 @@ class PythonRunnerContractTests(unittest.TestCase):
             UPSTREAM_API_FORMAT="openai_chat",
             PLAN_QUESTION_TIMEOUT_SECONDS=1,
             MODEL_CONTEXT_TOKENS=128_000,
+            SKILL_PATH=Path(__file__).parents[2] / "skills/document-knowledge-organizer/SKILL.md",
         ):
             runner.validate_configuration()
 
@@ -363,14 +364,16 @@ class PythonRunnerContractTests(unittest.TestCase):
         self.assertIn("resume=resume_session_id", runner)
         self.assertIn("persist_session_id(message)", runner)
         self.assertIn('KNOWLEDGE_PLAN_INTERACTION_MODE", "collaborative"', runner)
-        self.assertIn("REFINEMENT_PROMPT.md", runner)
+        self.assertIn("document-knowledge-organizer", runner)
+        self.assertIn("skills=[str(SKILL_PATH)]", runner)
         self.assertIn("refinement.txt", runner)
-        self.assertTrue((directory / "REFINEMENT_PROMPT.md").is_file())
+        skill = directory.parent.parent / "skills/document-knowledge-organizer/SKILL.md"
+        self.assertTrue(skill.is_file())
         self.assertNotIn("@anthropic-ai/claude-agent-sdk", dockerfile)
         self.assertNotIn("claude-agent-sdk-runtime", dockerfile)
         self.assertIn("runner.py", dockerfile)
         self.assertIn("plan_store.py", dockerfile)
-        self.assertIn("REFINEMENT_PROMPT.md", dockerfile)
+        self.assertIn("skills/document-knowledge-organizer", dockerfile)
         self.assertIn('["python", "/app/knowledge-parser/runner.py"]', task)
 
 

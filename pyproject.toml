@@ -76,6 +76,9 @@ eval = [
     "numba==0.61.2",
     "llvmlite==0.44.0",
 ]
+scip = [
+    "pyscipopt>=6.2,<7",
+]
 tsp = [
     "numpy>=1.24.0",
 ]
@@ -124,7 +127,7 @@ agent = [
     "agentscope>=2.0,<3.0",
 ]
 all = [
-    "llm4ad-next[infra,providers,eval,dev,docs,tsp,lunarlander,dyca,meoh]"
+    "llm4ad-next[infra,providers,eval,scip,dev,docs,tsp,lunarlander,dyca,meoh]"
 ]
 
 [project.scripts]

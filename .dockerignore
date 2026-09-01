@@ -12,3 +12,10 @@
 docker/app-data
 docker/litellm-data
 docker/litellm-db
+docker/project_home
+docker/compose.local-port-override.yml
+artifacts
+plugins-dev
+openspec
+*.pdf
+*.zip

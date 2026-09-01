@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -12,9 +11,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import FieldLabel from "./FieldLabel"
 import type { JsonSchema } from "./resolveSchema"
 import {
+  fitSliderToValue,
+  getUiSlider,
   isMultiline,
   isUiHidden,
   isUserRequired,
@@ -34,6 +36,8 @@ interface SchemaFieldProps {
   onChange: (value: unknown) => void
   required?: boolean
   label?: string
+  layout?: "stacked" | "inline"
+  memoryEnabled?: boolean
 }
 
 export default function SchemaField({
@@ -44,6 +48,8 @@ export default function SchemaField({
   onChange,
   required,
   label,
+  layout = "stacked",
+  memoryEnabled,
 }: SchemaFieldProps) {
   const {
     label: uiLabel,
@@ -69,6 +75,7 @@ export default function SchemaField({
         value={value as Record<string, unknown> | undefined}
         onChange={onChange as (v: Record<string, unknown>) => void}
         label={fieldLabel}
+        memoryEnabled={memoryEnabled}
       />
     )
   }
@@ -105,6 +112,7 @@ export default function SchemaField({
         onChange={onChange}
         required={fieldRequired}
         nullable={nullable}
+        layout={layout}
       />
     )
   }
@@ -156,6 +164,7 @@ export default function SchemaField({
         description={fieldDescription}
         value={value as boolean | undefined}
         onChange={onChange}
+        layout={layout}
       />
     )
   }
@@ -171,6 +180,7 @@ export default function SchemaField({
         required={fieldRequired}
         nullable={nullable}
         schema={resolved}
+        layout={layout}
       />
     )
   }
@@ -300,6 +310,7 @@ function NumberField({
   required,
   nullable,
   schema,
+  layout,
 }: {
   label: string
   description?: string
@@ -308,6 +319,7 @@ function NumberField({
   required?: boolean
   nullable?: boolean
   schema: JsonSchema
+  layout: "stacked" | "inline"
 }) {
   const { t } = useTranslation()
   const getError = (): string | null => {
@@ -333,6 +345,7 @@ function NumberField({
     return null
   }
   const error = getError()
+  const slider = getUiSlider(schema)
 
   const hints: string[] = []
   if (schema.minimum !== undefined) hints.push(`>= ${schema.minimum}`)
@@ -348,28 +361,148 @@ function NumberField({
       : undefined
 
   return (
-    <div className="space-y-2">
-      <FieldLabel label={label} description={description} required={required} />
-      <Input
-        type="number"
-        value={value ?? ""}
-        min={schema.minimum ?? schema.exclusiveMinimum}
-        max={schema.maximum ?? schema.exclusiveMaximum}
-        step={schema.type === "integer" ? 1 : "any"}
-        onChange={(e) => {
-          const v = e.target.value
-          if (v === "") {
-            onChange(nullable ? null : undefined)
-          } else {
-            onChange(
-              schema.type === "integer" ? parseInt(v, 10) : parseFloat(v),
-            )
-          }
-        }}
-        placeholder={placeholder}
-        className={error ? "border-destructive" : undefined}
-      />
-      {error && <p className="text-xs text-destructive">{error}</p>}
+    <div
+      className={
+        layout === "inline"
+          ? "grid min-h-9 grid-cols-[minmax(112px,0.75fr)_minmax(0,1.25fr)] items-center gap-x-3 gap-y-1"
+          : "space-y-2"
+      }
+    >
+      <div className="min-w-0">
+        <FieldLabel
+          label={label}
+          description={description}
+          required={required}
+        />
+      </div>
+      <div className="min-w-0">
+        {slider ? (
+          <SliderNumberInput
+            label={label}
+            value={value}
+            onChange={onChange}
+            slider={slider}
+            integer={schema.type === "integer"}
+            compact={layout === "inline"}
+            fallback={
+              typeof schema.default === "number" ? schema.default : undefined
+            }
+          />
+        ) : (
+          <Input
+            type="number"
+            value={value ?? ""}
+            min={schema.minimum ?? schema.exclusiveMinimum}
+            max={schema.maximum ?? schema.exclusiveMaximum}
+            step={schema.type === "integer" ? 1 : "any"}
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === "") {
+                onChange(nullable ? null : undefined)
+              } else {
+                onChange(
+                  schema.type === "integer" ? parseInt(v, 10) : parseFloat(v),
+                )
+              }
+            }}
+            placeholder={placeholder}
+            className={error ? "border-destructive" : undefined}
+          />
+        )}
+      </div>
+      {error && (
+        <p
+          className={`text-xs text-destructive ${
+            layout === "inline" ? "col-start-2" : ""
+          }`}
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function SliderNumberInput({
+  label,
+  value,
+  onChange,
+  slider,
+  integer,
+  fallback,
+  compact,
+}: {
+  label: string
+  value: number | undefined
+  onChange: (v: unknown) => void
+  slider: { min: number; max: number; step: number }
+  integer: boolean
+  fallback?: number
+  compact: boolean
+}) {
+  const current = value ?? fallback ?? slider.min
+  const fittedSlider = fitSliderToValue(slider, current)
+  const isRatio = fittedSlider.min >= 0 && fittedSlider.max <= 1
+  const displayValue = isRatio ? `${Math.round(current * 100)}%` : current
+
+  const update = (rawValue: string) => {
+    const parsed = integer ? parseInt(rawValue, 10) : parseFloat(rawValue)
+    if (!Number.isFinite(parsed)) return
+    onChange(Math.min(fittedSlider.max, Math.max(fittedSlider.min, parsed)))
+  }
+
+  if (compact) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <input
+          type="range"
+          aria-label={label}
+          min={fittedSlider.min}
+          max={fittedSlider.max}
+          step={fittedSlider.step}
+          value={current}
+          onChange={(event) => update(event.target.value)}
+          className="h-2 min-w-20 flex-1 cursor-pointer accent-primary"
+          aria-valuetext={String(displayValue)}
+        />
+        <output className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
+          {displayValue}
+        </output>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          aria-label={label}
+          min={fittedSlider.min}
+          max={fittedSlider.max}
+          step={fittedSlider.step}
+          value={current}
+          onChange={(event) => update(event.target.value)}
+          className="h-2 min-w-0 flex-1 cursor-pointer accent-primary"
+          aria-valuetext={String(displayValue)}
+        />
+        <Input
+          type="number"
+          min={fittedSlider.min}
+          max={fittedSlider.max}
+          step={fittedSlider.step}
+          value={current}
+          onChange={(event) => update(event.target.value)}
+          className="h-8 w-20 shrink-0 text-right tabular-nums"
+        />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>{fittedSlider.min}</span>
+        <span className="font-medium text-foreground tabular-nums">
+          {displayValue}
+        </span>
+        <span>{fittedSlider.max}</span>
+      </div>
     </div>
   )
 }
@@ -379,12 +512,28 @@ function BooleanField({
   description,
   value,
   onChange,
+  layout,
 }: {
   label: string
   description?: string
   value: boolean | undefined
   onChange: (v: unknown) => void
+  layout: "stacked" | "inline"
 }) {
+  if (layout === "inline") {
+    return (
+      <div className="grid min-h-9 grid-cols-[minmax(112px,0.75fr)_minmax(0,1.25fr)] items-center gap-3">
+        <div className="min-w-0">
+          <FieldLabel label={label} description={description} />
+        </div>
+        <Checkbox
+          checked={value ?? false}
+          onCheckedChange={(checked) => onChange(!!checked)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-start gap-3 py-1">
       <Checkbox
@@ -409,6 +558,7 @@ function EnumField({
   onChange,
   required,
   nullable,
+  layout,
 }: {
   label: string
   description?: string
@@ -417,33 +567,48 @@ function EnumField({
   onChange: (v: unknown) => void
   required?: boolean
   nullable?: boolean
+  layout: "stacked" | "inline"
 }) {
   const { t } = useTranslation()
   return (
-    <div className="space-y-2">
-      <FieldLabel label={label} description={description} required={required} />
-      <Select
-        value={value ?? (nullable ? NULLABLE_SENTINEL : "")}
-        onValueChange={(v) => onChange(v === NULLABLE_SENTINEL ? null : v)}
-      >
-        <SelectTrigger>
-          <SelectValue
-            placeholder={t("evolution.schemaForm.selectPlaceholder")}
-          />
-        </SelectTrigger>
-        <SelectContent>
-          {nullable && (
-            <SelectItem value={NULLABLE_SENTINEL}>
-              {t("evolution.schemaForm.nullableOption")}
-            </SelectItem>
-          )}
-          {options.map((opt) => (
-            <SelectItem key={String(opt)} value={String(opt)}>
-              {String(opt)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div
+      className={
+        layout === "inline"
+          ? "grid min-h-9 grid-cols-[minmax(112px,0.75fr)_minmax(0,1.25fr)] items-center gap-3"
+          : "space-y-2"
+      }
+    >
+      <div className="min-w-0">
+        <FieldLabel
+          label={label}
+          description={description}
+          required={required}
+        />
+      </div>
+      <div className="min-w-0">
+        <Select
+          value={value ?? (nullable ? NULLABLE_SENTINEL : "")}
+          onValueChange={(v) => onChange(v === NULLABLE_SENTINEL ? null : v)}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue
+              placeholder={t("evolution.schemaForm.selectPlaceholder")}
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {nullable && (
+              <SelectItem value={NULLABLE_SENTINEL}>
+                {t("evolution.schemaForm.nullableOption")}
+              </SelectItem>
+            )}
+            {options.map((opt) => (
+              <SelectItem key={String(opt)} value={String(opt)}>
+                {String(opt)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   )
 }

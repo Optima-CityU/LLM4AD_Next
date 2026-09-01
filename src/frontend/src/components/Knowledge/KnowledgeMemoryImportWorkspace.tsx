@@ -762,6 +762,19 @@ export default function KnowledgeMemoryImportWorkspace() {
       setDocumentBlocks((current) =>
         current.map((item) => (item.id === updated.id ? updated : item)),
       )
+      setRun((current) =>
+        current
+          ? {
+              ...current,
+              inserted_document_ids: current.inserted_document_ids.filter(
+                (id) => id !== documentId,
+              ),
+              can_refine:
+                current.inserted_document_ids.filter((id) => id !== documentId)
+                  .length === 0 && current.generated_memory_ids.length === 0,
+            }
+          : current,
+      )
       toast.success(t("knowledge.documentBlocks.saved"))
     } catch (error) {
       toast.error(

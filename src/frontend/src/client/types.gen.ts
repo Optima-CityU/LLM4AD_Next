@@ -1394,22 +1394,7 @@ export type MemoryCardArtifact = {
 export type type = 'code' | 'formula' | 'table' | 'example' | 'quote' | 'metric';
 
 /**
- * Confirm which extracted preview memories should become active.
- */
-export type MemoryCardExtractionCommitRequest = {
-    selected_ids?: Array<(string)>;
-    all_ids?: Array<(string)>;
-};
-
-/**
- * Discard temporary extracted preview memories.
- */
-export type MemoryCardExtractionDiscardRequest = {
-    memory_ids?: Array<(string)>;
-};
-
-/**
- * Generate MindMemOS memory previews from a raw user description.
+ * Process a raw user description through MindMemOS immediately.
  */
 export type MemoryCardExtractionRequest = {
     content: string;
@@ -1417,7 +1402,7 @@ export type MemoryCardExtractionRequest = {
 };
 
 /**
- * Preview memories extracted by MindMemOS before the user confirms them.
+ * Memories affected by one MindMemOS processing operation.
  */
 export type MemoryCardExtractionResponse = {
     preview_id: string;
@@ -1469,6 +1454,7 @@ export type MemoryCardResponse = {
         [key: string]: unknown;
     };
     readonly?: MemoryCardReadonlyInfo;
+    operation?: ('add' | 'update' | 'reinforcement' | null);
 };
 
 /**
@@ -3284,7 +3270,7 @@ export type TaskMemoryObservabilityResponse = {
 };
 
 /**
- * Promote selected task-memory cards into project-memory previews.
+ * Promote selected task-memory cards into project memory.
  */
 export type TaskMemoryPromotionRequest = {
     project_id: string;
@@ -4141,26 +4127,6 @@ export type Llm4AdMemoryStreamPromoteTaskMemoryCardsData = {
 };
 
 export type Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse = (unknown);
-
-export type Llm4AdMemoryCommitMemoryCardExtractionData = {
-    previewId: string;
-    projectId?: (string | null);
-    requestBody: MemoryCardExtractionCommitRequest;
-    scope: 'user' | 'project' | 'task';
-    taskId?: (string | null);
-};
-
-export type Llm4AdMemoryCommitMemoryCardExtractionResponse = (MemoryCardExtractionResponse);
-
-export type Llm4AdMemoryDiscardMemoryCardExtractionData = {
-    previewId: string;
-    projectId?: (string | null);
-    requestBody: MemoryCardExtractionDiscardRequest;
-    scope: 'user' | 'project' | 'task';
-    taskId?: (string | null);
-};
-
-export type Llm4AdMemoryDiscardMemoryCardExtractionResponse = (Message);
 
 export type Llm4AdMemoryUpdateMemoryCardData = {
     memoryId: string;

@@ -104,11 +104,29 @@ class InitSampler(BaseSampler):
         # Get problem background from config or kwargs
         background: str = kwargs.get("background", "")
 
-        # Build memory context
-        memory_context = await self.memory.aget_prompt_context(
-            query=background,
-            context={"sampler": "init"},
-        ) if self.memory else ""
+        # Independent exploration intentionally bypasses every memory scope.
+        # It still receives a compact search-policy instruction so the absence
+        # of recalled context is an explicit algorithmic role, not an accident.
+        disable_memory = bool(kwargs.get("disable_memory", False))
+        if self.memory and not disable_memory:
+            memory_context = await self.memory.aget_prompt_context(
+                query=background,
+                context={
+                    "sampler": "init",
+                    "generation": generation,
+                    "island_id": kwargs.get("island_id"),
+                    "island_strategy": kwargs.get("island_strategy"),
+                },
+            )
+        elif disable_memory:
+            memory_context = (
+                "### Independent exploration policy\n"
+                "Propose an independent mechanism from the problem and source code only. "
+                "Do not assume or imitate recalled solutions; prioritize a structurally "
+                "different, testable approach."
+            )
+        else:
+            memory_context = ""
 
         # Build the prompt
         prompt = self.prompt_template.format(

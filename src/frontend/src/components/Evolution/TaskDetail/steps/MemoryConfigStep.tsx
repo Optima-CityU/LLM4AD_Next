@@ -152,6 +152,18 @@ function longTermMemory(value: unknown, config?: ProjectMemoryConfigResponse): M
     mindmemos_fail_open: boolValue(current.mindmemos_fail_open, config?.mindmemos_fail_open ?? true),
     mindmemos_request_timeout: numberValue(current.mindmemos_request_timeout, 300),
     mindmemos_add_timeout: numberValue(current.mindmemos_add_timeout, 300),
+    mindmemos_context_char_budget: numberValue(
+      current.mindmemos_context_char_budget,
+      20000,
+    ),
+    mindmemos_elite_code_slots: Math.min(
+      5,
+      Math.max(0, numberValue(current.mindmemos_elite_code_slots, 1)),
+    ),
+    mindmemos_elite_code_char_budget: Math.max(
+      0,
+      numberValue(current.mindmemos_elite_code_char_budget, 12000),
+    ),
     mindmemos_extraction_prompt_language: ["auto", "ZH", "EN"].includes(
       String(current.mindmemos_extraction_prompt_language),
     )
@@ -655,6 +667,70 @@ export default function MemoryConfigStep({
                     />
                     <p className="text-xs leading-5 text-muted-foreground">
                       {t("evolution.memoryConfig.addTimeoutHelp")}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>{t("evolution.memoryConfig.contextCharBudget")}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={numberValue(memory.mindmemos_context_char_budget, 20000)}
+                      disabled={interactionLocked}
+                      onChange={(event) =>
+                        updateField(
+                          "mindmemos_context_char_budget",
+                          Math.max(0, Number.parseInt(event.target.value || "0", 10)),
+                        )
+                      }
+                    />
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t("evolution.memoryConfig.contextCharBudgetHelp")}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>{t("evolution.memoryConfig.eliteCodeSlots")}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={5}
+                      step={1}
+                      value={numberValue(memory.mindmemos_elite_code_slots, 1)}
+                      disabled={interactionLocked}
+                      onChange={(event) =>
+                        updateField(
+                          "mindmemos_elite_code_slots",
+                          Math.min(
+                            5,
+                            Math.max(0, Number.parseInt(event.target.value || "0", 10)),
+                          ),
+                        )
+                      }
+                    />
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t("evolution.memoryConfig.eliteCodeSlotsHelp")}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>{t("evolution.memoryConfig.eliteCodeCharBudget")}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={numberValue(memory.mindmemos_elite_code_char_budget, 12000)}
+                      disabled={interactionLocked}
+                      onChange={(event) =>
+                        updateField(
+                          "mindmemos_elite_code_char_budget",
+                          Math.max(0, Number.parseInt(event.target.value || "0", 10)),
+                        )
+                      }
+                    />
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t("evolution.memoryConfig.eliteCodeCharBudgetHelp")}
                     </p>
                   </div>
 

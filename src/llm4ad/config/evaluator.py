@@ -110,12 +110,12 @@ class EvaluatorConfig(BaseModel):
     the correct concrete config subclass based on the ``type`` field.
     """
 
-    type: Literal["executable", "custom"] = Field(
+    type: Literal["executable", "custom", "solver"] = Field(
         default="custom", description="Evaluator type",
         json_schema_extra=ui(
             label_zh="评估器类型", label_en="Evaluator Type",
-            desc_zh="评估器类型：custom（自定义 Python 模块）或 executable（外部可执行文件）",
-            desc_en="Evaluator type: custom (Python module) or executable (external binary)",
+            desc_zh="评估器类型：custom、executable 或 solver",
+            desc_en="Evaluator type: custom, executable, or solver-backed",
         ),
     )
     dataset: DatasetConfig = Field(
@@ -135,11 +135,20 @@ class EvaluatorConfig(BaseModel):
         ),
     )
     max_retries: int = Field(
-        default=1, ge=0, description="Maximum retries for failed evaluations",
+        default=1,
+        ge=0,
+        description="Maximum model-guided repair attempts for candidate evaluation failures",
         json_schema_extra=ui(
             label_zh="最大重试次数", label_en="Max Retries",
-            desc_zh="评估失败后的最大重试次数，设为 0 表示不重试",
-            desc_en="Maximum number of retries after a failed evaluation; set to 0 to disable retries",
+            desc_zh=(
+                "候选实现因代码或约束错误评估失败后，根据异常改写并重新评估的最大次数；"
+                "超时、鉴权和服务异常不会触发改写，设为 0 表示禁用"
+            ),
+            desc_en=(
+                "Maximum model-guided rewrite and reevaluation attempts for candidate "
+                "code or constraint failures; timeouts, authentication, and service "
+                "failures are not rewritten; set to 0 to disable"
+            ),
         ),
     )
     parallel: bool = Field(
@@ -210,6 +219,71 @@ class CustomEvaluatorConfig(EvaluatorConfig):
     )
 
 
+class SolverMetricConfig(BaseModel):
+    """Metric exposed by a solver-backed problem adapter."""
+
+    name: str = Field(..., min_length=1, description="Metric name returned by the adapter")
+    type: Literal["minimize", "maximize"] = Field(
+        default="maximize", description="Optimization direction"
+    )
+    weight: float = Field(default=1.0, ge=0.0, description="Metric score weight")
+    description: str = Field(default="", description="Human-readable metric description")
+
+
+class SolverEvaluatorConfig(EvaluatorConfig):
+    """Configuration for the generic solver-backed evaluator.
+
+    A problem adapter translates a structured candidate into a solver model,
+    then independently validates the returned solution.  The evaluator owns
+    candidate loading, backend selection, metric validation, and score mapping.
+    """
+
+    type: Literal["solver"] = Field(
+        default="solver",
+        description="Evaluator type",
+        json_schema_extra=ui(hidden=True, label_zh="评估器类型", label_en="Evaluator Type"),
+    )
+    backend: Literal["scip"] = Field(
+        default="scip",
+        description="Mathematical solver backend",
+        json_schema_extra=ui(hidden=True, label_zh="求解器", label_en="Solver Backend"),
+    )
+    adapter: str = Field(
+        ...,
+        min_length=1,
+        description="Problem adapter in module:Class or file.py:Class format",
+        json_schema_extra=ui(label_zh="问题适配器", label_en="Problem Adapter"),
+    )
+    candidate_file: str = Field(
+        default="model_spec.py",
+        min_length=1,
+        description="Structured candidate file relative to the candidate project root",
+        json_schema_extra=ui(label_zh="候选文件", label_en="Candidate File"),
+    )
+    candidate_symbol: str = Field(
+        default="MODEL_SPEC",
+        min_length=1,
+        description="Assignment name read from Python literal candidate files",
+        json_schema_extra=ui(label_zh="候选变量", label_en="Candidate Symbol"),
+    )
+    metrics: list[SolverMetricConfig] = Field(
+        ...,
+        min_length=1,
+        description="Metrics returned by the problem adapter",
+        json_schema_extra=ui(label_zh="求解指标", label_en="Solver Metrics"),
+    )
+    adapter_config: dict[str, object] = Field(
+        default_factory=dict,
+        description="Trusted problem-specific adapter configuration",
+        json_schema_extra=ui(hidden=True, label_zh="适配器配置", label_en="Adapter Config"),
+    )
+    solver_options: dict[str, bool | int | float | str] = Field(
+        default_factory=dict,
+        description="Trusted backend parameter overrides",
+        json_schema_extra=ui(hidden=True, label_zh="求解器参数", label_en="Solver Options"),
+    )
+
+
 class ExecutableEvaluatorConfig(EvaluatorConfig):
     """Built-in executable evaluator, fully config-driven.
 
@@ -270,4 +344,8 @@ class EvalContext(BaseModel):
         description="How evaluators should store behavior data: "
         "'rendered' (pre-rendered images), 'raw' (compact JSON for deferred rendering), "
         "or 'none' (no behavior data).",
+    )
+    evaluation_profile: Literal["standard", "elite"] = Field(
+        default="standard",
+        description="Evaluation fidelity requested by the orchestrator.",
     )

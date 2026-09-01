@@ -6,8 +6,9 @@ import pytest
 from pydantic import BaseModel
 
 from llm4ad.infra.repo_analyzer.base import EvolveBlock
-from llm4ad.planner.base import Algorithm, EvaluationResult, InsightType
+from llm4ad.planner.base import Algorithm, CodeArtifact, EvaluationResult, InsightType
 from llm4ad.planner.sampler.crossover_sampler import CrossoverSampler
+from llm4ad.planner.sampler.init_sampler import InitSampler
 from llm4ad.planner.sampler.mutation_sampler import MutationSampler
 
 
@@ -82,6 +83,38 @@ def create_mock_algorithm(id: str, generation: int = 0, score: float | None = No
     return Algorithm(**kwargs)
 
 
+@pytest.mark.asyncio
+async def test_init_sampler_skips_memory_for_independent_exploration(
+    mock_provider, mock_memory, mock_analyzed_repository
+):
+    """A parentless exploration candidate receives policy guidance but no memory."""
+    mock_response = MagicMock()
+    mock_response.parsed = AlgorithmSchema(
+        name="IndependentAlgorithm",
+        description="A mechanism proposed without recalled experience",
+    )
+    mock_response.prompt_tokens = 10
+    mock_response.completion_tokens = 5
+    mock_provider.generate.return_value = mock_response
+    sampler = InitSampler(
+        provider=mock_provider,
+        memory=mock_memory,
+        config={},
+        analyzed_repository=mock_analyzed_repository,
+    )
+
+    await sampler.sample(
+        parents=[],
+        generation=2,
+        disable_memory=True,
+        island_strategy={"memory_policy": "none", "position": 1.0},
+    )
+
+    mock_memory.aget_prompt_context.assert_not_awaited()
+    prompt = mock_provider.generate.await_args.args[0]
+    assert "independent" in prompt.lower()
+
+
 class TestMutationSampler:
     """Tests for MutationSampler."""
 
@@ -97,6 +130,36 @@ class TestMutationSampler:
 
         assert sampler.temperature == 0.5
         assert sampler.max_tokens == 1024
+
+    @pytest.mark.asyncio
+    async def test_mutation_sampler_can_skip_memory(
+        self, mock_provider, mock_memory, mock_analyzed_repository
+    ):
+        """Memory-free exploration still mutates a real parent without retrieval."""
+        mock_response = MagicMock()
+        mock_response.parsed = AlgorithmSchema(
+            name="MemoryFreeMutation",
+            description="Mutate independently from the parent implementation",
+        )
+        mock_response.prompt_tokens = 10
+        mock_response.completion_tokens = 5
+        mock_provider.generate.return_value = mock_response
+        sampler = MutationSampler(
+            provider=mock_provider,
+            memory=mock_memory,
+            config={},
+            analyzed_repository=mock_analyzed_repository,
+        )
+
+        algorithm = await sampler.sample(
+            parents=[create_mock_algorithm("parent", score=1.0)],
+            generation=2,
+            background="test",
+            disable_memory=True,
+        )
+
+        assert algorithm.parent_ids == ["parent"]
+        mock_memory.aget_prompt_context.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_mutation_sampler_sample_without_parent(self, mock_provider, mock_memory):
@@ -138,6 +201,7 @@ class TestMutationSampler:
             parents=[parent],
             generation=1,
             background="Sort numbers",
+            island_id=2,
         )
 
         assert algorithm is not None
@@ -150,6 +214,50 @@ class TestMutationSampler:
         assert algorithm.generation_meta.operation_params["parent_score"] == 0.8
         assert algorithm.generation_meta.operation_params["parent_description"] == parent.description
         assert algorithm.generation_meta.operation_params["parent_id"] == "parent-1"
+        retrieval_context = mock_memory.aget_prompt_context.await_args.kwargs["context"]
+        assert retrieval_context["generation"] == 1
+        assert retrieval_context["island_id"] == 2
+
+    @pytest.mark.asyncio
+    async def test_mutation_prompt_contains_parent_code_and_evaluation_feedback(
+        self, mock_provider, mock_memory, mock_analyzed_repository
+    ):
+        """A child plan must see the implementation and optimized state it inherits."""
+        parent = create_mock_algorithm("parent-1", score=2.4)
+        parent.code_artifacts = [
+            CodeArtifact(
+                file_path="model_spec.py",
+                language="python",
+                content="MODEL_SPEC = {'phase': 0.125}\n",
+                content_mode="full",
+            )
+        ]
+        assert parent.evaluation is not None
+        parent.evaluation.evolution_feedback = {
+            "optimized_parameters": {"phase": 0.375},
+            "search_status": "evaluation_budget",
+        }
+        mock_response = MagicMock()
+        mock_response.parsed = AlgorithmSchema(
+            name="InheritedMutation",
+            description="Refine the inherited phase around the optimized value",
+        )
+        mock_response.prompt_tokens = 10
+        mock_response.completion_tokens = 5
+        mock_provider.generate.return_value = mock_response
+        sampler = MutationSampler(
+            provider=mock_provider,
+            memory=mock_memory,
+            config={},
+            analyzed_repository=mock_analyzed_repository,
+        )
+
+        await sampler.sample(parents=[parent], generation=2, background="packing")
+
+        prompt = mock_provider.generate.await_args.args[0]
+        assert "MODEL_SPEC = {'phase': 0.125}" in prompt
+        assert '"phase": 0.375' in prompt
+        assert "baseline repository snapshot" in prompt.lower()
 
     @pytest.mark.asyncio
     async def test_mutation_sampler_no_block(
@@ -200,6 +308,38 @@ class TestCrossoverSampler:
         assert sampler.max_tokens == 2048
 
     @pytest.mark.asyncio
+    async def test_crossover_sampler_can_skip_memory(
+        self, mock_provider, mock_memory
+    ):
+        """Memory-free exploration can recombine parents without retrieval."""
+        mock_response = MagicMock()
+        mock_response.parsed = AlgorithmSchema(
+            name="MemoryFreeCrossover",
+            description="Combine two island candidates without recalled experience",
+        )
+        mock_response.prompt_tokens = 10
+        mock_response.completion_tokens = 5
+        mock_provider.generate.return_value = mock_response
+        sampler = CrossoverSampler(
+            provider=mock_provider,
+            memory=mock_memory,
+            config={},
+        )
+
+        algorithm = await sampler.sample(
+            parents=[
+                create_mock_algorithm("parent-1", score=1.0),
+                create_mock_algorithm("parent-2", score=0.9),
+            ],
+            generation=2,
+            background="test",
+            disable_memory=True,
+        )
+
+        assert algorithm.parent_ids == ["parent-1", "parent-2"]
+        mock_memory.aget_prompt_context.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_crossover_sampler_sample_without_parents(self, mock_provider, mock_memory):
         """Test that sample raises error without parents."""
         sampler = CrossoverSampler(
@@ -240,6 +380,7 @@ class TestCrossoverSampler:
             generation=1,
             parents=[parent1, parent2],
             background="Sort numbers",
+            island_id=3,
         )
 
         assert algorithm is not None
@@ -254,6 +395,35 @@ class TestCrossoverSampler:
         assert algorithm.generation_meta.operation_params["parent_1_description"] == parent1.description
         assert algorithm.generation_meta.operation_params["parent_2_score"] == 0.9
         assert algorithm.generation_meta.operation_params["parent_2_description"] == parent2.description
+        retrieval_context = mock_memory.aget_prompt_context.await_args.kwargs["context"]
+        assert retrieval_context["generation"] == 1
+        assert retrieval_context["island_id"] == 3
+
+    @pytest.mark.asyncio
+    async def test_crossover_prompt_contains_both_parent_implementations(
+        self, mock_provider, mock_memory
+    ):
+        """Crossover must combine real implementations instead of descriptions only."""
+        parent1 = create_mock_algorithm("parent-1", score=0.8)
+        parent2 = create_mock_algorithm("parent-2", score=0.9)
+        parent1.code_artifacts = [
+            CodeArtifact(file_path="solution.py", content="def solve(): return 'left'\n")
+        ]
+        parent2.code_artifacts = [
+            CodeArtifact(file_path="solution.py", content="def solve(): return 'right'\n")
+        ]
+        mock_response = MagicMock()
+        mock_response.parsed = AlgorithmSchema(name="Combined", description="combine")
+        mock_response.prompt_tokens = 10
+        mock_response.completion_tokens = 5
+        mock_provider.generate.return_value = mock_response
+        sampler = CrossoverSampler(provider=mock_provider, memory=mock_memory, config={})
+
+        await sampler.sample(parents=[parent1, parent2], generation=2, background="test")
+
+        prompt = mock_provider.generate.await_args.args[0]
+        assert "return 'left'" in prompt
+        assert "return 'right'" in prompt
 
     @pytest.mark.asyncio
     async def test_crossover_sampler_with_parent_kwargs(
@@ -317,5 +487,5 @@ class TestCrossoverSampler:
             background="",
         )
 
-        # Child should have generation 
+        # Child should have generation
         assert algorithm.generation == 3

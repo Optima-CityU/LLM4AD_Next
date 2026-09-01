@@ -33,6 +33,7 @@ x-backend-common: &backend-common
     network: host
     args:
       UV_INDEX_URL: ${UV_INDEX_URL:-}
+      GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-https://gh-proxy.org}
   env_file:
     - .env
   environment:
@@ -225,6 +226,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
+        GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-https://gh-proxy.org}
         CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download}
     restart: "no"
     entrypoint: ["true"]

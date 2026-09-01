@@ -256,7 +256,7 @@ Return the code in a fenced code block with file path annotation:
         # Otherwise build from the template.
         if "{insight}" in self.prompt_template or "{project_context}" in self.prompt_template:
             full_prompt = self.prompt_template.format(
-                insight=prompt,
+                insight=context.get("insight", prompt),
                 language=language,
                 task_description=task_description,
                 constraints=constraints,

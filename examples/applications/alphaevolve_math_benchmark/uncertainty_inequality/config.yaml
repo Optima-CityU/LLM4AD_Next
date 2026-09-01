@@ -1,0 +1,74 @@
+project_name: "alphaevolve_uncertainty_inequality"
+path_resolution: "cwd"
+description_en: "Evolve Hermite-combination coefficients that minimize the uncertainty-inequality upper bound."
+description_zh: "进化 Hermite 多项式组合系数，最小化不确定性不等式的上界。"
+random_seed: 42
+background: |
+  # An uncertainty inequality Problem
+  Given a function  𝑓:ℝ→ℝ , define the Fourier transform  𝑓ˆ(𝜉):=∫ℝ𝑓(𝑥)𝑒−2𝜋𝑖𝑥𝜉 𝑑𝑥  and
+    𝐴(𝑓):=inf{𝑟>0:𝑓(𝑥)≥0 for all |𝑥|≥𝑟}.
+  Let  𝐶4  be the largest constant satisfying
+    𝐴(𝑓)𝐴(𝑓ˆ)≥𝐶4
+  for all even  𝑓  with  max(𝑓(0),𝑓ˆ(0))<0 . It is known that
+    0.2025 ≤ 𝐶4 ≤ 0.3523;
+
+  AlphaEvolve improved the upper bound to  𝐶4 ≤ 0.3521  with a similar linear combination as in Gonçalves et al. (2017) but with refined constants.
+
+  First, following the method in Gonçalves et al. (2017), we consider test functions of the form  𝑓(𝑥)=𝑃(𝑥)𝑒−𝜋𝑥2 , where  𝑃(𝑥)  is an even polynomial. For this form, the Fourier transform  𝑓̂ (𝜉)  has the structure  𝑃(𝜉)𝑒−𝜋𝜉2 , which implies  𝐴(𝑓)=𝐴(𝑓̂ )  is the largest positive root of  𝑃(𝑥)  (for functions that are positive for large  |𝑥| ). The inequality then becomes  𝐶4≤(𝐴(𝑓))2 .
+
+  The polynomial  𝑃(𝑥)  is chosen as a linear combination of Hermite polynomials of even order  𝐻4𝑘(𝑥) , specifically  𝑃(𝑥)=∑𝑚𝑘=0𝑐𝑘𝐻4𝑘(𝑥) . The goal is to find coefficients  𝑐𝑘  that minimize the largest positive root of  𝑃(𝑥)  while satisfying certain conditions on  𝑃(𝑥)  (related to the  𝑓(0)<0  condition and  𝑃(𝑥)>0  for large  |𝑥| ). In the implementation below, the polynomial  𝑃(𝑥)  is constructed with the technical constraint  𝑃(0)=0 , meaning  𝑃(𝑥)  has a factor of  𝑥2 . The largest positive root of  𝑃(𝑥)  is then the largest positive root of  𝑃(𝑥)/𝑥2 . The upper bound on  𝐶4  is given by this largest root squared, divided by  2𝜋 .
+
+  AlphaEvolve found the coefficients ( 𝑐0 ,  𝑐1 ,  𝑐2 ) defining a polynomial  𝑃(𝑥)=𝑐0𝐻0(𝑥)+𝑐1𝐻4(𝑥)+𝑐2𝐻8(𝑥)  that provides an improved upper bound for  𝐶4 .
+
+  Your task is to find the coefficients ( 𝑐0 ,  𝑐1 ,  𝑐2 ), and I'll use the verify_hermite_combination function to verify its validity, and then use the valid coefficients to calculate the upper_bound. The goal is to find a better upper_bound <= 0.3521.
+
+  <verify_hermite_combination>
+  def verify_hermite_combination(coeffs: np.ndarray) -> sympy.Expr:
+    """Computes the Hermite combination for given coefficients."""
+    m = len(coeffs)
+    rational_coeffs = [sympy.Rational(c) for c in coeffs]
+    degrees = np.arange(0, 4 * m + 4, 4)
+    x = sympy.symbols('x')
+    hps = [
+        sympy.polys.orthopolys.hermite_poly(n=i, x=x, polys=False)
+        for i in degrees
+    ]
+
+    # All but the last coefficient.
+    partial_fn: sympy.Expr = sum(
+        rational_coeffs[i] * hps[i] for i in range(len(rational_coeffs))
+    )
+
+    # Impose the condition that the root at 0 should be 0.
+    a = hps[-1].subs(x, 0)
+    b = -partial_fn.subs(x, 0)
+    last_coeff = b / a
+    rational_coeffs.append(sympy.Rational(last_coeff))
+
+    res_fn = sum(rational_coeffs[i] * hps[i] for i in range(len(rational_coeffs)))
+
+    if sympy.limit(res_fn, x, sympy.oo) < 0:
+      res_fn = -res_fn
+
+    x = sympy.symbols('x')
+    # Check the value at 0 is 0.
+    value_at_0 = res_fn.subs(x, 0)
+    assert value_at_0 == 0, f'The value at 0 is {value_at_0} != 0.'
+    assert sympy.limit(res_fn, x, sympy.oo) > 0, 'Limit at infty is not positive.'
+  </verify_hermite_combination>
+
+  Requirement:
+  1. Fully implement the find_coefficients function. The return result of coefficients needs to be able to pass the verification of the verify_hermite_combination function.
+  2. Do not rewrite the verify_hermite_combination functions. Keep it unchanged.
+  3. Optimize the algorithm to the extreme, striving to raise upper_bound <= 0.3521.
+
+  Your solution should be written in Python.
+
+  You got this! I believe in you!!!
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the find_coefficients() entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "uncertainty_inequality/evaluator.py:UncertaintyInequalityEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [c_upper_bound, target_ratio, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "uncertainty_inequality/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

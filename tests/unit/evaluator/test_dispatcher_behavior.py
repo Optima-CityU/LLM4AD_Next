@@ -132,3 +132,27 @@ def test_dispatch_batch_uses_configured_evaluator_timeout():
 
     assert results[0].success is True
     assert [context.timeout for context in evaluator.contexts] == [600]
+
+
+def test_custom_evaluator_can_import_a_module_from_the_project_root(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A nested evaluator may share helpers located at the task project root."""
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (tmp_path / "shared_import_probe.py").write_text("VALUE = 42\n", encoding="utf-8")
+    evaluator_path = case_dir / "shared_import_probe_evaluator.py"
+    evaluator_path.write_text(
+        "from shared_import_probe import VALUE\n"
+        "class SharedImportProbeEvaluator:\n"
+        "    marker = VALUE\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    evaluator_class = EvaluationDispatcher._import_custom_evaluator(
+        "case/shared_import_probe_evaluator.py:SharedImportProbeEvaluator"
+    )
+
+    assert evaluator_class.marker == 42

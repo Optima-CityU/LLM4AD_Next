@@ -164,6 +164,7 @@ class MemoryCardResponse(BaseModel):
     algorithm_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     readonly: MemoryCardReadonlyInfo = Field(default_factory=MemoryCardReadonlyInfo)
+    operation: Literal["add", "update", "reinforcement"] | None = None
 
 
 class MemoryCardUpsertRequest(BaseModel):
@@ -189,35 +190,22 @@ class MemoryCardStatusUpdate(BaseModel):
 
 
 class MemoryCardExtractionRequest(BaseModel):
-    """Generate MindMemOS memory previews from a raw user description."""
+    """Process a raw user description through MindMemOS immediately."""
 
     content: str = Field(min_length=1, max_length=20000)
     prompt_language: Literal["ZH", "EN"] | None = None
 
 
 class MemoryCardExtractionResponse(BaseModel):
-    """Preview memories extracted by MindMemOS before the user confirms them."""
+    """Memories affected by one MindMemOS processing operation."""
 
     preview_id: str
     items: list[MemoryCardResponse]
     message: str = ""
 
 
-class MemoryCardExtractionCommitRequest(BaseModel):
-    """Confirm which extracted preview memories should become active."""
-
-    selected_ids: list[str] = Field(default_factory=list)
-    all_ids: list[str] = Field(default_factory=list)
-
-
-class MemoryCardExtractionDiscardRequest(BaseModel):
-    """Discard temporary extracted preview memories."""
-
-    memory_ids: list[str] = Field(default_factory=list)
-
-
 class TaskMemoryPromotionRequest(BaseModel):
-    """Promote selected task-memory cards into project-memory previews."""
+    """Promote selected task-memory cards into project memory."""
 
     project_id: uuid.UUID
     task_id: uuid.UUID

@@ -25,6 +25,7 @@ from llm4ad.planner.sampler.base import BaseSampler
 from llm4ad.planner.sampler.prompt_templates import (
     MUTATE_ALGORITHM_FROM_BLOCK,
     build_multimodal_mutation_prompt,
+    format_parent_algorithm_context,
 )
 
 
@@ -145,6 +146,8 @@ class MultimodalMutationSampler(BaseSampler):
                     context_after=block.context_after,
                     score=parent_score,
                     description=parent.description,
+                    parent_context=format_parent_algorithm_context(parent),
+                    memory_context="",
                 )
             else:
                 prompt = self._build_fallback_prompt(background, parent)
@@ -219,6 +222,8 @@ class MultimodalMutationSampler(BaseSampler):
             f"# Current Algorithm Information\n\n"
             f"Current algorithm score: {parent_score:.4f}\n"
             f"Current algorithm description: {parent.description}\n\n"
+            f"# Selected Parent State and Implementation\n\n"
+            f"{format_parent_algorithm_context(parent)}\n\n"
             "# Your Task\n\n"
             "Please propose a mutation (small change) to improve this algorithm.\n"
             "Focus on making an incremental improvement based on the existing "

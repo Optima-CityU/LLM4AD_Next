@@ -10,6 +10,7 @@
 
 # ---------- 知识文档解析协议代理 ----------
 ARG CC_SWITCH_DOWNLOAD_IMAGE=docker.1ms.run/curlimages/curl:8.16.0
+ARG PYTHON_BASE_IMAGE=docker.1ms.run/library/python:3.12-bookworm
 # cc-switch 在每个知识解析容器内独立运行，将 Anthropic Messages 转换为平台
 # 已支持的 OpenAI Chat Completions 协议。固定版本并校验归档，避免 latest 漂移。
 FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS cc-switch-runtime
@@ -32,7 +33,7 @@ RUN case "${TARGETARCH}" in \
     && install -m 0755 /tmp/cc-switch /usr/local/bin/cc-switch
 
 # ---------- 基础镜像 ----------
-FROM python:3.12-bookworm
+FROM ${PYTHON_BASE_IMAGE}
 
 # 禁用 Python 输出缓冲，保证日志实时输出
 ENV PYTHONUNBUFFERED=1
@@ -86,11 +87,15 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 # ---------- 安装依赖（含 research extra，不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
+ARG GITHUB_PROXY_URL=https://gh-proxy.org
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=pyproject.toml,target=/pyproject.toml \
     --mount=type=bind,source=README.md,target=/README.md \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
     uv sync --no-install-workspace --extra research
 
 # ---------- 复制应用代码 ----------
@@ -108,6 +113,9 @@ COPY ./README.md          /README.md
 # ---------- 安装工作区包（含 research extra）----------
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
     uv sync --extra research
 
 # Python Claude Agent SDK 由 uv 安装并自带 Claude Code CLI，无需额外 Node 运行时。
@@ -122,10 +130,7 @@ COPY ./src/backend/app/tasks/task_config_crypto.py           /app/backend/app/ta
 COPY ./docker/knowledge-parser/runner.py                      /app/knowledge-parser/runner.py
 COPY ./docker/knowledge-parser/plan_store.py                  /app/knowledge-parser/plan_store.py
 COPY ./docker/knowledge-parser/sdk_events.py                  /app/knowledge-parser/sdk_events.py
-COPY ./docker/knowledge-parser/PROMPT.md                      /app/knowledge-parser/PROMPT.md
-COPY ./docker/knowledge-parser/PLAN_PROMPT.md                 /app/knowledge-parser/PLAN_PROMPT.md
-COPY ./docker/knowledge-parser/REFINEMENT_PROMPT.md           /app/knowledge-parser/REFINEMENT_PROMPT.md
-COPY ./docker/knowledge-parser/PLAN_SCHEMA.json               /app/knowledge-parser/PLAN_SCHEMA.json
+COPY ./skills/document-knowledge-organizer                    /app/skills/document-knowledge-organizer
 COPY ./docker/knowledge-parser/CC-SWITCH-LICENSE              /usr/share/licenses/cc-switch/LICENSE
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------

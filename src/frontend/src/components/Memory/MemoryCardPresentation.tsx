@@ -129,6 +129,11 @@ export function MemoryCardTile({
           <h3 className="truncate text-sm font-semibold" title={card.title}>{card.title}</h3>
           <div className="mt-1 flex flex-wrap gap-1">
             <Badge variant="outline">{memoryTypeLabel(card.type, t)}</Badge>
+            {card.operation && (
+              <Badge variant="secondary">
+                {t(`memory.cardManager.operations.${card.operation}`)}
+              </Badge>
+            )}
             {!card.enabled && <Badge variant="secondary">{t("memory.cardManager.status.disabled")}</Badge>}
           </div>
         </div>

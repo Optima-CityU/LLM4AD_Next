@@ -1,0 +1,23 @@
+project_name: "alphaevolve_sums_differences"
+path_resolution: "cwd"
+description_en: "Evolve a finite integer set that maximizes the logarithmic sumset/difference-set ratio."
+description_zh: "进化有限整数集合，最大化和集与差集规模的对数比值。"
+random_seed: 42
+background: |
+  Ruzsa's inequality problem
+
+  Act as an expert software developer and optimization specialist specializing in creating python lists of distinct integers with certain properties. Your task is to find a python list A consisting distinct integers wit the property that the set A - A is as large as possible, and at the same time the set A + A is as small as possible. Here A + A is the set of all possible sums of two elements of A.
+
+  Your task is to write a search function that searches for the best list. You may choose n, the length of the list, to be anything in this experiment. Larger values of n have more potential for bigger scores, but the search space is larger so they are harder to find. You'll have to balance it accordingly!
+
+  [IMPORTANT]You must write search_for_best_set function and return Tuple[np.ndarray, str] !!!
+  [IMPORTANT]You must refer to the get_score method in the previous code and place the provided get_score method code intact in the new code you generate, and you must not modify the get_score method
+
+  Good luck, you've got this!
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the search_for_best_set() entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "sums_differences/evaluator.py:SumsDifferencesEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [get_score_result, target_value, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "sums_differences/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

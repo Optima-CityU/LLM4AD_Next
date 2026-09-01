@@ -4187,43 +4187,6 @@ export const MemoryCardArtifactSchema = {
     description: 'Immutable source evidence selected by the extractor and copied by MindMemOS.'
 } as const;
 
-export const MemoryCardExtractionCommitRequestSchema = {
-    properties: {
-        selected_ids: {
-            items: {
-                type: 'string'
-            },
-            type: 'array',
-            title: 'Selected Ids'
-        },
-        all_ids: {
-            items: {
-                type: 'string'
-            },
-            type: 'array',
-            title: 'All Ids'
-        }
-    },
-    type: 'object',
-    title: 'MemoryCardExtractionCommitRequest',
-    description: 'Confirm which extracted preview memories should become active.'
-} as const;
-
-export const MemoryCardExtractionDiscardRequestSchema = {
-    properties: {
-        memory_ids: {
-            items: {
-                type: 'string'
-            },
-            type: 'array',
-            title: 'Memory Ids'
-        }
-    },
-    type: 'object',
-    title: 'MemoryCardExtractionDiscardRequest',
-    description: 'Discard temporary extracted preview memories.'
-} as const;
-
 export const MemoryCardExtractionRequestSchema = {
     properties: {
         content: {
@@ -4248,7 +4211,7 @@ export const MemoryCardExtractionRequestSchema = {
     type: 'object',
     required: ['content'],
     title: 'MemoryCardExtractionRequest',
-    description: 'Generate MindMemOS memory previews from a raw user description.'
+    description: 'Process a raw user description through MindMemOS immediately.'
 } as const;
 
 export const MemoryCardExtractionResponseSchema = {
@@ -4273,7 +4236,7 @@ export const MemoryCardExtractionResponseSchema = {
     type: 'object',
     required: ['preview_id', 'items'],
     title: 'MemoryCardExtractionResponse',
-    description: 'Preview memories extracted by MindMemOS before the user confirms them.'
+    description: 'Memories affected by one MindMemOS processing operation.'
 } as const;
 
 export const MemoryCardPageResponseSchema = {
@@ -4485,6 +4448,18 @@ export const MemoryCardResponseSchema = {
         },
         readonly: {
             '$ref': '#/components/schemas/MemoryCardReadonlyInfo'
+        },
+        operation: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['add', 'update', 'reinforcement']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Operation'
         }
     },
     type: 'object',
@@ -9992,7 +9967,7 @@ export const TaskMemoryPromotionRequestSchema = {
     type: 'object',
     required: ['project_id', 'task_id', 'memory_ids'],
     title: 'TaskMemoryPromotionRequest',
-    description: 'Promote selected task-memory cards into project-memory previews.'
+    description: 'Promote selected task-memory cards into project memory.'
 } as const;
 
 export const TaskResponseSchema = {

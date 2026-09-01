@@ -69,6 +69,7 @@ export type MemoryCard = {
   algorithm_id?: string | null
   metadata?: Record<string, unknown>
   "readonly"?: MemoryCardReadonlyInfo
+  operation?: "add" | "update" | "reinforcement" | null
 }
 
 export type MemoryCardStructuredContent = {

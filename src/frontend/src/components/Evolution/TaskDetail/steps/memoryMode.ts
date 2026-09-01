@@ -37,6 +37,9 @@ export function createTaskMemoryOnboardingPresentation(
     mindmemos_fail_open: true,
     mindmemos_request_timeout: 300,
     mindmemos_add_timeout: 300,
+    mindmemos_context_char_budget: 20000,
+    mindmemos_elite_code_slots: 1,
+    mindmemos_elite_code_char_budget: 12000,
     mindmemos_extraction_prompt_language: "auto",
   }
 }

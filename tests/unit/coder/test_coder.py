@@ -1,8 +1,9 @@
 """Unit tests for llm4ad.coder module."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from llm4ad.coder.base import (
     BaseCoder,
@@ -10,10 +11,9 @@ from llm4ad.coder.base import (
     GenerateResult,
     GenerateStatus,
 )
-from llm4ad.config.schema import CustomCoderConfig, ClaudeCodeConfig
 from llm4ad.config.app import ProviderConfig
+from llm4ad.config.schema import ClaudeCodeConfig, CustomCoderConfig
 from llm4ad.infra.provider.base import GenerationResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -461,6 +461,36 @@ class TestGenerateInitial:
     """Tests for initial code generation (no parent_code)."""
 
     @pytest.mark.asyncio
+    async def test_custom_template_uses_structured_insight_from_context(
+        self,
+        mock_provider,
+        tmp_path,
+    ):
+        """A custom template receives the raw insight, not a prebuilt fallback prompt."""
+        from llm4ad.coder.custom_naive_coder import CustomNaiveCoder
+
+        config = CustomCoderConfig(
+            type="custom",
+            prompt_template="STRICT CONTRACT\n{insight}\n{project_context}",
+        )
+        coder = CustomNaiveCoder(config=config, provider=mock_provider)
+        mock_provider.generate.return_value = GenerationResult(
+            text="```python:model_spec.py\nMODEL_SPEC = {}\n```",
+            total_tokens=10,
+        )
+
+        await coder.generate(
+            prompt="PREBUILT FALLBACK PROMPT",
+            context={"insight": "RAW STRUCTURED INSIGHT", "language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        sent_prompt = mock_provider.generate.await_args.args[0]
+        assert "STRICT CONTRACT" in sent_prompt
+        assert "RAW STRUCTURED INSIGHT" in sent_prompt
+        assert "PREBUILT FALLBACK PROMPT" not in sent_prompt
+
+    @pytest.mark.asyncio
     async def test_generate_success(self, coder, mock_provider, tmp_path):
         mock_provider.generate.return_value = GenerationResult(
             text="```python:solution.py\ndef sort(arr):\n    return sorted(arr)\n```",
@@ -573,7 +603,7 @@ class TestGenerateMutation:
     @pytest.mark.asyncio
     async def test_mutation_no_evolve_block_copies_file(self, coder, mock_provider, tmp_path):
         parent_code = {"config.py": "CONFIG = {}"}
-        result = await coder.generate(
+        await coder.generate(
             prompt="improve",
             context={"parent_code": parent_code, "language": "python"},
             working_dir=str(tmp_path),

@@ -1,0 +1,89 @@
+project_name: "alphaevolve_minimum_overlap"
+path_resolution: "cwd"
+description_en: "Evolve a symmetric relaxed sequence that minimizes its maximum normalized overlap with its complement."
+description_zh: "进化对称松弛序列，最小化该序列与其补序列的最大归一化重叠。"
+random_seed: 42
+background: |
+  Act as an expert in optimization and algorithm design. Your task is to solve the following problem:
+
+  Erdős' minimum overlap problem
+
+  Let $C_5$ be the largest constant satisfying
+  $$ \sup_{x \in [-2,2]} \int_{-1}^1 f(t) g(x+t)\ dt\geq C_5$$
+  for all non-negative $f,g: [-1,1] \to [0,1]$ with $f+g=1$ on $[-1,1]$ and
+  $\int f(x)\ dx = 1$, where we extend $f,g$ by zero outside of $[-1,1]$. This
+  constant controls the asymptotics of the Minimum Overlap Problem described by
+  [Erdős (1955)]. The bounds
+  $$0.379005 \leq C_5 \leq 0.380927$$
+  are known; the lower bound was obtained by
+  [White (2023)]
+  via convex programming methods.
+
+  It is known that
+  this constant is equal to the infimum, over all step
+  functions $h$ on $[0, 2]$ with values in $[0, 1]$ and satisfying
+  $
+  \int_0^2 h(x)dx = 1
+  $
+  of
+  $$
+  \max_k \int h(x)(1 - h(x+k))dx
+  .$$ The upper bound to the Erdős minimum overlap problem was then obtained by using this result, in
+  [Haugland (2016)] by a step function
+  construction.
+
+  Your goal is to lower the upper bound as much as possible; it needs to be less than 0.380927. You can refer to the way the compute_upper_bound function calculates the upper bound.
+
+  You need to fully implement the `generate_erdos_data` function and return an `np.ndarray`. The upper limit calculated based on the returned result should be as small as possible, preferably smaller than 0.380927. The data returned by the `generate_erdos_data` function needs to be tested and the upper limit calculated using the following code:
+
+  import numpy as np
+  def generate_erdos_data() -> np.ndarray:
+    """Generates a sequence of coefficients for Erdős' minimum overlap problem."""
+    # Your implementation goes here.
+    pass
+
+  def verify_sequence(sequence: list[float]):
+    """Raises an error if the sequence does not satisfy the constraints."""
+    # Check that all values are between 0 and 1.
+    if not all(0 <= val <= 1 for val in sequence):
+      raise AssertionError("All values in the sequence must be between 0 and 1.")
+    # Check that the sum of values in the sequence is exactly n / 2.0.
+    # Note: Due to floating point errors in adaptive scaling, we use np.isclose
+    target_val = len(sequence) / 2.0
+    current_sum = np.sum(sequence)
+    if not np.isclose(current_sum, target_val, rtol=1e-5):
+      raise AssertionError(
+          "The sum of values in the sequence must be exactly n / 2.0. The sum is "
+          f"{current_sum} but it should be {target_val}.")
+    print(
+        "The sequence generates a valid step function for Erdős' minimum "
+        "overlap problem."
+    )
+
+
+  def compute_upper_bound(sequence: list[float]) -> float:
+    """Returns the upper bound for a sequence of coefficients."""
+    convolution_values = np.correlate(
+        np.array(sequence), 1 - np.array(sequence), mode='full'
+    )
+    return np.max(convolution_values) / len(sequence) * 2
+
+  # --- Usage Example ---
+  if __name__ == "__main__":
+      # 1. Get data (Arguments are removed) You generated code
+      best_sequence = generate_erdos_data()
+
+      # 2. Execute your required external operations
+      reversed_sequence = best_sequence[::-1]
+      final_sequence = np.concatenate((best_sequence[:-1], reversed_sequence))
+
+      # 3. Verify and Print
+      verify_sequence(final_sequence)
+      print("Upper Bound:", compute_upper_bound(final_sequence))
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the generate_erdos_data() entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "minimum_overlap/evaluator.py:MinimumOverlapEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [upper bound, target_upper_bound, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "minimum_overlap/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

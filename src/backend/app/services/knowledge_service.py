@@ -645,6 +645,7 @@ def update_document(
     document = _get_owned_document(db, user.id, document_id)
     source = _get_owned_source(db, user.id, document.source_id)
     uploaded_key: str | None = None
+    changed = False
     if request.title is not None:
         title = request.title.strip()
         if not title:
@@ -652,6 +653,7 @@ def update_document(
         if title != document.title:
             document.title = title
             document.user_modified = True
+            changed = True
     if request.content is not None:
         data = request.content.encode("utf-8")
         _decode_markdown(data)
@@ -665,8 +667,19 @@ def update_document(
             document.content_size = len(data)
             document.estimated_tokens = estimate_knowledge_tokens(request.content)
             document.user_modified = True
+            changed = True
     document.updated_time = datetime.now(UTC)
     try:
+        if changed:
+            run = db.get(models.KnowledgeParseRun, document.parse_run_id)
+            if run is not None:
+                document_key = str(document.id)
+                run.inserted_document_ids = [
+                    item
+                    for item in list(getattr(run, "inserted_document_ids", []) or [])
+                    if item != document_key
+                ]
+                db.add(run)
         db.add(document)
         db.commit()
         db.refresh(document)
@@ -698,15 +711,32 @@ def _get_selected_run_documents(
     return documents
 
 
-def _memory_ids_from_add_response(payload: dict[str, Any]) -> list[str]:
+def _memory_events_from_add_response(payload: dict[str, Any]) -> list[dict[str, Any]]:
     memories = ((payload.get("data") or {}).get("memories") or [])
-    result: list[str] = []
+    result: list[dict[str, Any]] = []
     for item in memories:
         if not isinstance(item, dict):
             continue
         memory_id = str(item.get("memory_id") or item.get("id") or "").strip()
-        if memory_id and memory_id not in result:
-            result.append(memory_id)
+        if not memory_id:
+            continue
+        operation = str(item.get("operation") or "add")
+        if operation not in {"add", "update", "reinforcement"}:
+            operation = "add"
+        related_memory_ids = list(
+            dict.fromkeys(
+                str(value).strip()
+                for value in item.get("related_memory_ids") or []
+                if str(value).strip()
+            )
+        )
+        result.append(
+            {
+                "memory_id": memory_id,
+                "operation": operation,
+                "related_memory_ids": related_memory_ids,
+            }
+        )
     return result
 
 
@@ -725,6 +755,20 @@ def _generated_memory_cards(
         include_tags=True,
     )
     return [cards[memory_id] for memory_id in unique_ids if memory_id in cards]
+
+
+def _generated_memory_cards_with_operations(
+    user: models.User,
+    run: Any,
+) -> list[schemas.MemoryCardResponse]:
+    operations = dict(getattr(run, "generated_memory_operations", {}) or {})
+    return [
+        card.model_copy(update={"operation": operations.get(card.id)})
+        for card in _generated_memory_cards(
+            user,
+            list(getattr(run, "generated_memory_ids", []) or []),
+        )
+    ]
 
 
 def _prepare_document_block_insert(
@@ -821,23 +865,52 @@ def _complete_document_block_insert(
     run: Any,
     documents: list[Any],
     already_inserted: list[str],
-    memory_ids: list[str],
+    memory_events: list[dict[str, Any]],
 ) -> schemas.KnowledgeDocumentInsertResponse:
     """Commit local insertion bookkeeping after MindMemOS completes atomically."""
 
-    if not memory_ids:
+    if not memory_events:
         raise HTTPException(status_code=422, detail="所选文档块没有提取出可保存的记忆")
     inserted_ids = [*already_inserted]
     for document in documents:
         value = str(document.id)
         if value not in inserted_ids:
             inserted_ids.append(value)
-    generated_ids = list(getattr(run, "generated_memory_ids", []) or [])
-    for memory_id in memory_ids:
+    operation_by_id = {
+        str(event["memory_id"]): str(event["operation"])
+        for event in memory_events
+    }
+    retired_ids = {
+        str(memory_id)
+        for event in memory_events
+        if event["operation"] in {"update", "reinforcement"}
+        for memory_id in event.get("related_memory_ids") or []
+    }
+    generated_ids = [
+        memory_id
+        for memory_id in list(getattr(run, "generated_memory_ids", []) or [])
+        if memory_id not in retired_ids
+    ]
+    for memory_id in operation_by_id:
         if memory_id not in generated_ids:
             generated_ids.append(memory_id)
+    generated_memories = [
+        card.model_copy(update={"operation": operation_by_id.get(card.id)})
+        for card in _generated_memory_cards(user, generated_ids)
+    ]
+    generated_ids = [card.id for card in generated_memories]
+    stored_operations = dict(getattr(run, "generated_memory_operations", {}) or {})
+    for memory_id in retired_ids:
+        stored_operations.pop(memory_id, None)
+    stored_operations.update(operation_by_id)
+    stored_operations = {
+        memory_id: operation
+        for memory_id in generated_ids
+        if (operation := stored_operations.get(memory_id)) in {"add", "update", "reinforcement"}
+    }
     run.inserted_document_ids = inserted_ids
     run.generated_memory_ids = generated_ids
+    run.generated_memory_operations = stored_operations
     run.message = f"已批量插入 {len(inserted_ids)} 个文档块"
     run.updated_time = datetime.now(UTC)
     db.add(run)
@@ -845,7 +918,7 @@ def _complete_document_block_insert(
     return schemas.KnowledgeDocumentInsertResponse(
         inserted_document_ids=[uuid.UUID(item) for item in inserted_ids],
         generated_memory_ids=generated_ids,
-        generated_memories=_generated_memory_cards(user, generated_ids),
+        generated_memories=generated_memories,
     )
 
 
@@ -856,7 +929,7 @@ def list_generated_memory_cards(
 ) -> list[schemas.MemoryCardResponse]:
     """Return still-existing generated cards for an owned parse run."""
     run = get_parse_run(db, user, run_id)
-    return _generated_memory_cards(user, list(getattr(run, "generated_memory_ids", []) or []))
+    return _generated_memory_cards_with_operations(user, run)
 
 
 def insert_document_blocks(
@@ -873,10 +946,7 @@ def insert_document_blocks(
         return schemas.KnowledgeDocumentInsertResponse(
             inserted_document_ids=[uuid.UUID(item) for item in already_inserted],
             generated_memory_ids=list(getattr(run, "generated_memory_ids", []) or []),
-            generated_memories=_generated_memory_cards(
-                user,
-                list(getattr(run, "generated_memory_ids", []) or []),
-            ),
+            generated_memories=_generated_memory_cards_with_operations(user, run),
         )
     memory_service._require_mindmemos_memory_enabled()
     memory_service._ensure_mindmemos_provider_binding(db, user)
@@ -886,8 +956,8 @@ def insert_document_blocks(
         payload,
         scopes=["memory:write"],
     )
-    memory_ids = _memory_ids_from_add_response(result)
-    return _complete_document_block_insert(db, user, run, documents, already_inserted, memory_ids)
+    memory_events = _memory_events_from_add_response(result)
+    return _complete_document_block_insert(db, user, run, documents, already_inserted, memory_events)
 
 
 async def stream_insert_document_blocks(
@@ -905,10 +975,7 @@ async def stream_insert_document_blocks(
         result = schemas.KnowledgeDocumentInsertResponse(
             inserted_document_ids=[uuid.UUID(item) for item in already_inserted],
             generated_memory_ids=list(getattr(run, "generated_memory_ids", []) or []),
-            generated_memories=_generated_memory_cards(
-                user,
-                list(getattr(run, "generated_memory_ids", []) or []),
-            ),
+            generated_memories=_generated_memory_cards_with_operations(user, run),
         )
         yield {"event": "completed", "data": result.model_dump(mode="json")}
         return
@@ -928,8 +995,8 @@ async def stream_insert_document_blocks(
                 return
             continue
 
-        memory_ids = _memory_ids_from_add_response(event)
-        result = _complete_document_block_insert(db, user, run, documents, already_inserted, memory_ids)
+        memory_events = _memory_events_from_add_response(event)
+        result = _complete_document_block_insert(db, user, run, documents, already_inserted, memory_events)
         yield {"event": "completed", "data": result.model_dump(mode="json")}
         return
 

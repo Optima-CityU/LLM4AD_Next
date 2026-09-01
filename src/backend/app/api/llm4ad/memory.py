@@ -167,7 +167,7 @@ def create_memory_card(
     "/cards/extractions",
     response_model=schemas.MemoryCardExtractionResponse,
     status_code=201,
-    summary="从原始描述提取记忆预览",
+    summary="从原始描述提取并保存记忆",
 )
 def extract_memory_cards(
     db: SessionDep,
@@ -189,7 +189,7 @@ def extract_memory_cards(
 
 @router.post(
     "/cards/extractions/stream",
-    summary="从原始描述流式提取记忆预览",
+    summary="从原始描述流式提取并保存记忆",
 )
 def stream_extract_memory_cards(
     db: SessionDep,
@@ -217,7 +217,7 @@ def stream_extract_memory_cards(
 
 @router.post(
     "/cards/promotions/stream",
-    summary="将任务记忆流式提升为项目记忆预览",
+    summary="将任务记忆流式提升为项目记忆",
 )
 def stream_promote_task_memory_cards(
     db: SessionDep,
@@ -235,57 +235,6 @@ def stream_promote_task_memory_cards(
             yield f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     return sse_response(stream())
-
-
-@router.post(
-    "/cards/extractions/{preview_id}/commit",
-    response_model=schemas.MemoryCardExtractionResponse,
-    summary="确认保存记忆预览",
-)
-def commit_memory_card_extraction(
-    db: SessionDep,
-    current_user: CurrentUser,
-    preview_id: str,
-    scope: schemas.MemoryScope,
-    request: schemas.MemoryCardExtractionCommitRequest,
-    project_id: uuid.UUID | None = None,
-    task_id: uuid.UUID | None = None,
-) -> schemas.MemoryCardExtractionResponse:
-    return memory_service.commit_memory_card_extraction(
-        db,
-        current_user=current_user,
-        scope=scope,
-        preview_id=preview_id,
-        project_id=project_id,
-        task_id=task_id,
-        request=request,
-    )
-
-
-@router.delete(
-    "/cards/extractions/{preview_id}",
-    response_model=Message,
-    summary="丢弃记忆预览",
-)
-def discard_memory_card_extraction(
-    db: SessionDep,
-    current_user: CurrentUser,
-    preview_id: str,
-    scope: schemas.MemoryScope,
-    request: schemas.MemoryCardExtractionDiscardRequest,
-    project_id: uuid.UUID | None = None,
-    task_id: uuid.UUID | None = None,
-) -> Message:
-    memory_service.discard_memory_card_extraction(
-        db,
-        current_user=current_user,
-        scope=scope,
-        preview_id=preview_id,
-        project_id=project_id,
-        task_id=task_id,
-        memory_ids=request.memory_ids,
-    )
-    return Message(message="记忆预览已丢弃")
 
 
 @router.patch(

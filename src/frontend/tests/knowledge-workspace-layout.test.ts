@@ -92,6 +92,23 @@ test("selected document blocks can be inserted through the structured batch endp
   expect(draftReviewSource).toContain('data-testid="knowledge-insert-selected"')
 })
 
+test("editing an inserted document immediately makes the new revision selectable", () => {
+  const saveDocumentBlock = workspaceSource.slice(
+    workspaceSource.indexOf("const saveDocumentBlock = async"),
+    workspaceSource.indexOf(
+      "const refineDocuments",
+      workspaceSource.indexOf("const saveDocumentBlock = async"),
+    ),
+  )
+
+  expect(saveDocumentBlock).toContain("setRun((current) =>")
+  expect(saveDocumentBlock).toContain(
+    "inserted_document_ids: current.inserted_document_ids.filter(",
+  )
+  expect(saveDocumentBlock).toContain("(id) => id !== documentId")
+  expect(saveDocumentBlock).toContain("current.generated_memory_ids.length === 0")
+})
+
 test("knowledge CRUD uses the openapi-ts generated client", () => {
   expect(workspaceSource).toContain("Llm4AdKnowledgeService.listSources")
   expect(workspaceSource).toContain("Llm4AdKnowledgeService.addSourceFiles")
@@ -126,6 +143,13 @@ test("generated memories are shown below document blocks with edit and delete ac
   expect(draftReviewSource).toContain("onDeleteMemory")
   expect(draftReviewSource).toContain('data-testid="knowledge-generated-memory-edit"')
   expect(draftReviewSource).toContain('data-testid="knowledge-generated-memory-delete"')
+})
+
+test("generated memory cards show whether insertion added, updated, or reinforced memory", () => {
+  expect(memoryCardPresentationSource).toContain("card.operation")
+  expect(memoryCardPresentationSource).toContain(
+    "memory.cardManager.operations.${card.operation}",
+  )
 })
 
 test("generated structured memories render exact source artifacts and preserve them while editing facts", () => {

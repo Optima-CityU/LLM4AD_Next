@@ -421,6 +421,7 @@ def _persist_parser_output(
             run.message = f"已整理 {len(documents)} 个预提取文档块，可继续编辑"
             run.manifest_object_key = manifest_key
             run.generated_memory_ids = []
+            run.generated_memory_operations = {}
             run.error_code = None
             run.error = None
             source.active_parse_run_id = run.id

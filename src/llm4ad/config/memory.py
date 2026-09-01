@@ -397,6 +397,57 @@ class MemoryConfig(BaseModel):
             desc_en="Maximum wait time in seconds for each MindMemOS extraction/write request; 0 waits indefinitely",
         ),
     )
+    mindmemos_context_char_budget: int = Field(
+        default=20000,
+        ge=0,
+        description="Maximum number of long-term-memory characters injected into one prompt",
+        json_schema_extra=ui(
+            label_zh="记忆上下文字符预算",
+            label_en="Memory Context Character Budget",
+            desc_zh=(
+                "每次提示词允许注入的长期记忆总字符数；完整精英代码优先，"
+                "其余指导记忆按剩余空间放置，0 表示不限制"
+            ),
+            desc_en=(
+                "Total long-term-memory characters allowed in each prompt; complete elite code "
+                "is protected first and guidance uses the remaining space; 0 disables the limit"
+            ),
+        ),
+    )
+    mindmemos_elite_code_slots: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Number of complete historical elite implementations reserved in memory prompts",
+        json_schema_extra=ui(
+            label_zh="历史精英代码槽位",
+            label_en="Historical Elite Code Slots",
+            desc_zh=(
+                "最终注入提示词的完整历史精英实现数量；系统仍会从更大的候选池中择优，"
+                "0 表示不单独注入精英代码"
+            ),
+            desc_en=(
+                "Number of complete historical elite implementations injected after selecting "
+                "from the wider recall pool; 0 disables the dedicated elite-code channel"
+            ),
+        ),
+    )
+    mindmemos_elite_code_char_budget: int = Field(
+        default=12000,
+        ge=0,
+        description="Reserved character budget for complete historical elite implementations",
+        json_schema_extra=ui(
+            label_zh="历史精英代码字符预算",
+            label_en="Historical Elite Code Character Budget",
+            desc_zh=(
+                "从记忆上下文总预算中优先保留给完整精英代码的字符数；代码无法完整容纳时不会截断注入"
+            ),
+            desc_en=(
+                "Characters reserved within the total memory context for complete elite code; "
+                "an implementation that cannot fit completely is not injected as partial code"
+            ),
+        ),
+    )
     mindmemos_extraction_prompt_language: Literal["auto", "ZH", "EN"] = Field(
         default="auto",
         description="Preferred language for MindMemOS memory extraction prompts",
