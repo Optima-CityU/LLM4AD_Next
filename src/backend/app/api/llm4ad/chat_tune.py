@@ -281,7 +281,8 @@ async def stream_turn(
         - heartbeat: 周期性心跳保活（约 15s）。
         - done / cancelled / error: 终止事件（data 帧）。
         - event: done: SSE 终止信号。
-        - timeout: 5 分钟无新数据的安全兜底。
+        - timeout: 30 分钟无新数据的安全兜底（构建期间后端每 30s 推送
+          progress 事件，正常构建不会触发）。
     """
     ctx = chat_tune_service.get_turn_stream_context(
         db, task_id, turn_id, current_user
@@ -298,7 +299,7 @@ async def stream_turn(
                 "turn_id": str(ctx.turn_id),
             },
             entry_handler=_chat_tune_entry_handler,
-            max_idle=600.0,
+            max_idle=1800.0,
             use_draining=True,
         )
     )

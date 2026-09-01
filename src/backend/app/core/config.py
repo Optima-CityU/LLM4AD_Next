@@ -253,11 +253,12 @@ class Settings(BaseSettings):
     KNOWLEDGE_PLAN_QUESTION_TIMEOUT: int = 900
 
     # ---- 调参（chat-tune）隔离容器配置 ----
-    CHAT_TUNE_CONTAINER_PORT: int = 8800  # 容器内 SSE 服务监听端口（不发布到宿主）
-    CHAT_TUNE_CONTAINER_MEMORY_LIMIT: str = "1g"  # 调参容器内存限制
-    CHAT_TUNE_CONTAINER_CPU_LIMIT: float = 1.0  # 调参容器 CPU 核心数限制
-    CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0  # 等待容器 SSE 服务就绪的超时（秒）
-    CHAT_TUNE_CONTAINER_NETWORK: bool = True  # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
+    CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）
+    CHAT_TUNE_CONTAINER_MEMORY_LIMIT: str = "1g"      # 调参容器内存限制
+    CHAT_TUNE_CONTAINER_CPU_LIMIT: float = 1.0        # 调参容器 CPU 核心数限制
+    CHAT_TUNE_CONTAINER_READY_TIMEOUT: float = 30.0   # 等待容器 SSE 服务就绪的超时（秒）
+    CHAT_TUNE_CONTAINER_NETWORK: bool = True           # True=通过 Docker 网络连接容器; False=发布端口到宿主机用 localhost 连接
+    CHAT_TUNE_PROGRESS_INTERVAL: float = 30.0         # 构建期间向 SSE 流推送进度事件的间隔（秒），防止前端流空闲超时
 
     # ---- MindMemOS 系统级记忆后端配置 ----
     LLM4AD_MINDMEMOS_ENABLED: bool = False
