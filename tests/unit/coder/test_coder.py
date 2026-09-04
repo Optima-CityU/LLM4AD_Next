@@ -461,6 +461,44 @@ class TestGenerateInitial:
     """Tests for initial code generation (no parent_code)."""
 
     @pytest.mark.asyncio
+    async def test_existing_evolve_file_preserves_code_outside_markers(
+        self,
+        coder,
+        mock_provider,
+        tmp_path,
+    ):
+        """A baseline EVOLVE file must use block replacement even without a parent."""
+        solve_path = tmp_path / "solve.py"
+        solve_path.write_text(
+            "# EVOLVE_START\n"
+            "def solve():\n"
+            "    return 1\n"
+            "# EVOLVE_END\n\n"
+            "def fixed_adapter():\n"
+            "    return solve()\n",
+            encoding="utf-8",
+        )
+        mock_provider.generate.return_value = GenerationResult(
+            text="```python:solve.py\ndef solve():\n    return 2\n```",
+            total_tokens=20,
+        )
+
+        result = await coder.generate(
+            prompt="improve the implementation",
+            context={"language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        assert result.is_success
+        content = solve_path.read_text(encoding="utf-8")
+        assert "return 2" in content
+        assert "def fixed_adapter():" in content
+        assert "return solve()" in content
+        sent_prompt = mock_provider.generate.await_args.args[0]
+        assert "def fixed_adapter():" in sent_prompt
+        assert "Code outside EVOLVE markers is immutable" in sent_prompt
+
+    @pytest.mark.asyncio
     async def test_custom_template_uses_structured_insight_from_context(
         self,
         mock_provider,

@@ -201,6 +201,11 @@ Return the code in a fenced code block with file path annotation:
 
         try:
             parent_code = context.get("parent_code")
+            if parent_code is None:
+                existing_evolve_files = self._collect_evolve_file_map(working_path)
+                if existing_evolve_files:
+                    parent_code = existing_evolve_files
+                    context = {**context, "parent_code": parent_code}
 
             mode = "mutation" if parent_code is not None else "initial"
             logger.debug(
@@ -226,6 +231,38 @@ Return the code in a fenced code block with file path annotation:
                 error_message=f"Generation failed: {str(e)}",
                 timing=ExecutionTiming(wall_time_ms=(time.time() - start_time) * 1000),
             )
+
+    def _collect_evolve_file_map(self, working_path: Path) -> dict[str, str]:
+        """Collect existing source files that contain EVOLVE blocks.
+
+        Args:
+            working_path: Candidate worktree root.
+
+        Returns:
+            Source contents keyed by paths relative to the worktree root.
+        """
+        source_extensions = {
+            ".py", ".cpp", ".cc", ".c", ".h", ".hpp",
+            ".java", ".js", ".ts", ".go", ".rs", ".rb",
+            ".sh", ".php",
+        }
+        skip_dirs = {
+            "__pycache__", ".git", "node_modules", ".venv", "venv",
+            "build", "dist", ".idea", ".vscode",
+        }
+        files: dict[str, str] = {}
+        for file_path in sorted(working_path.rglob("*")):
+            if not file_path.is_file() or file_path.suffix not in source_extensions:
+                continue
+            if any(part in skip_dirs for part in file_path.parts):
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if self._find_evolve_blocks(content):
+                files[str(file_path.relative_to(working_path))] = content
+        return files
 
     async def _generate_initial(
         self, prompt: str, context: dict[str, Any], working_path: Path, **kwargs
@@ -406,6 +443,17 @@ Return the code in a fenced code block with file path annotation:
                     block_name=block_name,
                     file_path=file_path,
                     language=language,
+                )
+                immutable_context = self._mask_evolve_blocks(content)
+                mutation_prompt = (
+                    "Code outside EVOLVE markers is immutable. The replacement must remain "
+                    "compatible with imports, callers, return-value unpacking, output adapters, "
+                    "and other interfaces shown in the fixed file context below. If a natural-"
+                    "language instruction conflicts with this executable interface, preserve the "
+                    "executable interface.\n\n"
+                    f"Fixed file context ({file_path}):\n"
+                    f"```{language}\n{immutable_context}\n```\n\n"
+                    f"{mutation_prompt}"
                 )
 
                 # Merge generation parameters
