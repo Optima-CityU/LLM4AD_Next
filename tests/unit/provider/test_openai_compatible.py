@@ -428,6 +428,102 @@ async def test_chat_with_schema_enables_json_mode_for_deepseek(provider_config):
 
 
 @pytest.mark.asyncio
+async def test_chat_with_schema_enables_json_mode_for_openai_type(provider_config):
+    """OpenAI providers should request JSON output for schema calls."""
+
+    class PersonInfo(BaseModel):
+        name: str
+        age: int
+
+    openai_provider = OpenAICompatibleProvider({
+        **provider_config,
+        "type": "openai",
+        "base_url": "https://gateway.example/v1",
+        "model": "gateway-model-alias",
+    })
+    openai_provider.client = AsyncMock()
+    openai_provider.client.chat.completions.create.return_value = ChatCompletion(
+        id="schema-id-openai",
+        created=1234567890,
+        model="gateway-model-alias",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant", content='{"name": "Alice", "age": 30}'
+                ),
+            )
+        ],
+        usage={"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        object="chat.completion",
+    )
+
+    result = await openai_provider.chat(
+        [ChatMessage(role="user", content="Tell me about a person")],
+        schema=PersonInfo,
+    )
+
+    assert result.parsed is not None
+    call_kwargs = openai_provider.client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_chat_with_schema_downgrades_when_response_format_is_unsupported(provider_config):
+    """An explicit response-format rejection should retry in prompt-only mode."""
+
+    class PersonInfo(BaseModel):
+        name: str
+        age: int
+
+    openai_provider = OpenAICompatibleProvider({
+        **provider_config,
+        "type": "openai",
+        "base_url": "https://gateway.example/v1",
+    })
+    openai_provider.client = AsyncMock()
+    unsupported_error = APIStatusError(
+        "Unsupported parameter: response_format",
+        response=httpx.Response(
+            status_code=400,
+            request=httpx.Request("POST", "https://gateway.example/v1/chat/completions"),
+        ),
+        body={"error": {"message": "response_format is not supported"}},
+    )
+    valid_response = ChatCompletion(
+        id="schema-fallback",
+        created=1234567890,
+        model="test-model",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant", content='{"name": "Alice", "age": 30}'
+                ),
+            )
+        ],
+        usage={"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        object="chat.completion",
+    )
+    openai_provider.client.chat.completions.create.side_effect = [
+        unsupported_error,
+        valid_response,
+    ]
+
+    result = await openai_provider.chat(
+        [ChatMessage(role="user", content="Tell me about a person")],
+        schema=PersonInfo,
+    )
+
+    assert result.parsed is not None
+    calls = openai_provider.client.chat.completions.create.call_args_list
+    assert calls[0].kwargs["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[1].kwargs
+
+
+@pytest.mark.asyncio
 async def test_chat_with_schema_retry_identifies_schema_echo_for_deepseek(provider_config):
     """When DeepSeek echoes a JSON Schema, retry feedback should ask for an instance."""
 
@@ -598,6 +694,106 @@ async def test_chat_with_schema_json_in_markdown(provider):
     assert result.parsed is not None
     assert result.parsed.name == "Bob"
     assert result.parsed.age == 25
+
+
+@pytest.mark.asyncio
+async def test_chat_with_schema_extracts_json_wrapped_in_prose(provider):
+    """A complete schema-valid JSON object may be wrapped in brief prose."""
+
+    class PersonInfo(BaseModel):
+        name: str
+        age: int
+
+    provider.client.chat.completions.create.return_value = ChatCompletion(
+        id="schema-prose-123",
+        created=1234567890,
+        model="test-model",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content='Here is the result:\n{"name": "Bob", "age": 25}\nDone.',
+                ),
+            )
+        ],
+        usage={"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        object="chat.completion",
+    )
+
+    result = await provider.chat(
+        [ChatMessage(role="user", content="Tell me about a person")],
+        schema=PersonInfo,
+    )
+
+    assert result.parsed is not None
+    assert result.parsed.name == "Bob"
+    assert result.parsed.age == 25
+
+
+@pytest.mark.asyncio
+async def test_chat_with_schema_logs_bounded_parse_diagnostics(provider):
+    """Parse warnings should classify responses without dumping full content."""
+
+    class PersonInfo(BaseModel):
+        name: str
+        age: int
+
+    invalid_response = ChatCompletion(
+        id="schema-invalid-123",
+        created=1234567890,
+        model="test-model",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant", content="not-json " + "x" * 300
+                ),
+            )
+        ],
+        usage={"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        object="chat.completion",
+    )
+    valid_response = ChatCompletion(
+        id="schema-valid-123",
+        created=1234567891,
+        model="test-model",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant", content='{"name": "Alice", "age": 30}'
+                ),
+            )
+        ],
+        usage={"prompt_tokens": 60, "completion_tokens": 20, "total_tokens": 80},
+        object="chat.completion",
+    )
+    provider.client.chat.completions.create.side_effect = [invalid_response, valid_response]
+
+    records = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        result = await provider.chat(
+            [ChatMessage(role="user", content="Tell me about a person")],
+            schema=PersonInfo,
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert result.parsed is not None
+    warning = next(
+        record["message"] for record in records
+        if "Failed to parse schema" in record["message"]
+    )
+    assert "category=malformed_json" in warning
+    assert "finish_reason=stop" in warning
+    assert "content_length=309" in warning
+    assert "preview='not-json" in warning
+    assert len(warning) < 500
 
 
 @pytest.mark.asyncio
