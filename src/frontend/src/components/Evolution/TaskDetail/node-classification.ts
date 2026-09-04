@@ -35,7 +35,7 @@ export function computeNodeClassifications(
     }
   }
 
-  // Pass 2: Island-generation best - highest score per (island, generation)
+  // Pass 2: Island-generation best - highest rawScore per (island, generation)
   const genIslandGroups = new Map<string, GANode[]>()
   for (const node of data.nodes) {
     const key = `${node.generation}-${node.island}`
@@ -43,54 +43,54 @@ export function computeNodeClassifications(
     genIslandGroups.get(key)!.push(node)
   }
   for (const [, group] of genIslandGroups) {
-    let maxScore = -1
+    let best = -Infinity
     for (const node of group) {
-      if (node.score > maxScore) maxScore = node.score
+      if (node.rawScore > best) best = node.rawScore
     }
     for (const node of group) {
-      if (node.score === maxScore) {
+      if (node.rawScore === best) {
         map.get(node.id)!.isIslandGenBest = true
       }
     }
   }
 
-  // Pass 3: Global-generation best - highest score per generation across ALL islands
+  // Pass 3: Global-generation best - highest rawScore per generation across ALL islands
   const genGroups = new Map<number, GANode[]>()
   for (const node of data.nodes) {
     if (!genGroups.has(node.generation)) genGroups.set(node.generation, [])
     genGroups.get(node.generation)!.push(node)
   }
   for (const [, group] of genGroups) {
-    let maxScore = -1
+    let best = -Infinity
     for (const node of group) {
-      if (node.score > maxScore) maxScore = node.score
+      if (node.rawScore > best) best = node.rawScore
     }
     for (const node of group) {
-      if (node.score === maxScore) {
+      if (node.rawScore === best) {
         map.get(node.id)!.isGlobalGenBest = true
       }
     }
   }
 
-  // Pass 4: Island overall best - highest score per island across all generations
-  const islandBest = new Map<number, number>() // island -> max score
+  // Pass 4: Island overall best - highest rawScore per island across all generations
+  const islandBest = new Map<number, number>() // island -> best rawScore
   for (const node of data.nodes) {
-    const cur = islandBest.get(node.island) ?? -1
-    if (node.score > cur) islandBest.set(node.island, node.score)
+    const cur = islandBest.get(node.island) ?? -Infinity
+    if (node.rawScore > cur) islandBest.set(node.island, node.rawScore)
   }
   for (const node of data.nodes) {
-    if (node.score === islandBest.get(node.island)) {
+    if (node.rawScore === islandBest.get(node.island)) {
       map.get(node.id)!.isIslandOverallBest = true
     }
   }
 
-  // Pass 5: Global best - every node tied at the highest score overall
-  let globalMax = -1
+  // Pass 5: Global best - every node tied at the highest rawScore overall
+  let globalMax = -Infinity
   for (const node of data.nodes) {
-    if (node.score > globalMax) globalMax = node.score
+    if (node.rawScore > globalMax) globalMax = node.rawScore
   }
   for (const node of data.nodes) {
-    if (node.score === globalMax) {
+    if (node.rawScore === globalMax) {
       map.get(node.id)!.isGlobalBest = true
     }
   }
