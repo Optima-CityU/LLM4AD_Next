@@ -445,12 +445,21 @@ Return the code in a fenced code block with file path annotation:
                     language=language,
                 )
                 immutable_context = self._mask_evolve_blocks(content)
+                serialization_contract = ""
+                if Path(file_path).suffix == ".py" and "json.dumps" in immutable_context:
+                    serialization_contract = (
+                        "The fixed Python adapter serializes returned values with json.dumps. "
+                        "Return JSON-native Python values; convert NumPy arrays or scalars to "
+                        "lists, floats, or integers before returning them.\n"
+                    )
                 mutation_prompt = (
                     "Code outside EVOLVE markers is immutable. The replacement must remain "
                     "compatible with imports, callers, return-value unpacking, output adapters, "
                     "and other interfaces shown in the fixed file context below. If a natural-"
                     "language instruction conflicts with this executable interface, preserve the "
-                    "executable interface.\n\n"
+                    "executable interface. Return only the replacement block, never the complete "
+                    "file or EVOLVE markers.\n"
+                    f"{serialization_contract}\n"
                     f"Fixed file context ({file_path}):\n"
                     f"```{language}\n{immutable_context}\n```\n\n"
                     f"{mutation_prompt}"
@@ -477,6 +486,16 @@ Return the code in a fenced code block with file path annotation:
                 if new_block is None:
                     # Fallback to single unnamed block extraction
                     new_block = self._extract_code(result.text)
+
+                normalization_error = None
+                if new_block:
+                    new_block, normalization_error = self._normalize_mutation_block(
+                        new_block,
+                        block_name,
+                    )
+                if normalization_error:
+                    errors.append(f"[{file_path}] Block '{block_name}': {normalization_error}")
+                    continue
 
                 block_changed = new_block and new_block.strip() != original_block.strip()
                 logger.debug(
@@ -563,6 +582,51 @@ Return the code in a fenced code block with file path annotation:
             },
             timing=llm_timing,
         )
+
+    def _normalize_mutation_block(
+        self,
+        code: str,
+        block_name: str,
+    ) -> tuple[str | None, str | None]:
+        """Normalize a mutation response to one EVOLVE block body.
+
+        Models occasionally ignore the block-only output contract and return a
+        complete source file. Inserting that response verbatim would nest
+        EVOLVE markers and duplicate immutable entrypoints.
+
+        Args:
+            code: Extracted code returned by the provider.
+            block_name: Name of the EVOLVE block currently being replaced.
+
+        Returns:
+            A tuple containing the normalized block and an optional error.
+        """
+        response_blocks = self._find_evolve_blocks(code)
+        if not response_blocks:
+            return code.strip(), None
+
+        if len(response_blocks) == 1:
+            replacement = response_blocks[0][3].strip()
+        else:
+            named_matches = [
+                block_content.strip()
+                for _pattern, _style, start_match, block_content in response_blocks
+                if start_match.strip() == block_name
+            ]
+            if len(named_matches) != 1:
+                return None, "full-file response contains ambiguous EVOLVE blocks"
+            replacement = named_matches[0]
+
+        if not replacement:
+            return None, "full-file response contains an empty EVOLVE block"
+        if self._find_evolve_blocks(replacement):
+            return None, "replacement contains nested EVOLVE blocks"
+
+        logger.warning(
+            "[Coder-Mutation] Unwrapped full-file response for EVOLVE block '{}'",
+            block_name,
+        )
+        return replacement, None
 
     def _get_parent_code_map(self, parent_code: Any) -> dict[str, str]:
         """Convert parent_code from context into a map of file paths to content.

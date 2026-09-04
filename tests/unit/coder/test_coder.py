@@ -499,6 +499,88 @@ class TestGenerateInitial:
         assert "Code outside EVOLVE markers is immutable" in sent_prompt
 
     @pytest.mark.asyncio
+    async def test_existing_evolve_file_unwraps_full_file_response(
+        self,
+        coder,
+        mock_provider,
+        tmp_path,
+    ):
+        """A full-file response must not be nested inside an EVOLVE block."""
+        solve_path = tmp_path / "solve.py"
+        solve_path.write_text(
+            "import json\n\n"
+            "# EVOLVE_START\n"
+            "def solve():\n"
+            "    return [1]\n"
+            "# EVOLVE_END\n\n"
+            "def fixed_adapter():\n"
+            "    print(json.dumps(solve()))\n",
+            encoding="utf-8",
+        )
+        mock_provider.generate.return_value = GenerationResult(
+            text=(
+                "```python:solve.py\n"
+                "import json\n\n"
+                "# EVOLVE_START\n"
+                "def solve():\n"
+                "    return [2]\n"
+                "# EVOLVE_END\n\n"
+                "def fixed_adapter():\n"
+                "    raise RuntimeError('must not replace fixed code')\n"
+                "```"
+            ),
+            total_tokens=30,
+        )
+
+        result = await coder.generate(
+            prompt="improve the implementation",
+            context={"language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        assert result.is_success
+        content = solve_path.read_text(encoding="utf-8")
+        assert content.count("# EVOLVE_START") == 1
+        assert content.count("# EVOLVE_END") == 1
+        assert "return [2]" in content
+        assert "raise RuntimeError" not in content
+        assert "print(json.dumps(solve()))" in content
+
+    @pytest.mark.asyncio
+    async def test_python_json_adapter_adds_serializable_return_contract(
+        self,
+        coder,
+        mock_provider,
+        tmp_path,
+    ):
+        """Python JSON adapters must advertise JSON-native return values."""
+        solve_path = tmp_path / "solve.py"
+        solve_path.write_text(
+            "import json\n\n"
+            "# EVOLVE_START\n"
+            "def solve():\n"
+            "    return [1]\n"
+            "# EVOLVE_END\n\n"
+            "print(json.dumps(solve()))\n",
+            encoding="utf-8",
+        )
+        mock_provider.generate.return_value = GenerationResult(
+            text="```python:solve.py\ndef solve():\n    return [2]\n```",
+            total_tokens=20,
+        )
+
+        result = await coder.generate(
+            prompt="improve the implementation",
+            context={"language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        assert result.is_success
+        sent_prompt = mock_provider.generate.await_args.args[0]
+        assert "JSON-native Python values" in sent_prompt
+        assert "NumPy arrays or scalars" in sent_prompt
+
+    @pytest.mark.asyncio
     async def test_custom_template_uses_structured_insight_from_context(
         self,
         mock_provider,
