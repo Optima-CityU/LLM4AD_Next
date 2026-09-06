@@ -113,9 +113,9 @@ _PROVIDER_TYPE_TO_ARC = {
 
 
 def resolve_provider_for_arc(
-    provider_id: str | None,
-    model_name: str | None,
-    user_id: uuid.UUID,
+        provider_id: str | None,
+        model_name: str | None,
+        user_id: uuid.UUID,
 ) -> dict[str, Any]:
     """把前端 provider_id / model_name 解析成 ARC ``llm:`` 段所需字段。
 
@@ -186,10 +186,10 @@ def resolve_provider_for_arc(
 
 
 def proxy_provider_for_arc(
-    provider_config: dict[str, Any],
-    *,
-    user_id: uuid.UUID,
-    task_id: uuid.UUID,
+        provider_config: dict[str, Any],
+        *,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
 ) -> None:
     """若 LLM_PROXY_ENABLE，将真实凭据换发为代理 token（原地修改）。
 
@@ -227,11 +227,11 @@ def proxy_provider_for_arc(
 
 
 def build_arc_config(
-    *,
-    session: SessionSnapshot,
-    turn: TurnSnapshot,
-    run_dir: Path,
-    provider_config: dict[str, Any],
+        *,
+        session: SessionSnapshot,
+        turn: TurnSnapshot,
+        run_dir: Path,
+        provider_config: dict[str, Any],
 ) -> dict[str, Any]:
     """构造 ARC 用的 config dict（后续 dump 到 config.arc.yaml）。
 
@@ -244,11 +244,21 @@ def build_arc_config(
     project_mode = _to_arc_project_mode(turn.mode or session.mode)
 
     config: dict[str, Any] = {
+        "web_search": {
+            "enabled": False,
+        },
+        "literature_search": {
+            "sources": [
+                "openalex",
+                "arxiv",
+                # "semantic_scholar",
+            ]
+        },
         "project": {
             "name": (session.title or "research")[:200],
             "mode": project_mode,
             # ml_vision 走 sandbox 直跑，不使用 ARC 域 profile，故置空。
-            "profile": "" if session.profile in _SANDBOX_PROFILES else session.profile,
+            "profile": "mathematics_optimization"
         },
         "research": {
             "topic": session.topic,
@@ -285,40 +295,118 @@ def build_arc_config(
             "wire_api": provider_config.get("wire_api", "chat_completions"),
             "api_key_env": provider_config["api_key_env"],
             "primary_model": provider_config["primary_model"],
+            # 降级路径：primary 失败时依次尝试。默认取 primary 自身（等价无降级），
+            # 需要真实降级时由调用方/前端覆写为不同模型。对齐 AutoResearchClawAD2
+            # config.arc.yaml 的 fallback_models 字段。
+            "fallback_models": [provider_config["primary_model"]],
+            # 单次请求超时。resolve_provider_for_arc 已返回 provider.timeout，
+            # 这里显式落进 llm 段（此前 build 时丢了，客户端退回默认值）。
+            "timeout_sec": provider_config.get("timeout") or 1200,
         },
         "experiment": {
-            "mode": "llm4ad_agent",
-            "time_budget_sec": 7200,
+            "skip_alignment_check": True,
+            "mode": "sandbox",
+            # "time_budget_sec": 300,
             "max_iterations": 5,
-            "metric_key": "best_individual_score",
-            "metric_direction": "maximize",
-            "llm4ad_agent": {
-                "llm4ad_dir": "",
-                "working_dir": "llm4ad_workspace",
-                "timeout_sec": 7200,
-                "max_repair_attempts": 10,
-                "build_max_tries": 3,
-                "metric_direction": "maximize",
-                # build 阶段（描述→任务目录）复用 pipeline 主 LLM 的凭证；
-                # ARC 明文读取这三个字段，不走 env 兜底。
-                "build_api_key": provider_config.get("api_key", ""),
-                "build_base_url": provider_config["base_url"],
-                "build_model": provider_config["primary_model"],
+            # 课题 ML03(GPU-less CPU optimizer comparison)的真正的 PRIMARY_METRIC。
+            # 之前 "best_individual_score" 与生成器/evaluator 实际产出的指标名不一致，
+            # Stage-13 择优在解析结果时匹配不到该 key，会静默拿默认值/失败。
+            "metric_key": "valid_prediction_time",
+            # Stage 13 择优后的演化增强。字段对齐 AutoResearchClawAD2/config.arc.yaml，
+            # 不配 target —— 目标算法由 LLM 三路分类自动选择（排除 baseline + 消融，其余全选）。
+            "llm4ad_boost": {
+                "enabled": True,
+                # 失败降级：记录告警并沿用 Stage 13 原有最优，不中断流水线
+                "fail_silently": True,
+                "evolution": {
+                    "method": "island_ga",
+                    # 对齐 AutoResearchClawAD2/config.arc.yaml 的 10。参考配置就是 10；
+                    # 4 代对优化类课题太少，常常一代全灭(如候选全被判语法错误)就收尾，
+                    # 迁移到 10 大幅提高演化出分/择优改进的概率。
+                    "max_generations": 10,
+                    "elite_ratio": 0.2,
+                    "mutation_rate": 0.6,
+                    "crossover_rate": 0.3,
+                    "island": {
+                        "num_islands": 4,
+                        "island_population_size": 4,
+                        "migration_interval": 5,
+                        "migration_rate": 0.1,
+                    },
+                },
+                "resources": {
+                    "time_budget_sec": 3600,
+                    "eval_timeout_sec": 600,
+                    "per_package_timeout_sec": 3600,
+                    "parallel_workers": 4,
+                },
+                "parallel_evolution": False,
+                "max_parallel_algorithms": 3,
+                "marking": {
+                    "strategy": "auto",
+                    "scope": "optimize_method",
+                    "preserve_imports": True,
+                    "preserve_init": True,
+                },
             },
             "figure_agent": {"use_docker": False},
-            "opencode": {"enabled": False},
+            # opencode 的降级通道；参考配置里关掉（配合 opencode.require_success）。
+            "code_agent": {"enabled": False},
+            # Stage 10 代码生成走容器内的 opencode CLI。字段对齐
+            # AutoResearchClawAD2/config.arc.yaml。
+            "opencode": {
+                "debug": True,
+                "enabled": True,
+                "auto": True,
+                "complexity_threshold": 0.0,
+                # "model": "gpt-5",
+                "timeout_sec": 3600,
+                # 总尝试 1+3=4 次；配合 require_success 失败不再降级
+                "max_retries": 10,
+                "workspace_cleanup": True,
+                # opencode 失败直接让 Stage 10 FAILED，不落回 CodeAgent/Legacy
+                "require_success": True,
+            },
+            # sandbox 直跑的执行环境。字段对齐 AutoResearchClawAD2/config.arc.yaml，
+            # 但 python_path 必须走容器内 POSIX 路径（见 _detect_sandbox_python_path）。
+            "sandbox": {
+                "python_path": _detect_sandbox_python_path(),
+                "gpu_required": False,
+                "max_memory_mb": 8192,
+                # 依赖白名单，直接迁移自 AutoResearchClawAD2/config.arc.yaml。
+                # _ensure_sandbox_deps 只自动装这份清单里的包；缺省(空)时沙箱可能
+                # 因缺包而静默降级/失败。ML03 及多数 optimization 课题要 numpy/scipy。
+                "allowed_imports": [
+                    "numpy",
+                    "scipy",
+                    "matplotlib",
+                    "sklearn",
+                    "pandas",
+                    "statsmodels",
+                    "networkx",
+                    "skimage",
+                    "qiskit",
+                    "qiskit_aer",
+                    "qiskit_algorithms",
+                    "qiskit_machine_learning",
+                    "qiskit_nature",
+                    "pyscf",
+                    "json",
+                    "time",
+                    "os",
+                    "sys",
+                    "math",
+                    "random",
+                    "collections",
+                    "itertools",
+                    "functools",
+                    "typing",
+                    "dataclasses",
+                    "pathlib",
+                    "csv",
+                ],
+            },
         },
         "prompts": {},
     }
-
-    # ml_vision 等域走 sandbox 直跑：改 experiment.mode 并注入顶层 sandbox 块。
-    # python_path 自动探测（相对容器工作目录），其余按需求固定。
-    if session.profile in _SANDBOX_PROFILES:
-        config["experiment"]["mode"] = "sandbox"
-        config["experiment"]["sandbox"] = {
-            "python_path": _detect_sandbox_python_path(),
-            "gpu_required": False,
-            "max_memory_mb": 4096,
-        }
-
     return config

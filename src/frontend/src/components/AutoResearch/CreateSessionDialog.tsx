@@ -67,7 +67,7 @@ export default function CreateSessionDialog({
   const [titleError, setTitleError] = useState("")
 
   const TOPIC_MIN = 1
-  const TOPIC_MAX = 500
+  const TOPIC_MAX = 1000
   const TITLE_MAX = 255
 
   const createMut = useCreateResearchSession()
