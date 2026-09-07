@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import {
   ArrowRight,
   ArrowUpRight,
+  Award,
   BookOpen,
   Box,
   Brain,
@@ -860,7 +861,7 @@ function AchievementsSection() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {[
             {
               icon: Trophy,
@@ -877,6 +878,14 @@ function AchievementsSection() {
               link: t("landing.achievements.survey.link"),
               linkLabel: t("landing.achievements.survey.linkLabel"),
               badge: false,
+            },
+            {
+              icon: Award,
+              title: t("landing.achievements.sat.title"),
+              desc: t("landing.achievements.sat.description"),
+              link: t("landing.achievements.sat.link"),
+              linkLabel: t("landing.achievements.sat.linkLabel"),
+              badge: true,
             },
           ].map((item, i) => (
             <div

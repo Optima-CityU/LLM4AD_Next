@@ -2342,7 +2342,7 @@
       "subtitle": "",
       "cvrp": {
         "title": "SOTA Results",
-        "description": "Established 51 new Best Known Solutions on large-scale Vehicle Routing Problem (CVRP) benchmarks, setting new records on the public leaderboard.",
+        "description": "Won the 2026 CVRPlib BKS Challenge by a commanding margin, establishing 51 new Best Known Solutions (out of 100).",
         "linkLabel": "View Leaderboard",
         "link": "https://galgos.inf.puc-rio.br/cvrplib/index.php/en/bks_challenge/score/"
       },
@@ -2351,6 +2351,12 @@
         "description": "Published 10+ papers at top-tier journals and conferences including ACM Computing Surveys, IEEE TEVC, ICML, ICLR, NeurIPS, and AAAI.",
         "linkLabel": "View Paper Collection",
         "link": "https://github.com/FeiLiu36/LLM4AlgorithmDesign"
+      },
+      "sat": {
+        "title": "SAT Competition Champion",
+        "description": "Hypre-evolve achieved first place in the SAT division of the Parallel-AI sub-track at SAT Competition 2026.",
+        "linkLabel": "View Submission",
+        "link": "https://satcompetition.github.io/2026/downloads/satcomp26slides.pdf"
       }
     },
     "news": {
