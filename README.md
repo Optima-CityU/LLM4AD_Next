@@ -173,7 +173,7 @@ evolution:
 </div>
 
 
-## Run LLM4AD
+## Run LLM4AD Next
 
 ### Option A: Online Demo (No Installation Required)
 

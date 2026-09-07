@@ -173,7 +173,7 @@ evolution:
 </div>
 
 
-## 运行 LLM4AD
+## 运行 LLM4AD Next
 
 ### 方式 A：在线演示（无需安装）
 
