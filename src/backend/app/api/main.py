@@ -22,8 +22,8 @@ from app.api.base_routes import (
 )
 from app.api.llm4ad import chat_tune as llm4ad_chat_tune
 from app.api.llm4ad import embedding_providers as llm4ad_embedding_providers
-from app.api.llm4ad import llm_proxy as llm4ad_llm_proxy
 from app.api.llm4ad import knowledge as llm4ad_knowledge
+from app.api.llm4ad import llm_proxy as llm4ad_llm_proxy
 from app.api.llm4ad import memory as llm4ad_memory
 from app.api.llm4ad import projects as llm4ad_projects
 from app.api.llm4ad import providers as llm4ad_providers

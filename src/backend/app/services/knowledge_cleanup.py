@@ -10,13 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
 from app.core.storage import storage
 from app.models.knowledge import (
     KnowledgeCleanupJob,
-    KnowledgeDocument,
     KnowledgeParsePlan,
     KnowledgeParseRun,
     KnowledgeParseStatus,

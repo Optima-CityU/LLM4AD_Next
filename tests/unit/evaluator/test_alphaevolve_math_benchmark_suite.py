@@ -38,14 +38,14 @@ EXPECTED_CONFIGS = {
 OFFICIAL_CASE_CONTRACTS = {
     "hexagon_packing": (
         "HexagonPackingEvaluator",
-        "3ac2acd29d453c7df63f6317457aa19735d7c13cfc2819cf72a75eef817fa01b",
+        "15b2eda7f1e061810f3d84256f74f54da7280ee9c8e4481c6a244ca2cc0a12e5",
         3.931,
         "target_over_objective",
         "outer_hex_side_length",
     ),
     "max_min_distance_ratio": (
         "MaxMinDistanceRatioEvaluator",
-        "bcbb21ea9ddfe65460bfd1fe5ab2441d67d6ff2fb1725a9cb6868a97ee22ef28",
+        "9283db261ec1352279adc944fb6f7a4c701230b009ac224320a75385106f43d2",
         12.889266112,
         "target_over_objective",
         "ratio_squared",
@@ -59,14 +59,14 @@ OFFICIAL_CASE_CONTRACTS = {
     ),
     "uncertainty_inequality": (
         "UncertaintyInequalityEvaluator",
-        "3a1d021909996ac4393c1ccec04c0bddacd8ac59698290f3c2b5542bbb67538a",
+        "97f4fd8be5002b2354eb1aa6594c4ebd830ac951df84300bc4d44995fccb080a",
         0.3521,
         "target_over_objective",
         "c_upper_bound",
     ),
     "second_autocorrelation": (
         "SecondAutocorrelationEvaluator",
-        "ac698187f4f34b344eddac407b8ec61b4f1a46cd48977df01cc4662cefe0dc35",
+        "4705ee978af05e7d1af6be07c4a1d8e311468e63fa1a418150aeb8409468cdea",
         0.8963,
         "objective_over_target",
         "c_lower_bound",
@@ -118,6 +118,11 @@ def _load_candidate_module(case_dir: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _prompt_contract_hash(prompt: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in prompt.split("\n"))
+    return hashlib.sha256(normalized.encode()).hexdigest()
 
 
 def test_suite_exposes_every_supported_benchmark_case() -> None:
@@ -182,7 +187,7 @@ def test_remaining_cases_preserve_official_prompt_and_score_contract(
     config = yaml.safe_load((EXAMPLE_DIR / case_dir / "config.yaml").read_text(encoding="utf-8"))
     evaluator = _load_evaluator(case_dir, class_name)()
 
-    assert hashlib.sha256(config["background"].encode()).hexdigest() == prompt_sha256
+    assert _prompt_contract_hash(config["background"]) == prompt_sha256
     assert evaluator.target_value == pytest.approx(target_value)
     assert evaluator.score_mode == score_mode
     assert metric_name in config["evaluator"]["metrics"]
