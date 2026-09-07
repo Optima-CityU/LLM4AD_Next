@@ -170,8 +170,13 @@ def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
     """
     if current_user.is_superuser:
         raise HTTPException(status_code=403, detail="超级管理员不能删除自己")
+    from app.services import knowledge_cleanup
+
+    cleanup_job = knowledge_cleanup.prepare_user_cleanup_job(session, current_user.id)
+    session.add(cleanup_job)
     session.delete(current_user)
     session.commit()
+    knowledge_cleanup.run_or_schedule_cleanup(cleanup_job.id)
     return Message(message="用户已删除")
 
 
@@ -387,9 +392,14 @@ def delete_user(session: SessionDep, current_user: CurrentUser, user_id: uuid.UU
         raise HTTPException(status_code=404, detail="用户不存在")
     if user.id == current_user.id:
         raise HTTPException(status_code=403, detail="超级管理员不能删除自己")
+    from app.services import knowledge_cleanup
+
+    cleanup_job = knowledge_cleanup.prepare_user_cleanup_job(session, user.id)
+    session.add(cleanup_job)
     # 先删除用户的所有条目
     statement = delete(Item).where(col(Item.owner_id) == user_id)
     session.exec(statement)  # type: ignore
     session.delete(user)
     session.commit()
+    knowledge_cleanup.run_or_schedule_cleanup(cleanup_job.id)
     return Message(message="用户已删除")

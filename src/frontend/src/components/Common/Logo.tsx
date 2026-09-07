@@ -18,7 +18,7 @@ function LogoText() {
     <svg
       viewBox="0 0 200 32"
       className="logo-text-svg h-6 w-auto shrink-0 group-data-[collapsible=icon]:hidden"
-      aria-label="LLM4AD_Next"
+      aria-label="OpenLoopX"
     >
       <defs>
         {/* Animated gradient fill */}
@@ -76,7 +76,7 @@ function LogoText() {
         fill="url(#logo-grad)"
         filter="url(#logo-glow)"
       >
-        LLM4AD_Next
+        OpenLoopX
       </text>
     </svg>
   )
@@ -94,7 +94,7 @@ export function Logo({
         <div className="flex items-center gap-3">
           <img
             src={logo}
-            alt="LLM4AD_Next"
+            alt="OpenLoopX"
             className={cn(
               "h-14 w-auto group-data-[collapsible=icon]:hidden",
               className,
@@ -104,7 +104,7 @@ export function Logo({
         </div>
         <img
           src={icon}
-          alt="LLM4AD_Next"
+          alt="OpenLoopX"
           className={cn(
             "size-5 hidden group-data-[collapsible=icon]:block",
             className,
@@ -114,7 +114,7 @@ export function Logo({
     ) : (
       <img
         src={variant === "full" ? logo : icon}
-        alt="LLM4AD_Next"
+        alt="OpenLoopX"
         className={cn(variant === "full" ? "h-6 w-auto" : "size-5", className)}
       />
     )

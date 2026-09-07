@@ -15,7 +15,10 @@ from llm4ad.infra.repo_analyzer.base import AnalyzedRepository, EvolveBlock
 from llm4ad.planner.base import Algorithm, GenerationMetadata, InsightType
 from llm4ad.planner.memory import Memory
 from llm4ad.planner.sampler.base import BaseSampler
-from llm4ad.planner.sampler.prompt_templates import MUTATE_ALGORITHM_FROM_BLOCK
+from llm4ad.planner.sampler.prompt_templates import (
+    MUTATE_ALGORITHM_FROM_BLOCK,
+    format_parent_algorithm_context,
+)
 
 
 @BaseSampler.register("mutation_sampler")
@@ -97,16 +100,25 @@ class MutationSampler(BaseSampler):
 
         # Get parent score from evaluation
         parent_score = parent.evaluation.score if parent.evaluation else 0.0
+        parent_context = format_parent_algorithm_context(
+            parent,
+            int(self.config.get("parent_context_char_budget", 20000)),
+        )
 
         # Build memory context
-        memory_context = await self.memory.aget_prompt_context(
-            query=background,
-            context={
-                "sampler": "mutation",
-                "parent_score": parent_score,
-                "parent_description": parent.description,
-            },
-        ) if self.memory else ""
+        memory_context = ""
+        if self.memory and not bool(kwargs.get("disable_memory", False)):
+            memory_context = await self.memory.aget_prompt_context(
+                query=background,
+                context={
+                    "sampler": "mutation",
+                    "generation": generation,
+                    "island_id": kwargs.get("island_id"),
+                    "island_strategy": kwargs.get("island_strategy"),
+                    "parent_score": parent_score,
+                    "parent_description": parent.description,
+                },
+            )
 
         # Track generation time
         start_time = time.time()
@@ -128,9 +140,12 @@ class MutationSampler(BaseSampler):
                 context_after=block.context_after,
                 score=parent_score,
                 description=parent.description,
+                parent_context=parent_context,
             )
         else:
-            prompt = self._build_mutation_prompt_from_parent(background, parent, memory_context)
+            prompt = self._build_mutation_prompt_from_parent(
+                background, parent, memory_context, parent_context
+            )
 
         response = await self.provider.generate(
             prompt,
@@ -179,7 +194,11 @@ class MutationSampler(BaseSampler):
         return algorithm
 
     def _build_mutation_prompt_from_parent(
-        self, background: str, parent: Algorithm, memory_context: str = ""
+        self,
+        background: str,
+        parent: Algorithm,
+        memory_context: str = "",
+        parent_context: str = "",
     ) -> str:
         """Build a mutation prompt when no evolvable block is available.
 
@@ -187,6 +206,7 @@ class MutationSampler(BaseSampler):
             background: Problem background
             parent: Parent algorithm to mutate
             memory_context: Formatted memory context string
+            parent_context: Rendered parent code and inheritable evaluator feedback
 
         Returns:
             Formatted prompt string
@@ -207,6 +227,10 @@ You are an expert algorithm designer working to improve an existing algorithm th
 We have an existing algorithm in our population that we want to mutate.
 Current algorithm score: {parent_score:.4f}
 Current algorithm description: {parent.description}
+
+# Selected Parent State and Implementation
+
+{parent_context or format_parent_algorithm_context(parent)}
 
 # Your Task
 

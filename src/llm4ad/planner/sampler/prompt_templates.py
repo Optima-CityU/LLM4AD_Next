@@ -8,12 +8,53 @@ parts (text + images) for vision-capable LLMs.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from llm4ad.infra.provider.base import ContentPart
     from llm4ad.infra.repo_analyzer.base import EvolveBlock
     from llm4ad.planner.base import Algorithm
+
+
+def format_parent_algorithm_context(algorithm: Algorithm, char_budget: int = 20000) -> str:
+    """Render inheritable parent state for planning without hiding its implementation."""
+    evaluation = getattr(algorithm, "evaluation", None)
+    lines = [
+        f"Parent ID: {getattr(algorithm, 'id', '')}",
+        f"Name: {getattr(algorithm, 'name', '')}",
+        f"Score: {getattr(evaluation, 'score', 0.0):.6g}",
+        f"Description: {getattr(algorithm, 'description', '')}",
+    ]
+    feedback = getattr(evaluation, "evolution_feedback", None) or {}
+    if feedback:
+        lines.extend(
+            (
+                "Evaluator findings to inherit:",
+                json.dumps(feedback, ensure_ascii=False, sort_keys=True, default=str),
+            )
+        )
+
+    remaining = max(0, char_budget - len("\n".join(lines)))
+    artifacts = list(getattr(algorithm, "code_artifacts", None) or [])
+    if artifacts and remaining:
+        lines.append("Parent implementation artifacts:")
+    for artifact in artifacts:
+        content = str(getattr(artifact, "content", "") or "")
+        if not content.strip() or remaining <= 0:
+            continue
+        file_path = str(getattr(artifact, "file_path", "") or "unknown")
+        language = str(getattr(artifact, "language", "") or "")
+        header = f"```{language}:{file_path}\n"
+        footer = "\n```"
+        available = max(0, remaining - len(header) - len(footer))
+        rendered = content
+        if len(rendered) > available:
+            rendered = rendered[:available].rstrip() + "\n[artifact shortened for planning]"
+        block = f"{header}{rendered}{footer}"
+        lines.append(block)
+        remaining -= len(block)
+    return "\n".join(lines)
 
 # Default template for initial algorithm generation when evolving a specific EVOLVE block
 INITIAL_ALGORITHM_FROM_BLOCK = """\
@@ -85,6 +126,10 @@ We have an existing algorithm in our population that we want to mutate.
 Current algorithm score: {score:.4f}
 Current algorithm description: {description}
 
+## Selected Parent State
+
+{parent_context}
+
 # Evolvable Region to Mutate
 
 File: {file_path}
@@ -96,7 +141,7 @@ Block Name: {block_name}
 {context_before}
 ```
 
-## Current Implementation:
+## Baseline Repository Snapshot (not the selected parent's current implementation):
 ```{language}
 {current_content}
 ```
@@ -136,10 +181,14 @@ You are an expert algorithm designer combining two good algorithm designs into a
 Score: {score1:.4f}
 Description: {description1}
 
+{parent_context1}
+
 # Parent Algorithm 2
 
 Score: {score2:.4f}
 Description: {description2}
+
+{parent_context2}
 
 # Your Task
 
@@ -190,6 +239,8 @@ You are an expert software engineer implementing an algorithm based on a high-le
 
 {description}
 
+{inheritance_instructions}
+
 # Implementation Instructions
 
 The main implementation should be placed between `EVOLVE_START` and `EVOLVE_END` markers in the target file.
@@ -218,6 +269,8 @@ You are an expert software engineer implementing an algorithm based on a high-le
 
 {description}
 
+{inheritance_instructions}
+
 {project_context}
 
 # Implementation Instructions
@@ -230,8 +283,8 @@ Requirements:
 2. Include proper comments
 3. Ensure the code is fully functional and runnable
 4. Write clean, efficient, and well-documented code
-5. You MUST implement the algorithm exactly as described above - do NOT reuse or copy any placeholder code
-6. The EVOLVE block currently contains a placeholder; replace it entirely with your complete, novel implementation
+5. Implement the requested change exactly as described
+6. For an initial candidate, replace the placeholder; for a descendant, preserve the inherited parent implementation and modify only what the new insight requires
 
 # Output Format
 
@@ -527,6 +580,7 @@ def build_multimodal_mutation_prompt(
         List of ContentPart for a multimodal ChatMessage.
     """
     parent_score = parent.evaluation.score if parent.evaluation else 0.0
+    parent_context = format_parent_algorithm_context(parent)
 
     if block:
         text_prompt = MUTATE_ALGORITHM_FROM_BLOCK.format(
@@ -539,6 +593,8 @@ def build_multimodal_mutation_prompt(
             context_after=block.context_after,
             score=parent_score,
             description=parent.description,
+            parent_context=parent_context,
+            memory_context="",
         )
     else:
         text_prompt = (
@@ -547,7 +603,8 @@ def build_multimodal_mutation_prompt(
             f"# Problem Background\n\n{background}\n\n"
             f"# Current Algorithm Information\n\n"
             f"Current algorithm score: {parent_score:.4f}\n"
-            f"Current algorithm description: {parent.description}\n"
+            f"Current algorithm description: {parent.description}\n\n"
+            f"# Selected Parent State and Implementation\n\n{parent_context}\n"
         )
 
     parts: list[ContentPart] = [_make_text_part(text_prompt)]
@@ -595,8 +652,10 @@ def build_multimodal_crossover_prompt(
         memory_context="",
         score1=score1,
         description1=parent1.description,
+        parent_context1=format_parent_algorithm_context(parent1),
         score2=score2,
         description2=parent2.description,
+        parent_context2=format_parent_algorithm_context(parent2),
     )
 
     parts: list[ContentPart] = [_make_text_part(text_prompt)]

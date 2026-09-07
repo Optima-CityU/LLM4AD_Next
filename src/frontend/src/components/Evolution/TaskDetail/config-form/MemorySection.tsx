@@ -89,6 +89,45 @@ export default function MemorySection() {
       />
       <FormField
         control={control}
+        name="memory.mindmemos_context_char_budget"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosContextCharBudget")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} step={1000} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_elite_code_slots"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosEliteCodeSlots")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} max={5} step={1} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
+        name="memory.mindmemos_elite_code_char_budget"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>{t("configForm.memory.mindmemosEliteCodeCharBudget")}</FormLabel>
+            <FormControl>
+              <Input type="number" min={0} step={1000} {...field} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <FormField
+        control={control}
         name="memory.mindmemos_extraction_prompt_language"
         render={({ field }) => (
           <FormItem>

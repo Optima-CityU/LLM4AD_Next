@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 from openai import APIStatusError, AsyncOpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from llm4ad.infra.provider.base import (
     BaseProvider,
@@ -72,7 +72,12 @@ class OpenAICompatibleProvider(BaseProvider):
 
         base_url = (self.base_url or "").lower()
         model = (self.model or "").lower()
-        return "deepseek" in base_url or model.startswith("deepseek")
+        provider_type = str(self.config.get("type", "")).lower()
+        return (
+            provider_type == "openai"
+            or "deepseek" in base_url
+            or model.startswith("deepseek")
+        )
 
     @classmethod
     def _build_schema_instruction(cls, schema_json: dict[str, Any]) -> str:
@@ -190,6 +195,92 @@ class OpenAICompatibleProvider(BaseProvider):
             return False
         schema_keys = {"properties", "required", "type", "$defs", "definitions"}
         return "properties" in value and bool(schema_keys.intersection(value))
+
+    @staticmethod
+    def _is_unsupported_response_format_error(error: APIStatusError) -> bool:
+        """Return whether an endpoint explicitly rejected response_format."""
+        if error.status_code not in (400, 422):
+            return False
+        body = getattr(error, "body", None)
+        detail = f"{error} {body}".lower()
+        return "response_format" in detail
+
+    @classmethod
+    def _validate_schema_value(
+        cls,
+        value: Any,
+        schema: type[BaseModel],
+    ) -> BaseModel:
+        """Validate one decoded JSON value against the requested schema."""
+        if cls._looks_like_json_schema_echo(value):
+            raise ValueError(
+                "Model returned a JSON Schema instead of a JSON instance. "
+                "Return concrete values for the requested top-level fields."
+            )
+        return schema.model_validate(value)
+
+    @classmethod
+    def _parse_schema_content(
+        cls,
+        content: str,
+        schema: type[BaseModel],
+    ) -> BaseModel:
+        """Parse a schema instance from plain, fenced, or briefly wrapped JSON."""
+        json_str = content.strip()
+        if not json_str:
+            raise ValueError("Empty response content from model")
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]
+        elif json_str.startswith("```"):
+            json_str = json_str[3:]
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]
+        json_str = json_str.strip()
+
+        try:
+            return cls._validate_schema_value(json.loads(json_str), schema)
+        except json.JSONDecodeError as complete_error:
+            decoder = json.JSONDecoder()
+            candidate_error: Exception | None = None
+            for index, char in enumerate(json_str):
+                if char != "{":
+                    continue
+                try:
+                    value, _ = decoder.raw_decode(json_str, index)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    return cls._validate_schema_value(value, schema)
+                except (ValidationError, ValueError) as error:
+                    candidate_error = error
+            if candidate_error is not None:
+                raise candidate_error from complete_error
+            raise complete_error
+
+    @staticmethod
+    def _schema_failure_category(
+        error: Exception,
+        *,
+        content: str,
+        finish_reason: str | None,
+    ) -> str:
+        """Classify structured response failures for production diagnostics."""
+        if not content.strip():
+            return "empty_content"
+        if finish_reason == "length":
+            return "truncated"
+        if isinstance(error, json.JSONDecodeError):
+            return "malformed_json"
+        if isinstance(error, ValidationError):
+            return "schema_validation"
+        if "returned a JSON Schema" in str(error):
+            return "schema_echo"
+        return "invalid_structure"
+
+    @staticmethod
+    def _content_preview(content: str, limit: int = 160) -> str:
+        """Return a bounded, single-line preview suitable for warning logs."""
+        return content[:limit].replace("\r", "\\r").replace("\n", "\\n")
 
     def _convert_messages(self, messages: list[ChatMessage]) -> list[dict[str, Any]]:
         """Convert internal ChatMessage format to OpenAI format.
@@ -366,7 +457,21 @@ class OpenAICompatibleProvider(BaseProvider):
 
         for attempt in range(max_parse_retries):
             try:
-                response = await self.client.chat.completions.create(**create_kwargs)
+                try:
+                    response = await self.client.chat.completions.create(**create_kwargs)
+                except APIStatusError as error:
+                    if (
+                        "response_format" in create_kwargs
+                        and self._is_unsupported_response_format_error(error)
+                    ):
+                        create_kwargs.pop("response_format", None)
+                        logger.warning(
+                            "Endpoint rejected response_format; retrying schema request "
+                            "with prompt-only JSON guidance"
+                        )
+                        response = await self.client.chat.completions.create(**create_kwargs)
+                    else:
+                        raise
 
                 latency_ms = (time.time() - start_time) * 1000
 
@@ -383,28 +488,20 @@ class OpenAICompatibleProvider(BaseProvider):
                 if schema is not None:
                     try:
                         content = response.choices[0].message.content or ""
-                        # Extract JSON from response (handle potential markdown code blocks)
-                        json_str = content.strip()
-                        if not json_str:
-                            raise ValueError("Empty response content from model")
-                        if json_str.startswith("```json"):
-                            json_str = json_str[7:]
-                        elif json_str.startswith("```"):
-                            json_str = json_str[3:]
-                        if json_str.endswith("```"):
-                            json_str = json_str[:-3]
-                        json_str = json_str.strip()
-
-                        raw_json = json.loads(json_str)
-                        if self._looks_like_json_schema_echo(raw_json):
-                            raise ValueError(
-                                "Model returned a JSON Schema instead of a JSON instance. "
-                                "Return concrete values for the requested top-level fields."
-                            )
-
-                        parsed_result = schema.model_validate(raw_json)
+                        parsed_result = self._parse_schema_content(content, schema)
                     except Exception as e:
-                        logger.warning(f"Failed to parse schema (attempt {attempt + 1}/{max_parse_retries}): {e}")
+                        finish_reason = response.choices[0].finish_reason
+                        category = self._schema_failure_category(
+                            e,
+                            content=content,
+                            finish_reason=finish_reason,
+                        )
+                        preview = self._content_preview(content)
+                        logger.warning(
+                            f"Failed to parse schema (attempt {attempt + 1}/{max_parse_retries}): "
+                            f"category={category} finish_reason={finish_reason or 'unknown'} "
+                            f"content_length={len(content)} preview={preview!r} error={e}"
+                        )
 
                         if attempt < max_parse_retries - 1:
                             # Add error feedback to prompt for retry

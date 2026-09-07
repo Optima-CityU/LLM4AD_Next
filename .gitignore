@@ -236,3 +236,17 @@ docs/slides/
 # External repositories
 openevolve-main/
 refefence_superpowers/
+
+# Local runtime data and development-only workspaces
+/docker/project_home/
+/docker/litellm-data/
+/docker/litellm-db/
+/docker/compose.local-port-override.yml
+/artifacts/
+/plugins-dev/
+/openspec/
+/src/frontend/VERSION
+
+# Generated publication archives and source documents are not repository assets
+*.pdf
+*.zip

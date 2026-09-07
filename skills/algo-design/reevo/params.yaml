@@ -1,0 +1,14 @@
+# ReEvo (Reflective Evolution) - Recommended Parameters
+# Paper: Ye et al., NeurIPS 2024
+
+evolution:
+  type: "reevo"
+  max_generations: 50          # increase for harder problems
+  population_size: 8           # individuals in the population
+  mutation_rate: 0.5           # fraction of pop used for elite mutations per gen
+  max_sample_nums: 100         # LLM call budget cap for the run
+  num_samplers: 1              # parallel crossover candidates per step
+  seed_path: null              # optional path to a seed heuristic file
+
+planner:
+  type: "reevo_evolution"

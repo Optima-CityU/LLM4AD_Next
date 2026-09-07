@@ -19,6 +19,7 @@ import {
   ChevronsUpDown,
   CircleAlert,
   Circle as CircleIcon,
+  Clock,
   CornerDownLeft,
   File as FileIcon,
   Hash,
@@ -189,6 +190,12 @@ function isSpecialProvider(v: string): boolean {
   return SPECIAL_PROVIDERS.includes(v as (typeof SPECIAL_PROVIDERS)[number])
 }
 
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
+}
+
 interface ChatMessage {
   id: string
   turnId?: string
@@ -198,6 +205,7 @@ interface ChatMessage {
   submission?: CardSubmission
   turnStatus?: ChatTuneTurnStatus
   error?: string | null
+  progress?: { stage?: string; elapsed_seconds?: number } | null
   createdAt: number
 }
 
@@ -492,6 +500,13 @@ export default function ChatTuneView({
             lastBuildStatusRef.current = next.build
             return next
           })
+        },
+        onProgress(progress) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMessageId ? { ...m, progress } : m,
+            ),
+          )
         },
         onDone() {
           cancelAnimationFrame(streamRafId.current)
@@ -1496,6 +1511,28 @@ const ChatMessageRow = memo(
 
           {/* Streaming indicator when content is empty */}
           {isStreaming && !displayText && !message.card && <TypingDots />}
+
+          {/* Keep-alive progress pushed by the backend during silent build
+           * phases (LLM thinking / codegen) */}
+          {isStreaming &&
+            !isUser &&
+            message.progress?.elapsed_seconds != null && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Clock className="size-3 shrink-0" />
+                <span>
+                  {t(
+                    message.progress.stage === "build"
+                      ? "evolution.chatTune.buildInProgress"
+                      : "evolution.chatTune.gatherInProgress",
+                    {
+                      elapsed: formatElapsed(
+                        message.progress.elapsed_seconds,
+                      ),
+                    },
+                  )}
+                </span>
+              </div>
+            )}
 
           {/* Card payload */}
           {message.card && (

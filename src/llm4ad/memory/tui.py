@@ -239,7 +239,7 @@ class ConfigModal(ModalScreen):
             yield Input(value=rerank.get("model", ""), id="c-rr-model")
 
     def _v(self, sel: str) -> str:
-        return self.query_one(sel, Input).value.strip()
+        return cast(str, self.query_one(sel, Input).value).strip()
 
     def action_save(self) -> None:
         """Persist to settings.yaml; enforce the embedding lock; dismiss."""
@@ -585,7 +585,7 @@ class MemoryBrowser(App):
     def _selected(self) -> dict[str, Any] | None:
         table = self.query_one("#memory-table", DataTable)
         if 0 <= table.cursor_row < len(self.memories):
-            return self.memories[table.cursor_row]
+            return cast(dict[str, Any], self.memories[table.cursor_row])
         return None
 
     def _require_ready(self) -> bool:

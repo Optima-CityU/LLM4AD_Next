@@ -24,7 +24,17 @@ class AnalysisResult:
     """Category: combinatorial_optimization, sorting, ml, rl, regression, etc."""
 
     evaluation_pattern: str
-    """How the algorithm is evaluated: 'subprocess' (spawned as separate process)."""
+    """Evaluation contract for the evolved function:
+
+    - ``separate_script`` (Variant A): the evaluator spawns
+      ``python algo.py '<instance>'`` for a single one-shot call; the algorithm
+      is a stateless solver with a ``main()`` reading ``sys.argv``.
+    - ``self_spawn`` (Variant B): the evaluator spawns ITSELF as a subprocess and
+      drives an environment/simulation loop that calls a policy function many
+      times per episode; the instance is a seed, not the full input.
+
+    Normalized to one of these two values by TaskAnalyzer.
+    """
 
     function_name: str
     """Proposed name for the function to evolve (e.g., 'greedy_coloring')."""
@@ -129,6 +139,12 @@ class TaskBlueprint:
     metrics: list[dict[str, Any]]
 
     # --- Optional ---
+    evaluation_pattern: str = "separate_script"
+    """Evaluation contract: 'separate_script' (Variant A, one-shot
+    `python algo.py '<instance>'`) or 'self_spawn' (Variant B, the evaluator
+    spawns itself and drives an environment loop calling a policy function
+    many times per episode). Determines algorithm template, sample-data
+    generation, and how the validator exercises the algorithm."""
     dataset_files: dict[str, str] = field(default_factory=dict)
     source_code_path: str | None = None
     test_evaluator_code: str = ""
@@ -175,6 +191,7 @@ class TaskBlueprint:
             "algorithm_file_name": self.algorithm_file_name,
             "function_to_evolve": self.function_to_evolve,
             "metrics": self.metrics,
+            "evaluation_pattern": self.evaluation_pattern,
             "validation_status": self.validation_status,
             "validation_errors": self.validation_errors,
             "repair_attempts": self.repair_attempts,

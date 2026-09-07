@@ -11,9 +11,11 @@ This class provides a unified entry point for the LLM4AD platform that:
 
 import json
 import os
+import random
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from loguru import logger
 
 from llm4ad.coder.base import BaseCoder
@@ -29,6 +31,12 @@ from llm4ad.orchestrator import (
 )
 from llm4ad.orchestrator.embedding_client import EmbeddingClient
 from llm4ad.planner.base import BasePlanner
+
+
+def _seed_local_random_generators(seed: int) -> None:
+    """Seed the local generators used by planners and orchestrators."""
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 class LLM4AD:
@@ -87,6 +95,8 @@ class LLM4AD:
             self.config = self.config.model_copy(update={"base_dir": str(base_dir)})
         else:
             self.config = config
+
+        _seed_local_random_generators(self.config.random_seed)
 
         # Initialize components
         self._providers: dict[str, BaseProvider] = {}
@@ -337,7 +347,7 @@ class LLM4AD:
         )
 
         # Create memory extractor for auto-extraction during evolution
-        if self.config.memory.auto_extraction.enabled:
+        if self.config.memory.enabled and self.config.memory.auto_extraction.enabled:
             auto_extraction_config = self.config.memory.auto_extraction
             if self.config.memory.type == "mindmemos_cloud":
                 auto_extraction_config = auto_extraction_config.model_copy(
@@ -456,13 +466,21 @@ class LLM4AD:
             "<level>{message}</level>"
         )
 
-        # Add console handler if enabled
+        # Add console handler if enabled. Honour NO_COLOR / non-tty so that
+        # when llm4ad runs as a captured child process (e.g. the AutoResearch
+        # container's llm4ad_driver subprocess, whose stderr is piped and
+        # re-logged) it emits plain text instead of ANSI escapes that show up
+        # as garbled markers in the event stream.
         if log_config.console:
+            colorize = (
+                not os.environ.get("NO_COLOR")
+                and getattr(sys.stderr, "isatty", lambda: False)()
+            )
             logger.add(
                 sys.stderr,
                 format=log_format,
                 level=level,
-                colorize=True,
+                colorize=colorize,
                 serialize=log_config.json_format,
             )
 

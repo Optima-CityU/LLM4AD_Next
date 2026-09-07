@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Settings2 } from "lucide-react"
+import { AlertCircle, BookOpenText, Brain, CheckCircle2, Loader2, RefreshCw, Settings2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import MemoryCardManager, {
   type OnboardingMemoryDemoPhase,
 } from "@/components/Memory/MemoryCardManager"
+import KnowledgeMemoryImportWorkspace from "@/components/Knowledge/KnowledgeMemoryImportWorkspace"
 import MemoryConfigEditor from "@/components/Memory/MemoryConfigEditor"
 import MemoryProviderBindingEditor from "@/components/Memory/MemoryProviderBindingEditor"
 import type { MemoryHealth, MemoryProviderBinding } from "@/components/Memory/types"
@@ -23,6 +24,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Tooltip,
   TooltipContent,
@@ -47,6 +49,7 @@ function MemoryPage() {
   const [memoryTourStep, setMemoryTourStep] = useState(0)
   const [isMemoryTourActive, setIsMemoryTourActive] = useState(false)
   const [onboardingDemoPhase, setOnboardingDemoPhase] = useState<OnboardingMemoryDemoPhase | null>(null)
+  const [activeView, setActiveView] = useState<"cards" | "documents">("cards")
   const memoryReady = health?.ok === true && binding?.configured === true
   const shouldStartMemoryTour = !isCheckingHealth && !bindingError
 
@@ -231,7 +234,9 @@ function MemoryPage() {
 
   return (
     <div
-      className="flex flex-col gap-4"
+      className={activeView === "documents"
+        ? "flex h-full min-h-0 flex-col gap-3 overflow-hidden"
+        : "flex flex-col gap-4"}
       data-testid="memory-page-content"
       inert={isMemoryTourActive}
     >
@@ -421,25 +426,40 @@ function MemoryPage() {
         </Alert>
       )}
 
-      <MemoryCardManager
-        scope="user"
-        title={t("memory.page.managerTitle")}
-        description={t("memory.page.managerDescription")}
-        disabled={!memoryReady}
-        loadEnabled={memoryReady}
-        onboardingDemoActive={isMemoryTourActive}
-        onboardingDemoPhase={isMemoryTourActive ? onboardingDemoPhase : null}
-        onOnboardingDemoComplete={handleOnboardingDemoComplete}
-        disabledReason={
-          isCheckingHealth
-            ? t("memory.page.checkingDisabledReason")
-            : bindingError
-              ? t("memory.page.bindingLoadManagerDisabledReason")
-              : health?.ok
-                ? t("memory.page.modelsUnboundManagerDisabledReason")
-                : health?.message || t("memory.page.serviceUnavailableManagerDisabledReason")
-        }
-      />
+      <Tabs
+        value={activeView}
+        onValueChange={(value) => setActiveView(value as "cards" | "documents")}
+        className={activeView === "documents" ? "flex min-h-0 flex-1 flex-col overflow-hidden" : undefined}
+      >
+        <TabsList className="grid w-full max-w-md shrink-0 grid-cols-2">
+          <TabsTrigger value="cards" className="gap-2"><Brain className="size-4" />{t("memory.page.cardsTab")}</TabsTrigger>
+          <TabsTrigger value="documents" className="gap-2"><BookOpenText className="size-4" />{t("memory.page.documentsTab")}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="cards" className="mt-4">
+          <MemoryCardManager
+            scope="user"
+            title={t("memory.page.managerTitle")}
+            description={t("memory.page.managerDescription")}
+            disabled={!memoryReady}
+            loadEnabled={memoryReady}
+            onboardingDemoActive={isMemoryTourActive}
+            onboardingDemoPhase={isMemoryTourActive ? onboardingDemoPhase : null}
+            onOnboardingDemoComplete={handleOnboardingDemoComplete}
+            disabledReason={
+              isCheckingHealth
+                ? t("memory.page.checkingDisabledReason")
+                : bindingError
+                  ? t("memory.page.bindingLoadManagerDisabledReason")
+                  : health?.ok
+                    ? t("memory.page.modelsUnboundManagerDisabledReason")
+                    : health?.message || t("memory.page.serviceUnavailableManagerDisabledReason")
+            }
+          />
+        </TabsContent>
+        <TabsContent value="documents" className="mt-3 min-h-0 flex-1 overflow-hidden data-[state=inactive]:hidden">
+          <KnowledgeMemoryImportWorkspace />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

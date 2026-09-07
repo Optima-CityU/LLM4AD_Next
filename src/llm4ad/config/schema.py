@@ -32,8 +32,11 @@ from llm4ad.config.evaluator import (  # noqa: F401
     EvaluatorConfig,
     ExecutableEvaluatorConfig,
     MetricPatternConfig,
+    SolverEvaluatorConfig,
+    SolverMetricConfig,
 )
 from llm4ad.config.evolution import (  # noqa: F401
+    DiverseIslandGAConfig,
     DyCAConfig,
     EvolutionConfig,
     IslandGAConfig,

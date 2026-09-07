@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import re
 import time
 import uuid
@@ -21,12 +22,12 @@ from sqlmodel import Session, select
 from app import models
 from app.core.config import settings
 from app.schemas.memory import (
-    MemoryCardExtractionCommitRequest,
     MemoryCardExtractionRequest,
     MemoryCardExtractionResponse,
     MemoryCardPageResponse,
     MemoryCardReadonlyInfo,
     MemoryCardResponse,
+    MemoryCardStructuredContent,
     MemoryCardUpsertRequest,
     MemoryConfigUpdate,
     MemoryHealthResponse,
@@ -81,10 +82,10 @@ def _memory_stream_completed_event(
 ) -> dict[str, Any]:
     has_items = bool(items)
     if has_items:
-        message = "记忆提取完成"
+        message = "记忆处理完成"
         message_i18n = {
-            "zh": "记忆提取完成",
-            "en": "Memory extraction completed",
+            "zh": "记忆处理完成",
+            "en": "Memory processing completed",
         }
     else:
         message = "MindMemOS 已完成处理，但没有提取到符合 LLM4AD 记忆卡片结构的内容。"
@@ -180,7 +181,7 @@ def _mindmemos_gateway_token(
         "account_id": str(current_user.id),
         "project_id": _mindmemos_project_id(current_user),
         "api_key_uuid": f"llm4ad-{current_user.id}",
-        "memory_algorithm": "schema",
+        "memory_algorithm": "structured",
         "scopes": scopes,
         "iat": now,
         "exp": now + ttl_seconds,
@@ -199,10 +200,22 @@ def _mindmemos_gateway_token(
     return f"{signing_input}.{_b64url(signature)}"
 
 
-def _mindmemos_headers(current_user: models.User, *, scopes: list[str]) -> dict[str, str]:
+def _mindmemos_headers(
+    current_user: models.User,
+    *,
+    scopes: list[str],
+) -> dict[str, str]:
     if not settings.LLM4AD_MINDMEMOS_JWT_SECRET.strip():
         raise HTTPException(status_code=503, detail="MindMemOS JWT secret is not configured")
-    return {"Authorization": f"Bearer {_mindmemos_gateway_token(current_user, scopes=scopes)}"}
+    return {
+        "Authorization": (
+            "Bearer "
+            + _mindmemos_gateway_token(
+                current_user,
+                scopes=scopes,
+            )
+        )
+    }
 
 
 def _mindmemos_base_url() -> str:
@@ -288,7 +301,10 @@ def _mindmemos_post(
         with httpx.Client(timeout=_mindmemos_timeout_for_path(path)) as client:
             response = client.post(
                 f"{_mindmemos_base_url()}{path}",
-                headers=_mindmemos_headers(current_user, scopes=scopes),
+                headers=_mindmemos_headers(
+                    current_user,
+                    scopes=scopes,
+                ),
                 json=payload,
             )
             _raise_for_mindmemos_error(response)
@@ -337,7 +353,10 @@ async def _mindmemos_stream_post(
                 async with client.stream(
                     "POST",
                     f"{_mindmemos_base_url()}{path}",
-                    headers=_mindmemos_headers(current_user, scopes=scopes),
+                    headers=_mindmemos_headers(
+                        current_user,
+                        scopes=scopes,
+                    ),
                     json=payload,
                 ) as response:
                     _raise_for_mindmemos_error(response)
@@ -516,8 +535,17 @@ def _llm4ad_request_record_metadata(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _memory_item_metadata(item: dict[str, Any]) -> dict[str, Any]:
-    metadata = dict(_llm4ad_request_record_metadata(item))
     item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    metadata: dict[str, Any] = {}
+    source_documents = item_metadata.get("source_documents")
+    if isinstance(source_documents, list):
+        for source_document in source_documents:
+            if not isinstance(source_document, dict):
+                continue
+            source_metadata = source_document.get("metadata")
+            if isinstance(source_metadata, dict):
+                metadata.update(source_metadata)
+    metadata.update(_llm4ad_request_record_metadata(item))
     metadata.update(item_metadata)
     for field in ("entity_id", "entity_type", "entity_name", "property_name", "property_time"):
         if item.get(field) is not None and metadata.get(field) is None:
@@ -598,19 +626,107 @@ def _tag_values_from_memory_item(item: dict[str, Any]) -> list[str]:
     return []
 
 
+def _parse_memory_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        try:
+            parsed = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _llm4ad_wrapped_card_fields(value: Any) -> dict[str, Any]:
+    parsed = _parse_memory_mapping(value)
+    if parsed is None:
+        return {}
+    nested = parsed.get("dynamic_property")
+    if isinstance(nested, dict):
+        parsed = nested
+    recognized = {*LLM4AD_MEMORY_TYPES, LLM4AD_MEMORY_TAG_PROPERTY, "name", "title"}
+    return {str(key): field_value for key, field_value in parsed.items() if str(key) in recognized}
+
+
+def _render_memory_card_content(value: Any) -> str:
+    """Render structured legacy values faithfully without exposing Python repr syntax."""
+
+    parsed = _parse_memory_mapping(value)
+    if parsed is None:
+        return str(value)
+    description = _optional_str(parsed.get("description"))
+    raw_content = parsed.get("content")
+    details: list[str] = []
+    if isinstance(raw_content, list | tuple):
+        details = [text for item in raw_content if (text := _optional_str(item))]
+    elif (text := _optional_str(raw_content)) is not None:
+        details = [text]
+    if description and details:
+        return description + "\n\n" + "\n".join(f"- {item}" for item in details)
+    if description:
+        return description
+    if details:
+        return "\n".join(f"- {item}" for item in details)
+    return json.dumps(parsed, ensure_ascii=False, sort_keys=True, indent=2)
+
+
+def _wrapped_card_content(fields: dict[str, Any], property_name: str | None) -> tuple[str | None, str | None]:
+    candidates = [property_name, *sorted(LLM4AD_MEMORY_TYPES)]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate not in LLM4AD_MEMORY_TYPES:
+            continue
+        value = fields.get(candidate)
+        if value is None or isinstance(value, (dict, list)):
+            continue
+        content = str(value).strip()
+        if content:
+            return candidate, content
+    return None, None
+
+
 def _remote_memory_to_card(item: dict[str, Any]) -> MemoryCardResponse:
     memory_id = str(item.get("id") or item.get("memory_id") or "")
-    content = str(item.get("memory") or item.get("content") or "")
+    raw_content = item.get("memory") or item.get("content") or ""
     metadata = _memory_item_metadata(item)
-    title = _memory_card_title(item, metadata)
     property_name = _memory_property_name(item)
+    wrapped_fields = _llm4ad_wrapped_card_fields(raw_content)
+    wrapped_type, wrapped_content = _wrapped_card_content(wrapped_fields, property_name)
+    structured_content: MemoryCardStructuredContent | None = None
+    try:
+        if metadata.get("structured_content") is not None:
+            structured_content = MemoryCardStructuredContent.model_validate(metadata["structured_content"])
+    except ValueError:
+        structured_content = None
+    content = (
+        structured_content.as_text()
+        if structured_content is not None
+        else wrapped_content or _render_memory_card_content(raw_content)
+    )
+    if wrapped_fields.get("title") or wrapped_fields.get("name"):
+        metadata = {
+            **metadata,
+            "title": wrapped_fields.get("title") or wrapped_fields.get("name"),
+        }
+    title = _memory_card_title(item, metadata)
     raw_type = _normalize_llm4ad_memory_type(
-        metadata.get("memory_type"),
+        wrapped_type,
         property_name,
+        metadata.get("memory_type"),
         item.get("memory_type"),
         item.get("mem_type"),
     )
-    tags = _normalize_tag_values(metadata.get("tags"))
+    tags = _normalize_tag_values(wrapped_fields.get("tags") or metadata.get("tags"))
     status = str(item.get("status") or metadata.get("status") or "active")
     enabled = status == "active" and metadata.get("enabled", True) is not False
     score = _optional_float(item.get("score"))
@@ -621,6 +737,7 @@ def _remote_memory_to_card(item: dict[str, Any]) -> MemoryCardResponse:
         type=raw_type,
         title=title,
         content=content,
+        structured_content=structured_content,
         enabled=enabled,
         source="mindmemos",
         tags=[str(tag) for tag in tags],
@@ -667,13 +784,21 @@ def _optional_int(value: Any) -> int | None:
 
 
 def _memory_card_title(item: dict[str, Any], metadata: dict[str, Any]) -> str:
+    item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    if metadata.get("llm4ad_title_overridden") is True:
+        for value in (item_metadata.get("title"), metadata.get("title")):
+            title = _optional_str(value)
+            if title:
+                return title[:120]
     for value in (
-        metadata.get("title"),
+        item_metadata.get("entity_name"),
+        item.get("entity_name"),
+        metadata.get("entity_name"),
+        item_metadata.get("title"),
         item.get("title"),
+        metadata.get("title"),
         metadata.get("name"),
         item.get("name"),
-        metadata.get("entity_name"),
-        item.get("entity_name"),
     ):
         title = _optional_str(value)
         if title:
@@ -689,7 +814,7 @@ def _normalize_llm4ad_memory_type(*candidates: Any) -> str:
     return "general_insight"
 
 
-def _is_llm4ad_schema_item(item: dict[str, Any]) -> bool:
+def _is_llm4ad_card_entity_item(item: dict[str, Any]) -> bool:
     return _memory_entity_type(item) == LLM4AD_MEMORY_ENTITY_TYPE
 
 
@@ -717,7 +842,7 @@ def _remote_items_to_cards(
         if not isinstance(item, dict):
             continue
         card_property_name = _llm4ad_card_property_name(item)
-        if not _is_llm4ad_schema_item(item) and not card_property_name:
+        if not _is_llm4ad_card_entity_item(item) and not card_property_name:
             continue
         entity_key = _memory_entity_key(item) or _optional_str(item.get("id") or item.get("memory_id"))
         if not entity_key:
@@ -744,8 +869,12 @@ def _remote_items_to_cards(
             continue
         if name_by_entity.get(entity_key) and card.title == "未命名记忆":
             card = card.model_copy(update={"title": name_by_entity[entity_key][:120]})
-        if entity_key and tags_by_entity.get(entity_key):
+        if card.metadata.get("llm4ad_tags_overridden"):
+            pass
+        elif entity_key and tags_by_entity.get(entity_key):
             card = card.model_copy(update={"tags": tags_by_entity[entity_key]})
+        elif not card.tags and card.title != "未命名记忆":
+            card = card.model_copy(update={"tags": [card.title[:64]]})
         cards.append(card)
     return cards
 
@@ -840,9 +969,19 @@ def _remote_list_cards(
             if entity_key and tags
         }
         if tag_cards_by_entity:
+            entity_by_memory_id = {
+                str(item.get("id") or item.get("memory_id") or ""): _memory_entity_key(item)
+                for item in memories
+            }
             cards = [
-                card.model_copy(update={"tags": tag_cards_by_entity.get(_memory_entity_key(item), card.tags)})
-                for card, item in zip(cards, memories, strict=False)
+                card
+                if card.metadata.get("llm4ad_tags_overridden")
+                else card.model_copy(
+                    update={
+                        "tags": tag_cards_by_entity.get(entity_by_memory_id.get(card.id), card.tags)
+                    }
+                )
+                for card in cards
             ]
     remote_total = page_data.get("total")
     total = len(cards)
@@ -870,6 +1009,8 @@ def _remote_fetch_cards_by_ids(
     current_user: models.User,
     scope_data: dict[str, str],
     memory_ids: list[str],
+    *,
+    include_tags: bool = False,
 ) -> dict[str, MemoryCardResponse]:
     ids = _unique_ids(memory_ids)
     if not ids:
@@ -889,6 +1030,31 @@ def _remote_fetch_cards_by_ids(
     )
     memories = ((data.get("data") or {}).get("memories") or [])
     memory_items = [item for item in memories if isinstance(item, dict)]
+    entity_ids = _unique_ids(
+        [entity_id for item in memory_items if (entity_id := _memory_entity_key(item))]
+    )
+    has_tag_property = any(
+        _memory_property_name(item) == LLM4AD_MEMORY_TAG_PROPERTY for item in memory_items
+    )
+    if include_tags and entity_ids and not has_tag_property:
+        tag_data = _mindmemos_post(
+            current_user,
+            "/v1/memory/list",
+            {
+                **scope_data,
+                "filters": _remote_scoped_filters(scope_data, _remote_tag_filters(entity_ids)),
+                "page": 1,
+                "page_size": max(len(entity_ids), 1),
+                "include_total": False,
+                "include_inactive": True,
+            },
+            scopes=["memory:read"],
+        )
+        memory_items.extend(
+            item
+            for item in ((tag_data.get("data") or {}).get("memories") or [])
+            if isinstance(item, dict)
+        )
     return {
         card.id: card
         for card in _remote_items_to_cards(memory_items)
@@ -919,17 +1085,24 @@ def _editable_card_metadata(
     title: str,
     enabled: bool,
     tags: list[str],
+    structured_content: MemoryCardStructuredContent | None = None,
     project_id: uuid.UUID | None,
     task_id: uuid.UUID | None,
 ) -> dict[str, Any]:
     del scope_name, project_id, task_id
-    return {
+    metadata = {
         "source": "llm4ad",
         "memory_type": memory_type,
+        "structured_allowed_property_names": [memory_type, "name", "tags"],
         "title": title,
+        "llm4ad_title_overridden": True,
+        "llm4ad_tags_overridden": True,
         "enabled": enabled,
         "tags": tags,
     }
+    if structured_content is not None:
+        metadata["structured_content"] = structured_content.model_dump()
+    return metadata
 
 
 def _remote_update_card_status(
@@ -1011,7 +1184,7 @@ def _archive_generated_card(
             metadata_patch=metadata,
         )
     except Exception:
-        _remote_delete_card(current_user, card.id)
+        _remote_delete_card(current_user, card.id, scope_data=scope_data)
         raise
     return card.model_copy(
         update={
@@ -1039,7 +1212,7 @@ def _fallback_card_from_add_event(
         scope_name=scope_name,
         project_id=project_id,
         task_id=task_id,
-        enabled=False,
+        enabled=True,
     )
     memory_type = _normalize_llm4ad_memory_type(
         item.get("property_name"),
@@ -1055,7 +1228,7 @@ def _fallback_card_from_add_event(
         type=memory_type,
         title=str(metadata["title"]),
         content=extracted_content,
-        enabled=False,
+        enabled=True,
         source="mindmemos",
         tags=[],
         metadata={key: value for key, value in metadata.items() if value is not None},
@@ -1073,62 +1246,67 @@ def _remote_generated_cards_from_add_memories(
     task_id: uuid.UUID | None,
     extra_metadata: dict[str, Any] | None = None,
 ) -> list[MemoryCardResponse]:
-    cards: list[MemoryCardResponse] = []
-    seen_ids: set[str] = set()
+    operations_by_id: dict[str, str] = {}
+    ordered_ids: list[str] = []
     for item in memories:
         if not isinstance(item, dict):
             continue
         operation = str(item.get("operation") or "add")
-        if operation != "add":
+        if operation not in {"add", "update", "reinforcement"}:
             continue
-        related_ids = _unique_ids([str(memory_id) for memory_id in item.get("related_memory_ids") or []])
-        if related_ids:
-            related_cards = _remote_fetch_cards_by_ids(
-                current_user,
-                scope_data,
-                related_ids,
-            )
-            for related_id in related_ids:
-                related_card = related_cards.get(related_id)
-                if related_card is None or related_id in seen_ids:
-                    continue
-                seen_ids.add(related_id)
-                cards.append(
-                    _archive_generated_card(
-                        current_user,
-                        scope_data,
-                        related_card,
-                        generation_id=generation_id,
-                        scope_name=scope_name,
-                        project_id=project_id,
-                        task_id=task_id,
-                        extra_metadata=extra_metadata,
-                    )
-                )
+        memory_id = _optional_str(item.get("memory_id") or item.get("id"))
+        related_ids = _unique_ids([str(value) for value in item.get("related_memory_ids") or []])
+        affected_ids = related_ids if operation == "add" and related_ids else [memory_id]
+        for affected_id in affected_ids:
+            if not affected_id:
+                continue
+            if affected_id not in operations_by_id:
+                ordered_ids.append(affected_id)
+            operations_by_id[affected_id] = operation
+
+    cards_by_id = (
+        _remote_fetch_cards_by_ids(current_user, scope_data, ordered_ids, include_tags=True)
+        if ordered_ids
+        else {}
+    )
+    cards: list[MemoryCardResponse] = []
+    for memory_id in ordered_ids:
+        card = cards_by_id.get(memory_id)
+        if card is not None:
+            cards.append(card.model_copy(update={"operation": operations_by_id[memory_id]}))
             continue
-        fallback_card = _fallback_card_from_add_event(
-            item,
-            generation_id=generation_id,
-            scope_name=scope_name,
-            project_id=project_id,
-            task_id=task_id,
-            extra_metadata=extra_metadata,
+        if cards_by_id:
+            # Structured Add emits auxiliary name/tag properties alongside the
+            # substantive card property. If any requested card resolved from
+            # storage, unresolved IDs are auxiliary rather than fallback cards.
+            continue
+        event = next(
+            (
+                item
+                for item in memories
+                if isinstance(item, dict)
+                and _optional_str(item.get("memory_id") or item.get("id")) == memory_id
+            ),
+            None,
         )
-        if fallback_card is None or fallback_card.id in seen_ids:
-            continue
-        seen_ids.add(fallback_card.id)
-        try:
-            _remote_update_card_status(
-                current_user,
-                fallback_card.id,
-                scope_data=scope_data,
-                status="archived",
-                metadata_patch=fallback_card.metadata,
+        fallback = (
+            _fallback_card_from_add_event(
+                event,
+                generation_id=generation_id,
+                scope_name=scope_name,
+                project_id=project_id,
+                task_id=task_id,
+                extra_metadata=extra_metadata,
             )
-        except Exception:
-            _remote_delete_card(current_user, fallback_card.id)
-            raise
-        cards.append(fallback_card)
+            if event is not None
+            else None
+        )
+        if fallback is not None:
+            cards.append(
+                fallback.model_copy(
+                    update={"enabled": True, "operation": operations_by_id[memory_id]}
+                )
+            )
     return cards
 
 
@@ -1185,7 +1363,7 @@ def _memory_add_preview_payload(
         scope_name=scope_name,
         project_id=project_id,
         task_id=task_id,
-        enabled=False,
+        enabled=True,
     )
     if prompt_language:
         metadata["llm4ad_prompt_language"] = prompt_language
@@ -1201,18 +1379,30 @@ def _memory_add_preview_payload(
     return payload
 
 
-def _task_memory_promotion_message(card: MemoryCardResponse) -> dict[str, str]:
-    """Represent one confirmed generated task card as a distinct add message."""
-    tags = ", ".join(card.tags) or "(none)"
+def _task_memory_promotion_item(card: MemoryCardResponse, *, source_task_id: uuid.UUID) -> dict[str, Any]:
+    """Map an existing card to MindMemOS' generic pre-structured import contract."""
+
+    if card.structured_content is not None:
+        structured_value = card.structured_content.model_dump()
+        description = card.structured_content.description
+    else:
+        description = card.title.strip() or card.content.strip().splitlines()[0][:120]
+        structured_value = {
+            "description": description,
+            "content": [card.content.strip()],
+        }
+    properties: list[dict[str, Any]] = [
+        {"property_name": card.type, "value": structured_value}
+    ]
+    if card.tags:
+        properties.append({"property_name": LLM4AD_MEMORY_TAG_PROPERTY, "value": ", ".join(card.tags)})
     return {
-        "role": "assistant",
-        "content": (
-            f"Selected task memory card (ID: {card.id})\n"
-            f"Title: {card.title}\n"
-            f"Type: {card.type}\n"
-            f"Tags: {tags}\n"
-            f"Content:\n{card.content}"
-        ),
+        "source_id": card.id,
+        "entity_name": card.title.strip() or description,
+        "entity_type": LLM4AD_MEMORY_ENTITY_TYPE,
+        "description": description,
+        "properties": properties,
+        "metadata": {"source_scope": "task", "source_task_id": str(source_task_id)},
     }
 
 
@@ -1226,13 +1416,13 @@ def _task_memory_promotion_preview_payload(
     project_id: uuid.UUID,
     prompt_language: str | None,
 ) -> dict[str, Any]:
-    """Build a schema-compatible add request without flattening source cards."""
+    """Build a Structured add request without flattening source cards."""
     metadata = _generated_card_metadata(
         generation_id=preview_id,
         scope_name="project",
         project_id=project_id,
         task_id=None,
-        enabled=False,
+        enabled=True,
     )
     metadata.update(
         {
@@ -1243,20 +1433,18 @@ def _task_memory_promotion_preview_payload(
     )
     if prompt_language:
         metadata["llm4ad_prompt_language"] = prompt_language
+    structured_items = [
+        _task_memory_promotion_item(card, source_task_id=source_task_id) for card in source_cards
+    ]
+    fingerprint = hashlib.sha256(
+        json.dumps(structured_items, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:24]
     payload: dict[str, Any] = {
         **scope_data,
         "mode": "sync",
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "User explicitly confirms and requests promotion of the following selected "
-                    "task-memory cards into reusable project memory."
-                ),
-            },
-            *[_task_memory_promotion_message(card) for card in source_cards],
-        ],
+        "structured_items": structured_items,
         "metadata": metadata,
+        "idempotency_key": f"task-memory-promotion:{source_task_id}:{fingerprint}",
     }
     if prompt_language:
         payload["prompt_language"] = prompt_language
@@ -1273,12 +1461,14 @@ def _remote_upsert_card(
     task_id: uuid.UUID | None = None,
 ) -> MemoryCardResponse:
     if request.id:
+        content = request.structured_content.as_text() if request.structured_content else request.content
         metadata_patch = _editable_card_metadata(
             scope_name=scope_name,
             memory_type=request.type,
             title=request.title,
             enabled=request.enabled,
             tags=request.tags,
+            structured_content=request.structured_content,
             project_id=project_id,
             task_id=task_id,
         )
@@ -1288,7 +1478,7 @@ def _remote_upsert_card(
             {
                 **scope_data,
                 "memory_id": request.id,
-                "content": request.content,
+                "content": content,
                 "metadata_patch": metadata_patch,
                 "status": "active" if request.enabled else "archived",
             },
@@ -1298,7 +1488,8 @@ def _remote_upsert_card(
             id=request.id,
             type=request.type,
             title=request.title or "未命名记忆",
-            content=request.content,
+            content=content,
+            structured_content=request.structured_content,
             enabled=request.enabled,
             source="mindmemos",
             tags=request.tags,
@@ -1315,6 +1506,7 @@ def _remote_upsert_card(
         title=request.title,
         enabled=request.enabled,
         tags=request.tags,
+        structured_content=request.structured_content,
         project_id=project_id,
         task_id=task_id,
     )
@@ -1324,7 +1516,14 @@ def _remote_upsert_card(
         {
             **scope_data,
             "mode": "sync",
-            "messages": [{"role": "user", "content": request.content}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": request.structured_content.as_text()
+                    if request.structured_content
+                    else request.content,
+                }
+            ],
             "metadata": {key: value for key, value in metadata.items() if value is not None},
             "score": request.score,
             "task_id": str(task_id) if task_id else None,
@@ -1332,6 +1531,17 @@ def _remote_upsert_card(
         scopes=["memory:write"],
     )
     memories = ((data.get("data") or {}).get("memories") or [])
+    affected = _remote_generated_cards_from_add_memories(
+        current_user,
+        scope_data,
+        scope_name,
+        memories,
+        generation_id=f"llm4ad-operation-{uuid.uuid4().hex}",
+        project_id=project_id,
+        task_id=task_id,
+    )
+    if affected:
+        return affected[0]
     memory_id = ""
     if memories and isinstance(memories[0], dict):
         memory_id = str(memories[0].get("memory_id") or memories[0].get("id") or "")
@@ -1339,7 +1549,8 @@ def _remote_upsert_card(
         id=memory_id or uuid.uuid4().hex[:8],
         type=request.type,
         title=request.title or "未命名记忆",
-        content=request.content,
+        content=request.structured_content.as_text() if request.structured_content else request.content,
+        structured_content=request.structured_content,
         enabled=request.enabled,
         source="mindmemos",
         tags=request.tags,
@@ -1350,11 +1561,17 @@ def _remote_upsert_card(
     )
 
 
-def _remote_delete_card(current_user: models.User, memory_id: str) -> None:
+def _remote_delete_card(
+    current_user: models.User,
+    memory_id: str,
+    *,
+    scope_data: dict[str, str],
+) -> None:
+    del scope_data
     _mindmemos_post(
         current_user,
         "/v1/memory/delete",
-        {"memory_id": memory_id},
+        {"memory_id": memory_id, "hard": True},
         scopes=["memory:write"],
     )
 
@@ -1456,7 +1673,11 @@ def get_memory_provider_binding(
         embedding_model=config.mindmemos_embedding_model,
         embedding_dim=config.mindmemos_embedding_dim,
         embedding_locked=bool(config.mindmemos_embedding_model and config.mindmemos_embedding_dim),
-        message="MindMemOS provider binding is configured." if config.mindmemos_binding_id else "Provider binding is not configured.",
+        message=(
+            "MindMemOS provider binding is configured."
+            if config.mindmemos_binding_id
+            else "Provider binding is not configured."
+        ),
     )
 
 
@@ -1554,7 +1775,11 @@ def _ensure_mindmemos_provider_binding(db: Session, current_user: models.User) -
     if config is None or not config.mindmemos_binding_id:
         raise HTTPException(status_code=400, detail="请先在记忆设置中绑定 Chat 与 Embedding 模型")
 
-    if not (config.mindmemos_chat_provider_id and config.mindmemos_chat_model and config.mindmemos_embedding_provider_id):
+    if not (
+        config.mindmemos_chat_provider_id
+        and config.mindmemos_chat_model
+        and config.mindmemos_embedding_provider_id
+    ):
         project_id = _mindmemos_project_id(current_user)
         data = _mindmemos_get(
             current_user,
@@ -1771,14 +1996,14 @@ def get_mindmemos_provider_binding_error(db: Session, current_user: models.User)
     return None
 
 
-def _mindmemos_provider_timeout(timeout: float | int | None) -> int:
-    """Bound dynamic provider calls so memory extraction errors surface quickly."""
+def _mindmemos_provider_timeout(timeout: float | int | None) -> float:
+    """Forward the provider's configured request timeout to MindMemOS."""
 
     try:
-        value = int(timeout or 30)
+        value = float(timeout) if timeout is not None else 60.0
     except (TypeError, ValueError):
-        value = 30
-    return max(1, min(value, 30))
+        return 60.0
+    return value if math.isfinite(value) and value > 0 else 60.0
 
 
 def get_project_memory_config(
@@ -1936,7 +2161,7 @@ def extract_memory_cards(
     project_id: uuid.UUID | None = None,
     task_id: uuid.UUID | None = None,
 ) -> MemoryCardExtractionResponse:
-    """Extract memory cards from raw text and archive them until the user enables them."""
+    """Extract and persist memory cards from raw text."""
     _require_mindmemos_memory_enabled()
     _ensure_mindmemos_provider_binding(db, current_user)
     content = request.content.strip()
@@ -1949,7 +2174,7 @@ def extract_memory_cards(
         project_id,
         task_id,
     )
-    preview_id = f"llm4ad-preview-{uuid.uuid4().hex}"
+    preview_id = f"llm4ad-operation-{uuid.uuid4().hex}"
     items = _remote_extract_preview_cards(
         current_user,
         scope_data,
@@ -1986,7 +2211,7 @@ async def stream_extract_memory_cards(
         project_id,
         task_id,
     )
-    preview_id = f"llm4ad-preview-{uuid.uuid4().hex}"
+    preview_id = f"llm4ad-operation-{uuid.uuid4().hex}"
     payload = _memory_add_preview_payload(
         scope_data,
         scope,
@@ -2013,8 +2238,8 @@ async def stream_extract_memory_cards(
         yield _memory_stream_progress_event(
             "finalizing",
             percent=96,
-            zh="正在整理记忆预览",
-            en="Preparing memory preview",
+            zh="正在整理记忆处理结果",
+            en="Preparing memory processing results",
         )
         items = _remote_generated_cards_from_add_memories(
             current_user,
@@ -2035,7 +2260,7 @@ async def stream_promote_task_memory_cards(
     current_user: models.User,
     request: TaskMemoryPromotionRequest,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Generate project-memory previews from user-confirmed task-memory cards."""
+    """Promote user-confirmed task-memory cards into project memory."""
     _require_mindmemos_memory_enabled()
     _ensure_mindmemos_provider_binding(db, current_user)
     source_ids = _unique_ids(request.memory_ids)
@@ -2065,7 +2290,7 @@ async def stream_promote_task_memory_cards(
             raise HTTPException(status_code=404, detail=f"记忆不存在或不属于当前任务范围: {memory_id}")
         source_cards.append(card)
 
-    preview_id = f"llm4ad-preview-{uuid.uuid4().hex}"
+    preview_id = f"llm4ad-operation-{uuid.uuid4().hex}"
     payload = _task_memory_promotion_preview_payload(
         target_scope_data,
         preview_id=preview_id,
@@ -2099,8 +2324,8 @@ async def stream_promote_task_memory_cards(
         yield _memory_stream_progress_event(
             "finalizing",
             percent=96,
-            zh="正在整理项目记忆预览",
-            en="Preparing project-memory preview",
+            zh="正在整理项目记忆处理结果",
+            en="Preparing project-memory processing results",
         )
         items = _remote_generated_cards_from_add_memories(
             current_user,
@@ -2114,86 +2339,6 @@ async def stream_promote_task_memory_cards(
         )
         yield _memory_stream_completed_event(preview_id=preview_id, items=items)
         return
-
-
-def commit_memory_card_extraction(
-    db: Session,
-    *,
-    current_user: models.User,
-    scope: MemoryScope,
-    preview_id: str,
-    request: MemoryCardExtractionCommitRequest,
-    project_id: uuid.UUID | None = None,
-    task_id: uuid.UUID | None = None,
-) -> MemoryCardExtractionResponse:
-    """Activate selected generated cards and leave unselected cards archived."""
-    _require_mindmemos_memory_enabled()
-    _ensure_mindmemos_provider_binding(db, current_user)
-    scope_data, resolved_project_id, resolved_task_id = _resolve_card_scope(
-        db,
-        current_user,
-        scope,
-        project_id,
-        task_id,
-    )
-    selected_ids = _unique_ids(request.selected_ids)
-    cards_by_id = _remote_fetch_cards_by_ids(
-        current_user,
-        scope_data,
-        selected_ids,
-    )
-
-    activated: list[MemoryCardResponse] = []
-    for memory_id in selected_ids:
-        card = cards_by_id.get(memory_id)
-        if card is None:
-            raise HTTPException(status_code=404, detail=f"记忆不存在或不属于当前范围: {memory_id}")
-        metadata = {
-            **card.metadata,
-            **_generated_card_metadata(
-                generation_id=str(card.metadata.get("llm4ad_generation_id") or preview_id),
-                scope_name=scope,
-                project_id=resolved_project_id,
-                task_id=resolved_task_id,
-                enabled=True,
-            ),
-            "memory_type": card.type,
-            "title": card.title,
-            "tags": card.tags,
-        }
-        _remote_update_card_status(
-            current_user,
-            memory_id,
-            scope_data=scope_data,
-            status="active",
-            metadata_patch=metadata,
-        )
-        activated.append(card.model_copy(update={"enabled": True, "metadata": metadata}))
-
-    return MemoryCardExtractionResponse(preview_id=preview_id, items=activated)
-
-
-def discard_memory_card_extraction(
-    db: Session,
-    *,
-    current_user: models.User,
-    scope: MemoryScope,
-    preview_id: str,
-    memory_ids: list[str],
-    project_id: uuid.UUID | None = None,
-    task_id: uuid.UUID | None = None,
-) -> None:
-    """Hard-delete generated cards when the user chooses not to keep them."""
-    del preview_id
-    _require_mindmemos_memory_enabled()
-    scope_data, _, _ = _resolve_card_scope(db, current_user, scope, project_id, task_id)
-    ids = _unique_ids(memory_ids)
-    cards_by_id = _remote_fetch_cards_by_ids(current_user, scope_data, ids)
-    missing_ids = [memory_id for memory_id in ids if memory_id not in cards_by_id]
-    if missing_ids:
-        raise HTTPException(status_code=404, detail=f"记忆不存在或不属于当前范围: {missing_ids[0]}")
-    for memory_id in ids:
-        _remote_delete_card(current_user, memory_id)
 
 
 def upsert_memory_card(
@@ -2277,7 +2422,7 @@ def delete_memory_card(
     scope_data, _, _ = _resolve_card_scope(db, current_user, scope, project_id, task_id)
     if memory_id not in _remote_fetch_cards_by_ids(current_user, scope_data, [memory_id]):
         raise HTTPException(status_code=404, detail="记忆不存在或不属于当前范围")
-    _remote_delete_card(current_user, memory_id)
+    _remote_delete_card(current_user, memory_id, scope_data=scope_data)
 
 
 def list_task_memory_cards(

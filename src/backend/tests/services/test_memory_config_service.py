@@ -44,7 +44,8 @@ def _fake_mindmemos(monkeypatch: pytest.MonkeyPatch):
                 return False
         return True
 
-    def fake_post(_current_user, path: str, payload: dict, *, _scopes: list[str]):
+    def fake_post(_current_user, path: str, payload: dict, *, scopes: list[str]):
+        del scopes
         calls.append((path, payload))
         if path == "/v1/memory/list":
             filters = payload.get("filters") or {}
@@ -98,7 +99,7 @@ def _fake_mindmemos(monkeypatch: pytest.MonkeyPatch):
             record["metadata"].update(payload.get("metadata_patch") or {})
             return {"code": "ok", "data": None}
         if path == "/v1/memory/delete":
-            assert payload == {"memory_id": payload["memory_id"]}
+            assert payload == {"memory_id": payload["memory_id"], "hard": True}
             store.pop(payload["memory_id"], None)
             return {"code": "ok", "data": None}
         raise AssertionError(f"unexpected path: {path}")
@@ -433,7 +434,7 @@ def test_project_memory_card_status_and_delete_are_project_scoped(
     )
 
     delete_payload = [payload for path, payload in calls if path == "/v1/memory/delete"][-1]
-    assert delete_payload == {"memory_id": card.id}
+    assert delete_payload == {"memory_id": card.id, "hard": True}
     assert card.id not in store
 
 

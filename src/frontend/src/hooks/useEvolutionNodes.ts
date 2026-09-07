@@ -8,6 +8,10 @@ import type {
 } from "@/components/Evolution/TaskDetail/island-ga-mock-data"
 import { EMPTY_DATA } from "@/components/Evolution/TaskDetail/island-ga-mock-data"
 import { buildDemoEvolutionData, isDemoTaskId } from "@/data/demoFixtures"
+import {
+  collectMigrationAliases,
+  resolveMigrationParentIds,
+} from "@/hooks/evolutionMigration"
 import { useDemoState } from "@/hooks/useDemoMode"
 import { taskKeys } from "@/lib/task-queries"
 
@@ -48,7 +52,10 @@ function meanScore(scores?: Record<string, number>): number {
   return vals.reduce((a, b) => a + b, 0) / vals.length
 }
 
-function toRawGANode(entry: RawGenerated): GANode {
+function toRawGANode(
+  entry: RawGenerated,
+  migrationAliases: ReadonlyMap<string, string> = new Map(),
+): GANode {
   const d = entry.data
   const raw = d.evaluation?.score ?? meanScore(d.scores)
   const islandId =
@@ -62,7 +69,10 @@ function toRawGANode(entry: RawGenerated): GANode {
   // right-panel parent/children lists and counts, the elite classifier in
   // node-classification.ts (which relies on parentIds.length === 1), and the
   // edge renderer — see a clean unique list.
-  const parentIds = d.parent_ids ? [...new Set(d.parent_ids)] : []
+  const parentIds = resolveMigrationParentIds(
+    d.parent_ids ?? [],
+    migrationAliases,
+  )
   return {
     id: d.id,
     generation: d.generation ?? parseGeneration(entry.file_name),
@@ -133,6 +143,7 @@ export function useEvolutionNodes(
   data: IslandGAData
   isLoading: boolean
   feedGenerated: (entry: Record<string, unknown>) => void
+  feedMigration: (entry: Record<string, unknown>) => void
 } {
   const isDemo = isDemoTaskId(taskId)
   const demoState = useDemoState()
@@ -143,13 +154,13 @@ export function useEvolutionNodes(
   // tasks stream nodes via SSE.
   const shouldRestFetch = isTerminal
 
-  // ── REST path: fetch ALL generated entries (separate query key) ──
+  // ── REST path: fetch graph nodes and migration lineage ──
   const generatedQuery = useQuery({
-    queryKey: [...taskKeys.logs(taskId!), "generated-all"],
+    queryKey: [...taskKeys.logs(taskId!), "graph-events-all"],
     queryFn: () =>
       Llm4AdTasksService.getTaskLogs({
         taskId: taskId!,
-        logType: "generated",
+        logType: "generated,migration",
         limit: 0,
       }),
     enabled: enabled && !!taskId && !isDemo && shouldRestFetch,
@@ -158,6 +169,13 @@ export function useEvolutionNodes(
   const restData = useMemo<IslandGAData>(() => {
     if (!generatedQuery.data?.entries) return EMPTY_DATA
     const entries = generatedQuery.data.entries as Record<string, unknown>[]
+    const aliases = new Map<string, string>()
+    for (const entry of entries) {
+      if (entry.type !== "migration") continue
+      for (const [cloneId, sourceId] of collectMigrationAliases(entry)) {
+        aliases.set(cloneId, sourceId)
+      }
+    }
     const generated = entries.filter(
       (e) =>
         e.type === "generated" && !!(e.data as Record<string, unknown>)?.id,
@@ -167,7 +185,7 @@ export function useEvolutionNodes(
     const scoredMap = new Map<string, GANode>()
     const unscoredMap = new Map<string, GANode>()
     for (const entry of generated) {
-      const node = toRawGANode(entry)
+      const node = toRawGANode(entry, aliases)
       if (hasValidScore(entry.data as Record<string, unknown>)) {
         scoredMap.set(node.id, node)
         unscoredMap.delete(node.id)
@@ -183,12 +201,14 @@ export function useEvolutionNodes(
   // ── Active task: fed by useTaskLogs via feedGenerated ──
   const [streamData, setStreamData] = useState<IslandGAData>(EMPTY_DATA)
   const nodesMap = useRef<Map<string, GANode>>(new Map())
+  const migrationAliases = useRef<Map<string, string>>(new Map())
   const rafId = useRef<number>(0)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on taskId or active transition
   useEffect(() => {
     setStreamData(EMPTY_DATA)
     nodesMap.current = new Map()
+    migrationAliases.current = new Map()
     cancelAnimationFrame(rafId.current)
   }, [taskId, isActive])
 
@@ -207,7 +227,10 @@ export function useEvolutionNodes(
     (entry: Record<string, unknown>) => {
       const data = entry.data as Record<string, unknown> | undefined
       if (!data?.id) return
-      const node = toRawGANode(entry as unknown as RawGenerated)
+      const node = toRawGANode(
+        entry as unknown as RawGenerated,
+        migrationAliases.current,
+      )
       if (!hasValidScore(data)) {
         node.unscored = true
         node.rawScore = 0
@@ -219,7 +242,48 @@ export function useEvolutionNodes(
     [flush],
   )
 
-  if (!taskId) return { data: EMPTY_DATA, isLoading: false, feedGenerated }
+  const feedMigration = useCallback(
+    (entry: Record<string, unknown>) => {
+      const incoming = collectMigrationAliases(entry)
+      if (incoming.size === 0) return
+
+      for (const [cloneId, sourceId] of incoming) {
+        migrationAliases.current.set(cloneId, sourceId)
+      }
+
+      // Normally migration arrives before its descendants. Re-resolve existing
+      // nodes as well so an SSE reconnect or reordered history remains correct.
+      let changed = false
+      for (const [nodeId, node] of nodesMap.current) {
+        const parentIds = resolveMigrationParentIds(
+          node.parentIds,
+          migrationAliases.current,
+        )
+        if (
+          parentIds.length !== node.parentIds.length ||
+          parentIds.some(
+            (parentId, index) => parentId !== node.parentIds[index],
+          )
+        ) {
+          nodesMap.current.set(nodeId, { ...node, parentIds })
+          changed = true
+        }
+      }
+      if (changed) {
+        cancelAnimationFrame(rafId.current)
+        rafId.current = requestAnimationFrame(flush)
+      }
+    },
+    [flush],
+  )
+
+  if (!taskId)
+    return {
+      data: EMPTY_DATA,
+      isLoading: false,
+      feedGenerated,
+      feedMigration,
+    }
   if (isDemo) {
     // Demo phases gate visible generations: running streams nodes one
     // generation at a time (via setDemoGeneration), completed shows the full
@@ -234,6 +298,7 @@ export function useEvolutionNodes(
       data: visibleGen >= 0 ? buildDemoEvolutionData(visibleGen) : EMPTY_DATA,
       isLoading: false,
       feedGenerated,
+      feedMigration,
     }
   }
   if (shouldRestFetch)
@@ -241,6 +306,12 @@ export function useEvolutionNodes(
       data: restData,
       isLoading: generatedQuery.isLoading,
       feedGenerated,
+      feedMigration,
     }
-  return { data: streamData, isLoading: false, feedGenerated }
+  return {
+    data: streamData,
+    isLoading: false,
+    feedGenerated,
+    feedMigration,
+  }
 }

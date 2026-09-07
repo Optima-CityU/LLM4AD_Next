@@ -1,0 +1,29 @@
+project_name: "alphaevolve_circle_rectangle_packing_n21"
+path_resolution: "cwd"
+description_en: "Evolve a valid packing of 21 circles in a perimeter-four rectangle and maximize the sum of radii."
+description_zh: "进化周长为 4 的矩形内 21 个互不相交圆的布局，并最大化半径之和。"
+random_seed: 42
+background: |
+  Construct exactly 21 disjoint circles represented by rows [x, y, radius].
+  Their minimum axis-aligned circumscribing rectangle must have perimeter at most 4.
+  Maximize the sum of radii while preserving every constraint.
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder:
+  type: "custom"
+  provider: "default"
+  timeout: 600.0
+  max_retries: 2
+  max_gen_tokens: 4096
+  context_max_tokens: 8192
+  default_extension: "py"
+  prompt_template: |
+    Improve only the EVOLVE_START/EVOLVE_END block in solve.py. Keep the JSON contract unchanged.
+    construct_packing() must return a finite array with shape (21, 3); every row is
+    [x, y, radius]. Radii must be non-negative, circles must be disjoint, and the
+    minimum axis-aligned circumscribing rectangle must have perimeter at most 4.
+    Maximize the sum of the third column.
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "circle_rectangle/evaluator.py:CircleRectanglePackingEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: ["sum_radii", "validity"]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "circle_rectangle/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

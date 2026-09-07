@@ -201,6 +201,11 @@ Return the code in a fenced code block with file path annotation:
 
         try:
             parent_code = context.get("parent_code")
+            if parent_code is None:
+                existing_evolve_files = self._collect_evolve_file_map(working_path)
+                if existing_evolve_files:
+                    parent_code = existing_evolve_files
+                    context = {**context, "parent_code": parent_code}
 
             mode = "mutation" if parent_code is not None else "initial"
             logger.debug(
@@ -226,6 +231,38 @@ Return the code in a fenced code block with file path annotation:
                 error_message=f"Generation failed: {str(e)}",
                 timing=ExecutionTiming(wall_time_ms=(time.time() - start_time) * 1000),
             )
+
+    def _collect_evolve_file_map(self, working_path: Path) -> dict[str, str]:
+        """Collect existing source files that contain EVOLVE blocks.
+
+        Args:
+            working_path: Candidate worktree root.
+
+        Returns:
+            Source contents keyed by paths relative to the worktree root.
+        """
+        source_extensions = {
+            ".py", ".cpp", ".cc", ".c", ".h", ".hpp",
+            ".java", ".js", ".ts", ".go", ".rs", ".rb",
+            ".sh", ".php",
+        }
+        skip_dirs = {
+            "__pycache__", ".git", "node_modules", ".venv", "venv",
+            "build", "dist", ".idea", ".vscode",
+        }
+        files: dict[str, str] = {}
+        for file_path in sorted(working_path.rglob("*")):
+            if not file_path.is_file() or file_path.suffix not in source_extensions:
+                continue
+            if any(part in skip_dirs for part in file_path.parts):
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if self._find_evolve_blocks(content):
+                files[str(file_path.relative_to(working_path))] = content
+        return files
 
     async def _generate_initial(
         self, prompt: str, context: dict[str, Any], working_path: Path, **kwargs
@@ -256,7 +293,7 @@ Return the code in a fenced code block with file path annotation:
         # Otherwise build from the template.
         if "{insight}" in self.prompt_template or "{project_context}" in self.prompt_template:
             full_prompt = self.prompt_template.format(
-                insight=prompt,
+                insight=context.get("insight", prompt),
                 language=language,
                 task_description=task_description,
                 constraints=constraints,
@@ -407,6 +444,26 @@ Return the code in a fenced code block with file path annotation:
                     file_path=file_path,
                     language=language,
                 )
+                immutable_context = self._mask_evolve_blocks(content)
+                serialization_contract = ""
+                if Path(file_path).suffix == ".py" and "json.dumps" in immutable_context:
+                    serialization_contract = (
+                        "The fixed Python adapter serializes returned values with json.dumps. "
+                        "Return JSON-native Python values; convert NumPy arrays or scalars to "
+                        "lists, floats, or integers before returning them.\n"
+                    )
+                mutation_prompt = (
+                    "Code outside EVOLVE markers is immutable. The replacement must remain "
+                    "compatible with imports, callers, return-value unpacking, output adapters, "
+                    "and other interfaces shown in the fixed file context below. If a natural-"
+                    "language instruction conflicts with this executable interface, preserve the "
+                    "executable interface. Return only the replacement block, never the complete "
+                    "file or EVOLVE markers.\n"
+                    f"{serialization_contract}\n"
+                    f"Fixed file context ({file_path}):\n"
+                    f"```{language}\n{immutable_context}\n```\n\n"
+                    f"{mutation_prompt}"
+                )
 
                 # Merge generation parameters
                 gen_kwargs = {
@@ -429,6 +486,16 @@ Return the code in a fenced code block with file path annotation:
                 if new_block is None:
                     # Fallback to single unnamed block extraction
                     new_block = self._extract_code(result.text)
+
+                normalization_error = None
+                if new_block:
+                    new_block, normalization_error = self._normalize_mutation_block(
+                        new_block,
+                        block_name,
+                    )
+                if normalization_error:
+                    errors.append(f"[{file_path}] Block '{block_name}': {normalization_error}")
+                    continue
 
                 block_changed = new_block and new_block.strip() != original_block.strip()
                 logger.debug(
@@ -515,6 +582,51 @@ Return the code in a fenced code block with file path annotation:
             },
             timing=llm_timing,
         )
+
+    def _normalize_mutation_block(
+        self,
+        code: str,
+        block_name: str,
+    ) -> tuple[str | None, str | None]:
+        """Normalize a mutation response to one EVOLVE block body.
+
+        Models occasionally ignore the block-only output contract and return a
+        complete source file. Inserting that response verbatim would nest
+        EVOLVE markers and duplicate immutable entrypoints.
+
+        Args:
+            code: Extracted code returned by the provider.
+            block_name: Name of the EVOLVE block currently being replaced.
+
+        Returns:
+            A tuple containing the normalized block and an optional error.
+        """
+        response_blocks = self._find_evolve_blocks(code)
+        if not response_blocks:
+            return code.strip(), None
+
+        if len(response_blocks) == 1:
+            replacement = response_blocks[0][3].strip()
+        else:
+            named_matches = [
+                block_content.strip()
+                for _pattern, _style, start_match, block_content in response_blocks
+                if start_match.strip() == block_name
+            ]
+            if len(named_matches) != 1:
+                return None, "full-file response contains ambiguous EVOLVE blocks"
+            replacement = named_matches[0]
+
+        if not replacement:
+            return None, "full-file response contains an empty EVOLVE block"
+        if self._find_evolve_blocks(replacement):
+            return None, "replacement contains nested EVOLVE blocks"
+
+        logger.warning(
+            "[Coder-Mutation] Unwrapped full-file response for EVOLVE block '{}'",
+            block_name,
+        )
+        return replacement, None
 
     def _get_parent_code_map(self, parent_code: Any) -> dict[str, str]:
         """Convert parent_code from context into a map of file paths to content.

@@ -188,6 +188,10 @@ def _resolve_providers(
             code_config.get("model") or "",
         )
     else:
+        # The runtime embedding source of truth is the user's default-model
+        # binding. Remove stale task-form remnants (including legacy empty
+        # strings) so they cannot fail AppConfig validation in the container.
+        input_args.pop("embedding", None)
         logger.info("Task embedding config not resolved; evaluation trace embeddings are disabled")
 
     # 启用凭据代理：把下发到容器的真实凭据替换为一次性代理 token + 代理 base_url。
@@ -571,9 +575,14 @@ def _force_stop_celery_task(db: Session, task: models.Task, *, reason: str | Non
         AbortableAsyncResult(task.celery_task_id, app=celery_app).abort()
 
     try:
-        from app.services.container_service import kill_task_container
+        from app.services.container_service import (
+            container_name as task_container_name,
+        )
+        from app.services.container_service import (
+            kill_container_by_name,
+        )
 
-        kill_task_container(str(task.id))
+        kill_container_by_name(task_container_name(str(task.id)))
     except Exception as e:
         logger.warning(f"强制停止任务容器失败: {e}")
 

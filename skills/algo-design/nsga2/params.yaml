@@ -1,0 +1,19 @@
+# NSGA-II (Non-dominated Sorting Genetic Algorithm II) - Recommended Parameters
+# Paper: Deb et al., IEEE TEC 2002
+
+evolution:
+  type: "nsga2"
+  max_generations: 50          # increase for harder problems
+  population_size: 80          # population size (must be even for NSGA-II)
+  selection_num: 5             # parents for crossover
+  objective_metrics:           # list of metric names to optimize
+    - "cost"
+    - "time"
+  max_sample_nums: 100         # LLM call budget cap
+  use_e2_operator: true        # enable E2 crossover
+  use_m1_operator: true        # enable M1 merge
+  use_m2_operator: true        # enable M2 refinement
+  seed_path: null              # optional seed path
+
+planner:
+  type: "nsga2_evolution"

@@ -21,6 +21,8 @@ from llm4ad.orchestrator.base import (
 from llm4ad.orchestrator.dyca import DyCAConfig, DyCAOrchestrator
 from llm4ad.orchestrator.eoh import EoHOrchestrator, EoHPopulation
 from llm4ad.orchestrator.island_ga import (
+    DiverseIslandGAConfig,
+    DiverseIslandGAOrchestrator,
     Island,
     IslandGAConfig,
     IslandGAOrchestrator,
@@ -42,6 +44,8 @@ __all__ = [
     # Island GA
     "IslandGAOrchestrator",
     "IslandGAConfig",
+    "DiverseIslandGAOrchestrator",
+    "DiverseIslandGAConfig",
     "Island",
     "MigrationStrategy",
     "MigrationTopology",

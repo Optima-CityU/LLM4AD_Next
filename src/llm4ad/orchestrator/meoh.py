@@ -738,19 +738,23 @@ class MEoHOrchestrator(BaseOrchestrator):
         t0 = time.time()
         results = await asyncio.gather(*coros, return_exceptions=True)
         self.state_tracker.record_timing("memory_extraction", (time.time() - t0) * 1000)
-        # Insert extracted cards concurrently: each remote add can take ~100s, so
-        # a serial loop would sum them; gather bounds it to the slowest add.
-        add_coros = []
+        cards = []
         for result in results:
             if isinstance(result, Exception):
                 logger.warning(f"Memory extraction failed: {result}")
             elif result is not None:
-                add_coros.append(self._limited_coro(memory.add_card(result)))
-        if add_coros:
-            add_results = await asyncio.gather(*add_coros, return_exceptions=True)
-            for add_result in add_results:
-                if isinstance(add_result, Exception):
-                    logger.warning(f"Memory insertion failed: {add_result}")
+                cards.append(result)
+        if cards:
+            try:
+                add_cards = getattr(memory, "add_cards", None)
+                if callable(add_cards):
+                    await add_cards(cards)
+                else:
+                    await asyncio.gather(
+                        *(self._limited_coro(memory.add_card(card)) for card in cards)
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Memory insertion failed: {exc}")
 
     async def _load_seed_population(self, seed_path: str) -> None:
         """Load seed algorithms from a JSON file."""

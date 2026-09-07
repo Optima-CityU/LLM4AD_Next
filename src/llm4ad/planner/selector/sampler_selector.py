@@ -61,6 +61,12 @@ class SamplerSelector:
         selected = []
         available: list[BaseSampler] = self.samplers.copy()
 
+        excluded_names = {
+            str(name) for name in kwargs.get("exclude_sampler_names", set())
+        }
+        if excluded_names:
+            available = [sampler for sampler in available if sampler.name not in excluded_names]
+
         maximum_parents = len(kwargs.get("population", []))
 
         available = [s for s in available if s.n_parents <= maximum_parents]

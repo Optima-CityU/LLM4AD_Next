@@ -265,7 +265,12 @@ class BaseOrchestrator(Registrable, ABC, registry_name="orchestrator"):
         if len(recent) < 2:
             return False, ""
 
-        best_scores = [gen.get("best_score", 0) for gen in recent]
+        best_scores = [
+            gen.get("global_best_score", gen.get("best_score"))
+            for gen in recent
+        ]
+        if any(score is None for score in best_scores):
+            return False, ""
         max_improvement = max(best_scores) - min(best_scores)
 
         if max_improvement < self.config.early_stop_threshold:

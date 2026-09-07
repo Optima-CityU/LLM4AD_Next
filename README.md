@@ -42,6 +42,8 @@
 
 ## 🔥 News
 
+- 🧮 [2026.09][New Dataset]: The **[AlphaEvolve Mathematics Benchmark Suite](examples/applications/alphaevolve_math_benchmark/README.md)** adds 11 independently runnable mathematical optimization cases, case-local evaluators, evolved implementations, and reusable experience artifacts.
+- 🏝️ [2026.09][New Search Method]: **Diverse Island GA** is now available, assigning a continuous spectrum of exploitation, correction, and independent-exploration behaviors across any number of islands while coordinating migration and memory use.
 - 🔬 [2026.07][New Feature]: **Search methods migrated** — EoH, MEoH, ReEvo, and MCTS-AHD are now available as standalone orchestrators. See [Search Methods](#search-methods-automatic-heuristic-design).
 - 🧠 [2026.07][New Feature]: **[MindMemOS](https://github.com/dadastory/MindMemOS)-backed long-term memory** is now available, with global, project, and task memory scopes plus configurable Chat and Embedding model bindings. See the [Memory Guide](docs/en/guides/memory.md).
 - 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [https://llm4ad-next.cn/](https://llm4ad-next.cn/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
@@ -78,12 +80,12 @@ Migration status of the Automatic Heuristic Design (AHD) search methods from the
 | Method | Status | Method | Status |
 |--------|--------|--------|--------|
 | **IslandGA** | ✅ Available | **FunSearch** | ⏳ Pending |
-| **MEoH** | ✅ Available | **HillClimb** | ⏳ Pending |
-| **DyCA** | ✅ Available | **LHNS** | ⏳ Pending |
-| **EoH** | ✅ Available | **LLaMEA** | ⏳ Pending |
-| **ReEvo** | ✅ Available | **MLES** | ⏳ Pending |
-| **MCTS-AHD** | ✅ Available | **MOEA/D** | ⏳ Pending |
-| | | **NSGA-II** | ⏳ Pending |
+| **Diverse Island GA** | ✅ Available | **HillClimb** | ⏳ Pending |
+| **MEoH** | ✅ Available | **LHNS** | ⏳ Pending |
+| **DyCA** | ✅ Available | **LLaMEA** | ⏳ Pending |
+| **EoH** | ✅ Available | **MLES** | ⏳ Pending |
+| **ReEvo** | ✅ Available | **MOEA/D** | ⏳ Pending |
+| **MCTS-AHD** | ✅ Available | **NSGA-II** | ⏳ Pending |
 | | | **PartEvo** | ⏳ Pending |
 | | | **RandSample** | ⏳ Pending |
 
@@ -93,8 +95,26 @@ Set `evolution.type` in your config and run `llm4ad run <config.yaml>`. See `exa
 
 ```yaml
 evolution:
-  type: "eoh"  # options: "eoh", "meoh", "reevo", "mcts_ahd", "island_ga", "dyca"
+  type: "eoh"  # options include "diverse_island_ga", "island_ga", "eoh", "meoh", "reevo", "mcts_ahd", "dyca"
 ```
+
+## Mathematical Optimization Highlights
+
+The new [AlphaEvolve Mathematics Benchmark Suite](examples/applications/alphaevolve_math_benchmark/README.md) brings 11 challenging geometry, combinatorics, and inequality problems into a unified LLM-driven evolution workflow. Diverse Island GA combines distinct search behaviors with reusable long-term experience, allowing different islands to preserve strong mechanisms, correct known failures, and explore independent solution families. The comparison uses the better published value from AlphaEvolve and LoongFlow for each objective; every row links directly to the evolved implementation, retained experience cards, and machine-readable result.
+
+| Case | Direction | AlphaEvolve | LoongFlow | LLM4AD | Gap to best published | Artifacts |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 26 circles in a unit square | Higher | `2.6358627564136983` | `2.6359829624734026` | **2.635983083325037** | `+1.208516344e-7` | [code](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/result.json) |
+| 21 circles in a perimeter-four rectangle | Higher | `2.3658321334167627` | `2.365832229500823` | **2.365832375700835** | `+1.46200012e-7` | [code](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/result.json) |
+| 11 unit hexagons in a regular hexagon | Lower | `3.930092` | `3.928906855463712` | **3.92468841680981** | `+0.004218438653902` | [code](examples/applications/alphaevolve_math_benchmark/hexagon_packing/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/hexagon_packing/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/hexagon_packing/results/best/result.json) |
+| 16-point maximum/minimum distance ratio | Lower | `12.88926611203463` | `12.889243547212832` | **12.889229907694045** | `+1.3639518787e-5` | [code](examples/applications/alphaevolve_math_benchmark/max_min_distance_ratio/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/max_min_distance_ratio/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/max_min_distance_ratio/results/best/result.json) |
+| Uncertainty inequality | Lower | `0.35209910442252773` | `0.352099104421844` | **0.35209910441916187** | `+2.68213e-12` | [code](examples/applications/alphaevolve_math_benchmark/uncertainty_inequality/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/uncertainty_inequality/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/uncertainty_inequality/results/best/result.json) |
+| Second autocorrelation inequality | Higher | `0.8962799441554083` | `0.9027021077220739` | **0.9053043552878318** | `+0.0026022475657579` | [code](examples/applications/alphaevolve_math_benchmark/second_autocorrelation/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/second_autocorrelation/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/second_autocorrelation/results/best/result.json) |
+| First autocorrelation inequality | Lower | `1.5052939684401607` | `1.509527314861778` | **1.507459811737381** | `-0.0021658432972203` | [code](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/result.json) |
+| Minimum overlap | Lower | `0.380924` | `0.3809137564083654` | **0.38092504473534605** | `-1.128832698065e-5` | [code](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/result.json) |
+| Heilbronn problem in an equilateral triangle | Higher | `0.036529889880030156` | `0.0365298898793351` | **0.0365298881927707** | `-1.687259456e-9` | [code](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/solve.py) · [experiences](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/experiences/README.md) · [result](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/result.json) |
+
+The minimum-overlap and Heilbronn-triangle rows were added as near-reference results. The gap column always compares LLM4AD with the stronger published baseline: positive values indicate an improvement and negative values indicate the remaining gap.
 
 ## Quick Start
 
@@ -268,6 +288,10 @@ ruff check src/ tests/ --fix
 ## License
 
 This project is licensed under the BSD 3-Clause License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgements
+
+The AutoResearch module is based on / adapted from [AutoResearchClaw](https://github.com/aiming-lab/AutoResearchClaw) (MIT License). Its original copyright and license notice are retained in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## Support
 

@@ -1,0 +1,211 @@
+project_name: "alphaevolve_circle_packing_n26_solver"
+path_resolution: "cwd"
+
+description_en: "Evolve solver-friendly parameterized constructions for 26-circle packing."
+description_zh: "进化适合数学优化器搜索的 26 圆装箱参数化构造。"
+
+background: |
+  Design a solver-friendly parameterized mathematical construction for packing exactly
+  26 circles in the unit square. You decide the layout family, grouping, formulas,
+  fixed constants, tunable parameters, and every tunable parameter's search domain.
+  A trusted optimizer searches the declared geometry domain and solves the best radii
+  for each layout while independently enforcing boundaries and non-overlap. Explore
+  compact representations that expose meaningful continuous degrees of freedom; do
+  not write an optimizer or weaken the trusted feasibility rules.
+
+random_seed: 42
+base_dir: "./runs"
+
+workspace:
+  auto_create: true
+  subdirs:
+    output: "output"
+    logs: "logs"
+    checkpoints: "checkpoints"
+    generated: "generated"
+    cache: "cache"
+    temp: "temp"
+
+providers:
+  - name: "default"
+    type: "openai_compatible"
+    base_url: ${LLM_BASE_URL}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL}
+    temperature: 0.7
+    max_tokens: 8192
+    timeout: 600.0
+
+coder:
+  type: "custom"
+  provider: "default"
+  timeout: 600.0
+  max_retries: 2
+  temperature: 0.7
+  max_gen_tokens: 4096
+  context_max_tokens: 8192
+  default_extension: "py"
+  log_to_console: false
+  prompt_template: |
+    Implement the following proposed circle-center construction by editing only
+    MODEL_SPEC in model_spec.py:
+
+    {insight}
+
+    Task and evaluation feedback, if any:
+    {task_description}
+
+    Existing project files:
+    {project_context}
+
+    MODEL_SPEC describes a mathematical design and its model-authored search domain.
+    You may replace the seed topology entirely: rows, rings, staggered groups,
+    asymmetric structures, boundary-focused layouts, or another parameterization are
+    all allowed. The platform does not prescribe geometric parameter ranges.
+
+    MODEL_SPEC has a strict, safely loaded data contract:
+
+    1. MODEL_SPEC itself and every nested value must be a Python literal accepted
+       by ast.literal_eval: dictionaries, lists, strings, integers, floats, booleans,
+       or None only.
+    2. Each "parameters" value is either:
+       - a fixed finite integer or float constant; or
+       - a tunable literal dictionary containing exactly numeric "initial", "lower",
+         and "upper" values, with lower < upper and initial inside that interval.
+       You choose which values are tunable and choose their bounds. Precompute fixed
+       derived constants. Never put an arithmetic expression, variable reference,
+       function call, comprehension, lambda, import, or helper object in a parameter.
+    3. "groups" must be a non-empty literal list of literal dictionaries. Every group
+       must contain a positive integer "count" and non-empty quoted string expressions
+       "x" and "y". All counts must sum to exactly 26.
+    4. Mathematical formulas are permitted only inside the quoted "x" and "y"
+       strings. Those strings may reference numeric parameters, i, count, group, pi,
+       e, arithmetic operators, and abs/sin/cos/sqrt/min/max.
+    5. The expressions must generate finite centers inside [0, 1] x [0, 1] for useful
+       points in the declared domain. Invalid sampled points are rejected. The trusted
+       evaluator searches tunable geometry and optimizes radii; do not add optimization
+       or evaluation code.
+    6. Prefer a compact, meaningful parameterization that the optimizer can search
+       effectively. You may expose many independent coordinates when justified, but
+       unnecessary dimensions consume the same fixed evaluation budget and usually
+       search less effectively.
+
+    Invalid parameter values:
+      "ay": 0.8660254037844386 * 0.1877
+      "cx": cx
+      "offset": {{"initial": 0.2, "lower": 0.4}}
+      "phase": {{"initial": 0.0, "lower": 1.0, "upper": -1.0}}
+
+    Valid fixed and model-tunable values:
+      "ay": 0.16255296829033913
+      "cx": 0.5
+      "step": {{"initial": 0.18, "lower": 0.08, "upper": 0.28}}
+      "phase": {{"initial": 0.0, "lower": -0.5, "upper": 0.5}}
+
+    Return exactly one named code block containing the complete model_spec.py file.
+    Preserve the EVOLVE_START and EVOLVE_END markers and do not include prose:
+
+    ```python:model_spec.py
+    # complete file content
+    ```
+
+planner:
+  type: "llm_evolution"
+  provider: "default"
+  selection_strategy: "weighted"
+  parent_selection_strategy: "tournament"
+  build:
+    script: {}
+  samplers:
+    - name: "init_sampler"
+    - name: "mutation_sampler"
+    - name: "crossover_sampler"
+
+evaluator:
+  type: "solver"
+  backend: "scip"
+  adapter: "circle_packing/solver_adapter.py:CirclePackingScipAdapter"
+  candidate_file: "model_spec.py"
+  candidate_symbol: "MODEL_SPEC"
+  adapter_config:
+    num_circles: 26
+    geometry_tolerance: 1.0e-10
+    geometry_safety_margin: 1.0e-9
+    max_tunable_parameters: 64
+    parameter_search_evaluations: 160
+    elite_parameter_search_multiplier: 4.0
+    parameter_search_population: 6
+    parameter_search_seed: 42
+  solver_options: {}
+  timeout: 1200.0
+  max_retries: 1
+  parallel: true
+  batch_size: 5
+  metrics:
+    - name: "sum_radii"
+      type: "maximize"
+      weight: 1.0
+      description: "Sum of the 26 optimized radii"
+    - name: "validity"
+      type: "maximize"
+      weight: 0.0
+      description: "Independent geometric feasibility check"
+
+evolution:
+  type: "diverse_island_ga"
+  elite_reevaluation_count: 1
+  max_generations: 7
+  early_stop_patience: 8
+  early_stop_threshold: 0.000001
+  checkpoint_interval: 5
+  max_checkpoints: 3
+  elite_ratio: 0.2
+  mutation_rate: 0.3
+  crossover_rate: 0.5
+  parent_selection_strategy: "tournament"
+  survival_selection_strategy: "truncation"
+  tournament_size: 3
+  num_islands: 3
+  island_population_size: 5
+  migration_interval: 3
+  migration_rate: 0.2
+  migration_strategy: "best"
+  migration_topology: "ring"
+  parallel_islands: true
+  human_readable_timing: true
+
+multimodal:
+  enabled: false
+  max_images_per_prompt: 3
+  image_max_size_kb: 512
+  include_observation_text: true
+  two_step_refinement: false
+
+logging:
+  level: "INFO"
+  format: null
+  file: null
+  console: true
+  json_format: false
+
+version_control:
+  enabled: true
+  type: "git_worktree"
+  local_path: "circle_packing/solver"
+  remote_url: null
+  revision: null
+  auto_initialize: true
+  auto_cleanup: true
+  max_worktree_age_days: 7
+  max_worktrees: 100
+  default_branch: "main"
+  commit_message_template: "Formula {algorithm_id}: {description}"
+
+repo_analyzer:
+  type: "evolve_detector"
+  context_lines_before: 5
+  context_lines_after: 5
+  include:
+    - "model_spec.py"
+  exclude:
+    - ".git/**"

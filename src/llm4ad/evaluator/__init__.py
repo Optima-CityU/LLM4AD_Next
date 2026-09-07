@@ -15,6 +15,7 @@ from llm4ad.evaluator.base import (
 from llm4ad.evaluator.behavior import BehaviorData, BehaviorVisualization
 from llm4ad.evaluator.dispatcher import EvaluationDispatcher
 from llm4ad.evaluator.llm_judge import LLMJudgeEvaluator
+from llm4ad.evaluator.solver.evaluator import SolverEvaluator
 from llm4ad.evaluator.task import Task, TaskConfig, TaskType
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "ExecutableEvaluator",
     "BenchmarkEvaluator",
     "LLMJudgeEvaluator",
+    "SolverEvaluator",
     # Task management
     "Task",
     "TaskConfig",

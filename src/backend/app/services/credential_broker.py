@@ -34,6 +34,8 @@ from app.core.redis import get_sync_redis
 _TOKEN_PREFIX = "llmproxy:token:"
 # 按 task_id 归集本任务发放的全部 token，便于结束时批量吊销。
 _TASK_TOKENS_PREFIX = "llmproxy:task:"
+# Per-user reverse index used to revoke every token when an account is deleted.
+_USER_TOKENS_PREFIX = "llmproxy:user:"
 
 
 def _token_key(token: str) -> str:
@@ -44,6 +46,10 @@ def _token_key(token: str) -> str:
 def _task_tokens_key(task_id: str | uuid.UUID) -> str:
     """构造按任务归集 token 集合的 Redis key。"""
     return f"{_TASK_TOKENS_PREFIX}{task_id}"
+
+
+def _user_tokens_key(user_id: str | uuid.UUID) -> str:
+    return f"{_USER_TOKENS_PREFIX}{user_id}"
 
 
 def issue_token(
@@ -93,6 +99,9 @@ def issue_token(
     task_key = _task_tokens_key(task_id)
     pipe.sadd(task_key, token)
     pipe.expire(task_key, ttl)
+    user_key = _user_tokens_key(user_id)
+    pipe.sadd(user_key, token)
+    pipe.expire(user_key, ttl)
     pipe.execute()
     return token
 
@@ -153,4 +162,23 @@ def revoke_task_tokens(task_id: str | uuid.UUID) -> int:
         return len(tokens)
     except Exception:
         logger.warning(f"吊销任务 {task_id} 的代理 token 失败", exc_info=True)
+        return 0
+
+
+def revoke_user_tokens(user_id: str | uuid.UUID, *, raise_on_error: bool = False) -> int:
+    """Revoke every proxy token indexed to a user; safe to call repeatedly."""
+    try:
+        r = get_sync_redis()
+        user_key = _user_tokens_key(user_id)
+        tokens = r.smembers(user_key)
+        pipe = r.pipeline()
+        for token in tokens:
+            pipe.delete(_token_key(token))
+        pipe.delete(user_key)
+        pipe.execute()
+        return len(tokens)
+    except Exception:
+        logger.warning(f"吊销用户 {user_id} 的代理 token 失败", exc_info=True)
+        if raise_on_error:
+            raise
         return 0

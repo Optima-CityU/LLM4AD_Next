@@ -173,12 +173,12 @@ def test_llm4ad_memory_card_tags_participate_in_first_order_extraction():
     assert tags_property["order"] < 2
 
 
-def test_llm4ad_memory_card_tags_are_optional_user_facing_metadata():
+def test_llm4ad_memory_card_schema_requests_grounded_tags_for_every_card():
     schema = yaml.safe_load(LLM4AD_SCHEMA_PATH.read_text(encoding="utf-8"))
     entity_types = schema["entity_types"] if isinstance(schema, dict) else schema
     entity = entity_types[0]
     tags_property = entity["dynamic_property"]["tags"]
 
-    assert "required" not in entity["entity_instruction"].lower()
-    assert "required" not in tags_property["desc"].lower()
-    assert "optional" in tags_property["desc"].lower()
+    assert "every" in entity["entity_instruction"].lower()
+    assert "1-6" in tags_property["desc"]
+    assert "grounded" in tags_property["desc"].lower()

@@ -515,10 +515,13 @@ def get_task_logs(
     )
 
 
-def _task_log_entry_handler(fields: dict) -> tuple[str, bool] | None:
+def _task_log_entry_handler(
+    _entry_id: str, fields: dict
+) -> tuple[str, bool] | None:
     """解析任务日志流条目为 SSE 帧。
 
     对脏数据宽松忽略，避免单个坏帧破坏整条 SSE 流。
+    id 行由 :func:`redis_sse_stream` 统一拼接，handler 只产出 event/data。
     """
     try:
         entry = json.loads(fields["data"])
@@ -570,8 +573,10 @@ async def stream_task_logs(
             redis_key=task_logs_key(task_id),
             connected_data={"task_id": str(task_id)},
             entry_handler=_task_log_entry_handler,
+            # 永不因静默关流：演化任务可能跑几十分钟，阶段间静默是常态。
+            # 终止只由 end 事件或已终态短路驱动；心跳（15s）保活连接。
+            max_idle=None,
             last_id=last_id,
-            max_idle=1800.0,
             use_draining=True,
         )
     )

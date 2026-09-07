@@ -1,8 +1,9 @@
 """Unit tests for llm4ad.coder module."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from llm4ad.coder.base import (
     BaseCoder,
@@ -10,10 +11,9 @@ from llm4ad.coder.base import (
     GenerateResult,
     GenerateStatus,
 )
-from llm4ad.config.schema import CustomCoderConfig, ClaudeCodeConfig
 from llm4ad.config.app import ProviderConfig
+from llm4ad.config.schema import ClaudeCodeConfig, CustomCoderConfig
 from llm4ad.infra.provider.base import GenerationResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -461,6 +461,156 @@ class TestGenerateInitial:
     """Tests for initial code generation (no parent_code)."""
 
     @pytest.mark.asyncio
+    async def test_existing_evolve_file_preserves_code_outside_markers(
+        self,
+        coder,
+        mock_provider,
+        tmp_path,
+    ):
+        """A baseline EVOLVE file must use block replacement even without a parent."""
+        solve_path = tmp_path / "solve.py"
+        solve_path.write_text(
+            "# EVOLVE_START\n"
+            "def solve():\n"
+            "    return 1\n"
+            "# EVOLVE_END\n\n"
+            "def fixed_adapter():\n"
+            "    return solve()\n",
+            encoding="utf-8",
+        )
+        mock_provider.generate.return_value = GenerationResult(
+            text="```python:solve.py\ndef solve():\n    return 2\n```",
+            total_tokens=20,
+        )
+
+        result = await coder.generate(
+            prompt="improve the implementation",
+            context={"language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        assert result.is_success
+        content = solve_path.read_text(encoding="utf-8")
+        assert "return 2" in content
+        assert "def fixed_adapter():" in content
+        assert "return solve()" in content
+        sent_prompt = mock_provider.generate.await_args.args[0]
+        assert "def fixed_adapter():" in sent_prompt
+        assert "Code outside EVOLVE markers is immutable" in sent_prompt
+
+    @pytest.mark.asyncio
+    async def test_existing_evolve_file_unwraps_full_file_response(
+        self,
+        coder,
+        mock_provider,
+        tmp_path,
+    ):
+        """A full-file response must not be nested inside an EVOLVE block."""
+        solve_path = tmp_path / "solve.py"
+        solve_path.write_text(
+            "import json\n\n"
+            "# EVOLVE_START\n"
+            "def solve():\n"
+            "    return [1]\n"
+            "# EVOLVE_END\n\n"
+            "def fixed_adapter():\n"
+            "    print(json.dumps(solve()))\n",
+            encoding="utf-8",
+        )
+        mock_provider.generate.return_value = GenerationResult(
+            text=(
+                "```python:solve.py\n"
+                "import json\n\n"
+                "# EVOLVE_START\n"
+                "def solve():\n"
+                "    return [2]\n"
+                "# EVOLVE_END\n\n"
+                "def fixed_adapter():\n"
+                "    raise RuntimeError('must not replace fixed code')\n"
+                "```"
+            ),
+            total_tokens=30,
+        )
+
+        result = await coder.generate(
+            prompt="improve the implementation",
+            context={"language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        assert result.is_success
+        content = solve_path.read_text(encoding="utf-8")
+        assert content.count("# EVOLVE_START") == 1
+        assert content.count("# EVOLVE_END") == 1
+        assert "return [2]" in content
+        assert "raise RuntimeError" not in content
+        assert "print(json.dumps(solve()))" in content
+
+    @pytest.mark.asyncio
+    async def test_python_json_adapter_adds_serializable_return_contract(
+        self,
+        coder,
+        mock_provider,
+        tmp_path,
+    ):
+        """Python JSON adapters must advertise JSON-native return values."""
+        solve_path = tmp_path / "solve.py"
+        solve_path.write_text(
+            "import json\n\n"
+            "# EVOLVE_START\n"
+            "def solve():\n"
+            "    return [1]\n"
+            "# EVOLVE_END\n\n"
+            "print(json.dumps(solve()))\n",
+            encoding="utf-8",
+        )
+        mock_provider.generate.return_value = GenerationResult(
+            text="```python:solve.py\ndef solve():\n    return [2]\n```",
+            total_tokens=20,
+        )
+
+        result = await coder.generate(
+            prompt="improve the implementation",
+            context={"language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        assert result.is_success
+        sent_prompt = mock_provider.generate.await_args.args[0]
+        assert "JSON-native Python values" in sent_prompt
+        assert "NumPy arrays or scalars" in sent_prompt
+
+    @pytest.mark.asyncio
+    async def test_custom_template_uses_structured_insight_from_context(
+        self,
+        mock_provider,
+        tmp_path,
+    ):
+        """A custom template receives the raw insight, not a prebuilt fallback prompt."""
+        from llm4ad.coder.custom_naive_coder import CustomNaiveCoder
+
+        config = CustomCoderConfig(
+            type="custom",
+            prompt_template="STRICT CONTRACT\n{insight}\n{project_context}",
+        )
+        coder = CustomNaiveCoder(config=config, provider=mock_provider)
+        mock_provider.generate.return_value = GenerationResult(
+            text="```python:model_spec.py\nMODEL_SPEC = {}\n```",
+            total_tokens=10,
+        )
+
+        await coder.generate(
+            prompt="PREBUILT FALLBACK PROMPT",
+            context={"insight": "RAW STRUCTURED INSIGHT", "language": "python"},
+            working_dir=str(tmp_path),
+        )
+
+        sent_prompt = mock_provider.generate.await_args.args[0]
+        assert "STRICT CONTRACT" in sent_prompt
+        assert "RAW STRUCTURED INSIGHT" in sent_prompt
+        assert "PREBUILT FALLBACK PROMPT" not in sent_prompt
+
+    @pytest.mark.asyncio
     async def test_generate_success(self, coder, mock_provider, tmp_path):
         mock_provider.generate.return_value = GenerationResult(
             text="```python:solution.py\ndef sort(arr):\n    return sorted(arr)\n```",
@@ -573,7 +723,7 @@ class TestGenerateMutation:
     @pytest.mark.asyncio
     async def test_mutation_no_evolve_block_copies_file(self, coder, mock_provider, tmp_path):
         parent_code = {"config.py": "CONFIG = {}"}
-        result = await coder.generate(
+        await coder.generate(
             prompt="improve",
             context={"parent_code": parent_code, "language": "python"},
             working_dir=str(tmp_path),

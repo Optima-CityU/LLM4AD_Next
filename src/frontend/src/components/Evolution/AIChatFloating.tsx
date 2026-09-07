@@ -4,6 +4,7 @@ import {
   Ban,
   Check,
   ChevronDown,
+  Clock,
   CornerDownLeft,
   Eye,
   Loader2,
@@ -33,6 +34,7 @@ import type {
   ChatTuneTurnStatus,
   ProviderResponse,
 } from "@/client"
+import type { TFunction } from "i18next"
 import { Llm4AdChatTuneService } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -75,6 +77,12 @@ function parseModels(raw: string | null | undefined): string[] {
 
 function isSpecialProvider(v: string): boolean {
   return ["", "default", "mock"].includes(v)
+}
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
 }
 
 /* ─────────────────── Drag hook ──────────────────── */
@@ -161,6 +169,7 @@ interface FloatingMessage {
   error?: string | null
   card?: AssistantCard
   submission?: CardSubmission
+  progress?: { stage?: string; elapsed_seconds?: number } | null
 }
 
 const TARGET_STAGE_OPTIONS: Array<{
@@ -353,6 +362,11 @@ function FloatingChatImpl({
           // Trigger session refresh so the main panel's stageSnapshot stays
           // aligned without waiting for onDone.
           refetchSession()
+        },
+        onProgress(progress) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msgId ? { ...m, progress } : m)),
+          )
         },
         onDone() {
           cancelAnimationFrame(streamRafId.current)
@@ -910,7 +924,7 @@ function FloatingMessageRow({
   ) => void
   onPayloadUpdate: (messageId: string, payload: Record<string, unknown>) => void
   onFocusComposer: () => void
-  t: (key: string) => string
+  t: TFunction
 }) {
   const isUser = msg.role === "user"
   const isSystem = msg.role === "system"
@@ -1022,6 +1036,22 @@ function FloatingMessageRow({
           )}
         </div>
       )}
+      {/* Keep-alive progress pushed by the backend during silent build phases */}
+      {!isUser &&
+        msg.isStreaming &&
+        msg.progress?.elapsed_seconds != null && (
+          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Clock className="size-2.5 shrink-0" />
+            <span>
+              {t(
+                msg.progress.stage === "build"
+                  ? "evolution.chatTune.buildInProgress"
+                  : "evolution.chatTune.gatherInProgress",
+                { elapsed: formatElapsed(msg.progress.elapsed_seconds) },
+              )}
+            </span>
+          </div>
+        )}
     </div>
   )
 }

@@ -1,0 +1,141 @@
+project_name: "alphaevolve_circle_packing_n26"
+path_resolution: "cwd"
+
+description_en: "Evolve a valid packing of 26 circles in a unit square and maximize the sum of radii from an unconstrained initial construction."
+description_zh: "从基础初始构造开始，进化单位正方形内 26 个互不相交圆的布局并最大化半径之和。"
+
+background: |
+  Design a deterministic constructor for packing exactly 26 disjoint circles
+  inside the unit square [0, 1] x [0, 1]. The constructor must return a NumPy
+  centers array with shape (26, 2) and a non-negative finite radii array with
+  shape (26,). Every circle must remain within the square and no pair may
+  overlap. The optimization objective is to maximize the sum of all radii.
+
+random_seed: 42
+base_dir: "./runs"
+
+workspace:
+  auto_create: true
+  subdirs:
+    output: "output"
+    logs: "logs"
+    checkpoints: "checkpoints"
+    generated: "generated"
+    cache: "cache"
+    temp: "temp"
+
+providers:
+  - name: "default"
+    type: "openai_compatible"
+    base_url: ${LLM_BASE_URL}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL}
+    temperature: 0.7
+    max_tokens: 8192
+    timeout: 600.0
+
+coder:
+  type: "custom"
+  provider: "default"
+  timeout: 600.0
+  max_retries: 2
+  temperature: 0.7
+  max_gen_tokens: 4096
+  context_max_tokens: 8192
+  default_extension: "py"
+  log_to_console: false
+  prompt_template: |
+    Improve the implementation between EVOLVE_START and EVOLVE_END in solve.py.
+    Implement construct_packing(num_circles=26), optionally with helper functions
+    inside the same evolvable block. It must return exactly two values:
+    centers and radii. centers must be convertible to a finite NumPy array with
+    shape (26, 2); radii must be convertible to a finite, non-negative NumPy
+    array with shape (26,). All circles must lie inside [0, 1] x [0, 1] and
+    every pair must be disjoint. Maximize sum(radii). Do not modify the JSON CLI
+    outside the evolvable block. Return only the replacement evolvable code.
+
+planner:
+  type: "llm_evolution"
+  provider: "default"
+  selection_strategy: "weighted"
+  parent_selection_strategy: "tournament"
+  build:
+    script: {}
+  samplers:
+    - name: "init_sampler"
+    - name: "mutation_sampler"
+    - name: "crossover_sampler"
+
+evaluator:
+  type: "custom"
+  module: "circle_packing/evaluator.py:CirclePackingEvaluator"
+  timeout: 1200.0
+  max_retries: 0
+  parallel: true
+  batch_size: 5
+  metrics:
+    - "sum_radii"
+    - "validity"
+
+evolution:
+  type: "island_ga"
+  # 3 islands x 5 initial candidates + 7 generations x 12 offspring =
+  # approximately 99 candidate evaluations. This mirrors the paper's
+  # constrained 100-evaluation comparison without claiming exact reproduction.
+  max_generations: 7
+  early_stop_patience: 8
+  early_stop_threshold: 0.000001
+  checkpoint_interval: 5
+  max_checkpoints: 3
+  elite_ratio: 0.2
+  mutation_rate: 0.3
+  crossover_rate: 0.5
+  parent_selection_strategy: "tournament"
+  survival_selection_strategy: "truncation"
+  tournament_size: 3
+  num_islands: 3
+  island_population_size: 5
+  migration_interval: 3
+  migration_rate: 0.2
+  migration_strategy: "best"
+  migration_topology: "ring"
+  parallel_islands: true
+  human_readable_timing: true
+
+multimodal:
+  enabled: false
+  max_images_per_prompt: 3
+  image_max_size_kb: 512
+  include_observation_text: true
+  two_step_refinement: false
+
+logging:
+  level: "INFO"
+  format: null
+  file: null
+  console: true
+  json_format: false
+
+version_control:
+  enabled: true
+  type: "git_worktree"
+  local_path: "circle_packing/algorithm"
+  remote_url: null
+  revision: null
+  auto_initialize: true
+  auto_cleanup: true
+  max_worktree_age_days: 7
+  max_worktrees: 100
+  default_branch: "main"
+  commit_message_template: "Algorithm {algorithm_id}: {description}"
+
+repo_analyzer:
+  type: "evolve_detector"
+  context_lines_before: 5
+  context_lines_after: 5
+  include:
+    - "*.py"
+  exclude:
+    - ".git/**"
+    - "__pycache__/**"
+    - "*.pyc"

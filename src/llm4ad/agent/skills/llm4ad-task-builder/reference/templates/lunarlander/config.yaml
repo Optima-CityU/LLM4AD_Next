@@ -1,0 +1,146 @@
+# LLM4AD task package - LunarLander benchmark (RL rollout pattern).
+
+project_name: "lunarlander_benchmark"
+description_en: "Evolve a LunarLander control policy with Island GA."
+description_zh: "使用 Island GA 进化 LunarLander 控制策略。"
+background: |
+  We aim to evolve a control policy for the LunarLander-v3 environment.
+  The policy maps the current state to an action to land the spacecraft safely
+  while minimizing fuel consumption and avoiding crashes.
+random_seed: 42
+base_dir: "./runs"
+
+workspace:
+  auto_create: true
+  subdirs:
+    output: "output"
+    logs: "logs"
+    checkpoints: "checkpoints"
+    generated: "generated"
+    cache: "cache"
+    temp: "temp"
+
+providers:
+  - name: "default"
+    type: "openai_compatible"
+    base_url: ${LLM_BASE_URL}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL}
+    temperature: 0.7
+    max_tokens: 8192
+    timeout: 120.0
+
+coder:
+  type: "custom"
+  provider: "default"
+  timeout: 180.0
+  max_retries: 2
+  temperature: 0.7
+  max_gen_tokens: 4096
+  context_max_tokens: 4096
+  default_extension: "py"
+  log_to_console: false
+  prompt_template: |
+    You are evolving a control policy for the LunarLander-v3 environment.
+    The function to optimize is ``choose_action(s, last_action, s_pre)``, wrapped
+    between the EVOLVE markers below. It returns an integer action 0-3
+    (0=nothing, 1=left engine, 2=main engine, 3=right engine). Keep the function
+    signature and only change the body between the markers.
+
+    Goal: maximize episode reward (safe landing, minimal fuel, gentle touchdown).
+
+    Current code to evolve:
+
+    # EVOLVE_START
+    {code}
+    # EVOLVE_END
+
+planner:
+  type: "llm_evolution"
+  provider: "default"
+  selection_strategy: "weighted"
+  parent_selection_strategy: "tournament"
+  build:
+    script: {}
+  samplers:
+    - name: "init_sampler"
+    - name: "mutation_sampler"
+    - name: "crossover_sampler"
+
+evaluator:
+  type: "custom"
+  module: "lunarlander_evaluator.py:LunarLanderPolicyEvaluator"
+  timeout: 120.0
+  max_retries: 2
+  parallel: true
+  batch_size: 4
+  dataset:
+    mode: "directory"
+    path: "data/sample"
+    recursive: false
+  metrics:
+    - "episode_reward"
+    - "execution_time_ms"
+    - "fuel_consumed"
+    - "success"
+
+evolution:
+  type: "island_ga"
+  max_generations: 5
+  early_stop_patience: 10
+  early_stop_threshold: 0.000001
+  checkpoint_interval: 5
+  max_checkpoints: 3
+  elite_ratio: 0.1
+  mutation_rate: 0.3
+  crossover_rate: 0.5
+  parent_selection_strategy: "tournament"
+  survival_selection_strategy: "truncation"
+  tournament_size: 3
+  num_islands: 2
+  island_population_size: 2
+  migration_interval: 5
+  migration_rate: 0.1
+  migration_strategy: "random"
+  migration_topology: "full"
+  parallel_islands: true
+  human_readable_timing: true
+
+multimodal:
+  enabled: false
+  max_images_per_prompt: 3
+  image_max_size_kb: 512
+  include_observation_text: true
+  two_step_refinement: false
+  behavior_storage: "rendered"
+
+logging:
+  level: "INFO"
+  format: null
+  file: null
+  console: true
+  json_format: false
+
+version_control:
+  enabled: true
+  type: "git_worktree"
+  local_path: "policy"
+  remote_url: null
+  revision: null
+  auto_initialize: true
+  auto_cleanup: true
+  max_worktree_age_days: 7
+  max_worktrees: 100
+  default_branch: "main"
+  commit_message_template: "Algorithm {algorithm_id}: {description}"
+
+repo_analyzer:
+  type: "evolve_detector"
+  context_lines_before: 5
+  context_lines_after: 5
+  include:
+    - "*.py"
+  exclude:
+    - ".git/**"
+    - "__pycache__/**"
+    - "*.pyc"

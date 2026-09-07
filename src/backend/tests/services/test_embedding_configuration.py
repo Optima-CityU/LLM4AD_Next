@@ -319,6 +319,21 @@ def test_resolve_providers_omits_embedding_when_disabled(db: Session):
     assert "embedding" not in resolved
 
 
+def test_resolve_providers_removes_stale_embedding_when_disabled(db: Session):
+    """Discard invalid UI remnants when the user has embedding disabled."""
+    user = create_random_user(db)
+    args = {
+        "planner": {"provider": "mock"},
+        "coder": {"provider": "mock"},
+        "evaluator": {"provider": "mock"},
+        "embedding": {"type": "", "model": ""},
+    }
+
+    resolved = _resolve_providers(db, args, user)
+
+    assert "embedding" not in resolved
+
+
 def test_resolve_providers_builds_jina_embedding_config_from_single_provider(db: Session):
     user = create_random_user(db)
     provider = _embedding_provider(

@@ -42,6 +42,8 @@
 
 ## 🔥 最新动态
 
+- 🧮 [2026.09][新数据集]：新增 **[AlphaEvolve 数学基准套件](examples/applications/alphaevolve_math_benchmark/README.md)**，包含 11 个可独立运行的数学优化案例、案例级评估器、演化实现与可复用经验。
+- 🏝️ [2026.09][新搜索方法]：新增**多样岛屿遗传算法（Diverse Island GA）**，支持任意岛屿数量下连续分配利用、纠错与独立探索行为，并协同控制迁移和记忆使用。
 - 🔬 [2026.07][新功能]：**搜索方法已迁移** —— EoH、MEoH、ReEvo 和 MCTS-AHD 现已作为独立编排器可用。请参阅[搜索方法](#搜索方法自动启发式设计)。
 - 🧠 [2026.07][新功能]：基于 **[MindMemOS](https://github.com/dadastory/MindMemOS) 的长期记忆**现已可用，支持全局、项目和任务记忆范围，并可配置聊天和嵌入模型绑定。请参阅[记忆指南](docs/en/guides/memory.md)。
 - 🚀 [2026.07][新版本]：**LLM4AD_Next 在线试用**现已上线 [https://llm4ad-next.cn/](https://llm4ad-next.cn/) —— 无需本地安装，直接在浏览器中体验完整的问题到算法工作流。
@@ -78,12 +80,12 @@ uv run llm4ad chat
 | 方法 | 状态 | 方法 | 状态 |
 |--------|--------|--------|--------|
 | **IslandGA** | ✅ 可用 | **FunSearch** | ⏳ 待迁移 |
-| **MEoH** | ✅ 可用 | **HillClimb** | ⏳ 待迁移 |
-| **DyCA** | ✅ 可用 | **LHNS** | ⏳ 待迁移 |
-| **EoH** | ✅ 可用 | **LLaMEA** | ⏳ 待迁移 |
-| **ReEvo** | ✅ 可用 | **MLES** | ⏳ 待迁移 |
-| **MCTS-AHD** | ✅ 可用 | **MOEA/D** | ⏳ 待迁移 |
-| | | **NSGA-II** | ⏳ 待迁移 |
+| **Diverse Island GA** | ✅ 可用 | **HillClimb** | ⏳ 待迁移 |
+| **MEoH** | ✅ 可用 | **LHNS** | ⏳ 待迁移 |
+| **DyCA** | ✅ 可用 | **LLaMEA** | ⏳ 待迁移 |
+| **EoH** | ✅ 可用 | **MLES** | ⏳ 待迁移 |
+| **ReEvo** | ✅ 可用 | **MOEA/D** | ⏳ 待迁移 |
+| **MCTS-AHD** | ✅ 可用 | **NSGA-II** | ⏳ 待迁移 |
 | | | **PartEvo** | ⏳ 待迁移 |
 | | | **RandSample** | ⏳ 待迁移 |
 
@@ -93,8 +95,26 @@ uv run llm4ad chat
 
 ```yaml
 evolution:
-  type: "eoh"  # 可选值: "eoh", "meoh", "reevo", "mcts_ahd", "island_ga", "dyca"
+  type: "eoh"  # 可选值包括: "diverse_island_ga", "island_ga", "eoh", "meoh", "reevo", "mcts_ahd", "dyca"
 ```
+
+## 数学优化成果
+
+新增的 [AlphaEvolve 数学基准套件](examples/applications/alphaevolve_math_benchmark/README.md) 将 11 个具有挑战性的几何、组合与不等式问题纳入统一的大模型驱动进化流程。多样岛屿遗传算法让不同岛屿分别保留有效机制、规避已知错误并探索独立解法，同时通过长期记忆持续复用搜索经验。每个案例均以 AlphaEvolve 与 LoongFlow 两项公开结果中的更优值作为比较基准，并直接提供演化得到的代码、经验卡片及机器可读结果。
+
+| 案例 | 方向 | AlphaEvolve | LoongFlow | LLM4AD | 与公开最优值的差距 | 相关资料 |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 单位正方形内 26 圆 | Higher | `2.6358627564136983` | `2.6359829624734026` | **2.635983083325037** | `+1.208516344e-7` | [代码](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/result.json) |
+| 周长为 4 的矩形内 21 圆 | Higher | `2.3658321334167627` | `2.365832229500823` | **2.365832375700835** | `+1.46200012e-7` | [代码](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/result.json) |
+| 正六边形内 11 个单位正六边形 | Lower | `3.930092` | `3.928906855463712` | **3.92468841680981** | `+0.004218438653902` | [代码](examples/applications/alphaevolve_math_benchmark/hexagon_packing/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/hexagon_packing/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/hexagon_packing/results/best/result.json) |
+| 16 点最大/最小距离比 | Lower | `12.88926611203463` | `12.889243547212832` | **12.889229907694045** | `+1.3639518787e-5` | [代码](examples/applications/alphaevolve_math_benchmark/max_min_distance_ratio/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/max_min_distance_ratio/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/max_min_distance_ratio/results/best/result.json) |
+| 不确定性不等式 | Lower | `0.35209910442252773` | `0.352099104421844` | **0.35209910441916187** | `+2.68213e-12` | [代码](examples/applications/alphaevolve_math_benchmark/uncertainty_inequality/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/uncertainty_inequality/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/uncertainty_inequality/results/best/result.json) |
+| 第二自相关不等式 | Higher | `0.8962799441554083` | `0.9027021077220739` | **0.9053043552878318** | `+0.0026022475657579` | [代码](examples/applications/alphaevolve_math_benchmark/second_autocorrelation/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/second_autocorrelation/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/second_autocorrelation/results/best/result.json) |
+| 第一自相关不等式 | Lower | `1.5052939684401607` | `1.509527314861778` | **1.507459811737381** | `-0.0021658432972203` | [代码](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/result.json) |
+| 最小重叠问题 | Lower | `0.380924` | `0.3809137564083654` | **0.38092504473534605** | `-1.128832698065e-5` | [代码](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/result.json) |
+| 等边三角形 Heilbronn 问题 | Higher | `0.036529889880030156` | `0.0365298898793351` | **0.0365298881927707** | `-1.687259456e-9` | [代码](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/result.json) |
+
+最小重叠与等边三角形 Heilbronn 是本次补充的两个接近公开最优值的结果。表中差距均统一相对两项公开基线中的更优值计算：正值表示实现提升，负值表示仍有差距。
 
 ## 快速开始
 
@@ -280,7 +300,7 @@ ruff check src/ tests/ --fix
 使用微信扫描二维码加入 LLM4AD_Next 社区群。
 
 <div align="center">
-  <img src="docs/assets/live-qr-20260818-033420.png"
+  <img src="docs/assets/live-qr-20260828-101026.png"
        alt="LLM4AD_Next 微信社区二维码"
        width="220">
 </div>

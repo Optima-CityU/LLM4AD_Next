@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from llm4ad.config.schema import EvalContext, ExecutableEvaluatorConfig
 from llm4ad.evaluator.behavior import BehaviorData
@@ -52,6 +52,8 @@ class EvaluationResult(BaseModel):
     metrics: dict[str, float]  # All evaluation metrics (objectives + secondary metrics)
     monitor_metrics: dict[str, float] = {}  # Metrics for monitoring (subset of metrics)
     metadata: dict[str, Any] = {}  # Extra info: monitoring, logs, analysis (optional)
+    evolution_feedback: dict[str, Any] = Field(default_factory=dict)
+    """Compact, safe evaluator findings that descendants may reuse."""
     success: bool = True  # Whether evaluation succeeded, defaults to True
     error_message: str | None = None  # Error message if failed, optional
     duration_ms: float = 0.0  # Evaluation duration in milliseconds, optional

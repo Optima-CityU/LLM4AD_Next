@@ -23,6 +23,7 @@ import { handleError } from "@/utils"
 const MINDMEMOS_RUNTIME_KEYS = [
   "mindmemos_base_url",
   "mindmemos_api_key",
+  "mindmemos_shared_api_key",
   "mindmemos_user_id",
   "mindmemos_app_id",
   "mindmemos_agent_id",

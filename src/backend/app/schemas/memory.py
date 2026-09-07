@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MemoryTestRequest(BaseModel):
@@ -87,6 +87,67 @@ class MemoryCardReadonlyInfo(BaseModel):
     source_timestamp: str | None = None
 
 
+class MemoryCardArtifact(BaseModel):
+    """Immutable source evidence selected by the extractor and copied by MindMemOS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    artifact_id: str = Field(min_length=1, max_length=512)
+    type: Literal["code", "formula", "table", "example", "quote", "metric"]
+    content: str = Field(min_length=1, max_length=200_000)
+    source_hash: str = Field(min_length=64, max_length=64)
+    language: str | None = Field(default=None, max_length=64)
+    source_block_id: str | None = Field(default=None, max_length=512)
+
+    @field_validator("content")
+    @classmethod
+    def preserve_exact_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("artifact content must not be empty")
+        return value
+
+
+class MemoryCardStructuredContent(BaseModel):
+    """LLM4AD card description plus lossless, independently editable facts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=4000)
+    content: list[str] = Field(min_length=1, max_length=100)
+    artifacts: list[MemoryCardArtifact] = Field(default_factory=list, max_length=100)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        text = " ".join(value.split())
+        if not text:
+            raise ValueError("description must not be empty")
+        return text
+
+    @field_validator("content")
+    @classmethod
+    def normalize_facts(cls, values: list[str]) -> list[str]:
+        facts: list[str] = []
+        for value in values:
+            fact = " ".join(value.split())
+            if fact and fact not in facts:
+                facts.append(fact)
+        if not facts:
+            raise ValueError("content must contain at least one fact")
+        return facts
+
+    def as_text(self) -> str:
+        sections = [self.description, "\n".join(f"- {fact}" for fact in self.content)]
+        for artifact in self.artifacts:
+            if artifact.type == "code":
+                sections.append(f"```{artifact.language or ''}\n{artifact.content}\n```")
+            elif artifact.type == "formula":
+                sections.append(f"$$\n{artifact.content}\n$$")
+            else:
+                sections.append(artifact.content)
+        return "\n\n".join(section for section in sections if section)
+
+
 class MemoryCardResponse(BaseModel):
     """MindMemOS memory item mapped for the LLM4AD memory UI."""
 
@@ -94,6 +155,7 @@ class MemoryCardResponse(BaseModel):
     type: str
     title: str
     content: str
+    structured_content: MemoryCardStructuredContent | None = None
     enabled: bool = True
     source: str = "static"
     tags: list[str] = Field(default_factory=list)
@@ -102,6 +164,7 @@ class MemoryCardResponse(BaseModel):
     algorithm_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     readonly: MemoryCardReadonlyInfo = Field(default_factory=MemoryCardReadonlyInfo)
+    operation: Literal["add", "update", "reinforcement"] | None = None
 
 
 class MemoryCardUpsertRequest(BaseModel):
@@ -111,6 +174,7 @@ class MemoryCardUpsertRequest(BaseModel):
     type: str = "general_insight"
     title: str = ""
     content: str
+    structured_content: MemoryCardStructuredContent | None = None
     enabled: bool = True
     tags: list[str] = Field(default_factory=list)
     score: float | None = None
@@ -126,35 +190,22 @@ class MemoryCardStatusUpdate(BaseModel):
 
 
 class MemoryCardExtractionRequest(BaseModel):
-    """Generate MindMemOS memory previews from a raw user description."""
+    """Process a raw user description through MindMemOS immediately."""
 
     content: str = Field(min_length=1, max_length=20000)
     prompt_language: Literal["ZH", "EN"] | None = None
 
 
 class MemoryCardExtractionResponse(BaseModel):
-    """Preview memories extracted by MindMemOS before the user confirms them."""
+    """Memories affected by one MindMemOS processing operation."""
 
     preview_id: str
     items: list[MemoryCardResponse]
     message: str = ""
 
 
-class MemoryCardExtractionCommitRequest(BaseModel):
-    """Confirm which extracted preview memories should become active."""
-
-    selected_ids: list[str] = Field(default_factory=list)
-    all_ids: list[str] = Field(default_factory=list)
-
-
-class MemoryCardExtractionDiscardRequest(BaseModel):
-    """Discard temporary extracted preview memories."""
-
-    memory_ids: list[str] = Field(default_factory=list)
-
-
 class TaskMemoryPromotionRequest(BaseModel):
-    """Promote selected task-memory cards into project-memory previews."""
+    """Promote selected task-memory cards into project memory."""
 
     project_id: uuid.UUID
     task_id: uuid.UUID

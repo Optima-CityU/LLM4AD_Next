@@ -15,6 +15,8 @@ import { cn, formatScore } from "@/lib/utils"
 import { ISLAND_COLORS } from "./island-ga-mock-data"
 
 type ViewMode = "global" | "instance"
+/** Y 轴刻度模式：线性，或 symlog（对数式，压缩离群点、兼容 0/负分）。 */
+type ScaleMode = "linear" | "log"
 
 interface GenerationStats {
   generation: number
@@ -54,7 +56,7 @@ const GEN_MAX_COLOR = "#a66cff"
  */
 function measureAxisLeftMargin(
   g: d3.Selection<SVGGElement, unknown, null, undefined>,
-  yScale: d3.ScaleLinear<number, number>,
+  yScale: d3.ScaleContinuousNumeric<number, number>,
   tickCount: number,
 ): number {
   const probe = g.append("g").call(d3.axisLeft(yScale).ticks(tickCount))
@@ -84,11 +86,71 @@ const SUB_VIEWS: Array<{ value: ViewMode; labelKey: string }> = [
   { value: "instance", labelKey: "evolution.panel.trend.instanceTrend" },
 ]
 
+/**
+ * Build the y-axis scale for the plotted scores in the chosen scale mode.
+ *
+ * Linear mode is the classic padded `[min, max]` domain. Log mode uses
+ * `scaleSymlog` (symmetric log) instead of `scaleLog` so that scores at or
+ * below zero — common for evolution objectives — stay well-defined; symlog is
+ * linear near zero and compresses large magnitudes, pulling a single very-low
+ * outlier back in so the rest of the series spreads out.
+ *
+ * The symlog `constant` (width of the near-zero linear window) is derived from
+ * the data rather than left at d3's default of 1: it's set to the median of the
+ * non-zero absolute scores. Without this, data whose magnitude is far below 1
+ * (e.g. scores in 0.001–0.05) would fall entirely inside the linear window and
+ * symlog would degrade to a near-linear axis — defeating the outlier
+ * compression. Tying the constant to the typical score magnitude keeps the mid
+ * band around the linear→log transition where it spreads out best.
+ *
+ * @param scores - All plotted score values (used for domain + symlog constant).
+ * @param range - Pixel range `[bottom, top]` for the axis.
+ * @param mode - `"linear"` or `"log"` (symlog).
+ * @returns A d3 continuous scale mapping score → pixel.
+ */
+function buildYScale(
+  scores: number[],
+  range: [number, number],
+  mode: ScaleMode,
+): d3.ScaleContinuousNumeric<number, number> {
+  const yMin = Math.min(...scores)
+  const yMax = Math.max(...scores)
+  const pad = (yMax - yMin) * 0.08 || 1
+  if (mode === "log") {
+    // symlog 的 constant C 决定「近零线性窗口」的宽度：C 越小，对数压缩越早
+    // 介入 —— 小值区间被拉得越开、大值浮动被压得越小。取非零 |score| 的中位数
+    // 作为数据尺度基准，再除以 LOG_STRENGTH 把窗口收窄、放大对数效果。
+    // absSorted 对离群点本身鲁棒（中位数不受单个极低值影响）。全零时回退到 1。
+    const LOG_STRENGTH = 8
+    const absSorted = scores
+      .map(Math.abs)
+      .filter((v) => v > 0)
+      .sort((a, b) => a - b)
+    const median =
+      absSorted.length > 0 ? absSorted[Math.floor(absSorted.length / 2)] : 1
+    // 下限防止 C→0 造成数值退化（symlog 在 C 过小时接近纯 log 而对 0 附近敏感）。
+    const constant = Math.max(median / LOG_STRENGTH, 1e-6)
+    // symlog needs no padding to avoid a zero blow-up; `.nice()` is skipped
+    // since symlog tick values aren't round.
+    return d3
+      .scaleSymlog<number, number>()
+      .domain([yMin - pad, yMax + pad])
+      .constant(constant)
+      .range(range)
+  }
+  return d3
+    .scaleLinear()
+    .domain([yMin - pad, yMax + pad])
+    .nice()
+    .range(range)
+}
+
 export default function TrendPanel() {
   const { t } = useTranslation()
   const { evolutionData, currentGeneration } = useEvolution()
 
   const [viewMode, setViewMode] = useState<ViewMode>("global")
+  const [scaleMode, setScaleMode] = useState<ScaleMode>("log")
   const [selectedNodeNames, setSelectedNodeNames] = useState<Set<string>>(
     new Set(),
   )
@@ -221,15 +283,8 @@ export default function TrendPanel() {
     if (innerH <= 0) return
 
     const allScores = globalTrendData.flatMap((d) => [d.maxScore, d.genMaxScore])
-    const yMin = Math.min(...allScores)
-    const yMax = Math.max(...allScores)
-    const yPad = (yMax - yMin) * 0.08 || 1
 
-    const yScale = d3
-      .scaleLinear()
-      .domain([yMin - yPad, yMax + yPad])
-      .nice()
-      .range([height - MARGIN.bottom, MARGIN.top])
+    const yScale = buildYScale(allScores, [height - MARGIN.bottom, MARGIN.top], scaleMode)
 
     const g = svg.append("g")
 
@@ -454,7 +509,7 @@ export default function TrendPanel() {
       tooltipLine.style("display", "none")
       tooltipG.style("display", "none")
     })
-  }, [viewMode, globalTrendData, dimensions, currentGeneration, t])
+  }, [viewMode, globalTrendData, dimensions, currentGeneration, scaleMode, t])
 
   // D3 rendering: instance trend
   useEffect(() => {
@@ -487,15 +542,8 @@ export default function TrendPanel() {
     const allScores = instanceTrendData.flatMap((line) =>
       line.points.map((p) => p.rawScore),
     )
-    const yMin = Math.min(...allScores)
-    const yMax = Math.max(...allScores)
-    const yPad = (yMax - yMin) * 0.08 || 1
 
-    const yScale = d3
-      .scaleLinear()
-      .domain([yMin - yPad, yMax + yPad])
-      .nice()
-      .range([height - MARGIN.bottom, MARGIN.top])
+    const yScale = buildYScale(allScores, [height - MARGIN.bottom, MARGIN.top], scaleMode)
 
     const g = svg.append("g")
 
@@ -694,6 +742,7 @@ export default function TrendPanel() {
     dimensions,
     currentGeneration,
     selectedNodeNames,
+    scaleMode,
     t,
   ])
 
@@ -716,6 +765,27 @@ export default function TrendPanel() {
               )}
             >
               {t(opt.labelKey)}
+            </button>
+          ))}
+        </div>
+
+        {/* Y-axis scale toggle: log (symlog) compresses low outliers so the rest
+            of the series is no longer flattened into a straight line. */}
+        <div className="flex items-center gap-0.5 border-l border-border/40 pl-2">
+          {(["linear", "log"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setScaleMode(m)}
+              title={t(`evolution.panel.trend.scale.${m}Hint`, "")}
+              className={cn(
+                "px-2 py-0.5 text-xs rounded transition-all duration-200",
+                scaleMode === m
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground hover:text-secondary-foreground hover:bg-accent/30",
+              )}
+            >
+              {t(`evolution.panel.trend.scale.${m}`)}
             </button>
           ))}
         </div>

@@ -6,25 +6,26 @@ HOW TO USE THIS TEMPLATE:
     3. Lines without TODO are reusable boilerplate (don't change)
     4. Reference in YAML config: module: "my_evaluator.py:MyEvaluator"
 
-SUBPROCESS ISOLATION:
-    All evaluations run in a subprocess for fault isolation. LLM-generated
-    code may segfault, deadlock, call sys.exit(), or leak memory — none of
-    these can crash the main orchestrator when running in a subprocess.
+SUBPROCESS ISOLATION (SEPARATE-SCRIPT CONTRACT):
+    Every evaluation runs the algorithm file as its own subprocess:
 
-    Two subprocess variants:
-    - Separate script: evaluator spawns `python my_function.py '<json>'`
-      (like TSP, Sorting). Use when the algorithm file already has a main().
-    - Self-spawning: evaluator spawns `python my_evaluator.py '<json>'`
-      (like LunarLander). Use when the evaluator needs to load the algorithm
-      module and run a simulation/loop before returning results.
+        python <algorithm_file> '<instance_json>'
 
-    This template uses the self-spawning pattern — the evaluate() method
-    spawns this file as a subprocess, and the __main__ block at the bottom
-    acts as the subprocess entry point. Adapt as needed for your task.
+    The algorithm file's ``main()`` reads the FULL instance dict from
+    ``sys.argv[1]``, runs the algorithm, and prints ONE JSON object to
+    stdout. The evaluator spawns that process, parses the JSON, and turns
+    it into a score. This is the single contract used across the whole
+    platform — the algorithm file, this evaluator, and the build-time
+    validator all invoke the algorithm exactly the same way.
+
+    Fault isolation: segfaults, ``sys.exit()``, deadlocks, or memory leaks
+    in generated algorithm code cannot crash the main orchestrator, because
+    the algorithm only ever runs inside the spawned subprocess.
 
 COMMON DATA FORMAT:
     One JSON file per instance. Each evaluate() call receives one JSON file
-    via cfg.data_path. The dispatcher discovers files and aggregates results.
+    via ``cfg.data_path``. The file's contents are passed verbatim to the
+    algorithm subprocess as ``sys.argv[1]``.
 
 WORKTREE COMPATIBILITY:
     In production, the algorithm file lives in a git worktree (flat layout):
@@ -54,9 +55,9 @@ from llm4ad.evaluator.base import (
 class MyTaskEvaluator(BaseEvaluator):
     """Evaluator template for a custom Python design task.
 
-    Spawns each evaluation as an isolated subprocess by invoking this file's
-    __main__ block. The subprocess loads input data, runs the algorithm, and
-    prints a JSON result to stdout.
+    Runs each evaluation by spawning the algorithm file as an isolated
+    subprocess (``python <algorithm_file> '<instance_json>'``), then parses
+    the JSON the subprocess prints to stdout and computes a score.
 
     Benefits:
     - Segfaults, sys.exit(), memory leaks in generated code cannot crash
@@ -98,6 +99,30 @@ class MyTaskEvaluator(BaseEvaluator):
         return self._metrics
 
     # ====================================================================
+    # Locate the algorithm file (worktree-compatible)
+    # ====================================================================
+
+    @staticmethod
+    def _resolve_algorithm_file(project_root: Path) -> Path | None:
+        """Find the algorithm file under either the nested or flat layout.
+
+        Args:
+            project_root: Root directory passed via ``cfg.project_root``.
+
+        Returns:
+            Path to the algorithm file, or ``None`` if it cannot be found.
+        """
+        # TODO: Change "my_algorithm" to your algorithm directory name and
+        # "my_function.py" to your algorithm filename.
+        nested = project_root / "my_algorithm" / "my_function.py"
+        if nested.exists():
+            return nested
+        flat = project_root / "my_function.py"
+        if flat.exists():
+            return flat
+        return None
+
+    # ====================================================================
     # Main process side: spawn subprocess, parse result
     # ====================================================================
 
@@ -107,14 +132,14 @@ class MyTaskEvaluator(BaseEvaluator):
     ) -> EvaluationResult:
         """Evaluate an algorithm implementation via subprocess.
 
-        Spawns this file as a subprocess with the algorithm directory, data
-        file path, and any additional parameters as a JSON argument. The
-        subprocess runs the algorithm and prints a JSON result to stdout.
+        Spawns the algorithm file as a subprocess, passing the full instance
+        JSON as ``sys.argv[1]``. The subprocess runs the algorithm and prints
+        a single JSON object to stdout.
 
         Args:
             cfg: EvalContext with:
                 - cfg.project_root: path to algorithm directory (worktree or local)
-                - cfg.data_path: path to the data file for this evaluation
+                - cfg.data_path: path to the JSON data file for this evaluation
                 - cfg.timeout: max execution time in seconds
 
         Returns:
@@ -136,34 +161,24 @@ class MyTaskEvaluator(BaseEvaluator):
                     duration_ms=(time.time() - start_time) * 1000,
                 )
 
-            # --- Step 2: Find algorithm directory (worktree-compatible) ---
-            # TODO: Change "my_algorithm" to your algorithm directory (repo) name
-            # TODO: Change "my_function.py" to targeted algorithm filename
-            algo_dir = project_root / "my_algorithm"
-            if not algo_dir.exists():
-                if (project_root / "my_function.py").exists():
-                    algo_dir = project_root
-                else:
-                    return EvaluationResult(
-                        score=0.0,
-                        metrics={},
-                        success=False,
-                        error_message=f"Algorithm not found in {project_root}",
-                        duration_ms=(time.time() - start_time) * 1000,
-                    )
+            # --- Step 2: Locate the algorithm file (boilerplate) ---
+            algo_file = self._resolve_algorithm_file(project_root)
+            if algo_file is None:
+                return EvaluationResult(
+                    score=0.0,
+                    metrics={},
+                    success=False,
+                    error_message=f"Algorithm file not found in {project_root}",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
 
-            # --- Step 3: Spawn subprocess (boilerplate) ---
-            input_json = json.dumps({
-                "algo_dir": str(algo_dir),
-                "data_path": str(data_path),
-                # TODO(optional): Add extra parameters the subprocess needs
-                # e.g. "seed": seed, "max_steps": max_steps
-            })
-
-            evaluator_script = str(Path(__file__).resolve())
+            # --- Step 3: Spawn algorithm subprocess (boilerplate) ---
+            # The full instance JSON is passed verbatim as argv[1]; the
+            # algorithm's main() reads it with json.loads(sys.argv[1]).
+            instance_json = data_path.read_text(encoding="utf-8").strip()
 
             proc = await asyncio.create_subprocess_exec(
-                sys.executable, evaluator_script, input_json,
+                sys.executable, str(algo_file), instance_json,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -208,30 +223,35 @@ class MyTaskEvaluator(BaseEvaluator):
                     duration_ms=duration_ms,
                 )
 
-            if "error" in result:
+            if isinstance(result, dict) and "error" in result:
                 return EvaluationResult(
                     score=0.0,
                     metrics={},
                     success=False,
-                    error_message=result["error"],
+                    error_message=str(result["error"]),
                     duration_ms=duration_ms,
                 )
 
             # --- Step 5: Compute score from subprocess result ---
-            # TODO: Extract values from result dict and compute your score.
-            # The result dict is whatever _run_algorithm() returns (see below).
+            # TODO: Extract values from the result dict and compute your score.
+            # The result dict is whatever the algorithm's process() returns.
             #
             # Score convention (higher is always better for evolution):
             #   MINIMIZE tasks (tour length, time): score = -value
             #   MAXIMIZE tasks (reward, accuracy):  score = value
             #   Composite: score = w1*metric1 + w2*metric2 + ...
-            primary = result.get("primary_score", 0.0)
+            payload = result.get("result", result) if isinstance(result, dict) else result
+            primary = result.get("primary_score", 0.0) if isinstance(result, dict) else 0.0
             score = float(primary)
 
             # TODO: Build metrics dict matching your _metrics definitions
             metrics = {
                 "primary_score": score,
-                "execution_time_ms": result.get("execution_time_ms", duration_ms),
+                "execution_time_ms": (
+                    result.get("execution_time_ms", duration_ms)
+                    if isinstance(result, dict)
+                    else duration_ms
+                ),
             }
 
             return EvaluationResult(
@@ -241,6 +261,7 @@ class MyTaskEvaluator(BaseEvaluator):
                 duration_ms=duration_ms,
                 metadata={
                     "dataset": str(data_path),
+                    "result": payload,
                 },
             )
 
@@ -252,129 +273,3 @@ class MyTaskEvaluator(BaseEvaluator):
                 error_message=f"Evaluation error: {e}",
                 duration_ms=(time.time() - start_time) * 1000,
             )
-
-    # ====================================================================
-    # Subprocess side: load algorithm, run evaluation, return JSON
-    # ====================================================================
-
-    @staticmethod
-    def _run_algorithm(algo_dir: Path, data_path: Path) -> dict:
-        """Run the algorithm on a single data instance (subprocess side).
-
-        This method runs inside the isolated subprocess. It loads the
-        algorithm, executes it on the input data, and returns a result dict.
-
-        Two common patterns:
-
-        1. Single-call (TSP/Sorting):
-           algo_result = algo_func(input_data)
-
-        2. Simulation loop (LunarLander/RL):
-           for step in range(max_steps):
-               action = algo_func(state)
-               state, reward = env.step(action)
-
-        Args:
-            algo_dir: Directory containing the algorithm code.
-            data_path: Path to the JSON data file for this instance.
-
-        Returns:
-            Dict with result fields. Must NOT contain "error" key on success.
-            On failure, return {"error": "description"}.
-        """
-        import importlib.util
-
-        start_time = time.time()
-
-        # --- Load data (boilerplate) ---
-        with open(data_path, encoding="utf-8") as f:
-            test_data = json.load(f)
-
-        # TODO: Extract input fields from your JSON data format
-        # Examples:
-        #   input_data = test_data["nodes"]              # TSP
-        #   seed = test_data["seed"]                     # LunarLander
-        #   input_data = test_data["input"]              # Generic
-        input_data = test_data.get("input", [])
-        expected = test_data.get("expected_output", None)
-
-        # --- Load algorithm module (boilerplate, only change filename) ---
-        # TODO: Change "my_function.py" to your algorithm filename
-        module_file = algo_dir / "my_function.py"
-        if not module_file.exists():
-            return {"error": f"my_function.py not found in {algo_dir}"}
-
-        module_name = f"_algo_{hash(str(module_file))}"
-        spec = importlib.util.spec_from_file_location(module_name, str(module_file))
-        if spec is None or spec.loader is None:
-            return {"error": f"Cannot load module from {module_file}"}
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        # TODO: Change "my_algorithm" to your function name in the module
-        algo_func = module.my_algorithm
-
-        # TODO: Implement your evaluation logic. This is the core of your task.
-        # Single-call example:
-        #   algo_result = algo_func(input_data)
-        # Simulation/RL example:
-        #   env = gym.make("LunarLander-v3")
-        #   obs, _ = env.reset(seed=seed)
-        #   for step in range(max_steps):
-        #       action = algo_func(obs.tolist(), last_action, prev_obs.tolist())
-        #       obs, reward, done, _, _ = env.step(action)
-        #       if done: break
-        try:
-            algo_result = algo_func(input_data)
-        except Exception as e:
-            return {"error": f"Algorithm execution failed: {e}"}
-
-        execution_time_ms = (time.time() - start_time) * 1000
-
-        # TODO: Compute result metrics from algorithm output.
-        # The keys here must match what evaluate() reads in Step 5.
-        is_correct = algo_result == expected if expected is not None else True
-        primary_score = 1.0 if is_correct else 0.0
-
-        return {
-            "primary_score": primary_score,
-            "execution_time_ms": execution_time_ms,
-            # TODO(optional): Add additional result fields
-            # e.g. "tour_length": length, "fuel_consumed": fuel
-        }
-
-
-# ---------------------------------------------------------------------------
-# Subprocess entry point (boilerplate — no changes needed)
-# ---------------------------------------------------------------------------
-# When this file is executed directly (python my_evaluator.py '<json>'),
-# it loads the algorithm, runs the evaluation, and prints JSON to stdout.
-# The evaluate() method above spawns this subprocess for fault isolation.
-
-
-def _subprocess_main() -> None:
-    """Run a single evaluation in an isolated subprocess."""
-    if len(sys.argv) < 2:
-        print("Usage: python my_evaluator.py '<json>'", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        input_data = json.loads(sys.argv[1])
-    except json.JSONDecodeError as exc:
-        print(f"Invalid JSON input: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    algo_dir = Path(input_data["algo_dir"])
-    data_path = Path(input_data["data_path"])
-
-    try:
-        result = MyTaskEvaluator._run_algorithm(algo_dir, data_path)
-    except Exception as exc:
-        result = {"error": str(exc)}
-
-    print(json.dumps(result))
-
-
-if __name__ == "__main__":
-    _subprocess_main()

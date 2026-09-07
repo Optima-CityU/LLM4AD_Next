@@ -40,6 +40,7 @@ class BuildError(Exception):
 # Primary async API
 # ======================================================================
 
+
 async def build_task(
     description: str,
     output_dir: str = "./",
@@ -142,7 +143,9 @@ async def build_task(
     # Stage 3: Validate & repair
     _progress(3, "Validating generated code...")
     validator = TaskValidator(provider)
-    blueprint = await validator.validate(blueprint, max_attempts=max_repair_attempts, multimodal=multimodal)
+    blueprint = await validator.validate(
+        blueprint, max_attempts=max_repair_attempts, multimodal=multimodal
+    )
 
     if not blueprint.is_valid():
         errors_summary = "\n".join(f"  - {e}" for e in blueprint.validation_errors)
@@ -161,6 +164,7 @@ async def build_task(
 # ======================================================================
 # Synchronous frontend API
 # ======================================================================
+
 
 def build_task_sync(
     description: str,
@@ -231,6 +235,7 @@ def build_task_sync(
 # Config-based API (multi-user platform)
 # ======================================================================
 
+
 async def build_from_config(
     config_path: str | Path,
     *,
@@ -292,16 +297,39 @@ def build_from_config_sync(
 
     All parameters are identical to :func:`build_from_config`.
     """
-    return asyncio.run(
-        build_from_config(config_path, on_progress=on_progress)
-    )
+    return asyncio.run(build_from_config(config_path, on_progress=on_progress))
 
 
 def _resolve_description(description: str) -> str:
-    """Resolve description from file path if applicable."""
-    desc_path = Path(description)
-    if desc_path.exists() and desc_path.suffix in (".md", ".txt"):
-        return desc_path.read_text(encoding="utf-8")
+    """Resolve description from a file path, or return the text as-is.
+
+    When ``description`` is a free-form prompt (e.g. multi-line text, or a
+    string longer than the OS path limit), constructing a ``Path`` and probing
+    it can raise ``OSError``/``ValueError`` on some platforms rather than
+    reporting "not a file". Multi-line inputs short-circuit early, and any
+    filesystem error is treated as "not a file path".
+
+    Args:
+        description: Either a path to a ``.md``/``.txt`` file, or the raw
+            description text.
+
+    Returns:
+        The file contents when ``description`` points to an existing
+        ``.md``/``.txt`` file, otherwise ``description`` unchanged.
+    """
+    # Fast path: multi-line strings are descriptions, never file paths. This
+    # also avoids passing them to Path(), which can raise on some platforms.
+    if not description or "\n" in description or "\x00" in description:
+        return description
+
+    try:
+        desc_path = Path(description)
+        if desc_path.suffix in (".md", ".txt") and desc_path.is_file():
+            return desc_path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        # Path too long, invalid characters, or unreadable — treat the input
+        # as literal description text.
+        return description
     return description
 
 
@@ -369,8 +397,7 @@ def _resolve_from_global_settings(provider_name: str) -> BaseProvider:
     if provider_name not in providers_by_name:
         available = ", ".join(providers_by_name.keys())
         raise BuildError(
-            f"Provider '{provider_name}' not found in global settings.\n"
-            f"Available: {available}"
+            f"Provider '{provider_name}' not found in global settings.\n" f"Available: {available}"
         )
 
     cfg = providers_by_name[provider_name]

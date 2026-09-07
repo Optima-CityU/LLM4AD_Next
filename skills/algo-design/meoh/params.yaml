@@ -1,0 +1,20 @@
+# MEoH (Multi-objective Evolution of Heuristics) - Recommended Parameters
+# Paper: Yao et al., AAAI 2025
+
+evolution:
+  type: "meoh"
+  max_generations: 50          # increase for harder problems
+  population_size: 80          # larger for multi-objective front coverage
+  selection_num: 5             # parents for crossover
+  max_sample_nums: 100         # LLM call budget cap
+  num_samplers: 1              # parallel candidates per generation
+  objective_metrics:           # list of metric names to optimize
+    - "cost"
+    - "time"
+  use_e2_operator: true        # enable E2 crossover
+  use_m1_operator: true        # enable M1 merge
+  use_m2_operator: true        # enable M2 refinement
+  seed_path: null              # optional seed path
+
+planner:
+  type: "meoh_evolution"

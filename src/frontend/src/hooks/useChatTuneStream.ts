@@ -16,10 +16,21 @@ export interface ChatTuneStageUpdate {
   review_status?: ChatTuneStageStatus
 }
 
+/**
+ * Periodic keep-alive progress pushed by the backend while the agent container
+ * works silently (no chunks). Keeps the SSE stream alive and feeds an
+ * elapsed-time indicator in the UI.
+ */
+export interface ChatTuneProgress {
+  stage?: string
+  elapsed_seconds?: number
+}
+
 export interface ChatTuneStreamCallbacks {
   onChunk: (content: string) => void
   onPayload: (payload: Record<string, unknown>) => void
   onStageUpdate?: (update: ChatTuneStageUpdate) => void
+  onProgress?: (progress: ChatTuneProgress) => void
   onDone: () => void
   onCancelled: () => void
   onError: (error: string) => void
@@ -132,6 +143,9 @@ function processSSEEvent(
         break
       case "stage_update":
         callbacks.onStageUpdate?.(parsed as ChatTuneStageUpdate)
+        break
+      case "progress":
+        callbacks.onProgress?.(parsed as ChatTuneProgress)
         break
       case "done":
         callbacks.onDone()

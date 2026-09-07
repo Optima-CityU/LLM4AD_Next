@@ -9,7 +9,10 @@ from llm4ad.planner.memory import (
     BaseMemory,
     BaseMemoryExtractor,
     Memory,
+    MemoryCard,
     MemoryExtractor,
+    MemoryType,
+    NullMemory,
     create_memory,
     create_memory_extractor,
 )
@@ -29,12 +32,88 @@ def test_create_memory_uses_local_yaml_by_default():
     assert memory.max_prompt_cards == config.max_prompt_cards
 
 
+def test_create_memory_returns_noop_memory_when_disabled(tmp_path):
+    """Disabled memory must not load, persist, retrieve, or extract cards."""
+    config = MemoryConfig(
+        enabled=False,
+        static_cards=[
+            {
+                "type": "domain_knowledge",
+                "title": "must stay disabled",
+                "content": "This card must never enter a prompt.",
+            }
+        ],
+    )
+
+    memory = create_memory(config)
+    memory.set_memory_dir(tmp_path / "memory")
+    memory.load_static_cards(config.static_cards)
+    memory.extractor = object()
+
+    assert isinstance(memory, NullMemory)
+    assert memory.extractor is None
+    assert memory.list_cards() == []
+    assert memory.get_prompt_context("query") == ""
+    assert memory.get_stats() == {"enabled": False, "total_cards": 0}
+    assert not (tmp_path / "memory").exists()
+
+
 def test_create_memory_reports_unknown_type():
     """Unknown memory type should raise a clear registry error."""
     config = MemoryConfig(type="missing_memory")
 
     with pytest.raises(KeyError, match="missing_memory"):
         create_memory(config)
+
+
+@pytest.mark.asyncio
+async def test_local_memory_honors_island_success_and_correction_roles():
+    """Short-term memory follows the same bounded island policy as MindMemOS."""
+    memory = Memory({"max_prompt_cards": 5, "task_memory_limit": 5, "persist": False})
+    for index in range(3):
+        await memory.add_card(
+            MemoryCard(
+                type=MemoryType.GOOD_ALGORITHM,
+                title=f"good-{index}",
+                content=f"successful mechanism {index}",
+                score=3 - index,
+            ),
+            persist=False,
+        )
+    for index in range(3):
+        await memory.add_card(
+            MemoryCard(
+                type=MemoryType.ERROR_REFLECTION,
+                title=f"error-{index}",
+                content=f"failure constraint {index}",
+                score=index,
+            ),
+            persist=False,
+        )
+
+    success_only = await memory.aget_prompt_context(
+        context={
+            "island_strategy": {
+                "memory_policy": "success_only",
+                "success_memory_ratio": 1.0,
+                "error_memory_ratio": 0.0,
+            }
+        }
+    )
+    corrective = await memory.aget_prompt_context(
+        context={
+            "island_strategy": {
+                "memory_policy": "corrective",
+                "success_memory_ratio": 0.6,
+                "error_memory_ratio": 0.4,
+            }
+        }
+    )
+
+    assert "successful mechanism" in success_only
+    assert "failure constraint" not in success_only
+    assert corrective.count("successful mechanism") == 3
+    assert corrective.count("failure constraint") == 2
 
 
 def test_create_memory_imports_custom_module(tmp_path, monkeypatch):

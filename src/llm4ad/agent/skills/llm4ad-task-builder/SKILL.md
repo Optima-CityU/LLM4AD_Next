@@ -48,10 +48,12 @@ evolve algorithms for one problem:
   example both sides use `solve.py`.
 
 **Evaluator** (`<name>_evaluator.py`):
+- **Before writing evaluator code**, read `reference/api-contract.md` for the complete
+  BaseEvaluator contract and common pitfalls.
 - Subclasses `BaseEvaluator`, decorated `@BaseEvaluator.register("<name>")`, with a
   no-argument `__init__(self)` (the base `__init__` takes no config).
-- Implements `metrics` (list of `Metric(name, type=MINIMIZE|MAXIMIZE, weight, description)`),
-  `name`, and `async def evaluate(self, cfg: EvalContext) -> EvaluationResult`.
+- Implements `metrics` (list of `Metric(name, type=MetricType.MINIMIZE, weight, description)`
+  — note `MetricType.MINIMIZE`, not bare `MINIMIZE`), `name`, and `async def evaluate(self, cfg: EvalContext) -> EvaluationResult`.
 - `cfg: EvalContext` carries `cfg.project_root` (the candidate's worktree dir),
   `cfg.data_path` (the current data file), and `cfg.timeout` (seconds per instance).
 - `evaluate` locates the algorithm file **by hardcoded name** under
@@ -71,8 +73,9 @@ evolve algorithms for one problem:
 **debug_run.py** / **test_evaluator.py**: standard boilerplate that runs
 `config.yaml` end-to-end and loads the evaluator, respectively.
 
-See `reference/config-template.yaml` for the config shape and `reference/example-tsp.md`
-for a pointer to a complete, known-good package in this repo to adapt.
+See `reference/api-contract.md` for the BaseEvaluator contract and
+`reference/templates/` for two complete, copyable template packages demonstrating
+different problem patterns (see `reference/templates/README.md`).
 
 ## The information to gather before building
 
@@ -135,7 +138,7 @@ evolution:
   migration_interval: 5       # gens between cross-island exchanges
   migration_rate: 0.1         # fraction of individuals migrated
   migration_strategy: "best"  # best | random | elite | worst
-  migration_topology: "ring"  # ring | fully_connected | hierarchical | mesh
+  migration_topology: "ring"  # ring | full | hierarchy | mesh
   parallel_islands: true      # run islands concurrently
 planner:
   type: "llm_evolution"

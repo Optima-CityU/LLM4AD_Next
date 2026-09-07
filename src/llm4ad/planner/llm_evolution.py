@@ -15,7 +15,12 @@ from llm4ad.infra.provider import BaseProvider
 from llm4ad.infra.repo_analyzer import AnalyzedRepository
 from llm4ad.infra.state import StateTracker
 from llm4ad.infra.version_control import BaseVersionControl, WorktreeInfo
-from llm4ad.planner.base import Algorithm, BasePlanner, InsightType
+from llm4ad.planner.base import (
+    Algorithm,
+    BasePlanner,
+    InsightType,
+    deduplicate_algorithms_by_code,
+)
 from llm4ad.planner.memory import Memory
 from llm4ad.planner.sampler.base import BaseSampler
 from llm4ad.planner.sampler.prompt_templates import (
@@ -149,6 +154,7 @@ class LLMEvolutionPlanner(BasePlanner):
         logger.info(f"Creating worktree for island {island_id} ({worktree_name}) ...")
         version_control_result = self.version_control.create_worktree(
             name=worktree_name,
+            base_commit=kwargs.get("base_commit"),
         )
 
         if not version_control_result.success or not version_control_result.data:
@@ -187,9 +193,21 @@ class LLMEvolutionPlanner(BasePlanner):
             New algorithm individual with insight description
         """
         start_time = time.time()
+        strategy = kwargs.get("island_strategy")
+        independent_exploration = bool(
+            isinstance(strategy, dict) and strategy.get("independent_exploration")
+        )
+        memory_free_exploration = bool(
+            isinstance(strategy, dict) and strategy.get("memory_policy") == "none"
+        )
+        sample_kwargs = dict(kwargs)
+        if independent_exploration or memory_free_exploration:
+            sample_kwargs["disable_memory"] = True
 
-        # For an empty population (generation 0), use init sampler
-        if len(population) == 0 or generation == 0:
+        # Initial populations and explicitly scheduled independent exploration
+        # use a parentless proposal. Ordinary later generations must not select
+        # init_sampler accidentally from the generic sampler pool.
+        if len(population) == 0 or generation == 0 or independent_exploration:
             # Find init sampler
             init_sampler = self.sampler_map.get("init_sampler")
             if init_sampler is None and self.samplers:
@@ -197,21 +215,79 @@ class LLMEvolutionPlanner(BasePlanner):
                 init_sampler = self.samplers[0]
             if init_sampler is None:
                 raise ValueError("No init_sampler available for initial generation")
-            algorithm = await init_sampler.sample(parents=population, generation=generation, **kwargs)
+            algorithm = await init_sampler.sample(
+                parents=[] if independent_exploration else population,
+                generation=generation,
+                **sample_kwargs,
+            )
         else:
             # Use SamplerSelector to choose a sampler for evolution
             if self.sampler_selector is None or not self.samplers:
                 raise ValueError("No samplers or sampler selector available for evolution")
 
             # Select a sampler using the selector
-            selected_samplers = self.sampler_selector.select(n=1, population=population)
+            selected_samplers = self.sampler_selector.select(
+                n=1,
+                population=population,
+                exclude_sampler_names={"init_sampler"},
+            )
+            if not selected_samplers:
+                raise ValueError("No parent-based sampler available for evolution")
             sampler = selected_samplers[0]
+
+            deduplicate_parent_code = bool(
+                kwargs.get("deduplicate_parent_code", True)
+            )
+            unique_population = (
+                deduplicate_algorithms_by_code(population)
+                if deduplicate_parent_code
+                else list(
+                    {individual.id: individual for individual in population}.values()
+                )
+            )
+            if sampler.name == "crossover_sampler" and len(unique_population) < 2:
+                mutation_sampler = self.sampler_map.get("mutation_sampler")
+                if mutation_sampler is None:
+                    raise ValueError(
+                        "Crossover requires two distinct parents and no mutation_sampler is available"
+                    )
+                logger.info(
+                    "Falling back from crossover to mutation: only {} distinct parent(s)",
+                    len(unique_population),
+                )
+                sampler = mutation_sampler
 
             logger.info(f"Selected sampler for generation {generation}: {sampler.name}")
 
             # Prepare parents for the sampler based on its n_parents requirement
-            parents = self.select_parents(population, sampler.n_parents, self.config.parent_selection_strategy)
-            algorithm = await sampler.sample(parents=parents, generation=generation, **kwargs)
+            parents = self.select_parents(
+                unique_population,
+                sampler.n_parents,
+                self.config.parent_selection_strategy,
+                deduplicate_code=deduplicate_parent_code,
+            )
+            if sampler.name == "crossover_sampler" and len({parent.id for parent in parents}) < 2:
+                mutation_sampler = self.sampler_map.get("mutation_sampler")
+                if mutation_sampler is None:
+                    raise ValueError(
+                        "Crossover parent selection produced fewer than two distinct parents "
+                        "and no mutation_sampler is available"
+                    )
+                logger.info(
+                    "Falling back from crossover to mutation after parent selection"
+                )
+                sampler = mutation_sampler
+                parents = self.select_parents(
+                    unique_population,
+                    sampler.n_parents,
+                    self.config.parent_selection_strategy,
+                    deduplicate_code=deduplicate_parent_code,
+                )
+            algorithm = await sampler.sample(
+                parents=parents,
+                generation=generation,
+                **sample_kwargs,
+            )
 
         # Record plan timing
         plan_time_ms = (time.time() - start_time) * 1000
@@ -265,6 +341,14 @@ class LLMEvolutionPlanner(BasePlanner):
 
         working_dir: str = algorithm.worktree.path
         task_description: str = kwargs.get("task_description", "")
+        inheritance_instructions = (
+            "# Inheritance\n\n"
+            "This worktree is based on the selected primary parent's exact commit. "
+            "Treat the existing files as the working parent implementation: preserve "
+            "unaffected behavior and apply the proposed mutation or crossover incrementally."
+            if algorithm.parent_ids
+            else "# Initial Candidate\n\nThe worktree contains the task baseline. Implement a new candidate."
+        )
 
         # Choose the appropriate prompt template based on coder type.
         # Agent-based coders (claude_code) use the agent template which expects
@@ -286,11 +370,13 @@ class LLMEvolutionPlanner(BasePlanner):
                 background=task_description,
                 description=algorithm.description,
                 project_context=project_context,
+                inheritance_instructions=inheritance_instructions,
             )
         else:
             prompt = IMPLEMENT_ALGORITHM.format(
                 background=task_description,
                 description=algorithm.description,
+                inheritance_instructions=inheritance_instructions,
             )
         logger.debug(f"Prompt for code generation: {len(prompt)} chars")
 

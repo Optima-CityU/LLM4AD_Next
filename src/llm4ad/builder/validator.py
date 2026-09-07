@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -25,22 +26,26 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
-from llm4ad.builder.blueprint import TaskBlueprint
+from llm4ad.builder.blueprint import AnalysisResult, TaskBlueprint
 from llm4ad.builder.creator import _strip_code_fences
 from llm4ad.builder.prompts import (
-    REPAIR_ALGORITHM_PROMPT,
+    REPAIR_ALGORITHM_SELF_SPAWN_PROMPT,
+    REPAIR_ALGORITHM_SEPARATE_SCRIPT_PROMPT,
     REPAIR_DATASET_PROMPT,
     REPAIR_DEBUG_RUN_PROMPT,
     REPAIR_EVALUATOR_MULTIMODAL_PROMPT,
     REPAIR_EVALUATOR_PROMPT,
+    REPAIR_EVALUATOR_SELF_SPAWN_PROMPT,
     REPAIR_FULL_PROMPT,
     REPAIR_TEST_EVALUATOR_PROMPT,
     get_algorithm_template,
     get_evaluator_template,
     get_multimodal_evaluator_template,
+    get_self_spawn_evaluator_template,
 )
 from llm4ad.builder.writer import write_task_directory
 from llm4ad.infra.provider.base import BaseProvider
@@ -102,9 +107,25 @@ class TaskValidator:
             else:
                 error_signatures.append(sig)
                 blueprint = await self._repair_targeted(
-                    blueprint, error, error_history=error_history, multimodal=multimodal,
+                    blueprint,
+                    error,
+                    error_history=error_history,
+                    multimodal=multimodal,
                 )
 
+        # Final validation: the last repair inside the loop produced a blueprint
+        # that was never re-validated. Run the gate once more so a fix applied on
+        # the final attempt is not incorrectly reported as a failure.
+        error = self._run_validation_stages(
+            blueprint, multimodal=multimodal, skip_debug_run=skip_debug_run
+        )
+        if error is None:
+            blueprint.validation_status = "passed"
+            blueprint.validation_errors = []
+            logger.info("Validation passed after final repair (attempt {})", max_attempts + 1)
+            return blueprint
+
+        blueprint.validation_errors.append(error)
         blueprint.validation_status = "failed"
         logger.error("Validation failed after {} attempts", max_attempts)
         return blueprint
@@ -147,6 +168,330 @@ class TaskValidator:
         return blueprint
 
     # ------------------------------------------------------------------
+    # Per-artifact checkpoints (generate-then-validate)
+    # ------------------------------------------------------------------
+    #
+    # These run the earliest meaningful check on a single artifact right
+    # after it is generated, repairing it in place before the pipeline moves
+    # on. They reuse the same check/repair primitives as the whole-blueprint
+    # gate so behavior stays consistent; the final validate() pass is still
+    # the authoritative check.
+
+    async def checkpoint_algorithm(
+        self,
+        algorithm_code: str,
+        *,
+        blueprint: TaskBlueprint,
+        analysis: AnalysisResult | None = None,
+        max_repairs: int = 2,
+    ) -> str:
+        """Static checkpoint for a freshly generated algorithm file.
+
+        Runs syntax + EVOLVE-marker checks (no subprocess) and repairs the
+        algorithm in place. The subprocess trial happens later, once a sample
+        instance exists (:meth:`checkpoint_algorithm_trial`).
+
+        Args:
+            algorithm_code: Generated algorithm source.
+            blueprint: TaskBlueprint containing evaluation_pattern.
+            analysis: Optional AnalysisResult for function_signature (used in creator).
+            max_repairs: Maximum in-place repair attempts.
+
+        Returns:
+            The (possibly repaired) algorithm source.
+        """
+        for _ in range(max_repairs + 1):
+            error = self._check_syntax("algorithm", algorithm_code) or self._check_evolve_markers(
+                algorithm_code
+            )
+            if error is None:
+                return algorithm_code
+            logger.info("Checkpoint(algorithm): repairing {}", error)
+            repaired = await self._repair_algorithm(
+                algorithm_code, error, blueprint=blueprint, analysis=analysis
+            )
+            # Only accept the repair if it does not itself regress: a fix for a
+            # syntax error must not drop the EVOLVE markers, and vice versa.
+            # Keep the prior code when the rewrite trades one failure for
+            # another so we do not carry a regression to later checkpoints.
+            new_error = self._check_syntax("algorithm", repaired) or self._check_evolve_markers(
+                repaired
+            )
+            if new_error is None:
+                return repaired
+            algorithm_code = repaired
+        # Deterministic last resort: if the LLM never produced the EVOLVE
+        # markers, wrap the first top-level function ourselves. The markers are
+        # mandatory for the platform to evolve the code, and a missing-marker
+        # policy is a generation failure we can repair without another LLM call.
+        if self._check_evolve_markers(algorithm_code) is not None:
+            algorithm_code = self._ensure_evolve_markers(algorithm_code)
+        return algorithm_code
+
+    @staticmethod
+    def _ensure_evolve_markers(algorithm_code: str) -> str:
+        """Wrap the first top-level function in EVOLVE markers if they are missing.
+
+        Only mutates code that is already missing the markers; returns
+        ``algorithm_code`` unchanged otherwise. Used as a deterministic fallback
+        when the LLM keeps generating a policy file without the markers.
+        """
+        if "EVOLVE_START" in algorithm_code and "EVOLVE_END" in algorithm_code:
+            return algorithm_code
+        try:
+            tree = ast.parse(algorithm_code)
+        except SyntaxError:
+            return algorithm_code
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                lines = algorithm_code.splitlines()
+                start = node.lineno - 1
+                end = node.end_lineno if node.end_lineno is not None else len(lines)
+                return "\n".join(
+                    lines[:start]
+                    + ["# EVOLVE_START"]
+                    + lines[start:end]
+                    + ["# EVOLVE_END"]
+                    + lines[end:]
+                )
+        return algorithm_code
+
+    async def checkpoint_sample_data(
+        self,
+        sample_data: str,
+        *,
+        algorithm_code: str,
+        function_to_evolve: str,
+        project_name: str,
+        max_repairs: int = 2,
+    ) -> str:
+        """Checkpoint a freshly generated sample instance.
+
+        Ensures the sample is present and valid JSON, regenerating it via the
+        dataset repair path when it is empty, ``NONE``, or malformed.
+
+        Args:
+            sample_data: Generated sample instance (raw text).
+            algorithm_code: Algorithm source, used to ground regeneration.
+            function_to_evolve: Evolved function name, for the repair prompt.
+            project_name: Project name, for the repair prompt.
+            max_repairs: Maximum regeneration attempts.
+
+        Returns:
+            The (possibly regenerated) sample instance text.
+        """
+        for _ in range(max_repairs + 1):
+            error = self._check_sample_data(sample_data)
+            if error is None:
+                return sample_data
+            logger.info("Checkpoint(sample): repairing {}", error)
+            partial = self._make_partial_blueprint(
+                algorithm_code=algorithm_code,
+                function_to_evolve=function_to_evolve,
+                project_name=project_name,
+            )
+            sample_data = await self._repair_dataset(partial, error)
+        return sample_data
+
+    async def checkpoint_algorithm_trial(
+        self,
+        *,
+        algorithm_code: str,
+        sample_data: str,
+        algorithm_dir_name: str,
+        algorithm_file_name: str,
+        function_to_evolve: str,
+        project_name: str,
+        evaluation_pattern: str = "separate_script",
+        max_repairs: int = 2,
+    ) -> tuple[str, str]:
+        """Run the algorithm subprocess on the sample and repair on failure.
+
+        A JSON-parse error points at the sample; any other failure points at
+        the algorithm. Repairs whichever is implicated and retries.
+
+        Returns:
+            The (possibly repaired) ``(algorithm_code, sample_data)`` pair.
+        """
+        # A trial is only meaningful with a usable sample instance. If the
+        # sample is still missing/invalid after its own checkpoint, skip the
+        # trial rather than feeding garbage to the algorithm: an empty dataset
+        # yields a meaningless setup error and would trigger a pointless
+        # algorithm rewrite. The final validate() pass reports the missing
+        # sample authoritatively.
+        if self._check_sample_data(sample_data) is not None:
+            logger.info("Checkpoint(algorithm_trial): skipped (no usable sample instance)")
+            return algorithm_code, sample_data
+
+        for _ in range(max_repairs + 1):
+            partial = self._make_partial_blueprint(
+                algorithm_code=algorithm_code,
+                sample_data=sample_data,
+                algorithm_dir_name=algorithm_dir_name,
+                algorithm_file_name=algorithm_file_name,
+                function_to_evolve=function_to_evolve,
+                project_name=project_name,
+            )
+            temp_dir = None
+            try:
+                temp_dir = self._write_to_temp(partial)
+                error = self._check_algorithm_trial(
+                    temp_dir, partial, evaluation_pattern=evaluation_pattern
+                )
+            except Exception as exc:  # noqa: BLE001
+                error = f"[runtime:setup] Failed to set up algorithm trial: {exc}"
+            finally:
+                if temp_dir is not None:
+                    shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+            if error is None:
+                return algorithm_code, sample_data
+            logger.info("Checkpoint(algorithm_trial): repairing {}", error)
+            if "parsing input JSON" in error or "json.decoder.jsondecodeerror" in error.lower():
+                sample_data = await self._repair_dataset(partial, error)
+            else:
+                repaired = await self._repair_algorithm(algorithm_code, error, blueprint=partial)
+                # Never accept a repair that breaks syntax or drops the EVOLVE
+                # markers: a regressive rewrite here would only surface much
+                # later in the final validate() pass.
+                regression = self._check_syntax(
+                    "algorithm", repaired
+                ) or self._check_evolve_markers(repaired)
+                if regression is None:
+                    algorithm_code = repaired
+                else:
+                    logger.warning(
+                        "Checkpoint(algorithm_trial): discarding regressive " "repair ({})",
+                        regression[:80],
+                    )
+        return algorithm_code, sample_data
+
+    async def checkpoint_evaluator(
+        self,
+        *,
+        evaluator_code: str,
+        evaluator_file_name: str,
+        evaluator_class_name: str,
+        algorithm_dir_name: str,
+        algorithm_file_name: str,
+        algorithm_code: str,
+        function_to_evolve: str = "solve",
+        metrics: list[dict[str, Any]] | None = None,
+        multimodal: bool = False,
+        evaluation_pattern: str = "separate_script",
+        max_repairs: int = 2,
+    ) -> str:
+        """Checkpoint a freshly generated evaluator file.
+
+        Runs syntax + import + class-exists checks and repairs the evaluator
+        in place. The full end-to-end run is still exercised by the final
+        validate() pass.
+
+        Returns:
+            The (possibly repaired) evaluator source.
+        """
+        repair_blueprint = self._make_partial_blueprint(
+            evaluator_code=evaluator_code,
+            algorithm_code=algorithm_code,
+            evaluator_file_name=evaluator_file_name,
+            evaluator_class_name=evaluator_class_name,
+            algorithm_dir_name=algorithm_dir_name,
+            algorithm_file_name=algorithm_file_name,
+            function_to_evolve=function_to_evolve,
+            metrics=metrics,
+        )
+        for _ in range(max_repairs + 1):
+            error = self._check_syntax("evaluator", evaluator_code)
+            if error is None:
+                partial = self._make_partial_blueprint(
+                    evaluator_code=evaluator_code,
+                    algorithm_code=algorithm_code,
+                    evaluator_file_name=evaluator_file_name,
+                    evaluator_class_name=evaluator_class_name,
+                    algorithm_dir_name=algorithm_dir_name,
+                    algorithm_file_name=algorithm_file_name,
+                )
+                temp_dir = None
+                try:
+                    temp_dir = self._write_to_temp(partial)
+                    error = self._check_import(temp_dir, partial)
+                except Exception as exc:  # noqa: BLE001
+                    error = f"[runtime:setup] Failed to set up evaluator import: {exc}"
+                finally:
+                    if temp_dir is not None:
+                        shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+            if error is None:
+                return evaluator_code
+            logger.info("Checkpoint(evaluator): repairing {}", error)
+            evaluator_code = await self._repair_evaluator(
+                evaluator_code,
+                error,
+                multimodal=multimodal,
+                evaluation_pattern=evaluation_pattern,
+                blueprint=repair_blueprint,
+            )
+        return evaluator_code
+
+    @staticmethod
+    def _check_sample_data(sample_data: str) -> str | None:
+        """Verify a sample instance is present and parseable JSON."""
+        stripped = (sample_data or "").strip()
+        if not stripped or stripped.upper() == "NONE":
+            return (
+                "[dataset:missing] No sample data generated - "
+                "SAMPLE_DATA section was empty or NONE"
+            )
+        try:
+            json.loads(stripped)
+        except json.JSONDecodeError as e:
+            return f"[dataset:invalid_json] Sample data is not valid JSON: {e}"
+        return None
+
+    @staticmethod
+    def _make_partial_blueprint(
+        *,
+        algorithm_code: str = "",
+        evaluator_code: str = "",
+        sample_data: str = "",
+        evaluator_file_name: str = "_checkpoint_evaluator.py",
+        evaluator_class_name: str = "CheckpointEvaluator",
+        algorithm_dir_name: str = "algorithm",
+        algorithm_file_name: str = "algorithm.py",
+        function_to_evolve: str = "solve",
+        metrics: list[dict[str, Any]] | None = None,
+        project_name: str = "_checkpoint",
+    ) -> TaskBlueprint:
+        """Build a minimal blueprint for writing a partial package to temp.
+
+        Fields not relevant to the current checkpoint are filled with valid
+        placeholders so :func:`write_task_directory` succeeds. Only the files a
+        given checkpoint actually executes are meaningful.
+        """
+        placeholder_config = (
+            "project_name: _checkpoint\n"
+            "evaluator:\n"
+            "  module: x\n"
+            "evolution:\n"
+            "  type: island_ga\n"
+        )
+        return TaskBlueprint(
+            project_name=project_name,
+            task_description="",
+            evaluator_code=evaluator_code or "pass\n",
+            algorithm_code=algorithm_code or "pass\n",
+            config_yaml=placeholder_config,
+            debug_run_code="pass\n",
+            evaluator_class_name=evaluator_class_name,
+            evaluator_file_name=evaluator_file_name,
+            algorithm_dir_name=algorithm_dir_name,
+            algorithm_file_name=algorithm_file_name,
+            function_to_evolve=function_to_evolve,
+            metrics=metrics or [],
+            dataset_files=({"data/sample/instance_001.json": sample_data} if sample_data else {}),
+        )
+
+    # ------------------------------------------------------------------
     # Validation stages
     # ------------------------------------------------------------------
 
@@ -181,7 +526,9 @@ class TaskValidator:
 
         # Stage 4.5: Check sample data exists
         if not blueprint.dataset_files:
-            return "[dataset:missing] No sample data generated - SAMPLE_DATA section was empty or NONE"
+            return (
+                "[dataset:missing] No sample data generated - SAMPLE_DATA section was empty or NONE"
+            )
 
         # Stage 4.6: Check test_evaluator code exists
         if not blueprint.test_evaluator_code.strip():
@@ -196,7 +543,9 @@ class TaskValidator:
             if error:
                 return error
 
-            error = self._check_algorithm_trial(temp_dir, blueprint)
+            error = self._check_algorithm_trial(
+                temp_dir, blueprint, evaluation_pattern=blueprint.evaluation_pattern
+            )
             if error:
                 return error
 
@@ -231,6 +580,7 @@ class TaskValidator:
         """Validate config YAML against AppConfig schema."""
         try:
             import yaml
+
             data = yaml.safe_load(config_yaml)
         except Exception as e:
             return f"[config:yaml_parse] YAML parse error: {e}"
@@ -246,8 +596,12 @@ class TaskValidator:
         # Skip full Pydantic validation since it requires env vars to be set
         # Just verify the structure is reasonable
         evaluator = data.get("evaluator", {})
-        if isinstance(evaluator, dict) and "module" not in evaluator and "executable" not in evaluator:
-                return "[config:evaluator] Evaluator must have 'module' or 'executable' field"
+        if (
+            isinstance(evaluator, dict)
+            and "module" not in evaluator
+            and "executable" not in evaluator
+        ):
+            return "[config:evaluator] Evaluator must have 'module' or 'executable' field"
 
         return None
 
@@ -345,27 +699,42 @@ class TaskValidator:
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
         if stdout:
-            tail = stdout if len(stdout) <= max_chars else "...(truncated)...\n" + stdout[-max_chars:]
+            tail = (
+                stdout if len(stdout) <= max_chars else "...(truncated)...\n" + stdout[-max_chars:]
+            )
             parts.append(f"  stdout:\n{tail}")
         if stderr:
-            tail = stderr if len(stderr) <= max_chars else "...(truncated)...\n" + stderr[-max_chars:]
+            tail = (
+                stderr if len(stderr) <= max_chars else "...(truncated)...\n" + stderr[-max_chars:]
+            )
             parts.append(f"  stderr:\n{tail}")
         return "\n".join(parts)
 
     def _check_import(self, task_dir: Path, blueprint: TaskBlueprint) -> str | None:
-        """Stage 5: Verify evaluator module imports and class exists."""
+        """Stage 5: Verify the evaluator module imports and exposes an evaluator.
+
+        The module must import cleanly and define at least one ``BaseEvaluator``
+        subclass. We deliberately do not require a specific class name here: the
+        name is extracted separately and wired into the config, and a mismatch
+        with the deterministic guess must not make a valid evaluator fail.
+        """
         evaluator_module = blueprint.evaluator_file_name.removesuffix(".py")
         script = (
-            f"import sys; sys.path.insert(0, r'{task_dir}'); "
+            f"import sys, inspect; "
+            f"sys.path.insert(0, r'{task_dir}'); "
             f"mod = __import__('{evaluator_module}'); "
-            f"assert hasattr(mod, '{blueprint.evaluator_class_name}'), "
-            f"'Class {blueprint.evaluator_class_name} not found in {evaluator_module}'"
+            f"from llm4ad.evaluator.base import BaseEvaluator; "
+            f"names = [n for n, o in vars(mod).items() "
+            f"if inspect.isclass(o) and issubclass(o, BaseEvaluator) "
+            f"and o is not BaseEvaluator]; "
+            f"assert names, 'no BaseEvaluator subclass found in {evaluator_module}'"
         )
         cmd = [sys.executable, "-c", script]
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
                 timeout=self._RUNTIME_TIMEOUT,
                 env=self._subprocess_env(),
             )
@@ -374,24 +743,62 @@ class TaskValidator:
 
         if result.returncode != 0:
             return self._format_subprocess_failure(
-                "[runtime:import]", result, cmd=cmd, cwd=str(task_dir),
-                extra=f"importing module '{evaluator_module}', expecting class '{blueprint.evaluator_class_name}'",
+                "[runtime:import]",
+                result,
+                cmd=cmd,
+                cwd=str(task_dir),
+                extra=f"importing module '{evaluator_module}' and checking for a BaseEvaluator subclass",
             )
         return None
 
-    def _check_algorithm_trial(self, task_dir: Path, blueprint: TaskBlueprint) -> str | None:
-        """Stage 6: Run algorithm with sample data and verify JSON output."""
+    def _check_algorithm_trial(
+        self,
+        task_dir: Path,
+        blueprint: TaskBlueprint,
+        *,
+        evaluation_pattern: str = "separate_script",
+    ) -> str | None:
+        """Stage 6: Verify algorithm can be executed/imported based on pattern."""
         algo_file = task_dir / blueprint.algorithm_dir_name / blueprint.algorithm_file_name
         if not algo_file.exists():
             return f"[runtime:algorithm] Algorithm file not found: {algo_file.name}"
 
+        if evaluation_pattern == "self_spawn":
+            # self_spawn: verify policy function can be imported and is callable
+            spec = importlib.util.spec_from_file_location("_validator_trial_policy", str(algo_file))
+            if spec is None or spec.loader is None:
+                return f"[runtime:algorithm] Cannot load module spec from {algo_file.name}"
+
+            module = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(module)
+            except Exception as exc:  # noqa: BLE001
+                return f"[runtime:algorithm] Policy module failed to import: {exc}"
+
+            fn = getattr(module, blueprint.function_to_evolve, None)
+            if not callable(fn):
+                # List available callables to help diagnose the issue
+                available = [
+                    name
+                    for name in dir(module)
+                    if not name.startswith("_") and callable(getattr(module, name, None))
+                ]
+                return (
+                    f"[runtime:algorithm] Policy function '{blueprint.function_to_evolve}' "
+                    f"not found or not callable. Available callables in module: {available}"
+                )
+
+            return None
+
+        # separate_script: verify subprocess execution with JSON output
         sample_json = next(iter(blueprint.dataset_files.values())).strip()
         cmd = [sys.executable, str(algo_file), sample_json]
 
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
                 timeout=self._RUNTIME_TIMEOUT,
                 cwd=str(task_dir),
                 env=self._subprocess_env(),
@@ -400,9 +807,14 @@ class TaskValidator:
             return "[runtime:algorithm] Algorithm execution timed out"
 
         if result.returncode != 0:
-            sample_preview = sample_json if len(sample_json) <= 500 else sample_json[:500] + "...(truncated)"
+            sample_preview = (
+                sample_json if len(sample_json) <= 500 else sample_json[:500] + "...(truncated)"
+            )
             return self._format_subprocess_failure(
-                "[runtime:algorithm]", result, cmd=cmd, cwd=str(task_dir),
+                "[runtime:algorithm]",
+                result,
+                cmd=cmd,
+                cwd=str(task_dir),
                 extra=f"sample input passed via argv[1]: {sample_preview}",
             )
 
@@ -413,8 +825,7 @@ class TaskValidator:
             except json.JSONDecodeError as e:
                 preview = stdout if len(stdout) <= 1000 else stdout[:1000] + "...(truncated)"
                 return (
-                    f"[runtime:algorithm] Output is not valid JSON: {e}\n"
-                    f"  stdout:\n{preview}"
+                    f"[runtime:algorithm] Output is not valid JSON: {e}\n" f"  stdout:\n{preview}"
                 )
 
         return None
@@ -429,7 +840,8 @@ class TaskValidator:
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
                 timeout=self._RUNTIME_TIMEOUT,
                 cwd=str(task_dir),
                 env=self._subprocess_env(),
@@ -439,7 +851,10 @@ class TaskValidator:
 
         if result.returncode != 0:
             return self._format_subprocess_failure(
-                "[runtime:debug_run]", result, cmd=cmd, cwd=str(task_dir),
+                "[runtime:debug_run]",
+                result,
+                cmd=cmd,
+                cwd=str(task_dir),
             )
         return None
 
@@ -453,7 +868,8 @@ class TaskValidator:
         try:
             result = subprocess.run(
                 cmd,
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
                 timeout=self._RUNTIME_TIMEOUT * 4,
                 cwd=str(task_dir),
                 env=self._subprocess_env(),
@@ -463,12 +879,18 @@ class TaskValidator:
 
         if result.returncode != 0:
             return self._format_subprocess_failure(
-                "[runtime:test_evaluator]", result, cmd=cmd, cwd=str(task_dir),
+                "[runtime:test_evaluator]",
+                result,
+                cmd=cmd,
+                cwd=str(task_dir),
             )
 
         if "[FAIL]" in result.stdout:
             return self._format_subprocess_failure(
-                "[runtime:test_evaluator]", result, cmd=cmd, cwd=str(task_dir),
+                "[runtime:test_evaluator]",
+                result,
+                cmd=cmd,
+                cwd=str(task_dir),
                 extra="exit code 0 but stdout contains [FAIL] — evaluator returned but a metric/assertion failed",
             )
 
@@ -495,41 +917,62 @@ class TaskValidator:
                 can see what was already tried — prevents go-around loops.
             multimodal: Whether multimodal-specific prompts apply.
         """
-        logger.info("Repairing: {}", error[:100])
+        logger.info("Repairing: {}", error)
         history_section = _format_history_section(error_history)
 
         evaluator_repair_prefixes = (
-            "[syntax:evaluator]", "[config:evaluator]", "[multimodal:",
-            "[runtime:import]", "[runtime:setup]",
+            "[syntax:evaluator]",
+            "[config:evaluator]",
+            "[multimodal:",
+            "[runtime:import]",
+            "[runtime:setup]",
         )
         algorithm_repair_prefixes = (
-            "[syntax:algorithm]", "[algorithm:", "[runtime:algorithm]",
+            "[syntax:algorithm]",
+            "[algorithm:",
+            "[runtime:algorithm]",
         )
 
         if error.startswith("[runtime:debug_run]"):
             blueprint.debug_run_code = await self._repair_debug_run(
-                blueprint, error, history_section=history_section,
+                blueprint,
+                error,
+                history_section=history_section,
             )
         elif error.startswith("[runtime:test_evaluator]"):
-            if "test_evaluator" in error.lower() and ("import" in error.lower() or "syntax" in error.lower()):
+            if "test_evaluator" in error.lower() and (
+                "import" in error.lower() or "syntax" in error.lower()
+            ):
                 blueprint.test_evaluator_code = await self._repair_test_evaluator(
-                    blueprint, error, history_section=history_section,
+                    blueprint,
+                    error,
+                    history_section=history_section,
                 )
             else:
                 blueprint.evaluator_code = await self._repair_evaluator(
-                    blueprint.evaluator_code, error,
-                    history_section=history_section, multimodal=multimodal,
+                    blueprint.evaluator_code,
+                    error,
+                    history_section=history_section,
+                    multimodal=multimodal,
+                    evaluation_pattern=blueprint.evaluation_pattern,
+                    blueprint=blueprint,
                 )
                 blueprint.test_evaluator_code = await self._repair_test_evaluator(
-                    blueprint, error, history_section=history_section,
+                    blueprint,
+                    error,
+                    history_section=history_section,
                 )
         elif error.startswith("[dataset:"):
             sample_data = await self._repair_dataset(blueprint, error)
             blueprint.dataset_files["data/sample/instance_001.json"] = sample_data
         elif any(error.startswith(p) for p in evaluator_repair_prefixes):
             blueprint.evaluator_code = await self._repair_evaluator(
-                blueprint.evaluator_code, error,
-                history_section=history_section, multimodal=multimodal,
+                blueprint.evaluator_code,
+                error,
+                history_section=history_section,
+                multimodal=multimodal,
+                evaluation_pattern=blueprint.evaluation_pattern,
+                blueprint=blueprint,
             )
         elif any(error.startswith(p) for p in algorithm_repair_prefixes):
             # Check if the error is actually a JSON parsing issue in sample data
@@ -543,7 +986,10 @@ class TaskValidator:
                 )
             else:
                 blueprint.algorithm_code = await self._repair_algorithm(
-                    blueprint.algorithm_code, error, history_section=history_section,
+                    blueprint.algorithm_code,
+                    error,
+                    blueprint=blueprint,
+                    history_section=history_section,
                 )
         elif error.startswith("[config:"):
             # Config errors are harder to repair via LLM since config is programmatic
@@ -552,23 +998,73 @@ class TaskValidator:
         else:
             # Generic error — try repairing evaluator first as it's the most complex
             blueprint.evaluator_code = await self._repair_evaluator(
-                blueprint.evaluator_code, error,
-                history_section=history_section, multimodal=multimodal,
+                blueprint.evaluator_code,
+                error,
+                history_section=history_section,
+                multimodal=multimodal,
+                evaluation_pattern=blueprint.evaluation_pattern,
+                blueprint=blueprint,
             )
 
         return blueprint
 
     async def _repair_evaluator(
-        self, evaluator_code: str, error: str, *,
-        history_section: str = "", multimodal: bool = False,
+        self,
+        evaluator_code: str,
+        error: str,
+        *,
+        history_section: str = "",
+        multimodal: bool = False,
+        evaluation_pattern: str = "separate_script",
+        blueprint: TaskBlueprint | None = None,
     ) -> str:
-        """Send repair prompt for evaluator code."""
+        """Send repair prompt for evaluator code.
+
+        Dispatches to the pattern-correct prompt/template so a self-spawn
+        evaluator is repaired as self-spawn (not rewritten to the
+        separate-script contract). When a blueprint is available, its
+        task-specific context (function name, metrics, algorithm code, class /
+        register names) is included so the LLM can rebuild the evaluator
+        correctly instead of guessing.
+        """
+        if blueprint is not None:
+            context = {
+                "project_name": blueprint.project_name,
+                "evaluator_class_name": blueprint.evaluator_class_name,
+                "evaluator_register_name": blueprint.evaluator_file_name.removesuffix(".py"),
+                "function_name": blueprint.function_to_evolve,
+                "metrics_json": json.dumps(blueprint.metrics, indent=2),
+                "algorithm_dir_name": blueprint.algorithm_dir_name,
+                "algorithm_file_name": blueprint.algorithm_file_name,
+                "algorithm_code": blueprint.algorithm_code,
+            }
+        else:
+            context = {
+                "project_name": "",
+                "evaluator_class_name": "",
+                "evaluator_register_name": "",
+                "function_name": "",
+                "metrics_json": "[]",
+                "algorithm_dir_name": "",
+                "algorithm_file_name": "",
+                "algorithm_code": "",
+            }
+
         if multimodal:
             prompt = REPAIR_EVALUATOR_MULTIMODAL_PROMPT.format(
                 evaluator_code=evaluator_code,
                 error_message=error,
                 history_section=history_section,
                 evaluator_template=get_multimodal_evaluator_template(),
+                **context,
+            )
+        elif evaluation_pattern == "self_spawn":
+            prompt = REPAIR_EVALUATOR_SELF_SPAWN_PROMPT.format(
+                evaluator_code=evaluator_code,
+                error_message=error,
+                history_section=history_section,
+                evaluator_template=get_self_spawn_evaluator_template(),
+                **context,
             )
         else:
             prompt = REPAIR_EVALUATOR_PROMPT.format(
@@ -576,25 +1072,63 @@ class TaskValidator:
                 error_message=error,
                 history_section=history_section,
                 evaluator_template=get_evaluator_template(),
+                **context,
             )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=8192)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_algorithm(
-        self, algorithm_code: str, error: str, *, history_section: str = "",
+        self,
+        algorithm_code: str,
+        error: str,
+        *,
+        blueprint: TaskBlueprint,
+        history_section: str = "",
+        analysis: AnalysisResult | None = None,
     ) -> str:
-        """Send repair prompt for algorithm code."""
-        prompt = REPAIR_ALGORITHM_PROMPT.format(
-            algorithm_code=algorithm_code,
-            error_message=error,
-            history_section=history_section,
-            algorithm_template=get_algorithm_template(),
-        )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=4096)
+        """Send repair prompt for algorithm code.
+
+        Args:
+            algorithm_code: Current algorithm source code
+            error: Error message to fix
+            blueprint: TaskBlueprint containing evaluation_pattern
+            history_section: Optional repair history
+            analysis: Optional AnalysisResult for function_signature (used in checkpoint_algorithm)
+        """
+        evaluation_pattern = blueprint.evaluation_pattern
+
+        if evaluation_pattern == "self_spawn":
+            # Use function_signature from analysis if available, otherwise from function_to_evolve
+            if analysis is not None:
+                function_signature = analysis.function_signature
+            else:
+                # Construct a placeholder signature from function name
+                function_signature = f"def {blueprint.function_to_evolve}(observation) -> action:"
+
+            prompt = REPAIR_ALGORITHM_SELF_SPAWN_PROMPT.format(
+                algorithm_code=algorithm_code,
+                error_message=error,
+                history_section=history_section,
+                function_signature=function_signature,
+                algorithm_template=get_algorithm_template("self_spawn"),
+            )
+        else:
+            prompt = REPAIR_ALGORITHM_SEPARATE_SCRIPT_PROMPT.format(
+                algorithm_code=algorithm_code,
+                error_message=error,
+                history_section=history_section,
+                algorithm_template=get_algorithm_template("separate_script"),
+            )
+
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_debug_run(
-        self, blueprint: TaskBlueprint, error: str, *, history_section: str = "",
+        self,
+        blueprint: TaskBlueprint,
+        error: str,
+        *,
+        history_section: str = "",
     ) -> str:
         """Send repair prompt for debug_run.py code."""
         algo_module = blueprint.algorithm_file_name.removesuffix(".py")
@@ -608,11 +1142,15 @@ class TaskValidator:
             algorithm_module=algo_module,
             function_name=blueprint.function_to_evolve,
         )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=4096)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_test_evaluator(
-        self, blueprint: TaskBlueprint, error: str, *, history_section: str = "",
+        self,
+        blueprint: TaskBlueprint,
+        error: str,
+        *,
+        history_section: str = "",
     ) -> str:
         """Send repair prompt for test_evaluator.py code."""
         metric_names = [m.get("name", "") for m in blueprint.metrics]
@@ -624,7 +1162,7 @@ class TaskValidator:
             evaluator_class_name=blueprint.evaluator_class_name,
             metric_names=json.dumps(metric_names),
         )
-        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=4096)
+        result = await self._provider.generate(prompt, temperature=0.2, max_tokens=16384)
         return _strip_code_fences(result.text.strip())
 
     async def _repair_dataset(self, blueprint: TaskBlueprint, error: str) -> str:
@@ -636,7 +1174,7 @@ class TaskValidator:
             output_format="JSON result",
             algorithm_code=blueprint.algorithm_code,
         )
-        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=2048)
+        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=16384)
         text = _strip_code_fences(result.text.strip())
 
         # Validate and clean JSON
@@ -649,7 +1187,7 @@ class TaskValidator:
                 start = text.find(start_char)
                 end = text.rfind(end_char)
                 if start != -1 and end > start:
-                    candidate = text[start:end + 1]
+                    candidate = text[start : end + 1]
                     try:
                         json.loads(candidate)
                         return candidate
@@ -658,10 +1196,17 @@ class TaskValidator:
             # If all extraction attempts fail, return original and let validation catch it
             return text
 
-    async def _repair_full(self, blueprint: TaskBlueprint, *, multimodal: bool = False) -> TaskBlueprint:
+    async def _repair_full(
+        self, blueprint: TaskBlueprint, *, multimodal: bool = False
+    ) -> TaskBlueprint:
         """Full regeneration of evaluator and algorithm."""
-        eval_template = get_multimodal_evaluator_template() if multimodal else get_evaluator_template()
-        algo_template = get_algorithm_template()
+        if multimodal:
+            eval_template = get_multimodal_evaluator_template()
+        elif blueprint.evaluation_pattern == "self_spawn":
+            eval_template = get_self_spawn_evaluator_template()
+        else:
+            eval_template = get_evaluator_template()
+        algo_template = get_algorithm_template(blueprint.evaluation_pattern)
         error_history = "\n".join(
             f"Attempt {i + 1}: {e}" for i, e in enumerate(blueprint.validation_errors)
         )
@@ -677,7 +1222,7 @@ class TaskValidator:
             evaluator_template=eval_template,
             algorithm_template=algo_template,
         )
-        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=8192)
+        result = await self._provider.generate(prompt, temperature=0.3, max_tokens=16384)
         sections = _parse_repair_sections(result.text)
 
         if "EVALUATOR_CODE" in sections:

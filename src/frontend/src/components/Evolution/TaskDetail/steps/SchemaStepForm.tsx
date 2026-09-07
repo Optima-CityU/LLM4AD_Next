@@ -17,6 +17,7 @@ interface SchemaStepFormProps {
   onBack?: () => void
   onNext?: () => void
   headerContent?: React.ReactNode
+  memoryEnabled?: boolean
 }
 
 export default function SchemaStepForm({
@@ -28,6 +29,7 @@ export default function SchemaStepForm({
   onBack,
   onNext,
   headerContent,
+  memoryEnabled,
 }: SchemaStepFormProps) {
   const { t } = useTranslation()
   const { validate } = useSchemaUi()
@@ -56,6 +58,7 @@ export default function SchemaStepForm({
           root={root}
           value={value}
           onChange={onChange}
+          memoryEnabled={memoryEnabled}
         />
 
         {showErrors && errors.length > 0 && (

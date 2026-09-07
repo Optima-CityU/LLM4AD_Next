@@ -15,6 +15,7 @@ from llm4ad.config.schema import (
     CustomEvaluatorConfig,
     EvalContext,
     EvaluatorConfig,
+    SolverEvaluatorConfig,
 )
 from llm4ad.evaluator.base import BaseEvaluator, EvaluationResult
 
@@ -148,8 +149,14 @@ class EvaluationDispatcher:
                 raise FileNotFoundError(f"Custom evaluator file not found: {file_path}")
 
             module_dir = str(file_path.parent)
-            if module_dir not in sys.path:
-                sys.path.insert(0, module_dir)
+            project_root = str(
+                Path(config_dir).expanduser().resolve()
+                if config_dir
+                else Path.cwd().resolve()
+            )
+            for import_path in (project_root, module_dir):
+                if import_path not in sys.path:
+                    sys.path.insert(0, import_path)
 
             module_name = file_path.stem
             module = importlib.import_module(module_name)
@@ -181,6 +188,8 @@ class EvaluationDispatcher:
                     kwargs["provider_config"] = self._provider_config
                 return self._eval_cls(**kwargs)
             return self._eval_cls()
+        if isinstance(self.config, SolverEvaluatorConfig):
+            return self._eval_cls(self.config, config_dir=self._config_dir)
         return self._eval_cls(self.config)
 
     def _get_data_files(self) -> list[str]:
@@ -246,7 +255,7 @@ class EvaluationDispatcher:
         Returns:
             Dictionary of metric definitions.
         """
-        evaluator = self._eval_cls()
+        evaluator = self._create_evaluator()
         return {metric.name: metric for metric in evaluator.metrics}
 
     def _aggregate_results(
@@ -350,6 +359,7 @@ class EvaluationDispatcher:
             duration_ms=total_duration,
             behavior=best_behavior,
             metadata=metadata,
+            evolution_feedback=max(successful, key=lambda result: result.score).evolution_feedback,
         )
 
     async def dispatch_batch(

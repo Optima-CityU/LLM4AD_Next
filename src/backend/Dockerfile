@@ -24,11 +24,15 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 # ---------- 安装依赖（不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
+ARG GITHUB_PROXY_URL=https://gh-proxy.org
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=pyproject.toml,target=/pyproject.toml \
     --mount=type=bind,source=README.md,target=/README.md \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
     uv sync --no-install-workspace
 
 # ---------- 复制应用代码 ----------
@@ -46,6 +50,9 @@ COPY ./README.md          /README.md
 # ---------- 安装工作区包 ----------
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
     uv sync
 
 # ---------- 启动服务 ----------

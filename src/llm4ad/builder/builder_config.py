@@ -176,9 +176,7 @@ def load_build_config(config_path: str | Path) -> BuilderConfig:
     try:
         data: dict[str, Any] = load_yaml_with_env_expansion(config_path)
     except KeyError as e:
-        raise BuildError(
-            f"Environment variable expansion failed in {config_path}: {e}"
-        ) from e
+        raise BuildError(f"Environment variable expansion failed in {config_path}: {e}") from e
     except Exception as e:
         raise BuildError(f"Failed to parse build config {config_path}: {e}") from e
 

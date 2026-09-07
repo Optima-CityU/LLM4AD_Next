@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import {
   ArrowRight,
   ArrowUpRight,
+  Award,
   BookOpen,
   Box,
   Brain,
@@ -25,6 +26,7 @@ import {
   Newspaper,
   Play,
   Sigma,
+  Sparkles,
   Trophy,
   Workflow,
   Wrench,
@@ -33,9 +35,10 @@ import {
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { NewsService } from "@/client"
+import { FooterMetadataLinks } from "@/components/Common/Footer"
+import { GithubFeedbackLink } from "@/components/Common/GithubFeedbackLink"
 import IslandBackground from "@/components/Common/IslandBackground"
 import LanguageToggle from "@/components/Common/LanguageToggle"
-import { FooterMetadataLinks } from "@/components/Common/Footer"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { ContactUsDialog } from "@/components/Feedback/ContactUsDialog"
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
@@ -50,7 +53,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       {
-        title: "LLM4AD_Next - Algorithm Design with Large Language Models",
+        title: "OpenLoopX - Algorithm Design with Large Language Models",
       },
     ],
   }),
@@ -314,25 +317,25 @@ function Navbar() {
           : "border-transparent bg-background/60"
       }`}
     >
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 2xl:max-w-[1536px]">
+        <div className="flex h-16 items-center gap-4">
+          <div className="flex shrink-0 items-center gap-3">
             <img
               src={icon}
-              alt="LLM4AD_Next"
+              alt="OpenLoopX"
               className="h-8 w-auto landing-spin-periodic"
             />
             <span className="text-lg font-bold tracking-wider landing-gradient-animated">
-              LLM4AD_Next
+              OpenLoopX
             </span>
           </div>
 
-          <div className="hidden md:flex items-center gap-6">
+          <div className="hidden min-w-0 flex-1 items-center justify-center gap-4 lg:flex xl:gap-6">
             {navLinks.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
-                className="text-sm text-muted-foreground hover:text-primary transition-colors relative group"
+                className="group relative whitespace-nowrap text-sm text-muted-foreground transition-colors hover:text-primary"
               >
                 {link.label}
                 <span className="absolute -bottom-1 left-0 h-px w-0 bg-primary transition-all duration-300 group-hover:w-full" />
@@ -340,7 +343,8 @@ function Navbar() {
             ))}
           </div>
 
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden shrink-0 items-center gap-2 lg:flex">
+            <GithubFeedbackLink labelClassName="hidden 2xl:inline" />
             <LanguageToggle />
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1" />
@@ -371,7 +375,7 @@ function Navbar() {
 
           <button
             type="button"
-            className="md:hidden text-muted-foreground p-2"
+            className="ml-auto p-2 text-muted-foreground lg:hidden"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label={mobileOpen ? "Close menu" : "Open menu"}
             aria-expanded={mobileOpen}
@@ -387,8 +391,10 @@ function Navbar() {
 
       {/* Mobile menu */}
       <div
-        className={`md:hidden border-t border-border/50 px-4 bg-background/95 backdrop-blur-xl overflow-hidden transition-all duration-300 ease-out ${
-          mobileOpen ? "max-h-80 py-4 opacity-100" : "max-h-0 py-0 opacity-0"
+        className={`overflow-hidden border-t border-border/50 bg-background/95 px-4 backdrop-blur-xl transition-all duration-300 ease-out lg:hidden ${
+          mobileOpen
+            ? "max-h-[calc(100dvh-4rem)] overflow-y-auto py-4 opacity-100"
+            : "max-h-0 py-0 opacity-0"
         }`}
       >
         <div className="space-y-3">
@@ -402,6 +408,10 @@ function Navbar() {
               {link.label}
             </a>
           ))}
+          <GithubFeedbackLink
+            className="w-full"
+            onClick={() => setMobileOpen(false)}
+          />
           <div className="flex items-center gap-2 pt-2 border-t border-border/50">
             <LanguageToggle />
             <ThemeToggle />
@@ -485,6 +495,19 @@ function HeroSection() {
             >
               {t("landing.hero.cta")}
               <ArrowRight className="ml-2 size-5" />
+            </Button>
+          </Link>
+          <Link to="/autoresearch">
+            <Button
+              variant="outline"
+              size="lg"
+              className="relative overflow-visible min-w-44 px-8 py-6 text-base border-primary/40 text-primary hover:bg-primary/10 hover:-translate-y-0.5 transition-all"
+            >
+              <Sparkles className="mr-2 size-5" />
+              {t("landing.hero.autoresearch")}
+              <span className="pointer-events-none absolute -top-2.5 -right-3 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 leading-none">
+                Beta
+              </span>
             </Button>
           </Link>
           <Button
@@ -838,7 +861,7 @@ function AchievementsSection() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {[
             {
               icon: Trophy,
@@ -855,6 +878,14 @@ function AchievementsSection() {
               link: t("landing.achievements.survey.link"),
               linkLabel: t("landing.achievements.survey.linkLabel"),
               badge: false,
+            },
+            {
+              icon: Award,
+              title: t("landing.achievements.sat.title"),
+              desc: t("landing.achievements.sat.description"),
+              link: t("landing.achievements.sat.link"),
+              linkLabel: t("landing.achievements.sat.linkLabel"),
+              badge: true,
             },
           ].map((item, i) => (
             <div
@@ -1068,9 +1099,9 @@ function LandingFooter() {
         <div className="flex flex-col sm:flex-row items-start justify-between gap-8">
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-3">
-              <img src={icon} alt="LLM4AD_Next" className="h-6 w-auto" />
+              <img src={icon} alt="OpenLoopX" className="h-6 w-auto" />
               <span className="text-sm font-medium text-foreground">
-                LLM4AD_Next
+                OpenLoopX
               </span>
             </div>
             <p className="text-xs text-muted-foreground/70 whitespace-nowrap">
@@ -1100,7 +1131,7 @@ function LandingFooter() {
 
         <div className="mt-8 pt-4 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground/50">
-            &copy; {new Date().getFullYear()} LLM4AD_Next Team. All rights
+            &copy; {new Date().getFullYear()} OpenLoopX Team. All rights
             reserved.
           </p>
           <div className="flex flex-col items-center gap-1 sm:items-end">

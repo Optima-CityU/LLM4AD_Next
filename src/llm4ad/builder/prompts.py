@@ -95,6 +95,7 @@ Analyze this problem and output a JSON object with the following fields:
 {{
     "problem_type": "<category: combinatorial_optimization | sorting | scheduling | ml | rl | regression | simulation | other>",
     "complexity_tier": "<simple | medium | complex — estimated difficulty of the optimization problem>",
+    "evaluation_pattern": "<separate_script | self_spawn — see the guideline below>",
     "project_name": "<short_snake_case_slug for the project, e.g. graph_coloring>",
     "background": "<2-4 sentence background description for the LLM, explaining the optimization goal and constraints>",
     "function_name": "<snake_case function name to evolve, e.g. greedy_coloring>",
@@ -121,9 +122,20 @@ Analyze this problem and output a JSON object with the following fields:
 - The function should be self-contained and take simple data structures as input
 - Choose metrics that are directly computable from the algorithm's output
 - The first metric should be the primary optimization objective
-- Use subprocess pattern: the algorithm file will be executed as a separate process
 - Keep the function signature simple — avoid complex custom types
 - **complexity_tier**: "simple" for straightforward problems, "medium" for moderate, "complex" for large search spaces or NP-hard
+- **evaluation_pattern**: decide how the evolved function is invoked during evaluation:
+  - `separate_script`: the function is called ONCE per instance with the full
+    input, computes a complete answer, and returns it (e.g. TSP tour, sorted
+    list, a regression formula). The algorithm file runs as its own subprocess:
+    `python <algo_file> '<instance_json>'`. This is the default for most tasks.
+  - `self_spawn`: the function is a POLICY / CONTROL function called REPEATEDLY
+    inside an environment or simulation loop, receiving live per-step state
+    (e.g. an RL control policy for CarRacing / LunarLander that maps an
+    observation to an action every timestep). Here the instance is typically a
+    seed, and the evaluator drives the loop. Choose this whenever evaluation
+    requires stepping an environment / running a simulation that calls the
+    function many times.
 - Output ONLY the JSON object, no additional text
 """
 
@@ -316,8 +328,139 @@ Generate a single standalone Python file that:
 Output ONLY the complete Python source code, no explanations or markdown fences.
 """
 
-CREATE_TASK_FROM_DRIVER_PROMPT = """\
-You are an expert Python developer building an LLM4AD task from a generated driver script.
+# ---------------------------------------------------------------------------
+# Split-call creation prompts (one artifact per call)
+#
+# These replace the single 6-section CREATE_TASK_PROMPT for the non-multimodal
+# fresh-build path. Generating one artifact per call removes section-marker
+# fragility and tail truncation, and lets later calls (sample data, evaluator)
+# see the real generated algorithm code so the execution contract stays
+# consistent.
+#
+# Contract (separate-script): the algorithm file's main() reads the FULL
+# instance dict from sys.argv[1], runs the algorithm, and prints one JSON
+# object to stdout. The evaluator spawns `python <algo_file> '<instance_json>'`
+# and parses that stdout JSON.
+# ---------------------------------------------------------------------------
+
+CREATE_ALGORITHM_PROMPT = """\
+You are an expert Python developer building the ALGORITHM FILE for an LLM4AD
+algorithm evolution task. Generate ONLY the algorithm file — nothing else.
+
+## Task Specification
+- Project: {project_name}
+- Background: {background}
+- Function to evolve: {function_name}
+- Signature: {function_signature}
+- Description: {function_description}
+- Input format: {input_format}
+- Output format: {output_format}
+
+## LLM4AD Algorithm Template (follow this pattern exactly)
+```python
+{algorithm_template}
+```
+
+## Requirements
+1. Include `# EVOLVE_START` and `# EVOLVE_END` markers around the evolvable function.
+2. The evolvable function must match the specified signature: `{function_signature}`.
+3. Keep imports used only by the evolvable function INSIDE the EVOLVE markers.
+4. Provide a reasonable BASELINE implementation (not just `pass` or `return None`).
+5. Include a `process(data)` wrapper (OUTSIDE the markers) that calls the
+   evolvable function and returns a dict result.
+6. Include a `main()` entry point (OUTSIDE the markers) that:
+   - reads the FULL instance dict from `sys.argv[1]` via `json.loads`,
+   - calls `process(...)`,
+   - prints exactly one JSON object to stdout via `print(json.dumps(...))`.
+7. The file must be runnable as: `python {algorithm_file_name} '<instance_json>'`.
+
+Output ONLY the complete Python source for the algorithm file. No explanations,
+no markdown fences.
+"""
+
+CREATE_SAMPLE_DATA_PROMPT = """\
+You are generating a single sample DATA INSTANCE for an LLM4AD task, used to
+validate the algorithm and evaluator at build time.
+
+## Input Format
+{input_format}
+
+## Algorithm File (the code this data will be fed to)
+```python
+{algorithm_code}
+```
+
+## Requirements
+The algorithm's `main()` reads this JSON from `sys.argv[1]` via `json.loads`
+and passes it to `process(...)`. Produce ONE instance that:
+1. Matches the input format above and the shape the algorithm's `main()` /
+   `process()` actually expect.
+2. Is realistic but MINIMAL (a small instance is enough to exercise the code).
+3. Is valid JSON parseable by Python's `json.loads()` — no comments, no trailing
+   commas, no unescaped multi-line strings, no code fences, no prose.
+
+CRITICAL: Output ONLY the JSON value (object or array). NEVER output "NONE" or
+an empty response — the build cannot validate without sample data.
+"""
+
+CREATE_EVALUATOR_PROMPT = """\
+You are an expert Python developer building the EVALUATOR FILE for an LLM4AD
+algorithm evolution task. Generate ONLY the evaluator file — nothing else.
+
+## Task Specification
+- Project: {project_name}
+- Background: {background}
+- Metrics: {metrics_json}
+- Output format (what the algorithm prints): {output_format}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Algorithm File (the code your evaluator will run and score)
+```python
+{algorithm_code}
+```
+
+## Sample Data Instance (one instance file the evaluator will receive)
+```json
+{sample_data}
+```
+
+## LLM4AD Evaluator Template (follow this SEPARATE-SCRIPT pattern exactly)
+```python
+{evaluator_template}
+```
+
+## Requirements
+1. Subclass `BaseEvaluator` and register with
+   `@BaseEvaluator.register("{evaluator_register_name}")`.
+2. Name the evaluator class EXACTLY `{evaluator_class_name}`.
+3. Import from `llm4ad.evaluator.base`: BaseEvaluator, EvalContext,
+   EvaluationResult, Metric, MetricType.
+4. Define metrics in `__init__` matching the specification above, and expose
+   them via the `metrics` property.
+5. Implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`.
+6. SEPARATE-SCRIPT execution (do NOT self-spawn, do NOT use importlib):
+   - Resolve the algorithm file for BOTH layouts:
+     `cfg.project_root / "{algorithm_dir_name}" / "{algorithm_file_name}"` and
+     `cfg.project_root / "{algorithm_file_name}"`.
+   - Read the instance file text from `cfg.data_path`.
+   - Spawn `python <algo_file> '<instance_json>'` via
+     `asyncio.create_subprocess_exec`, with a timeout using
+     `asyncio.wait_for` + `proc.kill()`.
+   - Parse the single JSON object the subprocess prints to stdout.
+   - If the parsed result contains an `"error"` key, treat it as failure.
+7. Compute the score from the result keys the algorithm's `process()` actually
+   returns (see the algorithm code above). Higher score is always better for
+   evolution (negate for minimize objectives).
+
+Output ONLY the complete Python source for the evaluator file. No explanations,
+no markdown fences.
+"""
+
+CREATE_EVALUATOR_FROM_DRIVER_PROMPT = """\
+You are an expert Python developer building the EVALUATOR FILE for an LLM4AD
+task from an already-assembled algorithm/driver script. Generate ONLY the
+evaluator file — nothing else.
 
 ## Task Specification
 - Project: {project_name}
@@ -327,7 +470,7 @@ You are an expert Python developer building an LLM4AD task from a generated driv
 - Algorithm directory: {algorithm_dir_name}
 - Algorithm file: {algorithm_file_name}
 
-## Generated Driver Script (the algorithm file)
+## Generated Driver Script (the algorithm file — already built)
 ```python
 {driver_code}
 ```
@@ -336,58 +479,209 @@ You are an expert Python developer building an LLM4AD task from a generated driv
 Input schema: {input_schema_json}
 Output schema: {output_schema_json}
 
-## LLM4AD Evaluator Template
+## Sample Data Instance (one instance file the evaluator will receive)
+```json
+{sample_data}
+```
+
+## LLM4AD Evaluator Template (follow this SEPARATE-SCRIPT pattern exactly)
 ```python
 {evaluator_template}
 ```
 
 ## Requirements
+1. Subclass `BaseEvaluator` and register with
+   `@BaseEvaluator.register("{evaluator_register_name}")`.
+2. Name the evaluator class EXACTLY `{evaluator_class_name}`.
+3. Import from `llm4ad.evaluator.base`: BaseEvaluator, EvalContext,
+   EvaluationResult, Metric, MetricType.
+4. Define metrics in `__init__` matching the specification above, and expose
+   them via the `metrics` property.
+5. Implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`.
+6. SEPARATE-SCRIPT execution (do NOT self-spawn, do NOT use importlib):
+   - Resolve the algorithm file for BOTH layouts:
+     `cfg.project_root / "{algorithm_dir_name}" / "{algorithm_file_name}"` and
+     `cfg.project_root / "{algorithm_file_name}"`.
+   - Read the instance file text from `cfg.data_path`.
+   - Spawn `python <algo_file> '<instance_json>'` with a timeout via
+     `asyncio.wait_for` + `proc.kill()`.
+   - Parse the single JSON object printed to stdout; an `"error"` key means
+     failure.
+7. Compute the score from the output_schema keys (higher is always better;
+   negate for minimize objectives).
 
-### Evaluator Requirements:
-1. Subclass `BaseEvaluator` and register with `@BaseEvaluator.register("{evaluator_register_name}")`
-2. Define metrics in `__init__` matching the specification above
-3. Implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-4. Use subprocess isolation: spawn the algorithm file as a subprocess
-5. The algorithm file has a `main()` that reads JSON from sys.argv[1] and prints JSON result
-6. Handle worktree compatibility: check both nested and flat directory layouts
-7. Parse JSON output from subprocess, compute score (higher is always better for evolution)
-8. Import from `llm4ad.evaluator.base`: BaseEvaluator, EvalContext, EvaluationResult, Metric, MetricType
-
-### Debug Runner Requirements:
-Generate a simple `debug_run.py` script that:
-1. Creates a small sample input matching the input schema
-2. Runs the algorithm on it directly (no subprocess)
-3. Prints the result for quick validation
-
-### Sample Data Requirements (CRITICAL):
-You MUST generate a valid JSON sample data instance matching `input_schema`.
-- Must be a realistic, minimal example
-- NEVER output "NONE" or leave it empty
-
-### Test Evaluator Requirements:
-Generate a `test_evaluator.py` that exercises the evaluator end-to-end.
-Pattern: import evaluator class, create EvalContext pointing to
-data/sample/instance_001.json, call evaluate(), check success and metrics,
-print [PASS] or [FAIL].
-
-## Output Format
-Output exactly these sections:
-
-===EVALUATOR_CODE===
-<complete Python source for the evaluator file>
-
-===DEBUG_RUN===
-<complete Python source for debug_run.py>
-
-===TEST_EVALUATOR===
-<complete Python source for test_evaluator.py>
-
-===SAMPLE_DATA===
-<Valid JSON content matching input_schema. Must be valid JSON parseable by json.loads().>
-
-===METADATA===
-<JSON object with: {{"evaluator_class_name": "...", "evaluator_register_name": "..."}}>
+Output ONLY the complete Python source for the evaluator file. No explanations,
+no markdown fences.
 """
+
+# ---------------------------------------------------------------------------
+# Self-spawn (Variant B) creation prompts and templates
+#
+# For interactive / stateful tasks (RL control policies, simulations), the
+# algorithm is a POLICY FUNCTION called repeatedly inside an environment loop,
+# not a one-shot solver. The instance is a seed, not the full input. The
+# evaluator therefore drives the loop itself: it spawns ITSELF as a subprocess
+# (fault isolation), loads the policy via importlib in the __main__ block, and
+# calls the policy function many times per episode. See LunarLander for the
+# canonical example.
+# ---------------------------------------------------------------------------
+
+CREATE_ALGORITHM_POLICY_PROMPT = """\
+You are an expert Python developer building the ALGORITHM FILE for an LLM4AD
+algorithm evolution task. This is an INTERACTIVE / STATEFUL task: the function
+you write is a POLICY (control) function that an environment loop calls MANY
+times per episode — once per step, with the current observation. It is NOT a
+one-shot solver. Generate ONLY the algorithm file — nothing else.
+
+## Task Specification
+- Project: {project_name}
+- Background: {background}
+- Policy function to evolve: {function_name}
+- Signature: {function_signature}
+- Description: {function_description}
+- Observation (input to the policy each step): {input_format}
+- Action (output of the policy each step): {output_format}
+
+## LLM4AD Policy Template (follow this pattern exactly)
+```python
+{algorithm_template}
+```
+
+## Requirements
+1. Include `# EVOLVE_START` and `# EVOLVE_END` markers around the evolvable
+   policy function.
+2. The evolvable function must match the specified signature:
+   `{function_signature}`. It takes a single-step observation and returns a
+   single action — it does NOT read sys.argv, does NOT run a loop, and does NOT
+   read a full problem instance.
+3. Keep imports used only by the evolvable function INSIDE the EVOLVE markers.
+4. Provide a reasonable BASELINE policy (not just `pass` or `return None`) that
+   maps the observation to a valid action.
+5. Do NOT add a `main()` that reads sys.argv or a subprocess entry point: the
+   evaluator drives the environment loop and calls this function directly. A
+   trivial `if __name__ == "__main__"` smoke test is optional but must not be
+   required for correctness.
+
+Output ONLY the complete Python source for the algorithm file. No explanations,
+no markdown fences.
+"""
+
+CREATE_EVALUATOR_SELF_SPAWN_PROMPT = """\
+You are an expert Python developer building the EVALUATOR FILE for an LLM4AD
+INTERACTIVE / STATEFUL task (e.g. an RL control policy). Generate ONLY the
+evaluator file — nothing else.
+
+## Task Specification
+- Project: {project_name}
+- Background: {background}
+- Policy function the evaluator calls each step: {function_name}
+- Metrics: {metrics_json}
+- Observation (input to the policy each step): {input_format}
+- Action (output of the policy each step): {output_format}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Policy Algorithm File (the code your evaluator will load and call)
+```python
+{algorithm_code}
+```
+
+## Sample Data Instance (one instance file the evaluator will receive)
+```json
+{sample_data}
+```
+The instance is a SEED (and optional episode settings), NOT a full input. Read
+the seed from it and run one episode with that seed.
+
+## LLM4AD Self-Spawning Evaluator Template (follow this pattern exactly)
+```python
+{evaluator_template}
+```
+
+## Requirements
+1. Subclass `BaseEvaluator` and register with
+   `@BaseEvaluator.register("{evaluator_register_name}")`.
+2. Name the evaluator class EXACTLY `{evaluator_class_name}`.
+3. Import from `llm4ad.evaluator.base`: BaseEvaluator, EvalContext,
+   EvaluationResult, Metric, MetricType.
+4. Define metrics in `__init__` matching the specification above, and expose
+   them via the `metrics` property.
+5. Implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`.
+6. SELF-SPAWN execution for fault isolation (this is REQUIRED — the policy is
+   untrusted and the environment loop must be isolated):
+   - `evaluate()` reads the seed from `cfg.data_path`, then spawns THIS FILE as
+     a subprocess: `python <this_evaluator_file> '<json_with_seed_and_paths>'`
+     via `asyncio.create_subprocess_exec`, with a timeout using
+     `asyncio.wait_for` + `proc.kill()`.
+   - Parse the single JSON object the subprocess prints to stdout; an `"error"`
+     key means failure.
+   - Add a `def _subprocess_main()` and `if __name__ == "__main__":` block that:
+     loads the policy module via `importlib.util.spec_from_file_location` with a
+     UNIQUE module name (never `import_module`, to avoid sys.modules caching),
+     resolves the algorithm file for BOTH layouts
+     (`{algorithm_dir_name}/{algorithm_file_name}` and `{algorithm_file_name}`),
+     runs ONE episode calling `{function_name}` each step, and prints the result
+     JSON to stdout.
+7. Compute the score from the episode outcome (higher is always better; negate
+   for minimize objectives). Guard every policy call in a try/except so a broken
+   policy yields an `"error"` result rather than crashing the loop.
+
+Output ONLY the complete Python source for the evaluator file. No explanations,
+no markdown fences.
+"""
+
+# debug_run.py for self-spawn tasks: the algorithm is a bare policy function
+# with no argv contract, so we cannot run `python algo.py '<instance>'`. Instead
+# import the policy and assert it is callable — no environment / gym needed.
+DEBUG_RUN_SELF_SPAWN_TEMPLATE = '''\
+#!/usr/bin/env python3
+"""Quick standalone check that the policy function imports and is callable.
+
+This is an interactive / self-spawn task: the algorithm is a policy function the
+evaluator calls inside an environment loop, so there is no `python algo.py
+'<instance>'` contract to exercise here. This check only proves the policy
+module imports cleanly and exposes a callable `{function_name}`. No API key,
+LLM provider, or environment (e.g. gym) is required.
+"""
+
+import importlib.util
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    """Import the policy module and verify the evolved function is callable."""
+    here = Path(__file__).parent
+    algo_file = here / "{algorithm_dir_name}" / "{algorithm_file_name}"
+    if not algo_file.exists():
+        algo_file = here / "{algorithm_file_name}"
+    if not algo_file.exists():
+        print(f"[X] Algorithm file not found: {algorithm_file_name}", file=sys.stderr)
+        return 1
+
+    spec = importlib.util.spec_from_file_location("_debug_policy", str(algo_file))
+    if spec is None or spec.loader is None:
+        print(f"[X] Cannot load module spec from {{algo_file}}", file=sys.stderr)
+        return 1
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[X] Policy module failed to import: {{exc}}", file=sys.stderr)
+        return 1
+
+    fn = getattr(module, "{function_name}", None)
+    if not callable(fn):
+        print(f"[X] Policy function '{function_name}' not found or not callable", file=sys.stderr)
+        return 1
+
+    print("[OK] Policy module imports and '{function_name}' is callable.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
 
 ANALYZE_MULTIMODAL_SUPPLEMENT = """\
 
@@ -421,138 +715,6 @@ Guidelines for visualization_spec:
 # ---------------------------------------------------------------------------
 # Creation prompts
 # ---------------------------------------------------------------------------
-
-CREATE_TASK_PROMPT = """\
-You are an expert Python developer building an LLM4AD algorithm evolution task.
-Generate the evaluator code and algorithm template based on the specification below.
-
-## Task Specification
-- Project: {project_name}
-- Background: {background}
-- Function to evolve: {function_name}
-- Signature: {function_signature}
-- Description: {function_description}
-- Input format: {input_format}
-- Output format: {output_format}
-- Metrics: {metrics_json}
-- Algorithm directory: {algorithm_dir_name}
-- Algorithm file: {algorithm_file_name}
-
-## LLM4AD Evaluator Template (follow this pattern exactly)
-```python
-{evaluator_template}
-```
-
-## LLM4AD Algorithm Template (follow this pattern exactly)
-```python
-{algorithm_template}
-```
-
-## Requirements
-
-### Evaluator Requirements:
-1. Subclass `BaseEvaluator` and register with `@BaseEvaluator.register("{evaluator_register_name}")`
-2. Define metrics in `__init__` matching the specification above
-3. Implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-4. Use subprocess isolation: spawn this file's `__main__` block as a subprocess
-5. The `_run_algorithm` static method loads the algorithm module via `importlib.util`
-6. Handle worktree compatibility: check both nested and flat directory layouts
-7. Parse JSON output from subprocess, compute score (higher is always better for evolution)
-8. Import from `llm4ad.evaluator.base`: BaseEvaluator, EvalContext, EvaluationResult, Metric, MetricType
-
-### Algorithm Requirements:
-1. Include `EVOLVE_START` and `EVOLVE_END` markers around the evolvable function
-2. The evolvable function must match the specified signature
-3. Include a `process()` wrapper that calls the function and formats output as dict
-4. Include a `main()` entry point that reads JSON from sys.argv[1] and prints JSON result
-5. Keep imports inside the EVOLVE markers if they're only used by the evolvable function
-6. Provide a reasonable baseline implementation (not just `pass` or `return None`)
-
-### Debug Runner Requirements:
-Generate a simple `debug_run.py` script that:
-1. Creates a small sample input matching the task's data format
-2. Runs the algorithm on it directly (no subprocess)
-3. Prints the result for quick validation
-
-### Sample Data Requirements (CRITICAL):
-You MUST generate a valid JSON sample data instance in the SAMPLE_DATA section.
-This is required for the pipeline to validate the evaluator at build time.
-- Must match the input format specification above
-- Must be a realistic, minimal example (one instance is enough)
-- NEVER output "NONE" or leave it empty — the build will fail without sample data
-
-### Test Evaluator Requirements:
-Generate a `test_evaluator.py` script that exercises the *evaluator* (not just the
-algorithm) end-to-end. This is critical to verify the evaluator actually evaluates
-correctly, not merely that it doesn't error. Pattern:
-
-```python
-import asyncio
-from pathlib import Path
-from {{evaluator_module_name}} import {{evaluator_class_placeholder}}
-from llm4ad.config.schema import EvalContext
-
-
-async def test_evaluator():
-    current_dir = Path(__file__).parent
-    data_path = current_dir / "data" / "sample" / "instance_001.json"
-    if not data_path.exists():
-        print(f"[X] Data file not found: {{data_path}}")
-        return False
-    evaluator = {{evaluator_class_placeholder}}()
-    cfg = EvalContext(
-        data_path=str(data_path),
-        project_root=str(current_dir),
-        timeout=120.0,
-    )
-    result = await evaluator.evaluate(cfg)
-    print(f"Success: {{result.success}}")
-    print(f"Score: {{result.score}}")
-    print(f"Metrics: {{result.metrics}}")
-    if result.error_message:
-        print(f"Error: {{result.error_message}}")
-    expected_metrics = [<list of metric names from spec>]
-    has_all = all(m in result.metrics for m in expected_metrics)
-    if result.success and has_all:
-        print("[PASS] Test PASSED")
-        return True
-    print("[FAIL] Test FAILED")
-    return False
-
-
-if __name__ == "__main__":
-    success = asyncio.run(test_evaluator())
-    exit(0 if success else 1)
-```
-
-Replace `{{evaluator_module_name}}` with the evaluator file's module name (without
-.py) and `{{evaluator_class_placeholder}}` with the actual class name. Populate
-`expected_metrics` with the metric names from the spec.
-
-## Output Format
-Output exactly these sections with the delimiters shown:
-
-===EVALUATOR_CODE===
-<complete Python source for the evaluator file>
-
-===ALGORITHM_CODE===
-<complete Python source for the algorithm file>
-
-===DEBUG_RUN===
-<complete Python source for debug_run.py>
-
-===TEST_EVALUATOR===
-<complete Python source for test_evaluator.py>
-
-===SAMPLE_DATA===
-<Valid JSON content for a sample data file. REQUIRED: always produce a valid, minimal but
-realistic JSON instance matching the input format. Must be valid JSON parseable by json.loads()
-— no comments, no trailing commas, no multi-line strings with unescaped newlines. Never output
-NONE or empty — the task pipeline cannot validate without sample data.>
-
-===METADATA===
-<JSON object with: {{"evaluator_class_name": "...", "evaluator_register_name": "..."}}>
-"""
 
 CREATE_TASK_MULTIMODAL_PROMPT = """\
 You are an expert Python developer building an LLM4AD **multimodal** algorithm evolution task.
@@ -665,101 +827,8 @@ NONE or empty — the task pipeline cannot validate without sample data.>
 """
 
 # ---------------------------------------------------------------------------
-# Creation prompt for reusing existing algorithm code (from_code with EVOLVE)
+# Config YAML template (programmatic, not LLM-generated)
 # ---------------------------------------------------------------------------
-
-CREATE_TASK_REUSE_ALGORITHM_PROMPT = """\
-You are an expert Python developer building an LLM4AD algorithm evolution task.
-The user has an existing codebase with EVOLVE markers. The algorithm file will
-be assembled separately — you only need to generate the evaluator, debug runner,
-test, and sample data.
-
-## Task Specification
-- Project: {project_name}
-- Background: {background}
-- Function to evolve: {function_name}
-- Signature: {function_signature}
-- Description: {function_description}
-- Input format: {input_format}
-- Output format: {output_format}
-- Metrics: {metrics_json}
-- Algorithm directory: {algorithm_dir_name}
-- Algorithm file: {algorithm_file_name}
-
-## Original File (CONTEXT ONLY — understand how the function is used)
-The full original file is shown below so you can understand how the function
-is called, what data it receives, and what it returns. It may contain old APIs
-or dependencies that must NOT appear in the generated files.
-```python
-{existing_algorithm_code}
-```
-
-## EVOLVE Block (the function being evolved)
-```python
-{evolve_block_content}
-```
-
-## Generated Algorithm File Structure
-The algorithm file has already been assembled as a standalone script with:
-- The EVOLVE function between `# EVOLVE_START` and `# EVOLVE_END`
-- A `solve(input_data)` wrapper that calls `{function_name}(**input_data)` and returns the result
-- A `main()` entry point that reads JSON from sys.argv[1] and prints JSON result
-- Can be run as: `python {algorithm_file_name} '<json_input>'`
-
-The evaluator must spawn this file as a subprocess and parse its JSON output.
-
-## LLM4AD Evaluator Template (follow this pattern exactly)
-```python
-{evaluator_template}
-```
-
-## Requirements
-
-### Evaluator Requirements:
-1. Subclass `BaseEvaluator` and register with `@BaseEvaluator.register("{evaluator_register_name}")`
-2. Define metrics in `__init__` matching the specification above
-3. Implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-4. Use subprocess isolation: spawn the algorithm file as a subprocess
-5. Handle worktree compatibility: check both nested and flat directory layouts
-6. Parse JSON output from subprocess, compute score (higher is always better for evolution)
-7. Import from `llm4ad.evaluator.base`: BaseEvaluator, EvalContext, EvaluationResult, Metric, MetricType
-
-### Debug Runner Requirements:
-Generate a simple `debug_run.py` script that:
-1. Creates a small sample input matching the task's data format
-2. Runs the algorithm on it directly (no subprocess)
-3. Prints the result for quick validation
-
-### Sample Data Requirements (CRITICAL):
-You MUST generate a valid JSON sample data instance in the SAMPLE_DATA section.
-- Must match the input format that the algorithm expects
-- Must be a realistic, minimal example
-- NEVER output "NONE" or leave it empty
-
-### Test Evaluator Requirements:
-Generate a `test_evaluator.py` that exercises the evaluator end-to-end.
-Pattern: import evaluator class, create EvalContext pointing to
-data/sample/instance_001.json, call evaluate(), check success and metrics,
-print [PASS] or [FAIL].
-
-## Output Format
-Output exactly these sections (NO ===ALGORITHM_CODE=== section — it is pre-built):
-
-===EVALUATOR_CODE===
-<complete Python source for the evaluator file>
-
-===DEBUG_RUN===
-<complete Python source for debug_run.py>
-
-===TEST_EVALUATOR===
-<complete Python source for test_evaluator.py>
-
-===SAMPLE_DATA===
-<Valid JSON content for a sample data file. Must be valid JSON parseable by json.loads().>
-
-===METADATA===
-<JSON object with: {{"evaluator_class_name": "...", "evaluator_register_name": "..."}}>
-"""
 
 CONFIG_YAML_TEMPLATE = """\
 # ==========================================================================
@@ -872,13 +941,142 @@ between EVOLVE_START and EVOLVE_END markers.\
 """
 
 # ---------------------------------------------------------------------------
+# Deterministic boilerplate templates (rendered, not LLM-generated)
+#
+# debug_run.py and test_evaluator.py are mechanical: every value they need is
+# known deterministically from the analysis. Rendering them removes LLM tokens,
+# truncation risk, and a class of "wrong filename/class" runtime failures.
+# ---------------------------------------------------------------------------
+
+DEBUG_RUN_TEMPLATE = '''\
+#!/usr/bin/env python3
+"""Quick standalone check that the algorithm runs on the sample instance.
+
+Runs the algorithm file as a subprocess (the same separate-script contract the
+evaluator uses) against data/sample/instance_001.json and prints the result.
+No API key or LLM provider is required — this only proves the package runs.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    """Run the algorithm on the sample instance and report the outcome."""
+    here = Path(__file__).parent
+    algo_file = here / "{algorithm_dir_name}" / "{algorithm_file_name}"
+    if not algo_file.exists():
+        algo_file = here / "{algorithm_file_name}"
+    if not algo_file.exists():
+        print(f"[X] Algorithm file not found: {algorithm_file_name}", file=sys.stderr)
+        return 1
+
+    data_path = here / "data" / "sample" / "instance_001.json"
+    if not data_path.exists():
+        print(f"[X] Sample data not found: {{data_path}}", file=sys.stderr)
+        return 1
+
+    instance_json = data_path.read_text(encoding="utf-8").strip()
+    proc = subprocess.run(
+        [sys.executable, str(algo_file), instance_json],
+        capture_output=True, text=True, timeout=30,
+    )
+
+    if proc.returncode != 0:
+        print(f"[X] Algorithm subprocess failed (rc={{proc.returncode}})", file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        return 1
+
+    try:
+        result = json.loads(proc.stdout.strip())
+    except json.JSONDecodeError as exc:
+        print(f"[X] Algorithm output is not valid JSON: {{exc}}", file=sys.stderr)
+        print(proc.stdout, file=sys.stderr)
+        return 1
+
+    print("[OK] Algorithm ran successfully on the sample instance.")
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+TEST_EVALUATOR_TEMPLATE = '''\
+"""End-to-end test for the generated evaluator.
+
+Imports the evaluator, points an EvalContext at the sample instance, runs
+evaluate(), and asserts success plus the presence of all expected metrics.
+"""
+
+import asyncio
+from pathlib import Path
+
+from {evaluator_module_name} import {evaluator_class_name}
+from llm4ad.config.schema import EvalContext
+
+
+async def test_evaluator() -> bool:
+    """Run the evaluator once on the sample instance and check the result."""
+    current_dir = Path(__file__).parent
+    data_path = current_dir / "data" / "sample" / "instance_001.json"
+    if not data_path.exists():
+        print(f"[X] Data file not found: {{data_path}}")
+        return False
+
+    evaluator = {evaluator_class_name}()
+    cfg = EvalContext(
+        data_path=str(data_path),
+        project_root=str(current_dir),
+        timeout=120.0,
+        {behavior_storage_kwarg}
+    )
+    result = await evaluator.evaluate(cfg)
+    print(f"Success: {{result.success}}")
+    print(f"Score: {{result.score}}")
+    print(f"Metrics: {{result.metrics}}")
+    if result.error_message:
+        print(f"Error: {{result.error_message}}")
+
+    expected_metrics = {expected_metrics_list}
+    has_all = all(m in result.metrics for m in expected_metrics)
+    if result.success and has_all:
+        print("[PASS] Test PASSED")
+        return True
+    print("[FAIL] Test FAILED")
+    return False
+
+
+if __name__ == "__main__":
+    success = asyncio.run(test_evaluator())
+    exit(0 if success else 1)
+'''
+
+# ---------------------------------------------------------------------------
 # Repair prompts
 # ---------------------------------------------------------------------------
 
 REPAIR_EVALUATOR_PROMPT = """\
 The following LLM4AD evaluator code has an error. Fix it.
 
-## Current Code
+## Task context (use these exact values)
+- Project: {project_name}
+- Evaluator class name: {evaluator_class_name}
+- Evaluator register name: {evaluator_register_name}
+- Algorithm function to evolve: {function_name}
+- Metrics to define: {metrics_json}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Algorithm File (the code your evaluator runs and parses)
+```python
+{algorithm_code}
+```
+
+## Current (broken) evaluator code
 ```python
 {evaluator_code}
 ```
@@ -889,12 +1087,17 @@ The following LLM4AD evaluator code has an error. Fix it.
 {history_section}
 ## Requirements
 1. Must subclass `BaseEvaluator` from `llm4ad.evaluator.base`
-2. Must use `@BaseEvaluator.register(...)` decorator
-3. Must define `_metrics` in `__init__` and expose via `metrics` property
-4. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-5. Must use subprocess isolation (spawn self as subprocess via `__main__`)
-6. Must handle worktree paths (check both nested and flat directory layouts)
-7. The `_run_algorithm` static method must load algorithm via `importlib.util`
+2. Register with `@BaseEvaluator.register("{evaluator_register_name}")`
+3. Name the evaluator class EXACTLY `{evaluator_class_name}`
+4. Define the metrics listed above in `__init__` and expose them via the
+   `metrics` property
+5. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
+6. Must use the SEPARATE-SCRIPT contract: spawn the algorithm file as a
+   subprocess via `python <algo_file> '<instance_json>'` (do NOT self-spawn,
+   do NOT use importlib). Pass the instance file text as argv[1].
+7. Must handle worktree paths (check both nested and flat directory layouts)
+8. Must parse the single JSON object printed to stdout; an `"error"` key means
+   failure. Use `asyncio.wait_for` + `proc.kill()` for the timeout.
 
 ## Reference Template
 ```python
@@ -904,7 +1107,64 @@ The following LLM4AD evaluator code has an error. Fix it.
 Output ONLY the fixed complete Python source code. No explanations.
 """
 
-REPAIR_ALGORITHM_PROMPT = """\
+REPAIR_EVALUATOR_SELF_SPAWN_PROMPT = """\
+The following LLM4AD evaluator code has an error. Fix it.
+
+## Task context (use these exact values)
+- Project: {project_name}
+- Evaluator class name: {evaluator_class_name}
+- Evaluator register name: {evaluator_register_name}
+- Policy function the evaluator loads and calls: {function_name}
+- Metrics to define: {metrics_json}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Policy Algorithm File (the code your evaluator will load and call)
+```python
+{algorithm_code}
+```
+
+## Current (broken) evaluator code
+```python
+{evaluator_code}
+```
+
+## Latest Error
+{error_message}
+
+{history_section}
+## Requirements
+1. Must subclass `BaseEvaluator` from `llm4ad.evaluator.base`
+2. Register with `@BaseEvaluator.register("{evaluator_register_name}")`
+3. Name the evaluator class EXACTLY `{evaluator_class_name}`
+4. Define the metrics listed above in `__init__` and expose them via the
+   `metrics` property
+5. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
+6. Must use the SELF-SPAWN contract: `evaluate()` spawns THIS FILE as a
+   subprocess via `asyncio.create_subprocess_exec`, with `asyncio.wait_for` +
+   `proc.kill()` for the timeout. The `__main__` block is the subprocess entry
+   point: it loads the policy module via
+   `importlib.util.spec_from_file_location` (a UNIQUE module name — never
+   `import_module`), resolves the policy file for BOTH the nested
+   (`<algorithm_dir>/<algorithm_file>`) and flat (`<algorithm_file>`) layouts,
+   and runs episode(s) calling the policy function each step. Do NOT switch to
+   the separate-script `python algo.py '<instance>'` contract.
+7. The instance file is a SEED (and optional episode settings), NOT a full
+   input. Read the seed from it and run the episode(s) with that seed.
+8. Parse the single JSON object printed to stdout; an `"error"` key means
+   failure.
+9. Never let `evaluate` raise: wrap the body in try/except and return an
+   `EvaluationResult(metrics={{}}, success=False, error_message=...)` on error.
+
+## Reference Template
+```python
+{evaluator_template}
+```
+
+Output ONLY the fixed complete Python source code. No explanations.
+"""
+
+REPAIR_ALGORITHM_SEPARATE_SCRIPT_PROMPT = """\
 The following LLM4AD algorithm file has an error. Fix it.
 
 ## Current Code
@@ -931,6 +1191,39 @@ The following LLM4AD algorithm file has an error. Fix it.
 
 Output ONLY the fixed complete Python source code. No explanations.
 """
+
+REPAIR_ALGORITHM_SELF_SPAWN_PROMPT = """\
+The following LLM4AD algorithm file has an error. Fix it.
+
+## Current Code
+```python
+{algorithm_code}
+```
+
+## Latest Error
+{error_message}
+
+{history_section}
+## Requirements
+1. Must have EVOLVE_START and EVOLVE_END markers
+2. The evolvable policy function must be between the markers
+3. The policy function signature must match: {function_signature}
+4. The policy takes a single observation and returns a single action
+5. Do NOT add a `main()` entry point or `process()` wrapper
+6. Do NOT read sys.argv or print to stdout
+7. Keep imports used only by the policy INSIDE the EVOLVE markers
+8. Must provide a working baseline implementation
+
+## Reference Template
+```python
+{algorithm_template}
+```
+
+Output ONLY the fixed complete Python source code. No explanations.
+"""
+
+# Deprecated: Use pattern-specific prompts above
+REPAIR_ALGORITHM_PROMPT = REPAIR_ALGORITHM_SEPARATE_SCRIPT_PROMPT
 
 REPAIR_DATASET_PROMPT = """\
 The generated LLM4AD task is missing sample data for testing.
@@ -980,17 +1273,26 @@ The following LLM4AD debug_run.py script has an error. Fix it.
 ```
 
 ## Requirements
-1. Import the function using sys.path:
+1. Run the algorithm as a SUBPROCESS on the sample instance (separate-script
+   contract — the same way the evaluator runs it):
    ```python
+   import json
+   import subprocess
    import sys
    from pathlib import Path
-   sys.path.insert(0, str(Path(__file__).parent / "{algorithm_dir_name}"))
-   from {algorithm_module} import {function_name}
+
+   here = Path(__file__).parent
+   algo_file = here / "{algorithm_dir_name}" / "{algorithm_file_name}"
+   if not algo_file.exists():
+       algo_file = here / "{algorithm_file_name}"
+   instance_json = (here / "data" / "sample" / "instance_001.json").read_text(encoding="utf-8").strip()
+   proc = subprocess.run([sys.executable, str(algo_file), instance_json],
+                         capture_output=True, text=True, timeout=30)
    ```
-2. Must run a quick test with sample data and print results
-3. Must exit with code 0 on success
+2. Must check the subprocess return code, parse the stdout JSON, and print results
+3. Must exit with code 0 on success (non-zero on failure)
 4. All parentheses, brackets, quotes, and triple-quotes must be properly closed
-5. Keep it simple — no complex test frameworks, just call the function and print
+5. Keep it simple — no LLM provider, no API key, just run the subprocess and print
 
 Output ONLY the fixed complete Python source code. No explanations.
 """
@@ -1076,7 +1378,21 @@ Output ONLY the fixed complete Python source code. No explanations.
 REPAIR_EVALUATOR_MULTIMODAL_PROMPT = """\
 The following LLM4AD **multimodal** evaluator code has an error. Fix it.
 
-## Current Code
+## Task context (use these exact values)
+- Project: {project_name}
+- Evaluator class name: {evaluator_class_name}
+- Evaluator register name: {evaluator_register_name}
+- Policy function the evaluator loads and calls: {function_name}
+- Metrics to define: {metrics_json}
+- Algorithm directory: {algorithm_dir_name}
+- Algorithm file: {algorithm_file_name}
+
+## Policy Algorithm File (the code your evaluator will load and call)
+```python
+{algorithm_code}
+```
+
+## Current (broken) evaluator code
 ```python
 {evaluator_code}
 ```
@@ -1087,18 +1403,19 @@ The following LLM4AD **multimodal** evaluator code has an error. Fix it.
 {history_section}
 ## Requirements
 1. Must subclass `BaseEvaluator` from `llm4ad.evaluator.base`
-2. Must use `@BaseEvaluator.register(...)` decorator
-3. Must define `_metrics` in `__init__` and expose via `metrics` property
-4. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
-5. Must use subprocess isolation (spawn self as subprocess via `__main__`)
-6. Must handle worktree paths (check both nested and flat directory layouts)
-7. Must import `BehaviorData`, `BehaviorVisualization` from `llm4ad.evaluator.behavior`
-8. Must import `BaseRenderer` from `llm4ad.evaluator.renderer`
-9. Must register a `BaseRenderer` subclass with `@BaseRenderer.register(...)`
-10. Must implement `_render_result_image()` for visualization
-11. Must implement `_build_observation_text()` for LLM-readable summaries
-12. Must handle `cfg.behavior_storage` modes ("rendered"/"raw"/"none")
-13. Must build `BehaviorData` with observation text + `BehaviorVisualization`
+2. Register with `@BaseEvaluator.register("{evaluator_register_name}")`
+3. Name the evaluator class EXACTLY `{evaluator_class_name}`
+4. Define the metrics listed above in `__init__` and expose them via the `metrics` property
+5. Must implement async `evaluate(self, cfg: EvalContext) -> EvaluationResult`
+6. Must use subprocess isolation (spawn self as subprocess via `__main__`)
+7. Must handle worktree paths (check both nested and flat directory layouts)
+8. Must import `BehaviorData`, `BehaviorVisualization` from `llm4ad.evaluator.behavior`
+9. Must import `BaseRenderer` from `llm4ad.evaluator.renderer`
+10. Must register a `BaseRenderer` subclass with `@BaseRenderer.register(...)`
+11. Must implement `_render_result_image()` for visualization
+12. Must implement `_build_observation_text()` for LLM-readable summaries
+13. Must handle `cfg.behavior_storage` modes ("rendered"/"raw"/"none")
+14. Must build `BehaviorData` with observation text + `BehaviorVisualization`
 
 ## Reference Template
 ```python
@@ -1236,8 +1553,17 @@ def get_evaluator_template() -> str:
     return _load_example("my_evaluator.py")
 
 
-def get_algorithm_template() -> str:
-    """Load the algorithm template as a string for few-shot prompts."""
+def get_algorithm_template(evaluation_pattern: str = "separate_script") -> str:
+    """Load the algorithm template as a string for few-shot prompts.
+
+    Args:
+        evaluation_pattern: Either "separate_script" or "self_spawn"
+
+    Returns:
+        Template string for the specified pattern
+    """
+    if evaluation_pattern == "self_spawn":
+        return get_self_spawn_algorithm_template()
     return _load_example("my_algorithm/my_function.py")
 
 
@@ -1249,3 +1575,58 @@ def get_multimodal_evaluator_template() -> str:
 def get_multimodal_algorithm_template() -> str:
     """Load the multimodal algorithm template as a string for few-shot prompts."""
     return _load_multimodal_example("my_algorithm/my_function.py")
+
+
+_SELF_SPAWN_EXAMPLE_DIR: Path | None = None
+
+
+def _get_self_spawn_example_dir() -> Path:
+    """Locate the examples/applications/lunarlander_python directory.
+
+    LunarLander is the canonical self-spawn (Variant B) reference: a policy
+    function called repeatedly inside an environment loop, with an evaluator
+    that spawns itself as a subprocess for fault isolation.
+    """
+    global _SELF_SPAWN_EXAMPLE_DIR
+    if _SELF_SPAWN_EXAMPLE_DIR is not None:
+        return _SELF_SPAWN_EXAMPLE_DIR
+
+    current = Path(__file__).resolve().parent
+    for _ in range(10):
+        candidate = current / "examples" / "applications" / "lunarlander_python"
+        if candidate.exists():
+            _SELF_SPAWN_EXAMPLE_DIR = candidate
+            return _SELF_SPAWN_EXAMPLE_DIR
+        current = current.parent
+
+    raise FileNotFoundError(
+        "Cannot locate examples/applications/lunarlander_python/. "
+        "Ensure the LLM4AD repository structure is intact."
+    )
+
+
+def _load_self_spawn_example(relative_path: str) -> str:
+    """Load an example file from the self-spawn (LunarLander) template directory."""
+    path = _get_self_spawn_example_dir() / relative_path
+    if not path.exists():
+        return f"[Self-spawn example file not found: {relative_path}]"
+    return path.read_text(encoding="utf-8")
+
+
+def get_self_spawn_algorithm_template() -> str:
+    """Load the self-spawn (Variant B) policy algorithm template as a string.
+
+    Returns the LunarLander policy (choose_action.py): a bare policy function
+    with EVOLVE markers, called each step by the evaluator's environment loop.
+    """
+    return _load_self_spawn_example("policy/choose_action.py")
+
+
+def get_self_spawn_evaluator_template() -> str:
+    """Load the self-spawn (Variant B) evaluator template as a string.
+
+    Returns the LunarLander evaluator: an evaluator whose evaluate() spawns
+    THIS file as a subprocess for fault isolation, and whose __main__ block
+    loads the policy via importlib and drives the environment loop.
+    """
+    return _load_self_spawn_example("lunarlander_evaluator.py")

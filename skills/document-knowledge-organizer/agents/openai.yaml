@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document Knowledge Organizer"
+  short_description: "Organize Markdown into faithful editable knowledge blocks"
+  default_prompt: "Use $document-knowledge-organizer to organize these Markdown documents into faithful editable knowledge blocks."

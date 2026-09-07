@@ -27,6 +27,57 @@ from llm4ad.builder.prompts import (
 from llm4ad.infra.provider.base import BaseProvider
 from llm4ad.infra.repo_analyzer.base import EvolveBlock
 
+# Canonical evaluation-contract identifiers. `separate_script` is Variant A:
+# the evaluator spawns `python algo.py '<instance>'` for a one-shot call.
+# `self_spawn` is Variant B: the evaluator spawns ITSELF and drives an
+# environment loop that calls a policy function many times per episode.
+_SEPARATE_SCRIPT = "separate_script"
+_SELF_SPAWN = "self_spawn"
+
+# Legacy / free-form aliases the LLM (or older specs) may emit, mapped onto the
+# two canonical contracts. Anything unrecognized falls back to separate_script.
+_EVALUATION_PATTERN_ALIASES = {
+    "separate_script": _SEPARATE_SCRIPT,
+    "separate-script": _SEPARATE_SCRIPT,
+    "subprocess": _SEPARATE_SCRIPT,
+    "variant_a": _SEPARATE_SCRIPT,
+    "variant-a": _SEPARATE_SCRIPT,
+    "a": _SEPARATE_SCRIPT,
+    "one_shot": _SEPARATE_SCRIPT,
+    "one-shot": _SEPARATE_SCRIPT,
+    "oneshot": _SEPARATE_SCRIPT,
+    "stateless": _SEPARATE_SCRIPT,
+    "self_spawn": _SELF_SPAWN,
+    "self-spawn": _SELF_SPAWN,
+    "selfspawn": _SELF_SPAWN,
+    "variant_b": _SELF_SPAWN,
+    "variant-b": _SELF_SPAWN,
+    "b": _SELF_SPAWN,
+    "policy": _SELF_SPAWN,
+    "interactive": _SELF_SPAWN,
+    "stateful": _SELF_SPAWN,
+    "rl": _SELF_SPAWN,
+    "simulation": _SELF_SPAWN,
+    "episode": _SELF_SPAWN,
+}
+
+
+def _normalize_evaluation_pattern(raw: Any) -> str:
+    """Map a raw evaluation_pattern value onto a canonical contract identifier.
+
+    Args:
+        raw: The value from the LLM spec (may be None, a canonical value, or a
+            legacy/free-form alias).
+
+    Returns:
+        Either ``separate_script`` (Variant A, one-shot) or ``self_spawn``
+        (Variant B, policy-in-a-loop). Unrecognized values default to
+        ``separate_script`` since it is the simpler and more common contract.
+    """
+    if not isinstance(raw, str):
+        return _SEPARATE_SCRIPT
+    return _EVALUATION_PATTERN_ALIASES.get(raw.strip().lower(), _SEPARATE_SCRIPT)
+
 
 class TaskAnalyzer:
     """Analyze a problem description or codebase to produce a structured spec."""
@@ -58,11 +109,16 @@ class TaskAnalyzer:
         """
         if code_path is not None:
             return await self._analyze_from_code(
-                description, code_path, data_path,
-                multimodal=multimodal, visualization_hint=visualization_hint,
+                description,
+                code_path,
+                data_path,
+                multimodal=multimodal,
+                visualization_hint=visualization_hint,
             )
         return await self._analyze_from_description(
-            description, multimodal=multimodal, visualization_hint=visualization_hint,
+            description,
+            multimodal=multimodal,
+            visualization_hint=visualization_hint,
         )
 
     # ------------------------------------------------------------------
@@ -70,7 +126,11 @@ class TaskAnalyzer:
     # ------------------------------------------------------------------
 
     async def _analyze_from_description(
-        self, description: str, *, multimodal: bool = False, visualization_hint: str | None = None,
+        self,
+        description: str,
+        *,
+        multimodal: bool = False,
+        visualization_hint: str | None = None,
     ) -> AnalysisResult:
         """Analyze a text-only problem description."""
         prompt = ANALYZE_DESCRIPTION_PROMPT.format(description=description)
@@ -111,11 +171,13 @@ class TaskAnalyzer:
         """
         from llm4ad.infra.repo_analyzer.evolve_detector import EvolveDetector
 
-        detector = EvolveDetector({
-            "context_lines_before": 10,
-            "context_lines_after": 10,
-            "include": ["*.py"],
-        })
+        detector = EvolveDetector(
+            {
+                "context_lines_before": 10,
+                "context_lines_after": 10,
+                "include": ["*.py"],
+            }
+        )
         analyzed_repo = detector.analyze(code_path)
 
         if analyzed_repo.evolvable_blocks:
@@ -127,13 +189,20 @@ class TaskAnalyzer:
                     block.file_path,
                 )
             return await self._analyze_from_code_with_evolve(
-                description, code_path, data_path, block,
-                multimodal=multimodal, visualization_hint=visualization_hint,
+                description,
+                code_path,
+                data_path,
+                block,
+                multimodal=multimodal,
+                visualization_hint=visualization_hint,
             )
 
         return await self._analyze_from_code_no_evolve(
-            description, code_path, data_path,
-            multimodal=multimodal, visualization_hint=visualization_hint,
+            description,
+            code_path,
+            data_path,
+            multimodal=multimodal,
+            visualization_hint=visualization_hint,
         )
 
     # ------------------------------------------------------------------
@@ -151,7 +220,9 @@ class TaskAnalyzer:
     ) -> AnalysisResult:
         """Analyze existing code without EVOLVE markers (original from_code path)."""
         code_summary = self._build_code_summary(code_path)
-        dataset_summary = self._build_dataset_summary(data_path) if data_path else "No dataset provided."
+        dataset_summary = (
+            self._build_dataset_summary(data_path) if data_path else "No dataset provided."
+        )
 
         prompt = ANALYZE_CODE_PROMPT.format(
             description=description,
@@ -343,8 +414,11 @@ class TaskAnalyzer:
         parts: list[str] = []
         py_files = sorted(code_path.rglob("*.py"))
         py_files = [
-            f for f in py_files
-            if not any(p.startswith(".") or p == "__pycache__" for p in f.relative_to(code_path).parts)
+            f
+            for f in py_files
+            if not any(
+                p.startswith(".") or p == "__pycache__" for p in f.relative_to(code_path).parts
+            )
         ]
 
         if not py_files:
@@ -368,7 +442,9 @@ class TaskAnalyzer:
             if len(content) <= 3000:
                 parts.append(f"```python\n{content}\n```")
             else:
-                parts.append(f"```python\n{content[:3000]}\n... (truncated, {len(content)} chars total)\n```")
+                parts.append(
+                    f"```python\n{content[:3000]}\n... (truncated, {len(content)} chars total)\n```"
+                )
             parts.append("")
 
         return "\n".join(parts)
@@ -443,7 +519,7 @@ class TaskAnalyzer:
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             try:
-                result = json.loads(text[start:end + 1])
+                result = json.loads(text[start : end + 1])
                 return result if isinstance(result, dict) else {}
             except json.JSONDecodeError:
                 pass
@@ -456,11 +532,21 @@ class TaskAnalyzer:
         return AnalysisResult(
             problem_type=spec.get("problem_type", "other"),
             complexity_tier=spec.get("complexity_tier", "simple"),
-            evaluation_pattern=spec.get("evaluation_pattern", "subprocess"),
+            evaluation_pattern=_normalize_evaluation_pattern(spec.get("evaluation_pattern")),
             function_name=spec.get("function_name", "my_algorithm"),
             function_signature=spec.get("function_signature", "def my_algorithm(data):"),
             function_description=spec.get("function_description", ""),
-            metrics=spec.get("metrics", [{"name": "score", "type": "maximize", "weight": 1.0, "description": "Primary score"}]),
+            metrics=spec.get(
+                "metrics",
+                [
+                    {
+                        "name": "score",
+                        "type": "maximize",
+                        "weight": 1.0,
+                        "description": "Primary score",
+                    }
+                ],
+            ),
             input_format=spec.get("input_format", ""),
             output_format=spec.get("output_format", ""),
             algorithm_dir_name=spec.get("algorithm_dir_name", "algorithm"),

@@ -1,0 +1,241 @@
+project_name: "alphaevolve_hexagon_packing_n11"
+path_resolution: "cwd"
+description_en: "Evolve a packing of 11 unit regular hexagons and minimize the enclosing regular hexagon side length."
+description_zh: "进化 11 个单位正六边形的无重叠布局，并最小化外接正六边形边长。"
+random_seed: 42
+background: |
+  You are a mathematics expert specializing in hexagonal packing problems and computational geometry. You need to design an algorithm to tightly pack 11 non-overlapping unit regular hexagons (i.e., regular hexagons with side length 1) into a larger enclosing regular hexagon, minimizing the side length of the outer hexagon. The unit hexagons must not overlap, and all vertices of the inner unit hexagons must lie within the outer hexagon. Current literature suggests the minimum achievable side length for the outer hexagon is approximately 3.931. A significant optimization and improvement are required to reduce the side length below 3.931.
+
+  Constraints:
+  1. The 11 unit hexagons should be packed as tightly as possible without overlapping.
+  2. The outer hexagon must be regular, and all vertices of the inner unit hexagons must lie inside the outer hexagon. The inner hexagons can be freely rotated and translated to minimize the side length of the outer hexagon.
+  3. The inner hexagons can be freely rotated and translated to achieve the tightest possible packing, thereby minimizing the side length of the outer hexagon.
+  4. Implement the optimize_construct function. The result returned by optimize_construct must pass the verification of the verify_construction function.
+  5. Do not rewrite the verify_construction function; keep it unchanged. These functions (hexagon_vertices, normalize_vector, get_normals, project_polygon, overlap_1d, polygons_intersect, hexagons_are_disjoint, is_inside_hexagon, all_hexagons_contained, verify_construction) is utility function. Please use them directly as much as possible and do not make any changes to them.
+  6. Use coordinate system with x>0, y>0 coordinates.
+
+  Suggestions:
+  1. The optimal arrangement may involve adjusting the orientations of the hexagons and packing them tightly, possibly referencing honeycomb-like structures.
+  2. The densest known hexagonal packing algorithms typically use hybrid optimization approaches. The optimization process is critical—simple physics-based models with carefully tuned parameters are often employed.
+  3. Focus on breaking through plateaus by trying fundamentally different approaches—not just parameter tuning.
+  4. Pay attention to boundary conditions: the 11 unit hexagons must not intersect, and all vertices of the inner hexagons must lie within the outer hexagon. If the verification algorithm fails repeatedly, consider rewriting the algorithm.
+
+  VERY IMPORTANT: Please note that the internal hexagons cannot overlap, and please pay attention to the precision of floating-point numbers. It needs to be able to pass the verify_construction function verification.
+
+  NOTE:Auxiliary calculation function:Use the following auxiliary calculation functions to handle related computations.
+
+  def hexagon_vertices(center_x, center_y, side_length, angle_degrees):
+      """
+      Calculate the vertices of a hexagon.
+
+      Args:
+          center_x: x-coordinate of hexagon center
+          center_y: y-coordinate of hexagon center
+          side_length: Length of hexagon side
+          angle_degrees: Rotation angle in degrees
+
+      Returns:
+          list: List of (x, y) tuples representing the hexagon vertices
+      """
+
+      vertices = []
+      angle_radians = math.radians(angle_degrees)
+      for i in range(6):
+          angle = angle_radians + 2 * math.pi * i / 6
+          x = center_x + side_length * math.cos(angle)
+          y = center_y + side_length * math.sin(angle)
+          vertices.append((x, y))
+      return vertices
+
+  def normalize_vector(v):
+      """
+      Normalize a 2D vector to unit length.
+
+      Args:
+          v: (x, y) tuple representing the vector
+
+      Returns:
+          tuple: Normalized (x, y) vector
+      """
+
+      magnitude = math.sqrt(v[0]**2 + v[1]**2)
+      return (v[0] / magnitude, v[1] / magnitude) if magnitude > EPSILON else (0., 0.)
+
+  def get_normals(vertices):
+      """
+      Calculate normal vectors for all edges of a polygon.
+
+      Args:
+          vertices: List of (x, y) tuples representing polygon vertices
+
+      Returns:
+          list: List of (x, y) normal vectors
+      """
+
+      normals = []
+      for i in range(len(vertices)):
+          p1 = vertices[i]
+          p2 = vertices[(i + 1) % len(vertices)]
+          edge = (p2[0] - p1[0], p2[1] - p1[1])
+          normal = normalize_vector((-edge[1], edge[0]))
+          normals.append(normal)
+      return normals
+
+  def project_polygon(vertices, axis):
+      """
+      Project a polygon onto an axis and return the min and max projection values.
+
+      Args:
+          vertices: List of (x, y) tuples representing polygon vertices
+          axis: (x, y) tuple representing the projection axis
+
+      Returns:
+          tuple: (min_projection, max_projection) projection range
+      """
+
+      min_proj = float('inf')
+      max_proj = float('-inf')
+      for vertex in vertices:
+          projection = vertex[0] * axis[0] + vertex[1] * axis[1]
+          min_proj = min(min_proj, projection)
+          max_proj = max(max_proj, projection)
+      return min_proj, max_proj
+
+  def overlap_1d(min1, max1, min2, max2):
+      """
+      Check if two 1D intervals overlap (with epsilon tolerance).
+
+      Args:
+          min1, max1: Start and end of first interval
+          min2, max2: Start and end of second interval
+
+      Returns:
+          bool: True if intervals overlap, False otherwise
+      """
+
+      return max1 >= min2 - EPSILON and max2 >= min1 - EPSILON
+
+  def polygons_intersect(vertices1, vertices2):
+      """
+      Check if two convex polygons intersect using the Separating Axis Theorem.
+
+      Args:
+          vertices1: List of (x, y) tuples for first polygon
+          vertices2: List of (x, y) tuples for second polygon
+
+      Returns:
+          bool: True if polygons intersect, False otherwise
+      """
+
+      normals1 = get_normals(vertices1)
+      normals2 = get_normals(vertices2)
+      axes = normals1 + normals2
+
+      for axis in axes:
+          min1, max1 = project_polygon(vertices1, axis)
+          min2, max2 = project_polygon(vertices2, axis)
+          if not overlap_1d(min1, max1, min2, max2):
+              return False
+       return True
+
+  def hexagons_are_disjoint(hex1_params, hex2_params):
+      """
+      Check if two hexagons are disjoint (non-overlapping).
+
+      Args:
+          hex1_params: (center_x, center_y, side_length, angle_degrees) for first hexagon
+          hex2_params: (center_x, center_y, side_length, angle_degrees) for second hexagon
+
+      Returns:
+          bool: True if hexagons are disjoint, False if they intersect
+      """
+
+      hex1_vertices = hexagon_vertices(*hex1_params)
+      hex2_vertices = hexagon_vertices(*hex2_params)
+      return not polygons_intersect(hex1_vertices, hex2_vertices)
+
+  def is_inside_hexagon(point, hex_params):
+      """
+      Check if a point is inside a hexagon.
+
+      Args:
+          point: (x, y) tuple representing the point
+          hex_params: (center_x, center_y, side_length, angle_degrees) for the hexagon
+
+      Returns:
+          bool: True if point is inside hexagon, False otherwise
+      """
+
+      hex_vertices = hexagon_vertices(*hex_params)
+      for i in range(len(hex_vertices)):
+          p1 = hex_vertices[i]
+          p2 = hex_vertices[(i + 1) % len(hex_vertices)]
+          edge_vector = (p2[0] - p1[0], p2[1] - p1[1])
+          point_vector = (point[0] - p1[0], point[1] - p1[1])
+          cross_product = (edge_vector[0] * point_vector[1] - edge_vector[1] * point_vector[0])
+
+          if cross_product < -EPSILON:
+              return False
+
+      return True
+
+  def all_hexagons_contained(inner_hex_params_list, outer_hex_params):
+      """
+      Check if all inner hexagons are completely contained within the outer hexagon.
+
+      Args:
+          inner_hex_params_list: List of (x, y, side_length, angle_degrees) for inner hexagons
+          outer_hex_params: (center_x, center_y, side_length, angle_degrees) for outer hexagon
+
+      Returns:
+          bool: True if all inner hexagons are contained, False otherwise
+      """
+
+      for inner_hex_params in inner_hex_params_list:
+          inner_hex_vertices = hexagon_vertices(*inner_hex_params)
+          for vertex in inner_hex_vertices:
+              if not is_inside_hexagon(vertex, outer_hex_params):
+                  return False
+      return True
+
+  def verify_construction(inner_hex_data, outer_hex_center, outer_hex_side_length, outer_hex_angle_degrees):
+      """
+      Verify the complete construction meets all requirements.
+
+      Args:
+          inner_hex_data: List of [x, y, angle_degrees] for inner hexagons
+          outer_hex_center: [x, y] for outer hexagon center
+          outer_hex_side_length: Side length of outer hexagon
+          outer_hex_angle_degrees: Rotation angle of outer hexagon in degrees
+
+      Returns:
+          bool: True if construction is valid, False otherwise
+      """
+
+      inner_hex_params_list = [
+          (x, y, 1, angle) for x, y, angle in inner_hex_data
+      ]
+      outer_hex_params = (
+          outer_hex_center[0], outer_hex_center[1],
+          outer_hex_side_length, outer_hex_angle_degrees
+      )
+
+      if outer_hex_side_length < EPSILON:
+          return False
+
+      for i in range(len(inner_hex_params_list)):
+          for j in range(i + 1, len(inner_hex_params_list)):
+              if not hexagons_are_disjoint(inner_hex_params_list[i], inner_hex_params_list[j]):
+                  return False
+
+      if not all_hexagons_contained(inner_hex_params_list, outer_hex_params):
+          return False
+
+      return True
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the optimize_construct() entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "hexagon_packing/evaluator.py:HexagonPackingEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [outer_hex_side_length, target_ratio, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "hexagon_packing/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

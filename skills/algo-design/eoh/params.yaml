@@ -1,0 +1,17 @@
+# EoH (Evolution of Heuristics) - Recommended Parameters
+# Paper: Liu et al., ICML 2024
+
+evolution:
+  type: "eoh"
+  max_generations: 50          # increase for harder problems
+  population_size: 5           # top-k individuals kept after truncation
+  selection_num: 2             # parents selected per E1/E2 crossover
+  max_sample_nums: 100         # LLM call budget cap for the run
+  num_samplers: 1              # parallel candidates per operator per gen
+  use_e2_operator: true        # enable E2 (backbone-motivated crossover)
+  use_m1_operator: true        # enable M1 (structural mutation)
+  use_m2_operator: true        # enable M2 (parameter mutation)
+  seed_path: null              # optional path to a seed heuristic file
+
+planner:
+  type: "eoh_evolution"

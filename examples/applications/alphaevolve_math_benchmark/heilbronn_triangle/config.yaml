@@ -1,0 +1,42 @@
+project_name: "alphaevolve_heilbronn_triangle_n11"
+path_resolution: "cwd"
+description_en: "Evolve 11 points in an equilateral triangle to maximize the minimum normalized triangle area."
+description_zh: "进化等边三角形内的 11 个点，最大化任意三点形成三角形的最小归一化面积。"
+random_seed: 42
+background: |
+  Your task is to solve the Heilbronn problem for triangles.
+
+  The problem is to place n points in an equilateral triangle with vertices (0,0), (1,0), and (0.5, sqrt(3)/2) to maximize the minimum area of a triangle formed by any three of those points. The benchmark for n=11 is a min_area of 0.0365. Your algorithm should aim to surpass this.
+
+  Your solution will be evaluated via a function with the signature: points, min_area = run_search_point(n)
+
+  In the function run_search_point(n), you must define a function find_best_placement(n) that performs the search. This function should return two things:
+  * points: A 2D NumPy array of shape (n, 2), where each row contains the (x, y) coordinates for a point.
+  * min_area: A single floating-point number representing the smallest area of any triangle formed by any three of the points, normalized by the area of the large equilateral triangle.
+
+  You have to evolve the function find_best_placement(n) to solve this problem.
+
+  Since the evaluation entry function is run_search_point(n), so you must write a run_search_point(n) function which calls find_best_placement(n).
+
+  Key insights and suggestions:
+  - Consider using optimization techniques such as simulated annealing, genetic algorithms, or other heuristic methods.
+  - Analyze geometric properties and symmetries that might simplify the problem.
+  - Incorporate existing mathematical insights or bounds related to the Heilbronn Triangle Problem.
+  - Focus on breaking through plateaus by trying fundamentally different approaches, not just tweaking parameters.
+
+  The following will be checked automatically:
+  - Containment: All points must lie strictly inside the equilateral triangle.
+  - Non-collinearity: Any three points must form a non-degenerate triangle.
+  - Uniqueness: All points must be distinct.
+
+  You must keep the run_search_point function unchanged, as it is the fixed entry point for the evaluator.
+  Your solution should be written in Python.
+
+  You got this! I believe in you!!!
+providers: [{name: "default", type: "openai_compatible", base_url: "${LLM_BASE_URL}", api_key: "${LLM_API_KEY}", model: "${LLM_MODEL}", temperature: 0.7, max_tokens: 8192, timeout: 600.0}]
+coder: {type: "custom", provider: "default", timeout: 600.0, max_retries: 2, max_gen_tokens: 4096, context_max_tokens: 8192, default_extension: "py", prompt_template: "Implement the experiment task exactly as specified in the problem background. Improve only the EVOLVE block in solve.py. Preserve the run_search_point(n=11) entry point and the final JSON adapter."}
+planner: {type: "llm_evolution", provider: "default", selection_strategy: "weighted", parent_selection_strategy: "tournament", build: {script: {}}, samplers: [{name: "init_sampler"}, {name: "mutation_sampler"}, {name: "crossover_sampler"}]}
+evaluator: {type: "custom", module: "heilbronn_triangle/evaluator.py:HeilbronnTriangleEvaluator", timeout: 1200.0, max_retries: 0, parallel: true, batch_size: 5, metrics: [min_area, target_ratio, validity, eval_time]}
+evolution: {type: "island_ga", max_generations: 7, early_stop_patience: 8, checkpoint_interval: 5, elite_ratio: 0.2, mutation_rate: 0.3, crossover_rate: 0.5, num_islands: 3, island_population_size: 5, migration_interval: 3, migration_rate: 0.2, parallel_islands: true}
+version_control: {enabled: true, type: "git_worktree", local_path: "heilbronn_triangle/algorithm", auto_initialize: true, auto_cleanup: true, default_branch: "main"}
+repo_analyzer: {type: "evolve_detector", include: ["*.py"], exclude: [".git/**", "__pycache__/**", "*.pyc"]}

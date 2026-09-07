@@ -31,10 +31,24 @@ test("retains manual pinned-memory fields when task config is submitted", () => 
     pinned_card_ids: ["user-card", "project-card"],
     task_injection_mode: "weight",
     task_injection_lambda: 0.35,
+    mindmemos_context_char_budget: 12000,
+    mindmemos_elite_code_slots: 2,
+    mindmemos_elite_code_char_budget: 9000,
   })
 
   expect(memory.retrieval_mode).toBe("manual")
   expect(memory.pinned_card_ids).toEqual(["user-card", "project-card"])
   expect(memory.task_injection_mode).toBe("weight")
   expect(memory.task_injection_lambda).toBe(0.35)
+  expect(memory.mindmemos_context_char_budget).toBe(12000)
+  expect(memory.mindmemos_elite_code_slots).toBe(2)
+  expect(memory.mindmemos_elite_code_char_budget).toBe(9000)
+})
+
+test("uses a bounded default for injected memory context", () => {
+  const memory = memoryConfigSchema.parse({})
+
+  expect(memory.mindmemos_context_char_budget).toBe(20000)
+  expect(memory.mindmemos_elite_code_slots).toBe(1)
+  expect(memory.mindmemos_elite_code_char_budget).toBe(12000)
 })

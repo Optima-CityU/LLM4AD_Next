@@ -831,7 +831,7 @@ class BuildOrchestrator:
             # Fallback: if LLM returned nothing useful, use problem-type baseline
             if not cleaned:
                 logger.warning(
-                    "LLM produced no valid requirements; applying fallback for problem_type=%s",
+                    "LLM produced no valid requirements; applying fallback for problem_type={}",
                     analysis.problem_type,
                 )
                 cleaned = self._get_fallback_requirements(analysis.problem_type)
@@ -843,8 +843,8 @@ class BuildOrchestrator:
         if cleaned:
             n = sum(1 for line in cleaned.splitlines() if line and not line.startswith("#"))
             logger.info(
-                "Stage 4 (requirements): generated %d packages "
-                "(problem_type=%s, complexity_tier=%s)",
+                "Stage 4 (requirements): generated {} packages "
+                "(problem_type={}, complexity_tier={})",
                 n, analysis.problem_type, analysis.complexity_tier,
             )
         else:
@@ -993,7 +993,7 @@ class BuildOrchestrator:
         )
 
         logger.info(
-            "Stage 4 (configure): applied complexity_tier='%s' → islands=%d, pop=%d, gens=%d",
+            "Stage 4 (configure): applied complexity_tier='{}' → islands={}, pop={}, gens={}",
             analysis.complexity_tier,
             params.num_islands,
             params.island_population_size,

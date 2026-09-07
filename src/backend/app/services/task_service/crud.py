@@ -45,6 +45,14 @@ def _apply_memory_defaults(
     )
     if binding_error:
         logger.warning("Skipping MindMemOS task memory because the provider binding is invalid: {}", binding_error)
+
+    # A template can explicitly opt out of memory (for example the fully
+    # offline mock template). Project-level defaults must not re-enable it.
+    if memory.get("enabled") is False:
+        memory["type"] = "local_yaml"
+        input_args["memory"] = memory
+        return input_args
+
     explicit_type = explicit_memory.get("type") if explicit_memory else None
     if explicit_type == "local_yaml":
         memory.update(explicit_memory or {})

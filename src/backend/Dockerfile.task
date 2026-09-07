@@ -1,9 +1,62 @@
 # ============================================================
 # LLM4AD 任务执行容器镜像
 # ============================================================
+# 一镜多入口：同一镜像按 ContainerJobSpec.command 覆盖 CMD 分别承载
+#   - 任务执行     app/tasks/container_runner.py（默认 CMD）
+#   - 调参执行     app/tasks/chat_tune_runner.py
+#   - 研究 pipeline app/tasks/research_container_runner.py（需 research extra）
+#   - 研究协作     app/tasks/research_collab_container_runner.py（需 research extra）
+# 故装 research extra（researchclaw，公开 git 依赖；git 由 bookworm 基础镜像自带）。
+
+# ---------- 知识文档解析协议代理 ----------
+ARG CC_SWITCH_DOWNLOAD_IMAGE=docker.1ms.run/curlimages/curl:8.16.0
+ARG PYTHON_BASE_IMAGE=docker.1ms.run/library/python:3.12-bookworm
+# cc-switch 在每个知识解析容器内独立运行，将 Anthropic Messages 转换为平台
+# 已支持的 OpenAI Chat Completions 协议。固定版本并校验归档，避免 latest 漂移。
+FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS cc-switch-runtime
+
+USER root
+ARG TARGETARCH=amd64
+ARG CC_SWITCH_VERSION=5.10.1
+ARG CC_SWITCH_RELEASE_BASE=https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download
+RUN case "${TARGETARCH}" in \
+      amd64) CC_SWITCH_ARCH=x64; CC_SWITCH_SHA256=be6836eb42cf6747b3830b15d87902fc6a1331c35263aa7590ed0a37a4430790 ;; \
+      arm64) CC_SWITCH_ARCH=arm64; CC_SWITCH_SHA256=10277f9e7aa76125ab4035e08ac15a52bc43d2c485f677b5ffec2055436d59e5 ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && CC_SWITCH_ARCHIVE="cc-switch-cli-v${CC_SWITCH_VERSION}-linux-${CC_SWITCH_ARCH}-musl.tar.gz" \
+    && curl -fL --retry 3 \
+      "${CC_SWITCH_RELEASE_BASE}/v${CC_SWITCH_VERSION}/${CC_SWITCH_ARCHIVE}" \
+      -o /tmp/cc-switch.tar.gz \
+    && echo "${CC_SWITCH_SHA256}  /tmp/cc-switch.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/cc-switch.tar.gz -C /tmp \
+    && install -m 0755 /tmp/cc-switch /usr/local/bin/cc-switch
+
+# ---------- OpenCode CLI ----------
+# opencode 是 Bun 编译的独立二进制（release 资产为单个可执行文件），运行时不需 Node。
+# 走 gh-proxy 镜像下载，固定版本 + SHA256 校验，避免 latest 漂移。策略与 cc-switch 一致。
+FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS opencode-runtime
+
+USER root
+ARG TARGETARCH=amd64
+ARG OPENCODE_VERSION=1.18.25
+# 用与 cc-switch 相同的 gh-proxy 前缀；官方仓库已迁移至 anomalyco/opencode。
+ARG OPENCODE_RELEASE_BASE=https://gh-proxy.org/https://github.com/anomalyco/opencode/releases/download
+RUN case "${TARGETARCH}" in \
+      amd64) OPENCODE_ARCH=x64; OPENCODE_SHA256=58a3729a6f3432dd6d2917fcc4a949788891a035818646ad480e12c947f56e78 ;; \
+      arm64) OPENCODE_ARCH=arm64; OPENCODE_SHA256=35ef77897425e41b5183a2c21ac4fb1d4d944d82a94e3c920f57b5490af11ac5 ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && OPENCODE_ARCHIVE="opencode-linux-${OPENCODE_ARCH}.tar.gz" \
+    && curl -fL --retry 3 \
+      "${OPENCODE_RELEASE_BASE}/v${OPENCODE_VERSION}/${OPENCODE_ARCHIVE}" \
+      -o /tmp/opencode.tar.gz \
+    && echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/opencode.tar.gz -C /tmp \
+    && install -m 0755 /tmp/opencode /usr/local/bin/opencode
 
 # ---------- 基础镜像 ----------
-FROM python:3.12-bookworm
+FROM ${PYTHON_BASE_IMAGE}
 
 # 禁用 Python 输出缓冲，保证日志实时输出
 ENV PYTHONUNBUFFERED=1
@@ -24,6 +77,20 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# ---------- 安装 TeX Live（仅 AutoResearch 论文阶段用）----------
+# ARC 的 compile_latex() 走 pdflatex → bibtex → pdflatex×2 三遍编译；缺 pdflatex
+# 时 ARC 降级为只导出 .tex（不报错、无 PDF）。约 +1GB 镜像体积，运行时内存不受影响。
+# 演化任务不用 LaTeX，但研究镜像复用本镜像（RESEARCH_RUNNER_IMAGE），故装在此处。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-bibtex-extra \
+    texlive-science \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
@@ -41,21 +108,24 @@ WORKDIR /app/backend/
 # 将虚拟环境加入 PATH
 ENV PATH="/app/backend/.venv/bin:$PATH"
 
-# ---------- 安装依赖（不含工作区包，利用 Docker 层缓存）----------
+# ---------- 安装依赖（含 research extra，不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
+ARG GITHUB_PROXY_URL=https://gh-proxy.org
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=pyproject.toml,target=/pyproject.toml \
     --mount=type=bind,source=README.md,target=/README.md \
-    uv sync --no-install-workspace
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
+    uv sync --no-install-workspace --extra research
 
 # ---------- 复制应用代码 ----------
+# 仅 uv sync（editable 安装工作区）所需：pyproject + 包标记 + llm4ad 源。
+# 高频改动的入口脚本延后到 uv sync 之后再 COPY，避免改脚本触发工作区重装。
 COPY ./src/backend/pyproject.toml /app/backend/
 COPY ./src/backend/app/__init__.py        /app/backend/app/__init__.py
-COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
-COPY ./src/backend/app/tasks/chat_tune_runner.py             /app/backend/app/tasks/chat_tune_runner.py
-COPY ./src/backend/app/tasks/task_config_crypto.py           /app/backend/app/tasks/task_config_crypto.py
 
 # 复制 llm4ad 核心库及根项目配置
 COPY ./src/llm4ad             /src/llm4ad
@@ -63,10 +133,30 @@ COPY ./examples               /examples
 COPY ./pyproject.toml     /pyproject.toml
 COPY ./README.md          /README.md
 
-# ---------- 安装工作区包 ----------
+# ---------- 安装工作区包（含 research extra）----------
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
-    uv sync
+    GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/" \
+    uv sync --extra research
+
+# Python Claude Agent SDK 由 uv 安装并自带 Claude Code CLI，无需额外 Node 运行时。
+COPY --from=cc-switch-runtime /usr/local/bin/cc-switch /usr/local/bin/cc-switch
+# OpenCode CLI：独立二进制，置于 PATH 供 llm4ad.coder.opencode 以 `opencode run ...` 调用。
+COPY --from=opencode-runtime /usr/local/bin/opencode /usr/local/bin/opencode
+
+# ---------- 复制容器入口脚本（editable 安装无需其内容，故放最后：改脚本只失效本层，不重跑 uv sync）----------
+COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
+COPY ./src/backend/app/tasks/chat_tune_runner.py             /app/backend/app/tasks/chat_tune_runner.py
+COPY ./src/backend/app/tasks/research_container_runner.py    /app/backend/app/tasks/research_container_runner.py
+COPY ./src/backend/app/tasks/research_collab_container_runner.py /app/backend/app/tasks/research_collab_container_runner.py
+COPY ./src/backend/app/tasks/task_config_crypto.py           /app/backend/app/tasks/task_config_crypto.py
+COPY ./docker/knowledge-parser/runner.py                      /app/knowledge-parser/runner.py
+COPY ./docker/knowledge-parser/plan_store.py                  /app/knowledge-parser/plan_store.py
+COPY ./docker/knowledge-parser/sdk_events.py                  /app/knowledge-parser/sdk_events.py
+COPY ./skills/document-knowledge-organizer                    /app/skills/document-knowledge-organizer
+COPY ./docker/knowledge-parser/CC-SWITCH-LICENSE              /usr/share/licenses/cc-switch/LICENSE
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner

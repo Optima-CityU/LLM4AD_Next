@@ -66,6 +66,7 @@ class ContainerJobSpec:
         image: 镜像名称（必填）。
         command: 启动命令；``None`` 使用镜像 CMD。
         working_dir: 容器内工作目录；``None`` 使用镜像默认。
+        user: 容器运行用户（Docker ``user`` 格式）；``None`` 使用镜像默认。
         mounts: ``{宿主机路径: 容器内路径}`` 卷绑定（rw）。
         env: 注入容器的环境变量。
         mem_limit: 内存限制（如 ``"4g"``）；``None`` 取 ``settings.TASK_CONTAINER_MEMORY_LIMIT``。
@@ -83,6 +84,7 @@ class ContainerJobSpec:
     image: str = ""
     command: list[str] | None = None
     working_dir: str | None = None
+    user: str | None = None
     mounts: dict[str, str] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     mem_limit: str | None = None
@@ -356,6 +358,8 @@ class ContainerJob:
             kwargs["command"] = self._spec.command
         if self._spec.working_dir:
             kwargs["working_dir"] = self._spec.working_dir
+        if self._spec.user:
+            kwargs["user"] = self._spec.user
         if self._spec.mounts:
             kwargs["volumes"] = {
                 host.rstrip("/").rstrip("\\"): {"bind": container, "mode": "rw"}
@@ -613,7 +617,12 @@ def run_container_job(
     return ContainerJob(spec, callbacks, client=client).run(poll_interval=poll_interval)
 
 
-def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = None) -> int:
+def cleanup_orphaned_containers(
+    client=None,
+    *,
+    extra_filters: dict | None = None,
+    exclude_names: set[str] | None = None,
+) -> int:
     """按管理标签清理本模块创建的遗留容器。
 
     供进程/worker 重启时调用，回收上次异常退出后未及 ``stop()`` 的孤儿容器。
@@ -623,14 +632,23 @@ def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = Non
         client: 可选 Docker 客户端（测试注入）；省略时使用共享单例。
         extra_filters: 追加的 Docker 过滤条件（与管理标签合并），用于缩小范围，
             例如 ``{"label": "run_id=xxx"}``。
+        exclude_names: 需保留的容器名集合（不清理）。多 worker 部署时，别的活
+            worker 正在跑的容器名会传进来，避免 worker 启动误杀在跑的容器。
 
     Returns:
         成功移除的容器数量。
     """
     cli = client or get_docker_client()
-    filters = {"label": f"{MANAGED_LABEL_KEY}={MANAGED_LABEL_VALUE}"}
+    # 管理标签是安全网：只回收本模块创建的容器。extra_filters 里若也带 "label"，
+    # 必须与管理标签**合并成列表**（docker 对 label 做 AND），而不是 dict.update
+    # 直接覆盖——否则安全网被丢，会误伤任何命中 extra label 的容器。
+    filters: dict = {"label": f"{MANAGED_LABEL_KEY}={MANAGED_LABEL_VALUE}"}
     if extra_filters:
-        filters.update(extra_filters)
+        for key, value in extra_filters.items():
+            if key == "label":
+                filters["label"] = [filters["label"], value]
+            else:
+                filters[key] = value
 
     try:
         containers = cli.containers.list(all=True, filters=filters)
@@ -641,6 +659,9 @@ def cleanup_orphaned_containers(client=None, *, extra_filters: dict | None = Non
     removed = 0
     for container in containers:
         identifier = getattr(container, "name", None) or getattr(container, "id", "?")
+        if exclude_names and getattr(container, "name", None) in exclude_names:
+            # 别的活 worker 正在跑的容器：跳过，不误杀。
+            continue
         try:
             container.remove(force=True, v=True)
             removed += 1

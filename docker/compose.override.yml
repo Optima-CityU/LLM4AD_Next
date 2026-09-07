@@ -43,6 +43,9 @@ services:
   worker:
     profiles: ["disabled"]
 
+  research-worker:
+    profiles: ["disabled"]
+
   flower:
     profiles: ["disabled"]
 

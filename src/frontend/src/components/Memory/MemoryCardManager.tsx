@@ -17,16 +17,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -60,12 +50,17 @@ import {
   DEFAULT_MEMORY_DRAFT,
   MEMORY_TYPES,
   type MemoryCard,
-  type MemoryCardExtractionResponse,
   type MemoryCardPage,
   type MemoryCardDraft,
   type MemoryScope,
 } from "./types"
-import TagInput from "./TagInput"
+import {
+  MemoryCardDeleteDialog,
+  MemoryCardEditorDialog,
+  MemoryCardTile,
+  memoryCardToDraft,
+  memoryTypeLabel,
+} from "./MemoryCardPresentation"
 
 type ViewMode = "cards" | "list"
 type ExtractionPromptLanguage = "auto" | "ZH" | "EN"
@@ -106,43 +101,6 @@ const PROJECT_EXTRACTION_EXAMPLE_KEYS = [
   "reflection",
 ] as const
 
-const ONBOARDING_DEMO_PREVIEW_ID = "__onboarding_demo_preview__"
-
-function toDraft(card: MemoryCard): MemoryCardDraft {
-  return {
-    id: card.id,
-    type: MEMORY_TYPES.includes(card.type as (typeof MEMORY_TYPES)[number])
-      ? card.type
-      : "general_insight",
-    title: card.title,
-    content: card.content,
-    enabled: card.enabled,
-    tags: card.tags,
-  }
-}
-
-function memoryTypeLabel(type: string, t: (key: string) => string) {
-  const key = `memory.cardManager.types.${type}`
-  const label = t(key)
-  return label === key ? type : label
-}
-
-function readOnlyRows(card: MemoryCard | null, t: (key: string) => string): Array<[string, string]> {
-  if (!card) return []
-  const info = card.readonly
-  const rows: Array<[string, string]> = [
-    [t("memory.cardManager.readonly.id"), card.id],
-    [t("memory.cardManager.readonly.source"), info?.source || card.source],
-    [t("memory.cardManager.readonly.status"), info?.status || (card.enabled ? "active" : "archived")],
-    [t("memory.cardManager.readonly.entity"), info?.entity_name || ""],
-    [t("memory.cardManager.readonly.property"), info?.property_name || ""],
-    [t("memory.cardManager.readonly.propertyTime"), info?.property_time || ""],
-    [t("memory.cardManager.readonly.updatedAt"), info?.last_update_at || ""],
-    [t("memory.cardManager.readonly.eventTime"), info?.event_time || ""],
-    [t("memory.cardManager.readonly.sourceTime"), info?.source_timestamp || ""],
-  ]
-  return rows.filter(([, value]) => value.trim())
-}
 
 function scopeQuery(scope: MemoryScope, projectId?: string, taskId?: string) {
   const params = new URLSearchParams({ scope })
@@ -324,9 +282,7 @@ export default function MemoryCardManager({
   const [extractionContent, setExtractionContent] = useState("")
   const [extractionPromptLanguage, setExtractionPromptLanguage] =
     useState<ExtractionPromptLanguage>("auto")
-  const [previewId, setPreviewId] = useState<string | null>(null)
   const [previewItems, setPreviewItems] = useState<MemoryCard[]>([])
-  const [selectedPreviewIds, setSelectedPreviewIds] = useState<string[]>([])
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false)
   const [isCancellingPreview, setIsCancellingPreview] = useState(false)
   const [extractionProgress, setExtractionProgress] = useState<{
@@ -336,13 +292,10 @@ export default function MemoryCardManager({
   } | null>(null)
   const [extractionLogs, setExtractionLogs] = useState<string[]>([])
   const [isCommittingPreview, setIsCommittingPreview] = useState(false)
-  const [isExtractionCloseConfirmOpen, setIsExtractionCloseConfirmOpen] = useState(false)
   const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([])
   const [isPromotionMode, setIsPromotionMode] = useState(false)
-  const [previewTargetScope, setPreviewTargetScope] = useState<MemoryScope>(scope)
   const togglingIdsRef = useRef<Set<string>>(new Set())
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set())
-  const skipNextPreviewDiscard = useRef(false)
   const extractionAbortRef = useRef<AbortController | null>(null)
   const onboardingDemoTimerRef = useRef<number | null>(null)
 
@@ -350,7 +303,6 @@ export default function MemoryCardManager({
   const mutationEndpoint = `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/memory/cards`
   const extractionEndpoint = `${mutationEndpoint}/extractions`
   const query = scopeQuery(scope, projectId, taskId)
-  const projectPreviewQuery = scopeQuery("project", promotionProjectId)
   const scopeKey = `${scope}:${projectId ?? ""}:${taskId ?? ""}`
   const canPromoteTaskCards = scope === "task" && Boolean(promotionProjectId && taskId)
   const interactionLocked = onboardingDemoActive || onboardingLocked
@@ -448,16 +400,6 @@ export default function MemoryCardManager({
     void loadCards()
   }, [refreshSignal, loadCards])
 
-  useEffect(() => {
-    if (previewItems.length === 0 || isCommittingPreview) return
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [isCommittingPreview, previewItems.length])
-
   const visibleCards = useMemo(() => {
     const needle = searchText.trim().toLowerCase()
     return [...cards]
@@ -502,18 +444,14 @@ export default function MemoryCardManager({
   const resetExtraction = useCallback(() => {
     setExtractionContent("")
     setExtractionPromptLanguage(normalizedDefaultExtractionPromptLanguage)
-    setPreviewId(null)
     setPreviewItems([])
-    setSelectedPreviewIds([])
     setIsGeneratingPreview(false)
     setIsCancellingPreview(false)
     setExtractionProgress(null)
     setExtractionLogs([])
     extractionAbortRef.current = null
     setIsCommittingPreview(false)
-    setIsExtractionCloseConfirmOpen(false)
     setIsPromotionMode(false)
-    setPreviewTargetScope(scope)
     setSelectedPromotionIds([])
   }, [normalizedDefaultExtractionPromptLanguage, scope])
 
@@ -533,19 +471,6 @@ export default function MemoryCardManager({
       const next = current.filter((card) => card.id !== cardId)
       if (next.length !== current.length) {
         setTotal((value) => (value === null ? value : Math.max(0, value - 1)))
-      }
-      return next
-    })
-  }, [])
-
-  const removeCards = useCallback((cardIds: string[]) => {
-    const ids = new Set(cardIds)
-    if (ids.size === 0) return
-    setCards((current) => {
-      const next = current.filter((card) => !ids.has(card.id))
-      const removedCount = current.length - next.length
-      if (removedCount > 0) {
-        setTotal((value) => (value === null ? value : Math.max(0, value - removedCount)))
       }
       return next
     })
@@ -596,7 +521,7 @@ export default function MemoryCardManager({
 
   const openEdit = (card: MemoryCard) => {
     if (disabled || interactionLocked) return
-    setDraft(toDraft(card))
+    setDraft(memoryCardToDraft(card))
     setEditingId(card.id)
     setIsEditorOpen(true)
   }
@@ -616,50 +541,10 @@ export default function MemoryCardManager({
     setTogglingIds(new Set(togglingIdsRef.current))
   }
 
-  const discardPreview = useCallback(async () => {
-    const ids = previewItems.map((item) => item.id)
-    if (!previewId || ids.length === 0) {
-      resetExtraction()
-      setIsExtractionOpen(false)
-      return
-    }
-    try {
-      const response = await authFetch(
-        `${extractionEndpoint}/${previewId}?${previewTargetScope === "project" ? projectPreviewQuery : query}`,
-        {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ memory_ids: ids }),
-        },
-      )
-      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.deleteGeneratedFailed")))
-      if (previewTargetScope !== "project") removeCards(ids)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.deleteGeneratedFailed"))
-    } finally {
-      resetExtraction()
-      setIsExtractionOpen(false)
-    }
-  }, [
-    extractionEndpoint,
-    previewId,
-    previewItems,
-    previewTargetScope,
-    projectPreviewQuery,
-    query,
-    removeCards,
-    resetExtraction,
-    t,
-  ])
-
   const closeExtractionImmediately = useCallback(() => {
     resetExtraction()
     setIsExtractionOpen(false)
   }, [resetExtraction])
-
-  const keepGeneratedCardsAndClose = useCallback(() => {
-    closeExtractionImmediately()
-  }, [closeExtractionImmediately])
 
   const requestCloseExtraction = useCallback(() => {
     if (isGeneratingPreview) {
@@ -677,29 +562,21 @@ export default function MemoryCardManager({
       toast.info(t("memory.cardManager.messages.savingInProgress"))
       return
     }
-    if (previewId && previewItems.length > 0) {
-      setIsExtractionCloseConfirmOpen(true)
-      return
-    }
     closeExtractionImmediately()
   }, [
     closeExtractionImmediately,
     isCommittingPreview,
     isGeneratingPreview,
     isPersistingPreview,
-    previewId,
-    previewItems.length,
     t,
   ])
 
   const handleExtractionOpenChange = (open: boolean) => {
     if (open) {
-      skipNextPreviewDiscard.current = false
       setIsExtractionOpen(true)
       return
     }
-    if (skipNextPreviewDiscard.current) skipNextPreviewDiscard.current = false
-    else requestCloseExtraction()
+    requestCloseExtraction()
   }
 
   const generatePreview = async () => {
@@ -774,14 +651,9 @@ export default function MemoryCardManager({
         if (event.event === "completed") {
           completed = true
           const items = event.items ?? []
-          setPreviewId(event.preview_id ?? null)
           setPreviewItems(items)
-          setSelectedPreviewIds(items.map((item) => item.id))
-          setPreviewTargetScope(isPromotionMode ? "project" : scope)
           if (!isPromotionMode) {
             mergeCards(items)
-          }
-          if (items.length > 0 && !isPromotionMode) {
             refreshFirstPage()
           }
           setExtractionProgress({ stage: "completed", message, percent: event.percent ?? 100 })
@@ -808,44 +680,8 @@ export default function MemoryCardManager({
     }
   }
 
-  const commitPreview = async () => {
-    if (!previewId) return
-    if (selectedPreviewIds.length === 0) {
-      toast.error(t("memory.cardManager.messages.selectPreview"))
-      return
-    }
-    setIsCommittingPreview(true)
-    try {
-      const response = await authFetch(
-        `${extractionEndpoint}/${previewId}/commit?${previewTargetScope === "project" ? projectPreviewQuery : query}`,
-        {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selected_ids: selectedPreviewIds,
-          all_ids: previewItems.map((item) => item.id),
-        }),
-        },
-      )
-      if (!response.ok) throw new Error(await responseError(response, t("memory.cardManager.messages.enableSelectedFailed")))
-      const payload = (await response.json()) as MemoryCardExtractionResponse
-      toast.success(t("memory.cardManager.messages.selectedEnabled"))
-      skipNextPreviewDiscard.current = true
-      setIsExtractionOpen(false)
-      resetExtraction()
-      if (previewTargetScope !== "project") {
-        mergeCards(payload.items ?? [])
-        refreshFirstPage()
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("memory.cardManager.messages.enableSelectedFailed"))
-    } finally {
-      setIsCommittingPreview(false)
-    }
-  }
-
   const saveDraft = async () => {
-    if (!draft.title.trim() || !draft.content.trim()) {
+    if (!draft.title.trim() || !draft.structured_content.description.trim() || draft.structured_content.content.length === 0) {
       toast.error(t("memory.cardManager.messages.titleAndContentRequired"))
       return
     }
@@ -864,6 +700,7 @@ export default function MemoryCardManager({
             type: draft.type,
             title: draft.title.trim(),
             content: draft.content.trim(),
+            structured_content: draft.structured_content,
             enabled: draft.enabled,
             tags: draft.tags,
           }),
@@ -943,10 +780,7 @@ export default function MemoryCardManager({
       setExtractionPromptLanguage("ZH")
       setIsPromotionMode(false)
       setIsExtractionOpen(true)
-      setPreviewId(ONBOARDING_DEMO_PREVIEW_ID)
       setPreviewItems([onboardingDemoCard])
-      setSelectedPreviewIds([onboardingDemoCard.id])
-      setPreviewTargetScope(scope)
       setIsGeneratingPreview(false)
       setIsCommittingPreview(false)
       setExtractionProgress({ stage: "completed", message: extractionStageLabel("completed"), percent: 100 })
@@ -975,9 +809,7 @@ export default function MemoryCardManager({
       setIsExtractionOpen(true)
       setExtractionContent(onboardingDemoCard.content)
       setExtractionPromptLanguage("ZH")
-      setPreviewId(null)
       setPreviewItems([])
-      setSelectedPreviewIds([])
       setIsGeneratingPreview(true)
       setExtractionProgress({ stage: "llm_extracting", message: extractionStageLabel("llm_extracting"), percent: 58 })
       setExtractionLogs([extractionStageLabel("chunking"), extractionStageLabel("llm_extracting")])
@@ -1031,7 +863,6 @@ export default function MemoryCardManager({
     if (!interactionLocked) return
     setIsEditorOpen(false)
     setDeleteTarget(null)
-    setIsExtractionCloseConfirmOpen(false)
   }, [interactionLocked])
 
   const iconAction = (
@@ -1427,52 +1258,25 @@ export default function MemoryCardManager({
         ) : (
           <div className={cn("grid gap-3", embedded ? "grid-cols-1" : "md:grid-cols-2 xl:grid-cols-3")}>
             {visibleCards.map((card) => (
-              <div
+              <MemoryCardTile
                 key={card.id}
-                data-tour={card.id === onboardingDemoCard.id ? "memory-onboarding-card" : undefined}
+                card={card}
+                embedded={embedded}
+                dataTour={card.id === onboardingDemoCard.id ? "memory-onboarding-card" : undefined}
+                leading={canPromoteTaskCards ? (
+                  <Checkbox
+                    checked={selectedPromotionIds.includes(card.id)}
+                    aria-label={t("memory.cardManager.actions.select", { title: card.title })}
+                    disabled={disabled}
+                    onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
+                  />
+                ) : undefined}
+                actions={renderActions(card)}
                 className={cn(
-                  "flex flex-col rounded-md border bg-background/70 p-3 transition hover:border-primary/40",
-                  embedded ? "min-h-32" : "min-h-48",
-                  !card.enabled && "opacity-60",
                   canPromoteTaskCards && selectedPromotionIds.includes(card.id) && "border-primary/60 bg-primary/5",
                   togglingIds.has(card.id) && "opacity-80",
                 )}
-              >
-                <div className="flex items-start gap-2">
-                  {canPromoteTaskCards && (
-                    <Checkbox
-                      checked={selectedPromotionIds.includes(card.id)}
-                      aria-label={t("memory.cardManager.actions.select", { title: card.title })}
-                      disabled={disabled}
-                      onCheckedChange={(value) => togglePromotionSelection(card.id, value === true)}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-semibold">{card.title}</h3>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      <Badge variant="outline">{memoryTypeLabel(card.type, t)}</Badge>
-                      {!card.enabled && <Badge variant="secondary">{t("memory.cardManager.status.disabled")}</Badge>}
-                    </div>
-                  </div>
-                  {renderActions(card)}
-                </div>
-                <p className={cn("mt-3 whitespace-pre-wrap text-sm text-muted-foreground", embedded ? "line-clamp-3" : "line-clamp-5")}>
-                  {card.content}
-                </p>
-                {card.tags.length > 0 && (
-                  <div className="mt-auto flex flex-wrap gap-1 pt-3">
-                    {card.tags.map((tag) => (
-                      <Badge
-                        key={tag}
-                        variant="secondary"
-                        className="text-[10px]"
-                      >
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
+              />
             ))}
           </div>
         )}
@@ -1659,232 +1463,109 @@ export default function MemoryCardManager({
                         : t("memory.cardManager.preview.description")}
                     </p>
                   </div>
-                  <Badge variant="secondary">{t("memory.cardManager.preview.selected", { selected: selectedPreviewIds.length, total: previewItems.length })}</Badge>
+                  <Badge variant="secondary">{previewItems.length}</Badge>
                 </div>
                 <div className="grid gap-2">
-                  {previewItems.map((item) => {
-                    const checked = selectedPreviewIds.includes(item.id)
-                    return (
-                      <label
-                        key={item.id}
-                        className={cn(
-                          "flex cursor-pointer items-start gap-3 rounded-md border bg-background p-3 transition",
-                          checked ? "border-primary/50" : "opacity-70",
-                        )}
-                      >
-                          <Checkbox
-                            checked={checked}
-                            disabled={onboardingDemoActive}
-                          onCheckedChange={(value) => {
-                            setSelectedPreviewIds((current) =>
-                              value === true
-                                ? Array.from(new Set([...current, item.id]))
-                                : current.filter((id) => id !== item.id),
-                            )
-                          }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="min-w-0 truncate text-sm font-semibold">{item.title}</p>
-                            <Badge variant="outline">{memoryTypeLabel(item.type, t)}</Badge>
-                          </div>
-                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                            {item.content}
-                          </p>
-                          {item.tags.length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {item.tags.map((tag) => (
-                                <Badge key={tag} variant="secondary" className="text-[10px]">
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
+                  {previewItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-start gap-3 rounded-md border bg-background p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="min-w-0 truncate text-sm font-semibold">{item.title}</p>
+                          <Badge variant="outline">{memoryTypeLabel(item.type, t)}</Badge>
+                          {item.operation && (
+                            <Badge variant="secondary">
+                              {t(`memory.cardManager.operations.${item.operation}`)}
+                            </Badge>
                           )}
                         </div>
-                      </label>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={onboardingDemoActive || isCommittingPreview || isCancellingPreview || isPersistingPreview}
-              onClick={requestCloseExtraction}
-            >
-              {isGeneratingPreview || isCancellingPreview ? (
-                <Loader2 className="mr-1 size-4 animate-spin" />
-              ) : (
-                <X className="mr-1 size-4" />
-              )}
-              {isGeneratingPreview
-                ? isCancellingPreview
-                  ? t("memory.cardManager.actions.cancelling")
-                  : t("memory.cardManager.actions.cancelGeneration")
-                : isCommittingPreview
-                  ? t("memory.cardManager.actions.saving")
-                  : t("memory.common.cancel")}
-            </Button>
-            {previewItems.length === 0 ? (
-              <Button
-                type="button"
-                disabled={onboardingDemoActive || isGeneratingPreview || disabled}
-                onClick={() => void generatePreview()}
-              >
-                {isGeneratingPreview && <Loader2 className="mr-1 size-4 animate-spin" />}
-                {isPromotionMode ? t("memory.cardManager.actions.generateProjectPreview") : t("memory.cardManager.actions.generatePreview")}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                disabled={onboardingDemoActive || isCommittingPreview || disabled || selectedPreviewIds.length === 0}
-                onClick={() => void commitPreview()}
-              >
-                {isCommittingPreview ? (
-                  <Loader2 className="mr-1 size-4 animate-spin" />
-                ) : (
-                  <Check className="mr-1 size-4" />
-                )}
-                {t("memory.cardManager.actions.enableSelected")}
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog
-        open={isExtractionCloseConfirmOpen}
-        onOpenChange={setIsExtractionCloseConfirmOpen}
-      >
-        <AlertDialogContent inert={onboardingDemoActive}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{isPromotionMode ? t("memory.cardManager.close.promoteTitle") : t("memory.cardManager.close.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {isPromotionMode
-                ? t("memory.cardManager.close.promoteDescription")
-                : t("memory.cardManager.close.description")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("memory.cardManager.close.continueEditing")}</AlertDialogCancel>
-            <Button type="button" variant="outline" onClick={keepGeneratedCardsAndClose}>
-              {t("memory.cardManager.close.keepDisabled")}
-            </Button>
-            <AlertDialogAction onClick={() => void discardPreview()}>
-              {t("memory.cardManager.close.deleteGenerated")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Dialog open={isEditorOpen} onOpenChange={setIsEditorOpen}>
-        <DialogContent
-          className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"
-          inert={onboardingDemoActive}
-        >
-          <DialogHeader>
-            <DialogTitle>{editingId ? t("memory.cardManager.editor.editTitle") : t("memory.cardManager.editor.addTitle")}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-title`}>{t("memory.cardManager.editor.title")}</Label>
-              <Input
-                id={`${scope}-memory-title`}
-                value={draft.title}
-                onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
-                placeholder={t("memory.cardManager.editor.titlePlaceholder")}
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[220px_1fr]">
-              <div className="grid gap-2">
-                <Label htmlFor={`${scope}-memory-type`}>{t("memory.cardManager.editor.type")}</Label>
-                <Select
-                  value={draft.type}
-                  onValueChange={(value) => setDraft((current) => ({ ...current, type: value }))}
-                >
-                  <SelectTrigger id={`${scope}-memory-type`}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MEMORY_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {memoryTypeLabel(type, t)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor={`${scope}-memory-tags`}>{t("memory.cardManager.editor.tags")}</Label>
-                <TagInput
-                  id={`${scope}-memory-tags`}
-                  value={draft.tags}
-                  onChange={(tags) => setDraft((current) => ({ ...current, tags }))}
-                  placeholder={t("memory.cardManager.editor.tagsPlaceholder")}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor={`${scope}-memory-content`}>{t("memory.cardManager.editor.content")}</Label>
-              <Textarea
-                id={`${scope}-memory-content`}
-                className="min-h-64 resize-y leading-6"
-                value={draft.content}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, content: event.target.value }))
-                }
-                placeholder={t("memory.cardManager.editor.contentPlaceholder")}
-              />
-            </div>
-            {editingCard && readOnlyRows(editingCard, t).length > 0 && (
-              <div className="grid gap-3 rounded-md border bg-muted/20 p-3">
-                <div>
-                  <p className="text-sm font-medium">{t("memory.cardManager.editor.systemInfo")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("memory.cardManager.editor.systemInfoDescription")}
-                  </p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {readOnlyRows(editingCard, t).map(([label, value]) => (
-                    <div key={label} className="grid gap-1.5">
-                      <Label className="text-xs text-muted-foreground">{label}</Label>
-                      <Input value={value} readOnly className="h-8 bg-background/70 text-xs" />
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                          {item.content}
+                        </p>
+                        {item.tags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {item.tags.map((tag) => (
+                              <Badge key={tag} variant="secondary" className="text-[10px]">
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
             )}
           </div>
+
           <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={closeEditor}>
-              {t("memory.common.cancel")}
-            </Button>
-            <Button type="button" disabled={isSaving || disabled} onClick={() => void saveDraft()}>
-              {isSaving && <Loader2 className="mr-1 size-4 animate-spin" />}
-              {editingId ? t("memory.cardManager.editor.saveChanges") : t("memory.cardManager.editor.add")}
-            </Button>
+            {!isExtractionCompleted && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={onboardingDemoActive || isCommittingPreview || isCancellingPreview || isPersistingPreview}
+                onClick={requestCloseExtraction}
+              >
+                {isGeneratingPreview || isCancellingPreview ? (
+                  <Loader2 className="mr-1 size-4 animate-spin" />
+                ) : (
+                  <X className="mr-1 size-4" />
+                )}
+                {isGeneratingPreview
+                  ? isCancellingPreview
+                    ? t("memory.cardManager.actions.cancelling")
+                    : t("memory.cardManager.actions.cancelGeneration")
+                  : isCommittingPreview
+                    ? t("memory.cardManager.actions.saving")
+                    : t("memory.common.cancel")}
+              </Button>
+            )}
+            {!isExtractionCompleted ? (
+              <Button
+                type="button"
+                disabled={onboardingDemoActive || isGeneratingPreview || disabled}
+                onClick={() => void generatePreview()}
+              >
+                {isGeneratingPreview && <Loader2 className="mr-1 size-4 animate-spin" />}
+                {isPromotionMode ? t("memory.cardManager.actions.promote") : t("memory.cardManager.actions.extractAndSave")}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={onboardingDemoActive || isCommittingPreview}
+                onClick={requestCloseExtraction}
+              >
+                <Check className="mr-1 size-4" />
+                {t("memory.common.close")}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent inert={onboardingDemoActive}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("memory.cardManager.delete.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("memory.cardManager.delete.description")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("memory.common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void deleteCard()}>{t("memory.cardManager.delete.confirm")}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <MemoryCardEditorDialog
+        open={isEditorOpen}
+        scopeId={scope}
+        draft={draft}
+        editingCard={editingCard}
+        saving={isSaving}
+        disabled={disabled}
+        interactionLocked={onboardingDemoActive}
+        onOpenChange={setIsEditorOpen}
+        onDraftChange={setDraft}
+        onCancel={closeEditor}
+        onSave={() => void saveDraft()}
+      />
+
+      <MemoryCardDeleteDialog
+        card={deleteTarget}
+        interactionLocked={onboardingDemoActive}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        onConfirm={() => void deleteCard()}
+      />
     </div>
   )
 }

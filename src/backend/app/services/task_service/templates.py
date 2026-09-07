@@ -27,7 +27,7 @@ EXAMPLES_DIR = (
 def list_example_templates() -> list[dict]:
     """列出可用的示例模板。
 
-    扫描 examples 目录下的一级子目录，收集文件名以 config.yaml 结尾的文件作为配置模板。
+    扫描 examples 目录下的一级模板目录，递归收集路径以 config.yaml 结尾的文件。
     忽略没有配置文件的文件夹。每个配置文件分别读取自身的 description_en/description_zh
     字段，作为前端提示文字。
 
@@ -43,7 +43,7 @@ def list_example_templates() -> list[dict]:
     for entry in sorted(EXAMPLES_DIR.iterdir()):
         if not entry.is_dir():
             continue
-        config_files = sorted(f for f in entry.iterdir() if f.is_file() and f.name.endswith("config.yaml"))
+        config_files = sorted(f for f in entry.rglob("*config.yaml") if f.is_file())
         if not config_files:
             continue
         configs: list[dict] = []
@@ -64,7 +64,7 @@ def list_example_templates() -> list[dict]:
                 logger.warning(f"读取模板配置 '{entry.name}/{config_path.name}' 失败: {exc}")
             configs.append(
                 {
-                    "name": config_path.name,
+                    "name": config_path.relative_to(entry).as_posix(),
                     "description_en": description_en,
                     "description_zh": description_zh,
                 }
@@ -90,20 +90,37 @@ def _apply_template(db: Session, task: models.Task, template_name: str, config_n
     template_dir = EXAMPLES_DIR / template_name
     if not template_dir.is_dir():
         raise HTTPException(status_code=400, detail=f"模板 '{template_name}' 不存在")
-    config_path = template_dir / config_name
-    if not config_path.is_file():
+    config_path = (template_dir / config_name).resolve()
+    if not config_path.is_relative_to(template_dir.resolve()) or not config_path.is_file():
         raise HTTPException(status_code=400, detail=f"模板 '{template_name}' 缺少 {config_name}")
 
     ts = int(datetime.now(UTC).timestamp())
     prefix = f"tasks/{task.id}/{ts}"
     storage.ensure_bucket()
 
-    template_total_size = sum(f.stat().st_size for f in template_dir.rglob("*") if f.is_file())
+    def is_template_file(path: Path) -> bool:
+        if not path.is_file() or "__pycache__" in path.parts or path.suffix == ".pyc":
+            return False
+        relative_parts = path.relative_to(template_dir).parts
+        if "results" in relative_parts:
+            return False
+        return path.name.lower() not in {"readme.md", "readme_zh.md", "notice", "notice.md"}
+
+    if config_path.parent == template_dir.resolve():
+        template_files = [path for path in template_dir.rglob("*") if is_template_file(path)]
+    else:
+        case_dir = config_path.parent
+        shared_dir = template_dir / "_shared"
+        template_files = [path for path in case_dir.rglob("*") if is_template_file(path)]
+        if shared_dir.is_dir() and shared_dir != case_dir:
+            template_files.extend(path for path in shared_dir.rglob("*") if is_template_file(path))
+        template_files.extend(path for path in template_dir.iterdir() if is_template_file(path))
+        template_files = sorted(set(template_files))
+
+    template_total_size = sum(path.stat().st_size for path in template_files)
     _check_storage_quota(prefix, template_total_size)
 
-    for file_path in template_dir.rglob("*"):
-        if not file_path.is_file():
-            continue
+    for file_path in template_files:
         if file_path.name.endswith("config.yaml"):
             continue
         relative = file_path.relative_to(template_dir).as_posix()

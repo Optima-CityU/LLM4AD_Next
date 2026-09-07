@@ -4,12 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm4ad.config.app import AppConfig
-from llm4ad.config.app import EmbeddingConfig, TaskSpecificConfig
+from llm4ad.config.app import AppConfig, EmbeddingConfig, TaskSpecificConfig
 from llm4ad.llm4ad import LLM4AD
 from llm4ad.orchestrator import base as orchestrator_base_module
-from llm4ad.orchestrator.base import BaseOrchestrator, EvolutionCheckpoint, EvolutionResult
 from llm4ad.orchestrator import embedding_client as embedding_client_module
+from llm4ad.orchestrator.base import BaseOrchestrator, EvolutionCheckpoint, EvolutionResult
 from llm4ad.orchestrator.embedding_client import EmbeddingClient
 
 
@@ -165,3 +164,26 @@ async def test_orchestrator_logs_embedding_background_task_failures(monkeypatch,
     await orchestrator._finish_embedding_tasks()
 
     assert any("embedding boom" in warning for warning in warnings)
+
+
+def test_early_stop_reads_canonical_global_best_score_history() -> None:
+    """Improving Island-GA history must not be mistaken for a flat zero series."""
+    orchestrator = _ConcreteOrchestrator(
+        planner=None,
+        coder=None,
+        dispatcher=None,
+        monitor=None,
+        config=SimpleNamespace(
+            checkpoint_interval=0,
+            early_stop_patience=3,
+            early_stop_threshold=0.01,
+        ),
+        state_tracker=SimpleNamespace(),
+    )
+    orchestrator.history = [
+        {"global_best_score": 1.0},
+        {"global_best_score": 1.1},
+        {"global_best_score": 1.2},
+    ]
+
+    assert orchestrator.check_early_stop() == (False, "")
