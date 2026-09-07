@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 from _shared.runtime import JsonBenchmarkEvaluator, finite_array
+from scipy.spatial import ConvexHull
 
 from llm4ad.evaluator.base import BaseEvaluator
 
@@ -21,6 +22,8 @@ def _minimum_area(points: np.ndarray) -> float:
 
 @BaseEvaluator.register("alphaevolve_heilbronn_square_evaluator")
 class HeilbronnSquareEvaluator(JsonBenchmarkEvaluator):
+    """Evaluate normalized minimum triangle area for 13 square points."""
+
     metric_name = "best_area_ratio"
     target_value = 0.0309
     score_mode = "objective_over_target"
@@ -28,6 +31,7 @@ class HeilbronnSquareEvaluator(JsonBenchmarkEvaluator):
     benchmark_key = "heilbronn_13_points_unit_square"
 
     def measure(self, payload: dict[str, Any]) -> float:
+        """Validate points and return minimum triangle area per hull area."""
         points = finite_array(payload, "points", (13, 2))
         if np.any(points < 0) or np.any(points > 1):
             raise ValueError("points must lie inside the unit square")
@@ -45,4 +49,7 @@ class HeilbronnSquareEvaluator(JsonBenchmarkEvaluator):
             raise ValueError("reported metrics must be finite")
         if abs(minimum - reported_minimum) >= 1e-5:
             raise ValueError("reported minimum_area does not match the point construction")
-        return minimum
+        hull_area = float(ConvexHull(points).volume)
+        if hull_area <= 0.0:
+            raise ValueError("point construction must have a positive convex-hull area")
+        return minimum / hull_area

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.util
+import json
 import math
 import re
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.spatial import ConvexHull
 import yaml
 
 from llm4ad.config.schema import EvalContext
@@ -395,6 +397,33 @@ def test_sums_and_differences_uses_integer_conversion_contract() -> None:
     assert evaluator.measure({"values": [0.9, 1.9]}) == pytest.approx(1.005)
 
 
+@pytest.mark.parametrize(
+    "values",
+    (
+        [0, 1],
+        [0, 1, 3, 7],
+        [-8, -3, 0, 2, 11],
+        [0.9, 1.9],
+    ),
+)
+def test_sums_candidate_optimizes_the_evaluator_objective(values: list[float]) -> None:
+    """Keep the candidate-facing score identical to the external evaluator."""
+    evaluator = _load_evaluator("sums_differences", "SumsDifferencesEvaluator")()
+    candidate = _load_candidate_module("sums_differences")
+
+    assert candidate.get_score(values) == pytest.approx(evaluator.measure({"values": values}))
+
+
+def test_sums_score_contract_is_outside_the_evolution_block() -> None:
+    """Prevent evolution from replacing the fixed sums score contract."""
+    source = (EXAMPLE_DIR / "sums_differences" / "algorithm" / "solve.py").read_text(encoding="utf-8")
+    _fixed_prefix, evolvable = source.split("# EVOLVE_START", 1)
+    evolvable, fixed_suffix = evolvable.split("# EVOLVE_END", 1)
+
+    assert "def get_score(" not in evolvable
+    assert "def get_score(" in fixed_suffix
+
+
 def test_triangle_containment_has_no_boundary_tolerance() -> None:
     evaluator = _load_evaluator("heilbronn_triangle", "HeilbronnTriangleEvaluator")()
     generator = np.random.default_rng(42)
@@ -408,9 +437,11 @@ def test_triangle_containment_has_no_boundary_tolerance() -> None:
 
 
 def test_heilbronn_square_recomputes_the_candidate_score() -> None:
+    """Recompute the normalized minimum area instead of trusting payload metrics."""
     evaluator = _load_evaluator("heilbronn_square", "HeilbronnSquareEvaluator")()
     points = np.random.default_rng(7).random((13, 2))
     minimum = _load_evaluator_module("heilbronn_square")._minimum_area(points)
+    normalized = minimum / float(ConvexHull(points).volume)
 
     assert evaluator.measure(
         {
@@ -418,7 +449,28 @@ def test_heilbronn_square_recomputes_the_candidate_score() -> None:
             "minimum_area": minimum + 5e-6,
             "best_area_ratio": minimum * 2,
         }
-    ) == pytest.approx(minimum)
+    ) == pytest.approx(normalized)
+
+
+def test_heilbronn_square_keeps_the_json_adapter_outside_the_evolution_block() -> None:
+    """Keep square output normalization outside model-generated code."""
+    source = (EXAMPLE_DIR / "heilbronn_square" / "algorithm" / "solve.py").read_text(encoding="utf-8")
+    _fixed_prefix, evolvable = source.split("# EVOLVE_START", 1)
+    evolvable, fixed_suffix = evolvable.split("# EVOLVE_END", 1)
+
+    assert "def find_best_placement(" in evolvable
+    assert "def run_search_point(" not in evolvable
+    assert "def run_search_point(" in fixed_suffix
+
+    candidate = _load_candidate_module("heilbronn_square")
+    points, minimum_area, area_ratio = candidate.run_search_point(13)
+    json.dumps(
+        {
+            "points": points,
+            "minimum_area": minimum_area,
+            "best_area_ratio": area_ratio,
+        }
+    )
 
 
 def test_second_autocorrelation_verifies_reported_lower_bound() -> None:
@@ -458,7 +510,7 @@ def test_uncertainty_inequality_rejects_zero_upper_bound() -> None:
         ("FirstAutocorrelationEvaluator", "first_autocorrelation", "upper_bound", 2.008221721626784),
         ("SumsDifferencesEvaluator", "sums_differences", "get_score_result", 1.009),
         ("HeilbronnTriangleEvaluator", "heilbronn_triangle", "min_area", 0.0012539434895968255),
-        ("HeilbronnSquareEvaluator", "heilbronn_square", "best_area_ratio", 0.000390043601303295),
+        ("HeilbronnSquareEvaluator", "heilbronn_square", "best_area_ratio", 0.0008448455308629798),
     ],
 )
 def test_shipped_baselines_are_valid(

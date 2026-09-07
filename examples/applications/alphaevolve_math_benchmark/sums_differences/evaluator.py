@@ -10,6 +10,8 @@ from llm4ad.evaluator.base import BaseEvaluator
 
 @BaseEvaluator.register("alphaevolve_sums_differences_evaluator")
 class SumsDifferencesEvaluator(JsonBenchmarkEvaluator):
+    """Evaluate the logarithmic sums-and-differences objective."""
+
     metric_name = "get_score_result"
     target_value = 1.1319033750264975
     score_mode = "objective_over_target"
@@ -19,6 +21,7 @@ class SumsDifferencesEvaluator(JsonBenchmarkEvaluator):
     benchmark_key = "sums_and_differences"
 
     def measure(self, payload: dict[str, Any]) -> float:
+        """Validate an integer set and return its benchmark objective."""
         values = payload["values"]
         if not isinstance(values, list):
             raise ValueError("values must be a list")

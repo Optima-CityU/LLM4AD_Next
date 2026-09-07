@@ -825,7 +825,8 @@ async def test_task_memory_add_marks_an_empty_scope_available_for_search():
     context = memory.get_prompt_context("tour construction")
 
     assert "nearest-neighbor construction" in context
-    assert len(memory.client.memory.list_calls) == 1
+    assert len(memory.client.memory.list_calls) == 2
+    assert {call["page_size"] for call in memory.client.memory.list_calls} == {1, 50}
     assert len(memory.client.memory.search_calls) == 1
 
 
@@ -1123,6 +1124,74 @@ def test_topk_elite_code_uses_quality_aware_selection_from_wider_recall_pool():
     assert "Algorithm ID: algorithm-elite" in context
     assert elite_code.strip() in context
     assert lower_code.strip() not in context
+
+
+def test_topk_elite_code_considers_task_archive_outside_semantic_recall():
+    """The best task implementation must remain eligible when semantic recall misses it."""
+    archive_code = "MODEL_SPEC = {'strategy': 'task_archive_best'}\n"
+    memory = MindMemOSMemory(
+        _config(
+            include_user_memory=False,
+            include_project_memory=False,
+            task_memory_limit=1,
+            task_candidate_pool=20,
+            task_injection_mode="topk",
+            mindmemos_context_char_budget=2000,
+            mindmemos_elite_code_slots=1,
+            mindmemos_elite_code_char_budget=1000,
+        ),
+        client_factory=FakeMindMemOSClient,
+    )
+    memory.client.memory.search_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="semantic-error-only",
+                score=0.99,
+                memory="A semantically close failure without a reusable implementation.",
+                memory_type="error_reflection",
+                metadata={
+                    "score": 0.0,
+                    "algorithm_id": "semantic-error",
+                },
+            )
+        ]
+    )
+    memory.client.memory.list_result = SimpleNamespace(
+        memories=[
+            SimpleNamespace(
+                id="archive-higher-score",
+                score=0.25,
+                memory="The strongest measured task implementation.",
+                memory_type="good_algorithm",
+                metadata={
+                    "score": 0.91,
+                    "algorithm_id": "archive-best",
+                    "enabled": True,
+                    "structured_content": {
+                        "artifacts": [
+                            {
+                                "artifact_id": "code-1:archive.py",
+                                "type": "code",
+                                "language": "python",
+                                "content": archive_code,
+                            }
+                        ]
+                    },
+                },
+            )
+        ]
+    )
+
+    context = memory.get_prompt_context("improve a related geometry search")
+
+    assert "Algorithm ID: archive-best" in context
+    assert archive_code.strip() in context
+    archive_calls = [
+        call
+        for call in memory.client.memory.list_calls
+        if call.get("page_size") != 1
+    ]
+    assert len(archive_calls) == 1
 
 
 def test_elite_code_selects_best_source_version_inside_merged_memory_card():

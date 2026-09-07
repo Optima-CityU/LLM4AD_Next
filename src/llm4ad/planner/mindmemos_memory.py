@@ -29,6 +29,9 @@ LLM4AD_MEMORY_CARD_PROPERTY_FILTER = {
 }
 LLM4AD_MEMORY_CARD_PROPERTIES = frozenset(LLM4AD_MEMORY_CARD_PROPERTY_FILTER["in"])
 _SCOPE_PRESENCE_TTL_SECONDS = 60.0
+_TASK_ELITE_ARCHIVE_TTL_SECONDS = 60.0
+_TASK_ELITE_ARCHIVE_PAGE_SIZE = 50
+_TASK_ELITE_ARCHIVE_MAX_PAGES = 20
 
 # Human-readable labels for memory event/type in user-facing logs. Keeps the
 # implementation name (MindMemOS) out of logs — users just see "long-term memory".
@@ -593,6 +596,7 @@ class MindMemOSMemory(BaseMemory):
         # identity stays in the key even though this object is task-local, which
         # prevents accidental cross-user reuse if the cache scope changes later.
         self._scope_presence: dict[tuple[str, str, str, str, str], tuple[bool, float]] = {}
+        self._task_elite_archive_cache: tuple[list[Any], float] | None = None
 
         injected_client_factory = client_factory is not None
         if client_factory is None:
@@ -809,6 +813,7 @@ class MindMemOSMemory(BaseMemory):
             # A successful sync write invalidates a previously cached empty
             # task scope even when an older server omits response events.
             self._mark_task_scope_present()
+            self._invalidate_task_elite_archive()
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             logger.info(
                 "🧠 [long-term memory] inserted structured task-memory batch: cards={} "
@@ -892,6 +897,7 @@ class MindMemOSMemory(BaseMemory):
                     self._mark_task_scope_present()
                 else:
                     self._invalidate_task_scope_presence()
+                self._invalidate_task_elite_archive()
                 return card
             except Exception as exc:  # noqa: BLE001
                 self._record_error(exc)
@@ -910,6 +916,7 @@ class MindMemOSMemory(BaseMemory):
         try:
             delete(memory_id=card_id, hard=True)
             self._invalidate_task_scope_presence()
+            self._invalidate_task_elite_archive()
         except Exception as exc:  # noqa: BLE001
             self._record_error(exc)
             if not self.fail_open:
@@ -934,6 +941,7 @@ class MindMemOSMemory(BaseMemory):
                     self._mark_task_scope_present()
                 else:
                     self._invalidate_task_scope_presence()
+                self._invalidate_task_elite_archive()
                 return updated
         raise KeyError(card_id)
 
@@ -1099,6 +1107,7 @@ class MindMemOSMemory(BaseMemory):
                 completed[index] = run_search(job)
 
         scope_hits: dict[str, int] = {}
+        task_scope_retrieved = False
         for index, _job in enumerate(search_jobs):
             outcome = completed[index]
             scope = str(outcome["scope"])
@@ -1112,6 +1121,8 @@ class MindMemOSMemory(BaseMemory):
             # ran so "search"/"top_k" never appears for a pinned fetch.
             retrieval_kind = "pinned-fetch" if pinned else "search"
             if exc is None:
+                if scope == "task":
+                    task_scope_retrieved = True
                 hits = list(outcome["hits"])
                 # The complete-code lane selects independently from the wider
                 # recall pool. Otherwise the first code-bearing card in the
@@ -1191,6 +1202,27 @@ class MindMemOSMemory(BaseMemory):
                 )
 
         strategy_note = _format_island_strategy_note(context)
+        if (
+            task_scope_retrieved
+            and self.include_task_memory
+            and self.task_memory_limit > 0
+            and self.elite_code_slots > 0
+        ):
+            try:
+                elite_recall_pool.extend(
+                    (hit, "task") for hit in self._task_elite_archive_hits()
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._record_error(exc)
+                if not self.fail_open:
+                    raise
+                logger.warning(
+                    "🧠 [long-term memory] task elite archive retrieval failed: "
+                    "session_id={} fail_open={}: {}",
+                    self.session_id or None,
+                    self.fail_open,
+                    exc,
+                )
         elite_pool = self._select_elite_code_pool(elite_recall_pool)
         elite_section, elite_algorithm_ids, elite_code_chars = _format_elite_code_section(
             elite_pool,
@@ -1495,6 +1527,56 @@ class MindMemOSMemory(BaseMemory):
             return
         key = self._scope_presence_key("task", self.session_id, self.agent_id)
         self._scope_presence.pop(key, None)
+
+    def _task_elite_archive_hits(self) -> list[Any]:
+        """Return active task-level successful implementations across list pages."""
+        if not self.session_id:
+            return []
+        now = time.monotonic()
+        cached = self._task_elite_archive_cache
+        if cached is not None and now - cached[1] < _TASK_ELITE_ARCHIVE_TTL_SECONDS:
+            return list(cached[0])
+
+        list_method = getattr(self.client.memory, "list", None)
+        if list_method is None:
+            return []
+        filters: dict[str, Any] = {
+            "user_id": self.user_id,
+            "app_id": self.app_id,
+            "session_id": self.session_id,
+            "agent_id": "task",
+            "entity_type": LLM4AD_MEMORY_ENTITY_TYPE,
+            "property_name": LLM4AD_MEMORY_CARD_PROPERTY_FILTER,
+        }
+        hits: list[Any] = []
+        for page in range(1, _TASK_ELITE_ARCHIVE_MAX_PAGES + 1):
+            result = list_method(
+                user_id=self.user_id,
+                app_id=self.app_id or None,
+                agent_id="task",
+                session_id=self.session_id,
+                page=page,
+                page_size=_TASK_ELITE_ARCHIVE_PAGE_SIZE,
+                include_total=False,
+                include_inactive=False,
+                filters=filters,
+            )
+            memories = list(getattr(result, "memories", []) or [])
+            hits.extend(
+                item
+                for item in memories
+                if _hit_is_enabled(item)
+                and _memory_type_from_hit(item) is MemoryType.GOOD_ALGORITHM
+                and _hit_code_artifacts(item)
+            )
+            if len(memories) < _TASK_ELITE_ARCHIVE_PAGE_SIZE:
+                break
+        self._task_elite_archive_cache = (hits, now)
+        return list(hits)
+
+    def _invalidate_task_elite_archive(self) -> None:
+        """Invalidate cached task-level implementation candidates after writes."""
+        self._task_elite_archive_cache = None
 
     async def _rewrite_query(self, query: str, context: dict[str, Any] | None = None) -> str:
         """Use planner provider to compress broad sampler context into a search query."""
