@@ -296,7 +296,7 @@ ruff check src/ tests/ --fix
 使用微信扫描二维码加入 LLM4AD_Next 社区群。
 
 <div align="center">
-  <img src="docs/assets/live-qr-20260818-033420.png"
+  <img src="docs/assets/live-qr-20260828-101026.png"
        alt="LLM4AD_Next 微信社区二维码"
        width="220">
 </div>
