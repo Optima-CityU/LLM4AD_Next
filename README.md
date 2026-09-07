@@ -302,7 +302,7 @@ The AutoResearch module is based on / adapted from [AutoResearchClaw](https://gi
 Scan the QR code with WeChat to join the LLM4AD_Next community group.
 
 <div align="center">
-  <img src="docs/assets/live-qr-20260828-101026.png"
+  <img src="docs/assets/live-qr-20260907-033016.png"
        alt="LLM4AD_Next WeChat community QR code"
        width="220">
 </div>
