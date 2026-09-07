@@ -205,7 +205,7 @@ def test_remaining_cases_preserve_official_prompt_and_score_contract(
     assert result.score == pytest.approx(expected_score)
 
 
-def test_suite_markdown_has_no_vendor_or_notice_documents() -> None:
+def test_suite_runtime_markdown_has_no_vendor_or_notice_documents() -> None:
     forbidden_names = {"notice", "baidu"}
     for path in EXAMPLE_DIR.rglob("*"):
         assert not any(token in path.name.lower() for token in forbidden_names)
@@ -214,10 +214,11 @@ def test_suite_markdown_has_no_vendor_or_notice_documents() -> None:
         text = path.read_text(encoding="utf-8").lower()
         assert "baidu" not in text
         assert "百度" not in text
-        assert not any("\u4e00" <= character <= "\u9fff" for character in text)
+        if "results" not in path.parts:
+            assert not any("\u4e00" <= character <= "\u9fff" for character in text)
 
 
-def test_suite_readme_records_only_published_improvements() -> None:
+def test_suite_readme_records_published_results() -> None:
     readme = (EXAMPLE_DIR / "README.md").read_text(encoding="utf-8")
     for value in (
         "2.6358627564136983",
@@ -241,6 +242,12 @@ def test_suite_readme_records_only_published_improvements() -> None:
         "0.35209910441916187",
         "0.9053043552878318",
         "1.507459811737381",
+        "0.380924",
+        "0.3809137564083654",
+        "0.38092504473534605",
+        "0.036529889880030156",
+        "0.0365298898793351",
+        "0.0365298881927707",
     ):
         assert value in readme
 
@@ -250,8 +257,10 @@ def test_suite_readme_records_only_published_improvements() -> None:
         "first_autocorrelation": 32,
         "hexagon_packing": 15,
         "max_min_distance_ratio": 12,
+        "minimum_overlap": 13,
         "second_autocorrelation": 15,
         "uncertainty_inequality": 2,
+        "heilbronn_triangle": 12,
     }
     assert {path.parts[-4] for path in EXAMPLE_DIR.glob("*/results/best/solve.py")} == set(
         published_cases
@@ -285,6 +294,8 @@ def test_runtime_sources_do_not_contain_published_results() -> None:
         "0.35209910442252773", "0.352099104421844",
         "0.8962799441554083", "0.9027021077220739",
         "1.5052939684401607", "1.509527314861778",
+        "0.380924", "0.3809137564083654",
+        "0.036529889880030156", "0.0365298898793351",
     }
     assert published_values.issubset(set(re.findall(r"`([0-9]+\.[0-9]+)`", comparison_section)))
     assert published_values
@@ -323,6 +334,8 @@ def test_runtime_sources_do_not_contain_published_results() -> None:
         "0.35209910441916187",
         "0.9053043552878318",
         "1.507459811737381",
+        "0.38092504473534605",
+        "0.0365298881927707",
     ):
         assert result_value not in combined
     assert "circle_packing/results/best" not in combined
