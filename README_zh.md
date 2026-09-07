@@ -100,13 +100,9 @@ evolution:
 
 ## 🏆 优秀案例展示
 
-> **9 项代表结果** · **6 项超过公开最优值** · **3 项竞争性结果**
->
-> 基于多样岛屿遗传算法与长期记忆演化得到的代表性成果。[查看全部 11 项数学基准 →](examples/applications/alphaevolve_math_benchmark/README.md)
+### [AlphaEvolve Mathematics Benchmark](examples/applications/alphaevolve_math_benchmark/README.md)
 
-### 数学优化
-
-| 案例 | 结果 | 相关资料 |
+| 案例（↑ Max · ↓ Min） | 结果 | 相关资料 |
 | --- | --- | --- |
 | 单位正方形内 26 圆 ↑ | AlphaEvolve `2.6358627564` · LoongFlow `2.6359829625`<br>**LLM4AD `2.6359830833`** · Δ `+1.21e-7` | [代码](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/result.json) |
 | 周长为 4 的矩形内 21 圆 ↑ | AlphaEvolve `2.3658321334` · LoongFlow `2.3658322295`<br>**LLM4AD `2.3658323757`** · Δ `+1.46e-7` | [代码](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/result.json) |
@@ -117,8 +113,6 @@ evolution:
 | 第一自相关不等式 ↓ | AlphaEvolve `1.5052939684` · LoongFlow `1.5095273149`<br>**LLM4AD `1.5074598117`** · Δ `-0.00216584` | [代码](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/result.json) |
 | 最小重叠问题 ↓ | AlphaEvolve `0.380924` · LoongFlow `0.3809137564`<br>**LLM4AD `0.3809250447`** · Δ `-1.13e-5` | [代码](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/result.json) |
 | 等边三角形 Heilbronn 问题 ↑ | AlphaEvolve `0.0365298898800` · LoongFlow `0.0365298898793`<br>**LLM4AD `0.0365298881928`** · Δ `-1.69e-9` | [代码](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/solve.py) · [经验](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/experiences/README.md) · [结果](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/result.json) |
-
-箭头表示优化方向。为便于阅读，主页中的指标经过适度取舍，完整精度保留在基准套件与对应 JSON 文件中。Δ 始终相对两项公开结果中的更优值计算：正值表示实现提升，负值表示仍有差距。
 
 ## 快速开始
 

@@ -100,13 +100,9 @@ evolution:
 
 ## 🏆 Featured Cases
 
-> **9 featured results** · **6 results beyond the best published baseline** · **3 competitive results**
->
-> A curated showcase evolved with Diverse Island GA and reusable long-term experience. [Explore all 11 mathematics benchmarks →](examples/applications/alphaevolve_math_benchmark/README.md)
+### [AlphaEvolve Mathematics Benchmark](examples/applications/alphaevolve_math_benchmark/README.md)
 
-### Mathematical Optimization
-
-| Case | Results | Artifacts |
+| Case (↑ Max · ↓ Min) | Results | Artifacts |
 | --- | --- | --- |
 | 26 circles in a unit square ↑ | AlphaEvolve `2.6358627564` · LoongFlow `2.6359829625`<br>**LLM4AD `2.6359830833`** · Δ `+1.21e-7` | [Code](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/solve.py) · [Experiences](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/experiences/README.md) · [Result](examples/applications/alphaevolve_math_benchmark/circle_packing/results/best/result.json) |
 | 21 circles in a perimeter-four rectangle ↑ | AlphaEvolve `2.3658321334` · LoongFlow `2.3658322295`<br>**LLM4AD `2.3658323757`** · Δ `+1.46e-7` | [Code](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/solve.py) · [Experiences](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/experiences/README.md) · [Result](examples/applications/alphaevolve_math_benchmark/circle_rectangle/results/best/result.json) |
@@ -117,8 +113,6 @@ evolution:
 | First autocorrelation inequality ↓ | AlphaEvolve `1.5052939684` · LoongFlow `1.5095273149`<br>**LLM4AD `1.5074598117`** · Δ `-0.00216584` | [Code](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/solve.py) · [Experiences](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/experiences/README.md) · [Result](examples/applications/alphaevolve_math_benchmark/first_autocorrelation/results/best/result.json) |
 | Minimum overlap ↓ | AlphaEvolve `0.380924` · LoongFlow `0.3809137564`<br>**LLM4AD `0.3809250447`** · Δ `-1.13e-5` | [Code](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/solve.py) · [Experiences](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/experiences/README.md) · [Result](examples/applications/alphaevolve_math_benchmark/minimum_overlap/results/best/result.json) |
 | Heilbronn problem in an equilateral triangle ↑ | AlphaEvolve `0.0365298898800` · LoongFlow `0.0365298898793`<br>**LLM4AD `0.0365298881928`** · Δ `-1.69e-9` | [Code](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/solve.py) · [Experiences](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/experiences/README.md) · [Result](examples/applications/alphaevolve_math_benchmark/heilbronn_triangle/results/best/result.json) |
-
-Arrows indicate the optimization direction. Displayed scores are rounded for readability; exact values remain available in the benchmark suite and linked JSON files. Δ compares LLM4AD with the stronger published baseline: positive values indicate an improvement and negative values indicate the remaining gap.
 
 ## Quick Start
 
