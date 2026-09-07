@@ -775,7 +775,8 @@ export class Llm4AdChatTuneService {
      * - heartbeat: 周期性心跳保活（约 15s）。
      * - done / cancelled / error: 终止事件（data 帧）。
      * - event: done: SSE 终止信号。
-     * - timeout: 5 分钟无新数据的安全兜底。
+     * - timeout: 30 分钟无新数据的安全兜底（构建期间后端每 30s 推送
+     * progress 事件，正常构建不会触发）。
      * @param data The data for the request.
      * @param data.taskId
      * @param data.turnId
