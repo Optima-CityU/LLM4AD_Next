@@ -212,7 +212,7 @@ def test_suite_markdown_has_no_vendor_or_notice_documents() -> None:
         assert not any("\u4e00" <= character <= "\u9fff" for character in text)
 
 
-def test_suite_readme_records_reference_metrics_and_reserves_local_results() -> None:
+def test_suite_readme_records_only_published_improvements() -> None:
     readme = (EXAMPLE_DIR / "README.md").read_text(encoding="utf-8")
     for value in (
         "2.6358627564136983",
@@ -223,31 +223,49 @@ def test_suite_readme_records_reference_metrics_and_reserves_local_results() -> 
         "3.928906855463712",
         "12.88926611203463",
         "12.889243547212832",
-        "0.380924",
-        "0.3809137564083654",
         "0.35209910442252773",
         "0.352099104421844",
         "0.8962799441554083",
         "0.9027021077220739",
         "1.5052939684401607",
         "1.509527314861778",
-        "1.1219357374860444",
-        "1.103534711409646",
-        "0.036529889880030156",
-        "0.0365298898793351",
-        "0.030936889034895654",
-        "0.030900663674639613",
         "2.635983083325037",
+        "2.365832375700835",
+        "3.92468841680981",
+        "12.889229907694045",
+        "0.35209910441916187",
+        "0.9053043552878318",
+        "1.507459811737381",
     ):
         assert value in readme
 
-    assert readme.count("|  |  |") == 10
+    published_cases = {
+        "circle_packing": 17,
+        "circle_rectangle": 14,
+        "first_autocorrelation": 32,
+        "hexagon_packing": 15,
+        "max_min_distance_ratio": 12,
+        "second_autocorrelation": 15,
+        "uncertainty_inequality": 2,
+    }
+    assert {path.parts[-4] for path in EXAMPLE_DIR.glob("*/results/best/solve.py")} == set(
+        published_cases
+    )
+    for case_dir, expected_experience_count in published_cases.items():
+        result_dir = EXAMPLE_DIR / case_dir / "results" / "best"
+        assert (result_dir / "solve.py").is_file()
+        assert (result_dir / "result.json").is_file()
+        experience_dir = result_dir / "experiences"
+        assert (experience_dir / "README.md").is_file()
+        experience_files = sorted(experience_dir.glob("experience-*.md"))
+        assert len(experience_files) == expected_experience_count
+        experience_index = (experience_dir / "README.md").read_text(encoding="utf-8")
+        for experience_file in experience_files:
+            assert f"({experience_file.name})" in experience_index
+            assert experience_file.read_text(encoding="utf-8").strip()
+        assert f"({case_dir}/results/best/solve.py)" in readme
+        assert f"({case_dir}/results/best/experiences/README.md)" in readme
 
-    assert (EXAMPLE_DIR / "circle_packing" / "results" / "best" / "result.json").is_file()
-    best_code = EXAMPLE_DIR / "circle_packing" / "results" / "best" / "solve.py"
-    assert best_code.is_file()
-    assert f"[{best_code.name}](circle_packing/results/best/{best_code.name})" in readme
-    assert list(EXAMPLE_DIR.glob("*/results/**/*.py")) == [best_code]
     assert "algorithm_id" not in readme
 
 
@@ -259,13 +277,9 @@ def test_runtime_sources_do_not_contain_published_results() -> None:
         "2.3658321334167627", "2.365832229500823",
         "3.930092", "3.928906855463712",
         "12.88926611203463", "12.889243547212832",
-        "0.380924", "0.3809137564083654",
         "0.35209910442252773", "0.352099104421844",
         "0.8962799441554083", "0.9027021077220739",
         "1.5052939684401607", "1.509527314861778",
-        "1.1219357374860444", "1.103534711409646",
-        "0.036529889880030156", "0.0365298898793351",
-        "0.030936889034895654", "0.030900663674639613",
     }
     assert published_values.issubset(set(re.findall(r"`([0-9]+\.[0-9]+)`", comparison_section)))
     assert published_values
@@ -296,7 +310,16 @@ def test_runtime_sources_do_not_contain_published_results() -> None:
     # Public task statements contain their comparison targets by design. The
     # locally evolved result and its implementation must remain outside all
     # model-visible task inputs.
-    assert "2.635983083325037" not in combined
+    for result_value in (
+        "2.635983083325037",
+        "2.365832375700835",
+        "3.92468841680981",
+        "12.889229907694045",
+        "0.35209910441916187",
+        "0.9053043552878318",
+        "1.507459811737381",
+    ):
+        assert result_value not in combined
     assert "circle_packing/results/best" not in combined
 
 

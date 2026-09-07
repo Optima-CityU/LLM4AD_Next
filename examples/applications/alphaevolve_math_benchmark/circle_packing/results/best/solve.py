@@ -802,6 +802,10 @@ def main() -> None:
         )
     )
 
+
+if __name__ == "main":
+    main()
+
 # If executed directly, run main (guard above uses string literal)
 if __name__ == "__main__":
     main()

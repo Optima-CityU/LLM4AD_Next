@@ -1,0 +1,859 @@
+Insight about ranking seeds by LP objective and polishing only the top candidates to improve efficiency and outcome quality.
+
+- Top-K LP Filtering for Efficient NLP Polishing: When the NLP polishing step is expensive relative to LP refinement, rank all generated seeds by their LP objective score and run polishing only on the top 5; this reduced runtime enough to increase LP iterations (e.g., from 15 to 30) and expand the seed set without exceeding time limits, yielding a valid solution (validity = 1.0) with sum_radii = 2.365832375671771 in this event; future designs should reuse LP-based top-k gating to allocate polishing budget to high-promise candidates while investing the saved time in deeper LP refinement.
+- Epsilon Annealing Schedule for the NLP polishing step: Executing SLSQP sequentially with epsilon=1e-6, 1e-9, and 1e-12 while warm-starting each run from the previous output safely guided the nonlinear solver toward near-exact tangencies without numerical collisions or instability during Top-5 candidate NLP evaluation.
+- Final Fixed-Center LP Polish: After the NLP phase, freezing the optimized center coordinates and bounding-box dimensions and solving a linear program to maximize radii, accepting the result only if the sum of radii strictly increased, reclaimed microscopic slack left by SLSQP and yielded a valid packing with sum_radii=2.365832375676698 and validity=1.0 for the 21-circle task.
+- Setting iterations=30 in lp_refine improved the accuracy of LP-based Top-K filtering so that only the top 5 LP-scoring seeds entered the expensive NLP phase, integrating the annealed NLP and LP polish efficiently into the search pipeline.
+
+```python
+#!/usr/bin/env python3
+"""Initial candidate for packing 21 circles in a perimeter-four rectangle."""
+
+import json
+
+import numpy as np
+
+
+# EVOLVE_START
+from scipy.optimize import linprog, minimize
+
+def get_natural_wh(pattern):
+    """Calculate the natural aspect ratio for a hexagonal staggered pattern."""
+    max_cols = max(pattern)
+    num_rows = len(pattern)
+    width = max(1, max_cols - 1) * 1.0
+    height = max(1, num_rows - 1) * (3**0.5 / 2)
+    # Scale so that width + height = 2 (perimeter = 4)
+    scale = 2.0 / (width + height)
+    return width * scale, height * scale
+
+def generate_seeds(num_circles):
+    """Generate various seed configurations to explore different contact graphs."""
+    base_patterns = [
+        [5, 4, 5, 4, 3],
+        [6, 5, 5, 5],
+        [4, 5, 4, 4, 4],
+        [7, 7, 7],
+        [3, 4, 5, 5, 4],
+        [4, 4, 5, 4, 4],
+        [5, 5, 6, 5],
+        [7, 6, 8]
+    ]
+    
+    unique_patterns = []
+    for p in base_patterns:
+        if sum(p) != num_circles:
+            continue
+        if p not in unique_patterns:
+            unique_patterns.append(p)
+        p_rev = p[::-1]
+        if p_rev not in unique_patterns:
+            unique_patterns.append(p_rev)
+            
+    # Fallback if num_circles is not 21
+    if not unique_patterns:
+        grid_size = int(np.ceil(np.sqrt(num_circles)))
+        p = [grid_size] * (num_circles // grid_size)
+        if num_circles % grid_size != 0:
+            p.append(num_circles % grid_size)
+        unique_patterns.append(p)
+            
+    seeds = []
+    
+    for p in unique_patterns:
+        nat_w, nat_h = get_natural_wh(p)
+        
+        # Perturb aspect ratios
+        for w_mult in [0.97, 1.0, 1.03]:
+            w_scale = nat_w * w_mult
+            h_scale = 2.0 - w_scale
+            if w_scale <= 0 or h_scale <= 0:
+                continue
+                
+            centers = []
+            num_rows = len(p)
+            for i, count in enumerate(p):
+                y = (i / max(1, num_rows - 1)) * h_scale if num_rows > 1 else h_scale / 2.0
+                for j in range(count):
+                    offset = (max(p) - count) / 2.0
+                    x = ((j + offset) / max(1, max(p) - 1)) * w_scale if max(p) > 1 else w_scale / 2.0
+                    centers.append([x, y])
+            centers = np.array(centers)
+            
+            # Nominal aspect ratio seed
+            seeds.append(centers)
+            # Transposed version
+            seeds.append(centers[:, [1, 0]])
+            
+            # Deterministic, unequal-radius jittered seeds to break symmetry
+            p_int = sum(x * (10**i) for i, x in enumerate(p))
+            rng = np.random.RandomState(p_int + int(w_mult*100))
+            jitter = rng.uniform(-0.01, 0.01, size=centers.shape)
+            
+            seeds.append(centers + jitter)
+            seeds.append(centers[:, [1, 0]] + jitter)
+            
+    return seeds
+
+def lp_refine(centers, iterations=15):
+    """
+    Iteratively solve a Linear Program to maximize the sum of radii.
+    Non-overlap constraints are conservatively linearized based on previous centers.
+    A dynamic trust-region constraint restricts center displacements per iteration
+    to keep the linear approximation valid and prevent oscillation.
+    """
+    N = len(centers)
+    radii = np.full(N, 0.01)
+    W, H = 1.0, 1.0
+    
+    num_constraints = 1 + 4*N + N*(N-1)//2
+    num_vars = 3*N + 2
+    
+    # Objective: minimize -sum(radii)
+    c = np.zeros(num_vars)
+    c[2*N : 3*N] = -1.0
+    
+    best_score = -1.0
+    for it in range(iterations):
+        A_ub = np.zeros((num_constraints, num_vars))
+        b_ub = np.zeros(num_constraints)
+        
+        # Dynamic trust-region constraints to keep linear approximation valid
+        # Bounding the change in x and y per iteration, decaying over time
+        trust_region = 0.05 * (0.95 ** it)
+        bounds = []
+        
+        # Bounds for x coordinates
+        for i in range(N):
+            cx = centers[i, 0]
+            bounds.append((max(0.0, cx - trust_region), min(2.0, cx + trust_region)))
+            
+        # Bounds for y coordinates
+        for i in range(N):
+            cy = centers[i, 1]
+            bounds.append((max(0.0, cy - trust_region), min(2.0, cy + trust_region)))
+            
+        # Bounds for radii (0 to 1)
+        bounds.extend([(0.0, 1.0)] * N)
+        
+        # Bounds for W, H (0 to 2)
+        bounds.extend([(0.0, 2.0), (0.0, 2.0)])
+        
+        row_idx = 0
+        
+        # Perimeter constraint: W + H <= 2
+        A_ub[row_idx, -2] = 1.0
+        A_ub[row_idx, -1] = 1.0
+        b_ub[row_idx] = 2.0
+        row_idx += 1
+        
+        # Bounding box constraints
+        for i in range(N):
+            # -x_i + r_i <= 0
+            A_ub[row_idx, i] = -1.0; A_ub[row_idx, 2*N + i] = 1.0; row_idx += 1
+            # x_i + r_i - W <= 0
+            A_ub[row_idx, i] = 1.0; A_ub[row_idx, 2*N + i] = 1.0; A_ub[row_idx, -2] = -1.0; row_idx += 1
+            # -y_i + r_i <= 0
+            A_ub[row_idx, N + i] = -1.0; A_ub[row_idx, 2*N + i] = 1.0; row_idx += 1
+            # y_i + r_i - H <= 0
+            A_ub[row_idx, N + i] = 1.0; A_ub[row_idx, 2*N + i] = 1.0; A_ub[row_idx, -1] = -1.0; row_idx += 1
+            
+        # Non-overlap constraints
+        for i in range(N):
+            for j in range(i+1, N):
+                dx = centers[i, 0] - centers[j, 0]
+                dy = centers[i, 1] - centers[j, 1]
+                dist = np.hypot(dx, dy)
+                if dist < 1e-9:
+                    nx, ny = 1.0, 0.0
+                else:
+                    nx, ny = dx / dist, dy / dist
+                
+                # -nx*x_i - ny*y_i + nx*x_j + ny*y_j + r_i + r_j <= 0
+                A_ub[row_idx, i] = -nx
+                A_ub[row_idx, N + i] = -ny
+                A_ub[row_idx, j] = nx
+                A_ub[row_idx, N + j] = ny
+                A_ub[row_idx, 2*N + i] = 1.0
+                A_ub[row_idx, 2*N + j] = 1.0
+                row_idx += 1
+                
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs')
+        if res.success:
+            centers = np.column_stack((res.x[:N], res.x[N:2*N]))
+            radii = res.x[2*N:3*N]
+            W = res.x[-2]
+            H = res.x[-1]
+            best_score = np.sum(radii)
+        else:
+            break
+            
+    return centers, radii, W, H, best_score
+
+def nlp_polish(centers, radii, W, H, epsilon=1e-6):
+    """
+    Nonlinear polishing using SLSQP with exact squared-distance non-overlap constraints.
+    Includes pinning boundary-contact circles to eliminate rigid modes.
+    """
+    N = len(centers)
+    
+    def objective(vars):
+        return -np.sum(vars[2*N : 3*N])
+        
+    def objective_jac(vars):
+        jac = np.zeros_like(vars)
+        jac[2*N : 3*N] = -1.0
+        return jac
+
+    constraints = []
+    
+    # Perimeter constraint
+    constraints.append({
+        'type': 'ineq',
+        'fun': lambda v: 2.0 - v[-2] - v[-1],
+        'jac': lambda v: np.concatenate([np.zeros(3*N), [-1.0, -1.0]])
+    })
+    
+    # Identify extreme circles to pin
+    idx_left = np.argmin(centers[:, 0] - radii)
+    idx_right = np.argmax(centers[:, 0] + radii)
+    idx_bottom = np.argmin(centers[:, 1] - radii)
+    idx_top = np.argmax(centers[:, 1] + radii)
+    
+    # Bounding box inequalities (excluding pinned variables to avoid dependent constraints)
+    idx_x_min = [i for i in range(N) if i != idx_left]
+    def box_x_min(v): return v[idx_x_min] - v[2*N:3*N][idx_x_min]
+    def box_x_min_jac(v):
+        J = np.zeros((len(idx_x_min), len(v)))
+        for k, i in enumerate(idx_x_min):
+            J[k, i] = 1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_x_min, 'jac': box_x_min_jac})
+    
+    idx_x_max = [i for i in range(N) if i != idx_right]
+    def box_x_max(v): return v[-2] - v[idx_x_max] - v[2*N:3*N][idx_x_max]
+    def box_x_max_jac(v):
+        J = np.zeros((len(idx_x_max), len(v)))
+        for k, i in enumerate(idx_x_max):
+            J[k, -2] = 1.0
+            J[k, i] = -1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_x_max, 'jac': box_x_max_jac})
+    
+    idx_y_min = [i for i in range(N) if i != idx_bottom]
+    def box_y_min(v): return v[N + np.array(idx_y_min)] - v[2*N:3*N][idx_y_min]
+    def box_y_min_jac(v):
+        J = np.zeros((len(idx_y_min), len(v)))
+        for k, i in enumerate(idx_y_min):
+            J[k, N + i] = 1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_y_min, 'jac': box_y_min_jac})
+    
+    idx_y_max = [i for i in range(N) if i != idx_top]
+    def box_y_max(v): return v[-1] - v[N + np.array(idx_y_max)] - v[2*N:3*N][idx_y_max]
+    def box_y_max_jac(v):
+        J = np.zeros((len(idx_y_max), len(v)))
+        for k, i in enumerate(idx_y_max):
+            J[k, -1] = 1.0
+            J[k, N + i] = -1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_y_max, 'jac': box_y_max_jac})
+    
+    # Exact squared-distance non-overlap constraints with epsilon margin
+    pairs = [(i, j) for i in range(N) for j in range(i+1, N)]
+    def non_overlap(v):
+        x = v[:N]
+        y = v[N:2*N]
+        r = v[2*N:3*N]
+        vals = np.zeros(len(pairs))
+        for idx, (i, j) in enumerate(pairs):
+            dx = x[i] - x[j]
+            dy = y[i] - y[j]
+            R = r[i] + r[j] + epsilon
+            vals[idx] = dx*dx + dy*dy - R*R
+        return vals
+        
+    def non_overlap_jac(v):
+        J = np.zeros((len(pairs), len(v)))
+        x = v[:N]
+        y = v[N:2*N]
+        r = v[2*N:3*N]
+        for idx, (i, j) in enumerate(pairs):
+            dx = x[i] - x[j]
+            dy = y[i] - y[j]
+            R = r[i] + r[j] + epsilon
+            
+            J[idx, i] = 2 * dx
+            J[idx, j] = -2 * dx
+            J[idx, N + i] = 2 * dy
+            J[idx, N + j] = -2 * dy
+            J[idx, 2*N + i] = -2 * R
+            J[idx, 2*N + j] = -2 * R
+        return J
+        
+    constraints.append({'type': 'ineq', 'fun': non_overlap, 'jac': non_overlap_jac})
+    
+    # Pinning equalities
+    def pin_left(v): return v[idx_left] - v[2*N + idx_left]
+    def pin_left_jac(v):
+        J = np.zeros(len(v))
+        J[idx_left] = 1.0; J[2*N + idx_left] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_left, 'jac': pin_left_jac})
+    
+    def pin_right(v): return v[-2] - v[idx_right] - v[2*N + idx_right]
+    def pin_right_jac(v):
+        J = np.zeros(len(v))
+        J[-2] = 1.0; J[idx_right] = -1.0; J[2*N + idx_right] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_right, 'jac': pin_right_jac})
+    
+    def pin_bottom(v): return v[N + idx_bottom] - v[2*N + idx_bottom]
+    def pin_bottom_jac(v):
+        J = np.zeros(len(v))
+        J[N + idx_bottom] = 1.0; J[2*N + idx_bottom] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_bottom, 'jac': pin_bottom_jac})
+    
+    def pin_top(v): return v[-1] - v[N + idx_top] - v[2*N + idx_top]
+    def pin_top_jac(v):
+        J = np.zeros(len(v))
+        J[-1] = 1.0; J[N + idx_top] = -1.0; J[2*N + idx_top] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_top, 'jac': pin_top_jac})
+    
+    bounds = [(0, 2)] * (2*N) + [(0, 1)] * N + [(0, 2), (0, 2)]
+    x0 = np.concatenate([centers[:, 0], centers[:, 1], radii, [W, H]])
+    
+    res = minimize(objective, x0, method='SLSQP', jac=objective_jac,
+                   bounds=bounds, constraints=constraints,
+                   options={'maxiter': 200, 'ftol': 1e-9})
+                   
+    if res.success:
+        out_centers = np.column_stack((res.x[:N], res.x[N:2*N]))
+        out_radii = res.x[2*N:3*N]
+        out_W = res.x[-2]
+        out_H = res.x[-1]
+        return out_centers, out_radii, out_W, out_H, -res.fun
+    else:
+        return centers, radii, W, H, np.sum(radii)
+
+def finalize(centers, radii):
+    """Recompute exactly, apply uniform infinitesimal safety reduction, and shift to origin."""
+    min_x = np.min(centers[:, 0] - radii)
+    max_x = np.max(centers[:, 0] + radii)
+    min_y = np.min(centers[:, 1] - radii)
+    max_y = np.max(centers[:, 1] + radii)
+    
+    centers[:, 0] -= min_x
+    centers[:, 1] -= min_y
+    
+    W = max_x - min_x
+    H = max_y - min_y
+    
+    radii -= 1e-11
+    
+    perimeter = W + H
+    if perimeter > 2.0:
+        scale = 2.0 / perimeter
+        centers *= scale
+        radii *= scale
+        radii -= 1e-12
+        
+    return np.column_stack((centers, radii))
+
+def construct_packing(num_circles: int = 21):
+    seeds = generate_seeds(num_circles)
+    
+    # Phase 1: Broad multi-start exploration using LP with 30 iterations
+    best_seeds = []
+    for seed in seeds:
+        centers, radii, W, H, score = lp_refine(seed, iterations=30)
+        if score > 0:
+            best_seeds.append((score, centers, radii, W, H))
+            
+    if not best_seeds:
+        # Emergency fallback
+        radius = 0.01
+        centers = np.array(
+            [[(column + 0.5) / 5, (row + 0.5) / 5] for row in range(5) for column in range(5)][:num_circles],
+            dtype=float,
+        )
+        radii = np.full(num_circles, radius, dtype=float)
+        return np.column_stack((centers, radii))
+        
+    # Sort seeds by LP objective score
+    best_seeds.sort(key=lambda x: x[0], reverse=True)
+    
+    # Phase 2: Epsilon-annealed NLP polishing for the top 5 layouts
+    top_5 = best_seeds[:5]
+    nlp_results = []
+    eps_schedule = [1e-6, 1e-8, 1e-10, 1e-12]
+    
+    for score, centers, radii, W, H in top_5:
+        for eps in eps_schedule:
+            centers, radii, W, H, _ = nlp_polish(centers, radii, W, H, epsilon=eps)
+        final_score = np.sum(radii)
+        nlp_results.append((final_score, centers, radii, W, H))
+        
+    # Select the absolute best layout after NLP polishing
+    nlp_results.sort(key=lambda x: x[0], reverse=True)
+    _, best_centers, best_radii, best_W, best_H = nlp_results[0]
+    
+    return finalize(best_centers, best_radii)
+# EVOLVE_END
+
+
+if __name__ == "__main__":
+    circles = construct_packing()
+    print(json.dumps({"circles": circles.tolist()}))
+```
+
+```python
+#!/usr/bin/env python3
+"""Initial candidate for packing 21 circles in a perimeter-four rectangle."""
+
+import json
+
+import numpy as np
+
+
+# EVOLVE_START
+from scipy.optimize import linprog, minimize
+
+def get_natural_wh(pattern):
+    """Calculate the natural aspect ratio for a hexagonal staggered pattern."""
+    max_cols = max(pattern)
+    num_rows = len(pattern)
+    width = max(1, max_cols - 1) * 1.0
+    height = max(1, num_rows - 1) * (3**0.5 / 2)
+    # Scale so that width + height = 2 (perimeter = 4)
+    scale = 2.0 / (width + height)
+    return width * scale, height * scale
+
+def generate_seeds(num_circles):
+    """Generate various seed configurations to explore different contact graphs."""
+    base_patterns = [
+        [5, 4, 5, 4, 3],
+        [6, 5, 5, 5],
+        [4, 5, 4, 4, 4],
+        [7, 7, 7],
+        [3, 4, 5, 5, 4],
+        [4, 4, 5, 4, 4],
+        [5, 5, 6, 5],
+        [7, 6, 8]
+    ]
+    
+    unique_patterns = []
+    for p in base_patterns:
+        if sum(p) != num_circles:
+            continue
+        if p not in unique_patterns:
+            unique_patterns.append(p)
+        p_rev = p[::-1]
+        if p_rev not in unique_patterns:
+            unique_patterns.append(p_rev)
+            
+    # Fallback if num_circles is not 21
+    if not unique_patterns:
+        grid_size = int(np.ceil(np.sqrt(num_circles)))
+        p = [grid_size] * (num_circles // grid_size)
+        if num_circles % grid_size != 0:
+            p.append(num_circles % grid_size)
+        unique_patterns.append(p)
+            
+    seeds = []
+    
+    for p in unique_patterns:
+        nat_w, nat_h = get_natural_wh(p)
+        
+        # Perturb aspect ratios
+        for w_mult in [0.97, 1.0, 1.03]:
+            w_scale = nat_w * w_mult
+            h_scale = 2.0 - w_scale
+            if w_scale <= 0 or h_scale <= 0:
+                continue
+                
+            centers = []
+            num_rows = len(p)
+            for i, count in enumerate(p):
+                y = (i / max(1, num_rows - 1)) * h_scale if num_rows > 1 else h_scale / 2.0
+                for j in range(count):
+                    offset = (max(p) - count) / 2.0
+                    x = ((j + offset) / max(1, max(p) - 1)) * w_scale if max(p) > 1 else w_scale / 2.0
+                    centers.append([x, y])
+            centers = np.array(centers)
+            
+            # Nominal aspect ratio seed
+            seeds.append(centers)
+            # Transposed version
+            seeds.append(centers[:, [1, 0]])
+            
+            # Deterministic, unequal-radius jittered seeds to break symmetry
+            p_int = sum(x * (10**i) for i, x in enumerate(p))
+            rng = np.random.RandomState(p_int + int(w_mult*100))
+            jitter = rng.uniform(-0.01, 0.01, size=centers.shape)
+            
+            seeds.append(centers + jitter)
+            seeds.append(centers[:, [1, 0]] + jitter)
+            
+    return seeds
+
+def lp_refine(centers, iterations=15):
+    """
+    Iteratively solve a Linear Program to maximize the sum of radii.
+    Non-overlap constraints are conservatively linearized based on previous centers.
+    A dynamic trust-region constraint restricts center displacements per iteration
+    to keep the linear approximation valid and prevent oscillation.
+    """
+    N = len(centers)
+    radii = np.full(N, 0.01)
+    W, H = 1.0, 1.0
+    
+    num_constraints = 1 + 4*N + N*(N-1)//2
+    num_vars = 3*N + 2
+    
+    # Objective: minimize -sum(radii)
+    c = np.zeros(num_vars)
+    c[2*N : 3*N] = -1.0
+    
+    best_score = -1.0
+    for it in range(iterations):
+        A_ub = np.zeros((num_constraints, num_vars))
+        b_ub = np.zeros(num_constraints)
+        
+        # Dynamic trust-region constraints to keep linear approximation valid
+        # Bounding the change in x and y per iteration, decaying over time
+        trust_region = 0.05 * (0.95 ** it)
+        bounds = []
+        
+        # Bounds for x coordinates
+        for i in range(N):
+            cx = centers[i, 0]
+            bounds.append((max(0.0, cx - trust_region), min(2.0, cx + trust_region)))
+            
+        # Bounds for y coordinates
+        for i in range(N):
+            cy = centers[i, 1]
+            bounds.append((max(0.0, cy - trust_region), min(2.0, cy + trust_region)))
+            
+        # Bounds for radii (0 to 1)
+        bounds.extend([(0.0, 1.0)] * N)
+        
+        # Bounds for W, H (0 to 2)
+        bounds.extend([(0.0, 2.0), (0.0, 2.0)])
+        
+        row_idx = 0
+        
+        # Perimeter constraint: W + H <= 2
+        A_ub[row_idx, -2] = 1.0
+        A_ub[row_idx, -1] = 1.0
+        b_ub[row_idx] = 2.0
+        row_idx += 1
+        
+        # Bounding box constraints
+        for i in range(N):
+            # -x_i + r_i <= 0
+            A_ub[row_idx, i] = -1.0; A_ub[row_idx, 2*N + i] = 1.0; row_idx += 1
+            # x_i + r_i - W <= 0
+            A_ub[row_idx, i] = 1.0; A_ub[row_idx, 2*N + i] = 1.0; A_ub[row_idx, -2] = -1.0; row_idx += 1
+            # -y_i + r_i <= 0
+            A_ub[row_idx, N + i] = -1.0; A_ub[row_idx, 2*N + i] = 1.0; row_idx += 1
+            # y_i + r_i - H <= 0
+            A_ub[row_idx, N + i] = 1.0; A_ub[row_idx, 2*N + i] = 1.0; A_ub[row_idx, -1] = -1.0; row_idx += 1
+            
+        # Non-overlap constraints
+        for i in range(N):
+            for j in range(i+1, N):
+                dx = centers[i, 0] - centers[j, 0]
+                dy = centers[i, 1] - centers[j, 1]
+                dist = np.hypot(dx, dy)
+                if dist < 1e-9:
+                    nx, ny = 1.0, 0.0
+                else:
+                    nx, ny = dx / dist, dy / dist
+                
+                # -nx*x_i - ny*y_i + nx*x_j + ny*y_j + r_i + r_j <= 0
+                A_ub[row_idx, i] = -nx
+                A_ub[row_idx, N + i] = -ny
+                A_ub[row_idx, j] = nx
+                A_ub[row_idx, N + j] = ny
+                A_ub[row_idx, 2*N + i] = 1.0
+                A_ub[row_idx, 2*N + j] = 1.0
+                row_idx += 1
+                
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs')
+        if res.success:
+            centers = np.column_stack((res.x[:N], res.x[N:2*N]))
+            radii = res.x[2*N:3*N]
+            W = res.x[-2]
+            H = res.x[-1]
+            best_score = np.sum(radii)
+        else:
+            break
+            
+    return centers, radii, W, H, best_score
+
+def nlp_polish(centers, radii, W, H, epsilon=1e-6):
+    """
+    Nonlinear polishing using SLSQP with exact squared-distance non-overlap constraints.
+    Includes pinning boundary-contact circles to eliminate rigid modes.
+    """
+    N = len(centers)
+    
+    def objective(vars):
+        return -np.sum(vars[2*N : 3*N])
+        
+    def objective_jac(vars):
+        jac = np.zeros_like(vars)
+        jac[2*N : 3*N] = -1.0
+        return jac
+
+    constraints = []
+    
+    # Perimeter constraint
+    constraints.append({
+        'type': 'ineq',
+        'fun': lambda v: 2.0 - v[-2] - v[-1],
+        'jac': lambda v: np.concatenate([np.zeros(3*N), [-1.0, -1.0]])
+    })
+    
+    # Identify extreme circles to pin
+    idx_left = np.argmin(centers[:, 0] - radii)
+    idx_right = np.argmax(centers[:, 0] + radii)
+    idx_bottom = np.argmin(centers[:, 1] - radii)
+    idx_top = np.argmax(centers[:, 1] + radii)
+    
+    # Bounding box inequalities (excluding pinned variables to avoid dependent constraints)
+    idx_x_min = [i for i in range(N) if i != idx_left]
+    def box_x_min(v): return v[idx_x_min] - v[2*N:3*N][idx_x_min]
+    def box_x_min_jac(v):
+        J = np.zeros((len(idx_x_min), len(v)))
+        for k, i in enumerate(idx_x_min):
+            J[k, i] = 1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_x_min, 'jac': box_x_min_jac})
+    
+    idx_x_max = [i for i in range(N) if i != idx_right]
+    def box_x_max(v): return v[-2] - v[idx_x_max] - v[2*N:3*N][idx_x_max]
+    def box_x_max_jac(v):
+        J = np.zeros((len(idx_x_max), len(v)))
+        for k, i in enumerate(idx_x_max):
+            J[k, -2] = 1.0
+            J[k, i] = -1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_x_max, 'jac': box_x_max_jac})
+    
+    idx_y_min = [i for i in range(N) if i != idx_bottom]
+    def box_y_min(v): return v[N + np.array(idx_y_min)] - v[2*N:3*N][idx_y_min]
+    def box_y_min_jac(v):
+        J = np.zeros((len(idx_y_min), len(v)))
+        for k, i in enumerate(idx_y_min):
+            J[k, N + i] = 1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_y_min, 'jac': box_y_min_jac})
+    
+    idx_y_max = [i for i in range(N) if i != idx_top]
+    def box_y_max(v): return v[-1] - v[N + np.array(idx_y_max)] - v[2*N:3*N][idx_y_max]
+    def box_y_max_jac(v):
+        J = np.zeros((len(idx_y_max), len(v)))
+        for k, i in enumerate(idx_y_max):
+            J[k, -1] = 1.0
+            J[k, N + i] = -1.0
+            J[k, 2*N + i] = -1.0
+        return J
+    constraints.append({'type': 'ineq', 'fun': box_y_max, 'jac': box_y_max_jac})
+    
+    # Exact squared-distance non-overlap constraints with epsilon margin
+    pairs = [(i, j) for i in range(N) for j in range(i+1, N)]
+    def non_overlap(v):
+        x = v[:N]
+        y = v[N:2*N]
+        r = v[2*N:3*N]
+        vals = np.zeros(len(pairs))
+        for idx, (i, j) in enumerate(pairs):
+            dx = x[i] - x[j]
+            dy = y[i] - y[j]
+            R = r[i] + r[j] + epsilon
+            vals[idx] = dx*dx + dy*dy - R*R
+        return vals
+        
+    def non_overlap_jac(v):
+        J = np.zeros((len(pairs), len(v)))
+        x = v[:N]
+        y = v[N:2*N]
+        r = v[2*N:3*N]
+        for idx, (i, j) in enumerate(pairs):
+            dx = x[i] - x[j]
+            dy = y[i] - y[j]
+            R = r[i] + r[j] + epsilon
+            
+            J[idx, i] = 2 * dx
+            J[idx, j] = -2 * dx
+            J[idx, N + i] = 2 * dy
+            J[idx, N + j] = -2 * dy
+            J[idx, 2*N + i] = -2 * R
+            J[idx, 2*N + j] = -2 * R
+        return J
+        
+    constraints.append({'type': 'ineq', 'fun': non_overlap, 'jac': non_overlap_jac})
+    
+    # Pinning equalities
+    def pin_left(v): return v[idx_left] - v[2*N + idx_left]
+    def pin_left_jac(v):
+        J = np.zeros(len(v))
+        J[idx_left] = 1.0; J[2*N + idx_left] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_left, 'jac': pin_left_jac})
+    
+    def pin_right(v): return v[-2] - v[idx_right] - v[2*N + idx_right]
+    def pin_right_jac(v):
+        J = np.zeros(len(v))
+        J[-2] = 1.0; J[idx_right] = -1.0; J[2*N + idx_right] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_right, 'jac': pin_right_jac})
+    
+    def pin_bottom(v): return v[N + idx_bottom] - v[2*N + idx_bottom]
+    def pin_bottom_jac(v):
+        J = np.zeros(len(v))
+        J[N + idx_bottom] = 1.0; J[2*N + idx_bottom] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_bottom, 'jac': pin_bottom_jac})
+    
+    def pin_top(v): return v[-1] - v[N + idx_top] - v[2*N + idx_top]
+    def pin_top_jac(v):
+        J = np.zeros(len(v))
+        J[-1] = 1.0; J[N + idx_top] = -1.0; J[2*N + idx_top] = -1.0
+        return J
+    constraints.append({'type': 'eq', 'fun': pin_top, 'jac': pin_top_jac})
+    
+    bounds = [(0, 2)] * (2*N) + [(0, 1)] * N + [(0, 2), (0, 2)]
+    x0 = np.concatenate([centers[:, 0], centers[:, 1], radii, [W, H]])
+    
+    res = minimize(objective, x0, method='SLSQP', jac=objective_jac,
+                   bounds=bounds, constraints=constraints,
+                   options={'maxiter': 200, 'ftol': 1e-9})
+                   
+    if res.success:
+        out_centers = np.column_stack((res.x[:N], res.x[N:2*N]))
+        out_radii = res.x[2*N:3*N]
+        out_W = res.x[-2]
+        out_H = res.x[-1]
+        return out_centers, out_radii, out_W, out_H, -res.fun
+    else:
+        return centers, radii, W, H, np.sum(radii)
+
+def fixed_center_lp(centers, radii, W, H):
+    """
+    Final fixed-center LP Polish: freeze centers and bounding box,
+    and maximize radii exactly to claim any microscopic slack left by NLP.
+    """
+    N = len(centers)
+    c = -np.ones(N)
+    A_ub = []
+    b_ub = []
+    
+    for i in range(N):
+        # r_i <= x_i
+        row = np.zeros(N); row[i] = 1.0; A_ub.append(row); b_ub.append(centers[i, 0])
+        # r_i <= W - x_i
+        row = np.zeros(N); row[i] = 1.0; A_ub.append(row); b_ub.append(W - centers[i, 0])
+        # r_i <= y_i
+        row = np.zeros(N); row[i] = 1.0; A_ub.append(row); b_ub.append(centers[i, 1])
+        # r_i <= H - y_i
+        row = np.zeros(N); row[i] = 1.0; A_ub.append(row); b_ub.append(H - centers[i, 1])
+        
+    for i in range(N):
+        for j in range(i+1, N):
+            dist = np.hypot(centers[i, 0] - centers[j, 0], centers[i, 1] - centers[j, 1])
+            row = np.zeros(N); row[i] = 1.0; row[j] = 1.0; A_ub.append(row); b_ub.append(dist)
+            
+    bounds = [(0, None)] * N
+    res = linprog(c, A_ub=np.array(A_ub), b_ub=np.array(b_ub), bounds=bounds, method='highs')
+    if res.success:
+        new_radii = res.x
+        if np.sum(new_radii) > np.sum(radii):
+            return new_radii
+    return radii
+
+def finalize(centers, radii):
+    """Recompute exactly, apply uniform infinitesimal safety reduction, and shift to origin."""
+    min_x = np.min(centers[:, 0] - radii)
+    max_x = np.max(centers[:, 0] + radii)
+    min_y = np.min(centers[:, 1] - radii)
+    max_y = np.max(centers[:, 1] + radii)
+    
+    centers[:, 0] -= min_x
+    centers[:, 1] -= min_y
+    
+    W = max_x - min_x
+    H = max_y - min_y
+    
+    radii -= 1e-11
+    
+    perimeter = W + H
+    if perimeter > 2.0:
+        scale = 2.0 / perimeter
+        centers *= scale
+        radii *= scale
+        radii -= 1e-12
+        
+    return np.column_stack((centers, radii))
+
+def construct_packing(num_circles: int = 21):
+    seeds = generate_seeds(num_circles)
+    
+    # Phase 1: Broad multi-start exploration using LP
+    best_seeds = []
+    for seed in seeds:
+        centers, radii, W, H, score = lp_refine(seed, iterations=30)
+        if score > 0:
+            best_seeds.append((score, centers, radii, W, H))
+            
+    if not best_seeds:
+        # Emergency fallback
+        radius = 0.01
+        centers = np.array(
+            [[(column + 0.5) / 5, (row + 0.5) / 5] for row in range(5) for column in range(5)][:num_circles],
+            dtype=float,
+        )
+        radii = np.full(num_circles, radius, dtype=float)
+        return np.column_stack((centers, radii))
+        
+    best_seeds.sort(key=lambda x: x[0], reverse=True)
+    
+    # Phase 2: Refine the top promising configurations
+    top_5 = best_seeds[:5]
+    refined_seeds = []
+    for score, centers, radii, W, H in top_5:
+        centers, radii, W, H, score = lp_refine(centers, iterations=50)
+        refined_seeds.append((score, centers, radii, W, H))
+        
+    refined_seeds.sort(key=lambda x: x[0], reverse=True)
+    _, best_centers, best_radii, best_W, best_H = refined_seeds[0]
+    
+    # Phase 3: Epsilon-annealed NLP polishing for the absolute best layout
+    eps_schedule = [1e-6, 1e-9, 1e-12]
+    centers, radii, W, H = best_centers, best_radii, best_W, best_H
+    
+    for eps in eps_schedule:
+        centers, radii, W, H, _ = nlp_polish(centers, radii, W, H, epsilon=eps)
+        
+    # Phase 4: Final fixed-center LP Polish
+    radii = fixed_center_lp(centers, radii, W, H)
+        
+    return finalize(centers, radii)
+# EVOLVE_END
+
+
+if __name__ == "__main__":
+    circles = construct_packing()
+    print(json.dumps({"circles": circles.tolist()}))
+```
