@@ -1,0 +1,23 @@
+# Diverse Island GA - Recommended Parameters
+# Reference: LLM4AD_Next specialized island model
+
+evolution:
+  type: "diverse_island_ga"
+  max_generations: 10          # smaller out-of-box workload than plain IslandGA
+  max_llm_concurrency: 5       # parallel LLM calls
+  elite_ratio: 0.2             # fraction of elite individuals retained
+  num_islands: 3               # number of islands on the strategy spectrum
+  island_population_size: 5    # individuals per island
+  elite_reevaluation_count: 0  # high-fidelity reevaluations per island per gen (0 = off)
+  migration_interval: 3        # generations between migration checks
+  migration_rate: 0.2          # fraction of individuals migrated
+  migration_strategy: "best"   # select migrants: "best" / "random" / "elite" / "worst"
+  migration_topology: "ring"   # island connectivity: "ring" / "full" / "hierarchy" / "mesh"
+  adaptive_migration: true     # receive migrants only after island stagnation
+  migration_stagnation_threshold: 2  # non-improving generations before migration allowed
+  short_task_generation_threshold: 10  # runs at/below this count use short-run migration limit
+  short_task_max_migrations: 1  # max migration events for short runs (0 = disabled)
+  novelty_survivor_ratio: 0.2  # share of survivor slots for code-dissimilar individuals
+  island_strategy_strength: 1.0  # how much islands differ (0 = uniform, 1 = full spectrum)
+  exploration_restart_ratio: 0.3  # share of candidates built from scratch on exploration island
+  parallel_islands: true       # evolve islands in parallel (false = sequential)

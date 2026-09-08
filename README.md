@@ -80,10 +80,10 @@ Migration status of the Automatic Heuristic Design (AHD) search methods from the
 
 | Method | Status | Skill | Method | Status | Skill |
 |--------|--------|-------|--------|--------|-------|
-| **IslandGA** | ✅ Available | ⏳ Pending | **FunSearch** | ⏳ Pending | 🧩 Available |
-| **Diverse Island GA** | ✅ Available | ⏳ Pending | **HillClimb** | ⏳ Pending | ⏳ Pending |
+| **IslandGA** | ✅ Available | 🧩 Available | **FunSearch** | ⏳ Pending | 🧩 Available |
+| **Diverse Island GA** | ✅ Available | 🧩 Available | **HillClimb** | ⏳ Pending | ⏳ Pending |
 | **MEoH** | ✅ Available | 🧩 Available | **LHNS** | ⏳ Pending | ⏳ Pending |
-| **DyCA** | ✅ Available | ⏳ Pending | **LLaMEA** | ⏳ Pending | ⏳ Pending |
+| **DyCA** | ✅ Available | 🧩 Available | **LLaMEA** | ⏳ Pending | ⏳ Pending |
 | **EoH** | ✅ Available | 🧩 Available | **MLES** | ⏳ Pending | ⏳ Pending |
 | **ReEvo** | ✅ Available | 🧩 Available | **MOEA/D** | ⏳ Pending | 🧩 Available |
 | **MCTS-AHD** | ✅ Available | 🧩 Available | **NSGA-II** | ⏳ Pending | 🧩 Available |
