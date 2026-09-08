@@ -2342,9 +2342,9 @@
       "title": "研究成果",
       "subtitle": "",
       "cvrp": {
-        "title": "业界领先成果",
+        "title": "CVRP BKS Challenge 夺冠",
         "description": "在 2026 CVRPlib BKS Challenge 中，以压倒性优势获得冠军，刷新 51（总计 100）个新的最佳已知解。",
-        "linkLabel": "查看排行榜",
+        "linkLabel": "查看详情",
         "link": "https://galgos.inf.puc-rio.br/cvrplib/index.php/en/bks_challenge/score/"
       },
       "survey": {
@@ -2356,7 +2356,7 @@
       "sat": {
         "title": "SAT 竞赛夺冠",
         "description": "在 SAT 2026 国际算法竞赛中，获得并行 AI 赛道 SAT 组冠军（Hypre-evolve）。",
-        "linkLabel": "查看参赛作品",
+        "linkLabel": "查看详情",
         "link": "https://satcompetition.github.io/2026/downloads/satcomp26slides.pdf"
       }
     },

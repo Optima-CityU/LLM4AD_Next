@@ -456,6 +456,38 @@
   }
 }
 
+/* News ticker: horizontal marquee for the landing announcement strip. The track
+   is duplicated and translated by -50% for a seamless loop; the wrapper fades
+   both edges and pauses on hover so links stay clickable. */
+@keyframes landing-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.landing-ticker-track {
+  animation: landing-ticker-scroll 32s linear infinite;
+}
+.landing-ticker-mask {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 8%,
+    black 92%,
+    transparent
+  );
+}
+.landing-ticker:hover .landing-ticker-track {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing-ticker-track {
+    animation: none;
+  }
+}
+
 .landing-gradient-animated {
   background: linear-gradient(
     90deg,

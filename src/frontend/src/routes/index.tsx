@@ -458,6 +458,7 @@ function HeroSection() {
       <FloatingBlobs />
       <GridGlow />
       <OrbitalDecoration />
+      <AnnouncementBanner />
 
       <div
         className="relative z-10 max-w-4xl mx-auto text-center"
@@ -478,14 +479,14 @@ function HeroSection() {
         </h1>
 
         <p
-          className="mt-6 text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed landing-reveal is-visible"
+          className="mt-5 text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed landing-reveal is-visible"
           style={{ transitionDelay: "0.3s" }}
         >
           {t("landing.hero.description")}
         </p>
 
         <div
-          className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4 landing-reveal is-visible"
+          className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 landing-reveal is-visible"
           style={{ transitionDelay: "0.45s" }}
         >
           <Link to={logged ? "/projects" : "/login"}>
@@ -564,6 +565,54 @@ const DEMO_VIDEO = {
     posterLight: "/assets/videos/llm4ad-intro-en-v2_light.webp",
   },
 } as const
+
+function AnnouncementBanner() {
+  const { t } = useTranslation()
+
+  const wins = [
+    {
+      tag: t("landing.achievements.cvrp.title"),
+      desc: t("landing.achievements.cvrp.description"),
+      href: t("landing.achievements.cvrp.link"),
+    },
+    {
+      tag: t("landing.achievements.sat.title"),
+      desc: t("landing.achievements.sat.description"),
+      href: t("landing.achievements.sat.link"),
+    },
+  ]
+  // Duplicate the list so the -50% horizontal translate loops seamlessly.
+  const track = [...wins, ...wins]
+
+  return (
+    <div className="absolute left-0 right-0 top-30 z-10 px-4 sm:px-6 lg:px-8">
+      <div className="landing-ticker mx-auto flex h-14 max-w-4xl items-center overflow-hidden rounded-2xl border border-border/40 bg-card/50 shadow-sm shadow-primary/5 backdrop-blur-xl">
+      {/* Scrolling items */}
+      <div className="landing-ticker-mask relative min-w-0 flex-1 overflow-hidden">
+        <div className="landing-ticker-track flex w-max items-center py-1">
+          {track.map((win, i) => (
+            <a
+              key={`${win.href}-${i}`}
+              href={win.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex h-full shrink-0 items-center gap-2.5 px-7"
+            >
+              <span className="inline-flex items-center whitespace-nowrap rounded-full border border-primary/25 bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold leading-4 text-primary">
+                {win.tag}
+              </span>
+              <span className="whitespace-nowrap text-sm leading-5 text-muted-foreground transition-colors group-hover:text-primary">
+                {win.desc}
+              </span>
+              <ExternalLink className="size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-primary" />
+            </a>
+          ))}
+        </div>
+      </div>
+      </div>
+    </div>
+  )
+}
 
 function DemoSection() {
   const { t, i18n } = useTranslation()
@@ -872,20 +921,20 @@ function AchievementsSection() {
               badge: true,
             },
             {
-              icon: GraduationCap,
-              title: t("landing.achievements.survey.title"),
-              desc: t("landing.achievements.survey.description"),
-              link: t("landing.achievements.survey.link"),
-              linkLabel: t("landing.achievements.survey.linkLabel"),
-              badge: false,
-            },
-            {
               icon: Award,
               title: t("landing.achievements.sat.title"),
               desc: t("landing.achievements.sat.description"),
               link: t("landing.achievements.sat.link"),
               linkLabel: t("landing.achievements.sat.linkLabel"),
               badge: true,
+            },
+            {
+              icon: GraduationCap,
+              title: t("landing.achievements.survey.title"),
+              desc: t("landing.achievements.survey.description"),
+              link: t("landing.achievements.survey.link"),
+              linkLabel: t("landing.achievements.survey.linkLabel"),
+              badge: false,
             },
           ].map((item, i) => (
             <div

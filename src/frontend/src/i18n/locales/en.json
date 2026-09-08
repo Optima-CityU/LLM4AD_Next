@@ -2341,9 +2341,9 @@
       "title": "Research Achievements",
       "subtitle": "",
       "cvrp": {
-        "title": "SOTA Results",
+        "title": "CVRP BKS Challenge Champion",
         "description": "Won the 2026 CVRPlib BKS Challenge by a commanding margin, establishing 51 new Best Known Solutions (out of 100).",
-        "linkLabel": "View Leaderboard",
+        "linkLabel": "View Details",
         "link": "https://galgos.inf.puc-rio.br/cvrplib/index.php/en/bks_challenge/score/"
       },
       "survey": {
@@ -2355,7 +2355,7 @@
       "sat": {
         "title": "SAT Competition Champion",
         "description": "Hypre-evolve achieved first place in the SAT division of the Parallel-AI sub-track at SAT Competition 2026.",
-        "linkLabel": "View Submission",
+        "linkLabel": "View Details",
         "link": "https://satcompetition.github.io/2026/downloads/satcomp26slides.pdf"
       }
     },
