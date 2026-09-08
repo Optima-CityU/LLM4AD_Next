@@ -1,0 +1,38 @@
+project_name: "tsp_eoh_example"
+
+providers:
+  - name: "default"
+    type: "openai_compatible"
+    base_url: ${LLM_BASE_URL}
+    api_key: ${LLM_API_KEY}
+    model: ${LLM_MODEL}
+    temperature: 0.7
+    max_tokens: 4096
+
+coder:
+  type: "custom"
+  provider: "default"
+  prompt_template: |
+    You are evolving a TSP solver.
+    Improve the nearest_neighbor_tsp function between EVOLVE_START and EVOLVE_END.
+    Goal: Find shorter tours. Consider 2-opt, multi-start, greedy heuristics.
+
+evaluator:
+  type: "custom"
+  module: "tsp_evaluator.py:PythonTSPEvaluator"
+  dataset:
+    path: "data/sample"
+
+evolution:
+  type: "eoh"
+  max_generations: 50
+  population_size: 5
+  max_sample_nums: 100
+  use_e2_operator: true
+  use_m1_operator: true
+  use_m2_operator: true
+
+version_control:
+  enabled: true
+  type: "git_worktree"
+  local_path: "tsp_algorithm"
