@@ -44,6 +44,7 @@
 
 - 🧮 [2026.09][New Dataset]: The **[AlphaEvolve Mathematics Benchmark Suite](examples/applications/alphaevolve_math_benchmark/README.md)** adds 11 independently runnable mathematical optimization cases, case-local evaluators, evolved implementations, and reusable experience artifacts.
 - 🏝️ [2026.09][New Search Method]: **Diverse Island GA** is now available, assigning a continuous spectrum of exploitation, correction, and independent-exploration behaviors across any number of islands while coordinating migration and memory use.
+- 🎯 [2026.08][New Feature]: **Algorithm Design Skills** — Modular skill definitions (EoH, FunSearch, ReEvo, MEoH, MOEA/D) that enable coding agents to autonomously design algorithms. See [Algorithm Design Skills](skills/algo-design/).
 - 🔬 [2026.07][New Feature]: **Search methods migrated** — EoH, MEoH, ReEvo, and MCTS-AHD are now available as standalone orchestrators. See [Search Methods](#search-methods-automatic-heuristic-design).
 - 🧠 [2026.07][New Feature]: **[MindMemOS](https://github.com/dadastory/MindMemOS)-backed long-term memory** is now available, with global, project, and task memory scopes plus configurable Chat and Embedding model bindings. See the [Memory Guide](docs/en/guides/memory.md).
 - 🚀 [2026.07][New Release]: **LLM4AD_Next Online Trial** is now available at [https://llm4ad-next.cn/](https://llm4ad-next.cn/) — try the full problem-to-algorithm workflow directly in your browser with no local setup.
@@ -77,17 +78,17 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 
 Migration status of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform.
 
-| Method | Status | Method | Status |
-|--------|--------|--------|--------|
-| **IslandGA** | ✅ Available | **FunSearch** | ⏳ Pending |
-| **Diverse Island GA** | ✅ Available | **HillClimb** | ⏳ Pending |
-| **MEoH** | ✅ Available | **LHNS** | ⏳ Pending |
-| **DyCA** | ✅ Available | **LLaMEA** | ⏳ Pending |
-| **EoH** | ✅ Available | **MLES** | ⏳ Pending |
-| **ReEvo** | ✅ Available | **MOEA/D** | ⏳ Pending |
-| **MCTS-AHD** | ✅ Available | **NSGA-II** | ⏳ Pending |
-| | | **PartEvo** | ⏳ Pending |
-| | | **RandSample** | ⏳ Pending |
+| Method | Status | Skill | Method | Status | Skill |
+|--------|--------|-------|--------|--------|-------|
+| **IslandGA** | ✅ Available | ⏳ Pending | **FunSearch** | ⏳ Pending | 🧩 Available |
+| **Diverse Island GA** | ✅ Available | ⏳ Pending | **HillClimb** | ⏳ Pending | ⏳ Pending |
+| **MEoH** | ✅ Available | 🧩 Available | **LHNS** | ⏳ Pending | ⏳ Pending |
+| **DyCA** | ✅ Available | ⏳ Pending | **LLaMEA** | ⏳ Pending | ⏳ Pending |
+| **EoH** | ✅ Available | 🧩 Available | **MLES** | ⏳ Pending | ⏳ Pending |
+| **ReEvo** | ✅ Available | 🧩 Available | **MOEA/D** | ⏳ Pending | 🧩 Available |
+| **MCTS-AHD** | ✅ Available | 🧩 Available | **NSGA-II** | ⏳ Pending | 🧩 Available |
+| | | | **PartEvo** | ⏳ Pending | ⏳ Pending |
+| | | | **RandSample** | ⏳ Pending | ⏳ Pending |
 
 ### Using the migrated methods
 
@@ -97,6 +98,21 @@ Set `evolution.type` in your config and run `llm4ad run <config.yaml>`. See `exa
 evolution:
   type: "eoh"  # options include "diverse_island_ga", "island_ga", "eoh", "meoh", "reevo", "mcts_ahd", "dyca"
 ```
+
+### Algorithm Design Skills
+
+Modular skill definitions that enable coding agents to autonomously design algorithms. Give a coding agent this prompt:
+
+```
+I want you to design a [PROBLEM] solver using the [SKILL] method.
+
+Skill: https://github.com/Optima-CityU/LLM4AD_Next/blob/develop/skills/algo-design/[SKILL]/SKILL.md
+Task: /path/to/your/task/
+
+Read the skill, read the task package, run [N] generations, give me the best algorithm.
+```
+
+See [use_example](skills/algo-design/use_example/) for a complete TSP + EoH example.
 
 ## 🏆 Featured Cases
 

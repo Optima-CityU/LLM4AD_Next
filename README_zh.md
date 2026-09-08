@@ -44,6 +44,7 @@
 
 - 🧮 [2026.09][新数据集]：新增 **[AlphaEvolve 数学基准套件](examples/applications/alphaevolve_math_benchmark/README.md)**，包含 11 个可独立运行的数学优化案例、案例级评估器、演化实现与可复用经验。
 - 🏝️ [2026.09][新搜索方法]：新增**多样岛屿遗传算法（Diverse Island GA）**，支持任意岛屿数量下连续分配利用、纠错与独立探索行为，并协同控制迁移和记忆使用。
+- 🎯 [2026.08][新功能]：**算法设计 Skill** —— 模块化方法定义（EoH, FunSearch, ReEvo, MEoH, MOEA/D），使 coding agent 能够自主设计算法。请参阅[算法设计 Skill](skills/algo-design/)。
 - 🔬 [2026.07][新功能]：**搜索方法已迁移** —— EoH、MEoH、ReEvo 和 MCTS-AHD 现已作为独立编排器可用。请参阅[搜索方法](#搜索方法自动启发式设计)。
 - 🧠 [2026.07][新功能]：基于 **[MindMemOS](https://github.com/dadastory/MindMemOS) 的长期记忆**现已可用，支持全局、项目和任务记忆范围，并可配置聊天和嵌入模型绑定。请参阅[记忆指南](docs/en/guides/memory.md)。
 - 🚀 [2026.07][新版本]：**LLM4AD_Next 在线试用**现已上线 [https://llm4ad-next.cn/](https://llm4ad-next.cn/) —— 无需本地安装，直接在浏览器中体验完整的问题到算法工作流。
@@ -77,17 +78,17 @@ uv run llm4ad chat
 
 从原始 [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) 平台迁移的自动启发式设计（AHD）搜索方法的迁移状态。
 
-| 方法 | 状态 | 方法 | 状态 |
-|--------|--------|--------|--------|
-| **IslandGA** | ✅ 可用 | **FunSearch** | ⏳ 待迁移 |
-| **Diverse Island GA** | ✅ 可用 | **HillClimb** | ⏳ 待迁移 |
-| **MEoH** | ✅ 可用 | **LHNS** | ⏳ 待迁移 |
-| **DyCA** | ✅ 可用 | **LLaMEA** | ⏳ 待迁移 |
-| **EoH** | ✅ 可用 | **MLES** | ⏳ 待迁移 |
-| **ReEvo** | ✅ 可用 | **MOEA/D** | ⏳ 待迁移 |
-| **MCTS-AHD** | ✅ 可用 | **NSGA-II** | ⏳ 待迁移 |
-| | | **PartEvo** | ⏳ 待迁移 |
-| | | **RandSample** | ⏳ 待迁移 |
+| 方法 | 状态 | Skill | 方法 | 状态 | Skill |
+|--------|--------|-------|--------|--------|-------|
+| **IslandGA** | ✅ 可用 | ⏳ 待开发 | **FunSearch** | ⏳ 待迁移 | 🧩 可用 |
+| **Diverse Island GA** | ✅ 可用 | ⏳ 待开发 | **HillClimb** | ⏳ 待迁移 | ⏳ 待开发 |
+| **MEoH** | ✅ 可用 | 🧩 可用 | **LHNS** | ⏳ 待迁移 | ⏳ 待开发 |
+| **DyCA** | ✅ 可用 | ⏳ 待开发 | **LLaMEA** | ⏳ 待迁移 | ⏳ 待开发 |
+| **EoH** | ✅ 可用 | 🧩 可用 | **MLES** | ⏳ 待迁移 | ⏳ 待开发 |
+| **ReEvo** | ✅ 可用 | 🧩 可用 | **MOEA/D** | ⏳ 待迁移 | 🧩 可用 |
+| **MCTS-AHD** | ✅ 可用 | 🧩 可用 | **NSGA-II** | ⏳ 待迁移 | 🧩 可用 |
+| | | | **PartEvo** | ⏳ 待迁移 | ⏳ 待开发 |
+| | | | **RandSample** | ⏳ 待迁移 | ⏳ 待开发 |
 
 ### 使用已迁移的方法
 
@@ -97,6 +98,21 @@ uv run llm4ad chat
 evolution:
   type: "eoh"  # 可选值包括: "diverse_island_ga", "island_ga", "eoh", "meoh", "reevo", "mcts_ahd", "dyca"
 ```
+
+### 算法设计 Skill
+
+模块化方法定义，使 coding agent 能够自主设计算法。给 coding agent 这个提示词：
+
+```
+I want you to design a [PROBLEM] solver using the [SKILL] method.
+
+Skill: https://github.com/Optima-CityU/LLM4AD_Next/blob/develop/skills/algo-design/[SKILL]/SKILL.md
+Task: /path/to/your/task/
+
+Read the skill, read the task package, run [N] generations, give me the best algorithm.
+```
+
+完整示例请参阅 [use_example](skills/algo-design/use_example/)（TSP + EoH）。
 
 ## 🏆 优秀案例展示
 
