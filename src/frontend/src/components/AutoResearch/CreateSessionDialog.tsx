@@ -33,7 +33,13 @@ import {
 import { cn } from "@/lib/utils"
 
 import ProviderModelPicker from "./ProviderModelPicker"
-import { MODE_OPTIONS, PROFILE_OPTIONS, type ResearchProfile } from "./shared"
+import {
+  METRIC_DIRECTION_OPTIONS,
+  MODE_OPTIONS,
+  PROFILE_OPTIONS,
+  type MetricDirection,
+  type ResearchProfile,
+} from "./shared"
 import { SectionLabel } from "./tech"
 
 interface Props {
@@ -62,12 +68,13 @@ export default function CreateSessionDialog({
   const [modelName, setModelName] = useState("")
   const [mode, setMode] = useState<ResearchMode>("co-pilot")
   const [profile, setProfile] = useState<ResearchProfile>("algorithm_evolution")
+  const [metricDirection, setMetricDirection] = useState<MetricDirection>("maximize")
   const [autoStart, setAutoStart] = useState(false)
   const [topicError, setTopicError] = useState("")
   const [titleError, setTitleError] = useState("")
 
   const TOPIC_MIN = 1
-  const TOPIC_MAX = 500
+  const TOPIC_MAX = 1000
   const TITLE_MAX = 255
 
   const createMut = useCreateResearchSession()
@@ -90,6 +97,7 @@ export default function CreateSessionDialog({
     setModelName("")
     setMode("co-pilot")
     setProfile("algorithm_evolution")
+    setMetricDirection("maximize")
     setAutoStart(false)
     setTopicError("")
     setTitleError("")
@@ -140,6 +148,7 @@ export default function CreateSessionDialog({
           model_name: modelName.trim() || null,
           mode,
           profile,
+          metric_direction: metricDirection,
         } as ResearchSessionCreateRequest))
       createdRef.current = created
 
@@ -305,6 +314,57 @@ export default function CreateSessionDialog({
                   </button>
                 )
               })}
+            </div>
+          </Field>
+
+          <Field label={t("autoResearch.create.metricDirectionLabel")}>
+            <div className="grid grid-cols-2 gap-3">
+              {METRIC_DIRECTION_OPTIONS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setMetricDirection(d as MetricDirection)}
+                  className={cn(
+                    "group relative rounded-lg px-4 py-3 text-left transition-all",
+                    "border-l border-r border-border/60",
+                    metricDirection === d
+                      ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
+                      : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <div
+                      className={cn(
+                        "mt-0.5 size-4 shrink-0 rounded-full border-2 transition-all",
+                        metricDirection === d
+                          ? "border-primary bg-primary"
+                          : "border-muted-foreground/40 bg-background",
+                      )}
+                    >
+                      {metricDirection === d && (
+                        <div className="size-full flex items-center justify-center">
+                          <div className="size-1.5 rounded-full bg-primary-foreground" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div
+                        className={cn(
+                          "text-sm font-medium transition-colors",
+                          metricDirection === d
+                            ? "text-foreground"
+                            : "text-foreground/80 group-hover:text-foreground",
+                        )}
+                      >
+                        {t(`autoResearch.metricDirection.${d}`)}
+                      </div>
+                      <div className="text-[11px] leading-relaxed text-muted-foreground">
+                        {t(`autoResearch.metricDirection.${d}Desc`)}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
           </Field>
 

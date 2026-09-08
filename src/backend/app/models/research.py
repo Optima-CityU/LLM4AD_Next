@@ -259,6 +259,17 @@ class ResearchSession(SQLModel, TimeMixin, table=True):
     # 结束原因（用户可读）
     error: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
 
+    # 优化方向：maximize（目标越大越好）/ minimize（目标越小越好）。
+    # 传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
+    metric_direction: str = Field(
+        default="maximize",
+        max_length=16,
+        sa_column=Column(
+            Text, nullable=False, server_default="maximize"
+        ),
+        description="ARC metric direction: 'maximize' or 'minimize'",
+    )
+
     # 结果分析 LLM 报告缓存：{"content","status","provider_model","language",
     # "created_at","updated_at","error"}。结构化聚合数据实时读盘、不落此字段。
     analysis_report: dict[str, Any] | None = Field(

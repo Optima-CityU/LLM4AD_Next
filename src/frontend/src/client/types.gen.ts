@@ -2778,6 +2778,10 @@ export type ResearchSessionCreateRequest = {
      */
     mode?: ResearchMode;
     /**
+     * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
+     */
+    metric_direction?: 'maximize' | 'minimize';
+    /**
      * 归属分组，可选
      */
     folder_id?: (string | null);
@@ -2791,6 +2795,11 @@ export type ResearchSessionCreateRequest = {
      */
     llm4ad_workspace?: (ResearchLLM4ADWorkspaceRef | null);
 };
+
+/**
+ * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
+ */
+export type metric_direction = 'maximize' | 'minimize';
 
 /**
  * 会话详情 + 分页消息 + 最近一轮。
@@ -2817,6 +2826,7 @@ export type ResearchSessionItem = {
     topic: string;
     profile: string;
     mode: string;
+    metric_direction: string;
     provider_id: (string | null);
     model_name: (string | null);
     status: ResearchSessionStatus;
@@ -2875,6 +2885,10 @@ export type ResearchSessionUpdateRequest = {
      */
     folder_id?: (string | null);
     mode?: (ResearchMode | null);
+    /**
+     * 指标优化方向；未提供不变
+     */
+    metric_direction?: ('maximize' | 'minimize' | null);
     provider_id?: (string | null);
     model_name?: (string | null);
 };

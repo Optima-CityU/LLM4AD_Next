@@ -1156,7 +1156,7 @@ function EmptyState({
   const [error, setError] = useState("")
 
   const TOPIC_MIN = 1
-  const TOPIC_MAX = 500
+  const TOPIC_MAX = 1000
 
   const handleSave = async () => {
     const trimmed = topic.trim()

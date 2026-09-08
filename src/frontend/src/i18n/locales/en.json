@@ -3545,6 +3545,7 @@
       "modelPlaceholder": "Leave empty to use provider default",
       "modeLabel": "Mode",
       "profileLabel": "Experiment type",
+      "metricDirectionLabel": "Metric direction",
       "workspaceLabel": "LLM4AD workspace (optional)",
       "subtitle": "Enter a research topic and pick a run mode to create the session.",
       "workspaceTaskRef": "Task ref",
@@ -3554,6 +3555,12 @@
       "create": "Create",
       "createAndStart": "Create & run",
       "creating": "Creating..."
+    },
+    "metricDirection": {
+      "maximize": "Maximize",
+      "minimize": "Minimize",
+      "maximizeDesc": "Higher is better (accuracy, F1, score)",
+      "minimizeDesc": "Lower is better (loss, error, runtime)"
     },
     "chat": {
       "welcomeTitle": "Start or pick a session",

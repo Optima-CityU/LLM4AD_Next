@@ -3415,6 +3415,7 @@
       "modelPlaceholder": "留空使用供应商默认模型",
       "modeLabel": "运行模式",
       "profileLabel": "实验类型",
+      "metricDirectionLabel": "指标优化方向",
       "workspaceLabel": "LLM4AD workspace（可选）",
       "subtitle": "填写研究主题、选择运行模式即可创建会话。",
       "workspaceTaskRef": "引用调参任务",
@@ -3424,6 +3425,12 @@
       "create": "创建",
       "createAndStart": "创建并运行",
       "creating": "创建中..."
+    },
+    "metricDirection": {
+      "maximize": "最大化",
+      "minimize": "最小化",
+      "maximizeDesc": "指标越大越好（如准确率、F1、得分）",
+      "minimizeDesc": "指标越小越好（如损失、误差、运行时间）"
     },
     "chat": {
       "welcomeTitle": "开始或选择一个会话",

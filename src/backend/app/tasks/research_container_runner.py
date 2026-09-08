@@ -38,7 +38,7 @@ try:
     loguru_logger.add(
         sys.stderr,
         format="{level: <8} {time:YYYY-MM-DD HH:mm:ss.SSS} | {name}:{function}:{line} - {message}",
-        level="INFO",
+        level="DEBUG",
         colorize=False,
     )
 except ImportError:
@@ -326,7 +326,7 @@ def main() -> None:
         with EventsSink(os.path.join(DATA_DIR, EVENTS_FILENAME)) as events:
             # 挂 ARC 根 logger → 事件文件（全量捕获 pipeline 内部日志）
             arc_logger = logging.getLogger("researchclaw")
-            arc_logger.setLevel(logging.INFO)
+            arc_logger.setLevel(logging.DEBUG)
             handler = _ArcEventsLogHandler(events)
             arc_logger.addHandler(handler)
 

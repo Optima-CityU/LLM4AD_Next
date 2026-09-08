@@ -90,6 +90,7 @@ def create_session(
         topic=request.topic,
         profile=request.profile,
         mode=request.mode.value,
+        metric_direction=request.metric_direction,
         provider_id=request.provider_id,
         model_name=request.model_name,
         llm4ad_workspace=workspace_dict,
@@ -162,6 +163,8 @@ def update_session(
         session.folder_id = folder_change[1]
     if request.mode is not None:
         session.mode = request.mode.value
+    if request.metric_direction is not None:
+        session.metric_direction = request.metric_direction
     if request.provider_id is not None:
         session.provider_id = request.provider_id
     if request.model_name is not None:

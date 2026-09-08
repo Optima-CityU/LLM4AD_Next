@@ -8368,6 +8368,13 @@ export const ResearchSessionCreateRequestSchema = {
             description: 'ARC HITL 模式',
             default: 'co-pilot'
         },
+        metric_direction: {
+            type: 'string',
+            enum: ['maximize', 'minimize'],
+            title: 'Metric Direction',
+            description: "指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。",
+            default: 'maximize'
+        },
         folder_id: {
             anyOf: [
                 {
@@ -8509,6 +8516,10 @@ export const ResearchSessionItemSchema = {
             type: 'string',
             title: 'Mode'
         },
+        metric_direction: {
+            type: 'string',
+            title: 'Metric Direction'
+        },
         provider_id: {
             anyOf: [
                 {
@@ -8636,7 +8647,7 @@ export const ResearchSessionItemSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'user_id', 'folder_id', 'title', 'topic', 'profile', 'mode', 'provider_id', 'model_name', 'status', 'active_turn_id', 'active_stage', 'active_stage_name', 'run_dir', 'best_objective', 'best_code_sha256', 'ended_time', 'error', 'created_time', 'updated_time'],
+    required: ['id', 'user_id', 'folder_id', 'title', 'topic', 'profile', 'mode', 'metric_direction', 'provider_id', 'model_name', 'status', 'active_turn_id', 'active_stage', 'active_stage_name', 'run_dir', 'best_objective', 'best_code_sha256', 'ended_time', 'error', 'created_time', 'updated_time'],
     title: 'ResearchSessionItem',
     description: '会话响应模型。'
 } as const;
@@ -8750,6 +8761,19 @@ export const ResearchSessionUpdateRequestSchema = {
                     type: 'null'
                 }
             ]
+        },
+        metric_direction: {
+            anyOf: [
+                {
+                    type: 'string',
+                    enum: ['maximize', 'minimize']
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Metric Direction',
+            description: '指标优化方向；未提供不变'
         },
         provider_id: {
             anyOf: [

@@ -163,6 +163,14 @@ class ResearchSessionCreateRequest(BaseModel):
     mode: ResearchMode = Field(
         default=ResearchMode.CO_PILOT, description="ARC HITL 模式"
     )
+    metric_direction: Literal["maximize", "minimize"] = Field(
+        default="maximize",
+        description=(
+            "指标优化方向：'maximize' 表示越大越好（如准确率），"
+            "'minimize' 表示越小越好（如损失/误差）。"
+            "传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。"
+        ),
+    )
     folder_id: uuid.UUID | None = Field(default=None, description="归属分组，可选")
     provider_id: str | None = Field(
         default=None,
@@ -191,6 +199,10 @@ class ResearchSessionUpdateRequest(BaseModel):
         description="传 None 且请求体显式包含该键时移到未分组；未提供不变",
     )
     mode: ResearchMode | None = Field(default=None)
+    metric_direction: Literal["maximize", "minimize"] | None = Field(
+        default=None,
+        description="指标优化方向；未提供不变",
+    )
     provider_id: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
 
@@ -207,6 +219,7 @@ class ResearchSessionItem(BaseModel):
     topic: str
     profile: str
     mode: str
+    metric_direction: str
     provider_id: str | None
     model_name: str | None
     status: ResearchSessionStatus

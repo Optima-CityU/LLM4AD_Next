@@ -32,3 +32,12 @@ export type ResearchProfile = (typeof PROFILE_OPTIONS)[number]
 
 /** ml_vision 画像：9-13 阶段不接 LLM4AD 演化引擎，改由 ARC 原生驱动。 */
 export const ML_VISION_PROFILE = "ml_vision"
+
+/**
+ * 指标优化方向。传给 ARC experiment.metric_direction：
+ *   - ``maximize``：指标越大越好（如准确率、F1）
+ *   - ``minimize``：指标越小越好（如损失、误差、运行时间）
+ */
+export const METRIC_DIRECTION_OPTIONS = ["maximize", "minimize"] as const
+
+export type MetricDirection = (typeof METRIC_DIRECTION_OPTIONS)[number]
