@@ -13,6 +13,9 @@ This directory contains algorithm design skills that can be loaded by coding age
 | **nsga2** | Deb et al., IEEE TEC 2002 | NSGA-II with non-dominated sorting | Multi-objective optimization |
 | **moead** | Zhang & Li, IEEE TEC 2007 | MOEA/D decomposition-based | Multi-objective optimization |
 | **mcts-ahd** | Zheng et al., ICML 2025 | Monte Carlo Tree Search | Tree-structured search |
+| **island-ga** | Classic distributed evolutionary model | Parallel islands with periodic migration | Parallel & diverse search |
+| **diverse-island-ga** | LLM4AD_Next specialized island model | Diverse island roles + adaptive migration | Diversity-preserving search |
+| **dyca** | LLM4AD_Next instance-aware model | Instance clustering + heterogeneous pools | Instance-aware search |
 
 ## Directory Structure
 
@@ -28,6 +31,9 @@ algo-design/
 ├── nsga2/                 # NSGA-II
 ├── moead/                 # MOEA/D
 ├── mcts-ahd/              # MCTS for AHD
+├── island-ga/             # Island Genetic Algorithm
+├── diverse-island-ga/     # Diversity-oriented Island GA
+├── dyca/                  # Dynamic Clustering Adaptive
 └── use_example/           # Complete usage example
     ├── README.md          # Example overview
     ├── skill_with_task.md # Integration guide
@@ -84,3 +90,6 @@ To add a new algorithm design skill:
 - **ReEvo**: `mutation_rate`, reflection window size
 - **FunSearch**: `num_islands`, `samples_per_prompt`
 - **MEoH**: `objective_metrics`, archive size
+- **IslandGA**: `num_islands`, `island_population_size`, `migration_interval`, `migration_rate`, `migration_strategy`, `migration_topology`
+- **Diverse IslandGA**: `adaptive_migration`, `novelty_survivor_ratio`, `island_strategy_strength`, `exploration_restart_ratio`
+- **DyCA**: `n_clusters`, `clustering_method`, `recluster_interval`, `ari_threshold`, `n_anchors`, `specialist_pool_size`
