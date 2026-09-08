@@ -9,8 +9,13 @@
 
 from __future__ import annotations
 
+import io
+import shutil
 import uuid
+import zipfile
+from copy import deepcopy
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -21,6 +26,7 @@ from sqlmodel import Session, select
 from app import models
 from app.core.redis import delete_research_stream
 from app.models.research import (
+    ResearchLog,
     ResearchMessage,
     ResearchSession,
     ResearchSessionStatus,
@@ -91,6 +97,7 @@ def create_session(
         profile=request.profile,
         mode=request.mode.value,
         metric_direction=request.metric_direction,
+        metric_key=request.metric_key,
         provider_id=request.provider_id,
         model_name=request.model_name,
         llm4ad_workspace=workspace_dict,
@@ -165,6 +172,8 @@ def update_session(
         session.mode = request.mode.value
     if request.metric_direction is not None:
         session.metric_direction = request.metric_direction
+    if request.metric_key is not None:
+        session.metric_key = request.metric_key
     if request.provider_id is not None:
         session.provider_id = request.provider_id
     if request.model_name is not None:
@@ -350,6 +359,274 @@ def delete_session(
         logger.opt(exception=True).warning(
             f"post-delete cleanup failed session={deleted_session_id}"
         )
+
+
+# ---- 复制会话与产物导入 ----
+
+
+def _now_utc() -> datetime:
+    """当前 UTC 时间（带时区），与 ``TimeMixin`` 的存储口径一致。"""
+    return datetime.now(UTC)
+
+
+def _derive_copied_run_dir(source: ResearchSession, new_session_id: uuid.UUID) -> str:
+    """为新会话派生 run_dir：沿用源码路径的目录骨架，仅把 ``{session_id}`` 段换成新 id。
+
+    源码 ``run_dir`` 形如 ``{home}/code_user-{uid}/research/{session_id}``，复制后落在
+    同一用户空间、新的会话目录下，与原始目录并存且物理隔离。若源码从未启动（无
+    run_dir），返回空串；若路径里找不到会话 id 段，退而求其次在新目录名旁追加 id。
+    """
+    if not source.run_dir:
+        return ""
+    path = Path(source.run_dir)
+    parts = list(path.parts)
+    old_id = str(source.id)
+    for idx in range(len(parts) - 1, -1, -1):
+        if parts[idx] == old_id:
+            parts[idx] = str(new_session_id)
+            return str(Path(*parts))
+    return str(path.parent / str(new_session_id))
+
+
+def copy_session(
+    db: Session, session_id: uuid.UUID, user: models.User
+) -> ResearchSessionItem:
+    """复制一个科研会话：整棵 DB 记录 + 落盘产物目录。
+
+    - **DB**：生成全部新 UUID（session / turn / message / log），杜绝主键冲突；
+      关联外键（``turn.session_id``、``message.session_id/turn_id``、
+      ``session.active_turn_id``、``turn.respond_to_message_id``、``log.*``）在新 id
+      之间重建映射，保证关联表一一对应。
+    - **产物目录**：沿源码 ``run_dir`` 目录骨架复制到新会话 id 下（见
+      :func:`_derive_copied_run_dir`）；复制失败不翻成 500，记日志后仍返回 DB 副本。
+    - ``stream_id`` 全部清空：副本没有对应的 Redis Stream，保留旧 id 会误导 SSE 续传
+      去读别的会话。
+    """
+    source = _get_session(db, session_id, user)
+    new_session_id = uuid.uuid4()
+    new_run_dir = _derive_copied_run_dir(source, new_session_id)
+    now = _now_utc()
+
+    new_session = ResearchSession(
+        id=new_session_id,
+        user_id=source.user_id,
+        folder_id=source.folder_id,
+        title=source.title,
+        topic=source.topic,
+        profile=source.profile,
+        mode=source.mode,
+        metric_direction=source.metric_direction,
+        metric_key=source.metric_key,
+        provider_id=source.provider_id,
+        model_name=source.model_name,
+        status=source.status,
+        active_stage=source.active_stage,
+        active_stage_name=source.active_stage_name,
+        run_dir=new_run_dir or None,
+        latest_config=deepcopy(source.latest_config),
+        llm4ad_workspace=deepcopy(source.llm4ad_workspace),
+        best_objective=source.best_objective,
+        best_code_sha256=source.best_code_sha256,
+        ended_time=source.ended_time,
+        error=source.error,
+        analysis_report=source.analysis_report,
+        # 副本是新的生命周期起点：创建/更新时间取当前，避免沿用旧值被当成过期会话清理
+        created_time=now,
+        updated_time=now,
+    )
+    db.add(new_session)
+    db.flush()  # 拿到 new_session_id（虽自生成，flush 保证后续 FK 可见）
+
+    # 1) 复制 turn（respond_to_message_id 稍后按消息映射补齐）
+    old_turns = db.exec(
+        select(ResearchTurn).where(ResearchTurn.session_id == source.id)
+    ).all()
+    turn_map: dict[uuid.UUID, ResearchTurn] = {}
+    for t in old_turns:
+        new_turn = ResearchTurn(
+            id=uuid.uuid4(),
+            session_id=new_session_id,
+            celery_task_id=None,  # 无活任务；旧 task id 只会误导
+            status=t.status,
+            provider_id=t.provider_id,
+            model_name=t.model_name,
+            mode=t.mode,
+            from_stage=t.from_stage,
+            to_stage=t.to_stage,
+            user_input=t.user_input,
+            respond_to_message_id=None,
+            error=t.error,
+            started_at=t.started_at,
+            ended_at=t.ended_at,
+            created_time=t.created_time,
+            updated_time=t.updated_time,
+        )
+        db.add(new_turn)
+        turn_map[t.id] = new_turn
+    db.flush()
+
+    # 2) 复制 message（建立旧→新 id 映射，供 respond_to_message_id / active_turn 用）
+    old_messages = db.exec(
+        select(ResearchMessage).where(ResearchMessage.session_id == source.id)
+    ).all()
+    message_map: dict[uuid.UUID, ResearchMessage] = {}
+    for m in old_messages:
+        target_turn = turn_map.get(m.turn_id)
+        if target_turn is None:  # 消息挂到了不存在的 turn？跳过，避免 KeyError
+            logger.warning(
+                f"copy_session orphan message skipped msg={m.id} turn={m.turn_id}"
+            )
+            continue
+        new_message = ResearchMessage(
+            id=uuid.uuid4(),
+            session_id=new_session_id,
+            turn_id=target_turn.id,
+            role=m.role,
+            content=m.content,
+            turn_status=m.turn_status,
+            error=m.error,
+            payload=m.payload,
+            payload_locked=m.payload_locked,
+            payload_locked_at=m.payload_locked_at,
+            payload_submission=m.payload_submission,
+            stage=m.stage,
+            event_type=m.event_type,
+            event_key=m.event_key,
+            seq=m.seq,
+            stream_id=None,  # 无 Redis stream（见函数 docstring）
+            created_time=m.created_time,
+            updated_time=m.updated_time,
+        )
+        db.add(new_message)
+        message_map[m.id] = new_message
+    db.flush()
+
+    # 3) 补齐 turn.respond_to_message_id（消息已建，映射可解）
+    for t, new_turn in turn_map.items():
+        if t.respond_to_message_id:
+            new_msg = message_map.get(t.respond_to_message_id)
+            if new_msg is not None:
+                new_turn.respond_to_message_id = new_msg.id
+
+    # 4) 复制 log
+    old_logs = db.exec(
+        select(ResearchLog).where(ResearchLog.session_id == source.id)
+    ).all()
+    for lg in old_logs:
+        target_turn = turn_map.get(lg.turn_id)
+        if target_turn is None:
+            logger.warning(
+                f"copy_session orphan log skipped log={lg.id} turn={lg.turn_id}"
+            )
+            continue
+        new_log = ResearchLog(
+            id=uuid.uuid4(),
+            session_id=new_session_id,
+            turn_id=target_turn.id,
+            level=lg.level,
+            message=lg.message,
+            source=lg.source,
+            module=lg.module,
+            event_key=lg.event_key,
+            turn_status=lg.turn_status,
+            stage=lg.stage,
+            ts=lg.ts,
+            seq=lg.seq,
+            stream_id=None,
+            created_time=lg.created_time,
+            updated_time=lg.updated_time,
+        )
+        db.add(new_log)
+
+    # 5) 会话活动轮指针映射到新 turn
+    if source.active_turn_id and source.active_turn_id in turn_map:
+        new_session.active_turn_id = turn_map[source.active_turn_id].id
+
+    db.commit()
+    db.refresh(new_session)
+
+    # 6) 复制落盘产物（best-effort：失败记录日志，不阻断已完成的 DB 复制）
+    if source.run_dir and new_run_dir:
+        src = Path(source.run_dir)
+        dst = Path(new_run_dir)
+        if src.is_dir() and not dst.exists():
+            try:
+                shutil.copytree(src, dst)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"copy_session files failed session={source.id} -> {new_session_id}"
+                )
+
+    return ResearchSessionItem.model_validate(new_session)
+
+
+def import_artifacts_zip(
+    db: Session,
+    session_id: uuid.UUID,
+    user: models.User,
+    data: bytes,
+    filename: str | None,
+) -> dict[str, Any]:
+    """上传 zip 解压覆盖到产物目录（run_dir）。
+
+    - zip 条目以**相对 run_dir** 的关系解压（对齐 ``/artifacts/archive`` 的打包口径：
+      归档内不含顶层容器目录）。
+    - 已存在的文件直接覆盖；单个条目失败（解压/写入）**捕获并记录**，不中断整批，
+      完成后返回失败清单。
+    - 防 zip-slip：每个目标路径 resolve 后必须仍在 run_dir 之内，越界条目跳过并记失败。
+    """
+    session = _get_session(db, session_id, user)
+    root = Path(session.run_dir) if session.run_dir else None
+    if not root or not root.is_dir():
+        raise HTTPException(status_code=404, detail="run_dir not initialized")
+    root = root.resolve()
+
+    imported = 0
+    overwritten = 0
+    failed: list[str] = []
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise HTTPException(status_code=400, detail="invalid zip file") from exc
+
+    with archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = info.filename.replace("\\", "/")
+            # 容错：去掉前导斜杠，防绝对路径 / 盘符越过 root 判断
+            name = name.lstrip("/")
+            if name.startswith("../") or ".." in name.split("/"):
+                failed.append(info.filename)
+                continue
+            target = (root / name).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                failed.append(info.filename)
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                existed = target.exists()
+                target.write_bytes(archive.read(info))
+                imported += 1
+                if existed:
+                    overwritten += 1
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"import artifacts failed entry={info.filename}"
+                )
+                failed.append(info.filename)
+
+    return {
+        "session_id": session.id,
+        "run_dir": session.run_dir,
+        "source": filename,
+        "imported": imported,
+        "overwritten": overwritten,
+        "failed": failed,
+    }
 
 
 def get_state(

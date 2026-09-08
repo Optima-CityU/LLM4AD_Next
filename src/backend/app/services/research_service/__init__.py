@@ -35,10 +35,12 @@ from .messages import (
     list_messages,
 )
 from .sessions import (
+    copy_session,
     create_session,
     delete_session,
     get_session_detail,
     get_state,
+    import_artifacts_zip,
     list_sessions,
     update_session,
 )
@@ -57,6 +59,7 @@ from .turns import (
 )
 
 __all__ = [
+    "copy_session",
     "create_artifacts_archive",
     "create_folder",
     "create_session",
@@ -72,6 +75,7 @@ __all__ = [
     "get_stream_context",
     "get_translate_stream_type",
     "get_turn",
+    "import_artifacts_zip",
     "inject_stage_guidance",
     "list_artifacts",
     "list_folders",

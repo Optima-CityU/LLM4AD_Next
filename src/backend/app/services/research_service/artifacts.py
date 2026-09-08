@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import tempfile
 import uuid
 import zipfile
@@ -39,6 +40,15 @@ from app.utils.log_persist import strip_generated_fields_for_list
 
 from ._common import _get_session
 
+# 只认「llm4ad 演化产物」这一条路径：
+#   stage-{NN}[/_...]/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/{文件}.json
+# 其中 run_id 仅允许字母+数字组合（用户约定），任务名（runs 下一级）不固定。
+# generated 目录下**只取一层的 .json 文件**（不递归），避免捞到无关嵌套数据。
+_GENERATED_PATH_RE = re.compile(
+    r"^stage-\d+(?:_[^/]+)?/task_packages/(?P<algo>[^/]+)/runs/[^/]+/"
+    r"(?P<run_id>[A-Za-z0-9]+)/generated/(?P<file>[^/]+\.json)$"
+)
+
 _ARTIFACT_KIND_HINTS: dict[str, str] = {
     "paper_final.md": "paper_final",
     "paper_revised.md": "paper_final",
@@ -47,6 +57,26 @@ _ARTIFACT_KIND_HINTS: dict[str, str] = {
     "results.json": "data",
     "evolution_state.json": "state",
 }
+
+# 产物目录里出现的无用缓存文件/目录。这些是 Python 解释器/工具链的中间产物，
+# 对用户无价值（.pyc 可随时从 .py 重新编译），列出来只会污染产物面板与下载包。
+_CACHE_SUFFIXES = {".pyc", ".pyo", ".pyd", ".pyw", ".whl", ".egg-info", ".so"}
+_CACHE_DIR_NAMES = {"__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
+
+
+def _is_useless_cache(rel: str) -> bool:
+    """判断一次相对 ``run_dir`` 的路径是否是无用缓存文件/目录。
+
+    覆盖两类：``__pycache__``/``.mypy_cache`` 等缓存目录，以及 ``.pyc``/``.whl``
+    等字节码/打包产物。和点文件过滤（``.events-*.jsonl`` 等）一样，露出来只会污染
+    产物面板、拖大下载包，故 list / tree / zip 三处统一剔除。
+    """
+    parts = rel.replace("\\", "/").split("/")
+    for part in parts:
+        if part in _CACHE_DIR_NAMES:
+            return True
+    name = parts[-1]
+    return any(name.endswith(s) for s in _CACHE_SUFFIXES)
 
 
 def _classify_artifact(path: Path) -> str:
@@ -102,7 +132,10 @@ def list_artifacts(
             rel = str(path.relative_to(root)).replace("\\", "/")
             # 跳过内部点文件/点目录（.events-<turn>.jsonl、.app_config.json 等
             # 容器管线中转文件）：内容已落 DB/Redis，露出来只会污染产物面板。
+            # 同样跳过 __pycache__/.pyc 这类无用缓存（见 _is_useless_cache）。
             if any(part.startswith(".") for part in rel.split("/")):
+                continue
+            if _is_useless_cache(rel):
                 continue
             try:
                 stat = path.stat()
@@ -154,27 +187,31 @@ def list_generated_solutions(
     session_id: uuid.UUID,
     user: models.User,
     *,
-    stage: int | None = None,
+    algorithm: str | None = None,
 ) -> ResearchGeneratedResponse:
-    """扫描 run_dir 下所有 ``**/generated/*.json``，内容内联、按 stage 分组。
+    """扫描 run_dir 下 ``stage-*/task_packages/{算法}/runs/{任务}/{run_id}/generated/*.json``，
+    内容内联、按**算法名称**分组。
 
-    大字段按演化持久化口径剥离（见 :func:`_load_stripped_generated`），前端一次
-    拿全，无需再逐个 download。``stage`` 非空时只返回该阶段。
+    只认 llm4ad 演化产物这条固定路径（见 :data:`_GENERATED_PATH_RE`），不递归
+    ``generated`` 目录。大字段按演化持久化口径剥离（见
+    :func:`_load_stripped_generated`），前端一次拿全，无需再逐个 download。
+    ``algorithm`` 非空时只返回该算法分组。
     """
     session = _get_session(db, session_id, user)
-    grouped: dict[int | None, list[ResearchGeneratedItem]] = {}
+    grouped: dict[str, list[ResearchGeneratedItem]] = {}
     root = Path(session.run_dir) if session.run_dir else None
     if root and root.is_dir():
+        # 只扫 generated 目录直接子层的 *.json；rglob 全文再正则约束，天然跳过无关文件。
         for path in root.rglob("generated/*.json"):
             if not path.is_file():
                 continue
             rel = str(path.relative_to(root)).replace("\\", "/")
-            st = _stage_of(rel)
-            if stage is not None and st != stage:
+            m = _GENERATED_PATH_RE.match(rel)
+            if not m:
                 continue
-            parts = rel.split("/")
-            gi = parts.index("generated") if "generated" in parts else -1
-            run_id = parts[gi - 1] if gi > 0 else None
+            algo = m.group("algo")
+            if algorithm is not None and algo != algorithm:
+                continue
             try:
                 stat = path.stat()
                 size: int | None = stat.st_size
@@ -182,26 +219,24 @@ def list_generated_solutions(
             except OSError:
                 size = None
                 mtime = None
-            grouped.setdefault(st, []).append(
+            grouped.setdefault(algo, []).append(
                 ResearchGeneratedItem(
                     path=rel,
-                    name=path.name,
-                    stage=st,
-                    run_id=run_id,
+                    name=m.group("file"),
+                    stage=algo,
+                    run_id=m.group("run_id"),
                     size=size,
                     mtime=mtime,
                     data=_load_stripped_generated(path),
                 )
             )
-    # None（无法解析 stage）排最后；组内按文件名稳定排序
+    # 算法名排序；组内按文件路径稳定排序
     groups = [
         ResearchGeneratedStageGroup(
-            stage=st,
+            stage=algo,
             items=sorted(items, key=lambda it: it.path),
         )
-        for st, items in sorted(
-            grouped.items(), key=lambda kv: (kv[0] is None, kv[0] or 0)
-        )
+        for algo, items in sorted(grouped.items())
     ]
     return ResearchGeneratedResponse(
         session_id=session.id,
@@ -243,6 +278,8 @@ def get_artifact_tree(
                 if child.name.startswith("."):
                     continue  # 隐藏 .events-*.jsonl / .app_config.json 等内部文件
                 child_rel = f"{rel}/{child.name}" if rel else child.name
+                if _is_useless_cache(child_rel):
+                    continue  # __pycache__/ .pyc 等缓存，不下钻也不列
                 node.children.append(build(child, child_rel, depth + 1))
         return node
 
@@ -299,6 +336,8 @@ def create_artifacts_archive(
                 rel = str(path.relative_to(root)).replace("\\", "/")
                 if any(part.startswith(".") for part in rel.split("/")):
                     continue
+                if _is_useless_cache(rel):
+                    continue  # __pycache__/ .pyc 等缓存，不进下载包
                 try:
                     zf.write(path, arcname=rel)
                 except OSError:

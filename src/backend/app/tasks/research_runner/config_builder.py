@@ -308,13 +308,14 @@ def build_arc_config(
             "mode": "sandbox",
             # "time_budget_sec": 300,
             "max_iterations": 5,
-            # 课题 ML03(GPU-less CPU optimizer comparison)的真正的 PRIMARY_METRIC。
-            # 之前 "best_individual_score" 与生成器/evaluator 实际产出的指标名不一致，
-            # Stage-13 择优在解析结果时匹配不到该 key，会静默拿默认值/失败。
-            "metric_key": "valid_prediction_time",
+            # 指标 key：用户经接口配置，落到 ARC experiment.metric_key；空串回落
+            # ARC 默认 "primary_metric"。Stage-13 择优按此列名从结果里取值，若与
+            # 生成器/evaluator 实际产出的指标名不一致会匹配不到（静默拿默认值/失败）。
+            "metric_key": session.metric_key or "primary_metric",
             # 指标优化方向：由会话创建时用户指定，传递到 ARC Stage-13/14 择优逻辑
-            # 与 llm4ad_boost 演化增强。researchclaw 只接受 "maximize"/"minimize"。
-            "metric_direction": session.metric_direction or "maximize",
+            # 与 llm4ad_boost 演化增强。空串表示未指定，**原样透传**给 ARC（不做
+            # "maximize" 兜底）——是否按默认值处理交给容器内 ARC 自身决定。
+            "metric_direction": session.metric_direction,
             # Stage 13 择优后的演化增强。字段对齐 AutoResearchClawAD2/config.arc.yaml，
             # 不配 target —— 目标算法由 LLM 三路分类自动选择（排除 baseline + 消融，其余全选）。
             "llm4ad_boost": {
@@ -340,7 +341,7 @@ def build_arc_config(
                 "resources": {
                     "time_budget_sec": 3600,
                     "eval_timeout_sec": 600,
-                    "per_package_timeout_sec": 3600,
+                    "per_package_timeout_sec": 7200,
                     "parallel_workers": 4,
                 },
                 "parallel_evolution": False,

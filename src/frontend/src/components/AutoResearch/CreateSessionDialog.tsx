@@ -37,6 +37,7 @@ import {
   METRIC_DIRECTION_OPTIONS,
   MODE_OPTIONS,
   PROFILE_OPTIONS,
+  metricDirectionToApi,
   type MetricDirection,
   type ResearchProfile,
 } from "./shared"
@@ -68,7 +69,8 @@ export default function CreateSessionDialog({
   const [modelName, setModelName] = useState("")
   const [mode, setMode] = useState<ResearchMode>("co-pilot")
   const [profile, setProfile] = useState<ResearchProfile>("algorithm_evolution")
-  const [metricDirection, setMetricDirection] = useState<MetricDirection>("maximize")
+  const [metricDirection, setMetricDirection] = useState<MetricDirection>("auto")
+  const [metricKey, setMetricKey] = useState("")
   const [autoStart, setAutoStart] = useState(false)
   const [topicError, setTopicError] = useState("")
   const [titleError, setTitleError] = useState("")
@@ -97,7 +99,8 @@ export default function CreateSessionDialog({
     setModelName("")
     setMode("co-pilot")
     setProfile("algorithm_evolution")
-    setMetricDirection("maximize")
+    setMetricDirection("auto")
+    setMetricKey("")
     setAutoStart(false)
     setTopicError("")
     setTitleError("")
@@ -148,7 +151,8 @@ export default function CreateSessionDialog({
           model_name: modelName.trim() || null,
           mode,
           profile,
-          metric_direction: metricDirection,
+          metric_direction: metricDirectionToApi(metricDirection),
+          metric_key: metricKey.trim() || undefined,
         } as ResearchSessionCreateRequest))
       createdRef.current = created
 
@@ -318,7 +322,7 @@ export default function CreateSessionDialog({
           </Field>
 
           <Field label={t("autoResearch.create.metricDirectionLabel")}>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               {METRIC_DIRECTION_OPTIONS.map((d) => (
                 <button
                   key={d}
@@ -366,6 +370,15 @@ export default function CreateSessionDialog({
                 </button>
               ))}
             </div>
+          </Field>
+
+          <Field label={t("autoResearch.create.metricKeyLabel")}>
+            <Input
+              value={metricKey}
+              onChange={(e) => setMetricKey(e.target.value)}
+              maxLength={64}
+              placeholder={t("autoResearch.create.metricKeyPlaceholder")}
+            />
           </Field>
 
           <div className="grid grid-cols-2 gap-3">

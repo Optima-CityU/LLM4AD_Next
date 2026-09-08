@@ -163,12 +163,20 @@ class ResearchSessionCreateRequest(BaseModel):
     mode: ResearchMode = Field(
         default=ResearchMode.CO_PILOT, description="ARC HITL 模式"
     )
-    metric_direction: Literal["maximize", "minimize"] = Field(
-        default="maximize",
+    metric_direction: Literal["maximize", "minimize", ""] = Field(
+        default="",
         description=(
             "指标优化方向：'maximize' 表示越大越好（如准确率），"
-            "'minimize' 表示越小越好（如损失/误差）。"
-            "传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。"
+            "'minimize' 表示越小越好（如损失/误差）；空串表示未指定，原样透传"
+            "给 ARC 处理。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。"
+        ),
+    )
+    metric_key: str = Field(
+        default="",
+        max_length=64,
+        description=(
+            "ARC experiment.metric_key：Stage-13 择优解析结果时按此列名取值；"
+            "空串表示未指定，由后端回落 ARC 默认 'primary_metric'。"
         ),
     )
     folder_id: uuid.UUID | None = Field(default=None, description="归属分组，可选")
@@ -199,9 +207,14 @@ class ResearchSessionUpdateRequest(BaseModel):
         description="传 None 且请求体显式包含该键时移到未分组；未提供不变",
     )
     mode: ResearchMode | None = Field(default=None)
-    metric_direction: Literal["maximize", "minimize"] | None = Field(
+    metric_direction: Literal["maximize", "minimize", ""] | None = Field(
         default=None,
-        description="指标优化方向；未提供不变",
+        description="指标优化方向；空串表示清空（回落 ARC 默认）；未提供不变",
+    )
+    metric_key: str | None = Field(
+        default=None,
+        max_length=64,
+        description="ARC experiment.metric_key；空串表示清空（回落 ARC 默认）；未提供不变",
     )
     provider_id: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
@@ -220,6 +233,7 @@ class ResearchSessionItem(BaseModel):
     profile: str
     mode: str
     metric_direction: str
+    metric_key: str
     provider_id: str | None
     model_name: str | None
     status: ResearchSessionStatus
@@ -622,7 +636,9 @@ ResearchArtifactTreeNode.model_rebuild()
 class ResearchGeneratedItem(BaseModel):
     """单个 ``generated/*.json`` 解，内容内联且已剥离大字段。
 
-    剥离策略复用演化任务持久化的
+    只扫描 ``stage-NN/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/*.json``
+    这条路径；``stage`` 字段存的是**算法名称**（task_packages 的下一级），不再是 ARC
+    阶段号。剥离策略复用演化任务持久化的
     :data:`app.utils.log_persist.LIST_STRIPPED_GENERATED_FIELDS`
     （``code_artifacts`` / ``generation_meta`` / ``worktree`` / ``description``
     置空），避免整段源码/长文本撑爆响应。
@@ -630,7 +646,10 @@ class ResearchGeneratedItem(BaseModel):
 
     path: str = Field(description="相对 run_dir 的路径，可直接用于 /artifacts/download")
     name: str = Field(description="文件名")
-    stage: int | None = Field(default=None, description="来自哪个 ARC 阶段")
+    stage: str | None = Field(
+        default=None,
+        description="算法名称（task_packages 下一级目录名，如 esn / mlp）",
+    )
     run_id: str | None = Field(
         default=None,
         description="llm4ad 演化 run 短 id（路径中 generated 的上一级目录名）",
@@ -644,18 +663,32 @@ class ResearchGeneratedItem(BaseModel):
 
 
 class ResearchGeneratedStageGroup(BaseModel):
-    """按 stage 分组的 generated 解。"""
+    """按算法名称分组的 generated 解。"""
 
-    stage: int | None = Field(default=None, description="stage 号；无法解析为 null")
+    stage: str | None = Field(default=None, description="算法名称；无法解析为 null")
     items: list[ResearchGeneratedItem] = Field(default_factory=list)
 
 
 class ResearchGeneratedResponse(BaseModel):
-    """所有 generated 解，内容内联、按 stage 分组。"""
+    """所有 generated 解，内容内联、按算法名称分组。"""
 
     session_id: uuid.UUID
     run_dir: str | None
     groups: list[ResearchGeneratedStageGroup] = Field(default_factory=list)
+
+
+class ResearchArtifactImportResponse(BaseModel):
+    """`POST /sessions/{sid}/artifacts/import` 响应：解压导入结果。
+
+    ``failed`` 列出未成功写入的 zip 条目；单个条目失败不会中断整批导入。
+    """
+
+    session_id: uuid.UUID
+    run_dir: str | None = None
+    source: str | None = Field(default=None, description="上传文件名 / 标识")
+    imported: int = Field(default=0, description="成功写入的条目数")
+    overwritten: int = Field(default=0, description="覆盖已存在文件的条目数")
+    failed: list[str] = Field(default_factory=list, description="失败的 zip 条目名")
 
 
 

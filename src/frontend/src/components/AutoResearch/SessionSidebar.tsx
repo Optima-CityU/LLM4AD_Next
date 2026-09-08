@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Copy,
   DownloadCloud,
   FolderPlus,
   ListFilter,
@@ -92,6 +93,8 @@ interface Props {
   onRenameSession: (id: string, title: string) => Promise<void> | void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onDeleteSession: (id: string) => Promise<void> | void
+  /** 复制一个科研会话（深度拷贝 DB + 落盘产物），成功后由父层跳转到副本。 */
+  onCopySession: (id: string) => Promise<void> | void
   /** 切换会话 profile（实验类型），会清空第 9 步之后的产物。 */
   onSwitchProfile: (id: string, profile: string) => Promise<void> | void
 }
@@ -133,6 +136,7 @@ export default function SessionSidebar({
   onRenameSession,
   onMoveSession,
   onDeleteSession,
+  onCopySession,
   onSwitchProfile,
 }: Props) {
   const { t } = useTranslation()
@@ -393,6 +397,7 @@ export default function SessionSidebar({
             activeSessionId={activeSessionId}
             onSelectSession={onSelectSession}
             onDeleteSession={setDeleteSession}
+            onCopySession={(s) => onCopySession(s.id)}
             onRenameSession={(s) => {
               setRenameSessionTitle(s.title)
               setRenameSession(s)
@@ -433,6 +438,7 @@ export default function SessionSidebar({
             activeSessionId={activeSessionId}
             onSelectSession={onSelectSession}
             onDeleteSession={setDeleteSession}
+            onCopySession={(s) => onCopySession(s.id)}
             onRenameSession={(s) => {
               setRenameSessionTitle(s.title)
               setRenameSession(s)
@@ -479,6 +485,7 @@ export default function SessionSidebar({
               activeSessionId={activeSessionId}
               onSelectSession={onSelectSession}
               onDeleteSession={setDeleteSession}
+              onCopySession={(s) => onCopySession(s.id)}
               onRenameSession={(s) => {
                 setRenameSessionTitle(s.title)
                 setRenameSession(s)
@@ -858,6 +865,7 @@ interface FolderGroupProps {
   activeSessionId: string | null
   onSelectSession: (id: string) => void
   onDeleteSession: (s: ResearchSessionItem) => void
+  onCopySession: (s: ResearchSessionItem) => void
   onRenameSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onSwitchProfile: (s: ResearchSessionItem, target: string) => void
@@ -885,6 +893,7 @@ function FolderSessionGroup({
   activeSessionId,
   onSelectSession,
   onDeleteSession,
+  onCopySession,
   onRenameSession,
   onMoveSession,
   onSwitchProfile,
@@ -993,6 +1002,7 @@ function FolderSessionGroup({
               onRename={onRenameSession}
               onMove={onMoveSession}
               onDelete={onDeleteSession}
+              onCopy={onCopySession}
               onSwitchProfile={onSwitchProfile}
             />
           ))}
@@ -1041,6 +1051,7 @@ interface SearchResultsProps {
   activeSessionId: string | null
   onSelectSession: (id: string) => void
   onDeleteSession: (s: ResearchSessionItem) => void
+  onCopySession: (s: ResearchSessionItem) => void
   onRenameSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onSwitchProfile: (s: ResearchSessionItem, target: string) => void
@@ -1055,6 +1066,7 @@ function SearchResults({
   activeSessionId,
   onSelectSession,
   onDeleteSession,
+  onCopySession,
   onRenameSession,
   onMoveSession,
   onSwitchProfile,
@@ -1127,6 +1139,7 @@ function SearchResults({
             onRename={onRenameSession}
             onMove={onMoveSession}
             onDelete={onDeleteSession}
+            onCopy={onCopySession}
             onSwitchProfile={onSwitchProfile}
           />
         ))}
@@ -1156,6 +1169,7 @@ interface SessionRowProps {
   onRename: (s: ResearchSessionItem) => void
   onMove: (id: string, folderId: string | null) => Promise<void> | void
   onDelete: (s: ResearchSessionItem) => void
+  onCopy: (s: ResearchSessionItem) => void
   onSwitchProfile: (s: ResearchSessionItem, target: string) => void
 }
 
@@ -1192,6 +1206,7 @@ function SessionRow({
   onRename,
   onMove,
   onDelete,
+  onCopy,
   onSwitchProfile,
 }: SessionRowProps) {
   const { t } = useTranslation()
@@ -1329,6 +1344,10 @@ function SessionRow({
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuItem onSelect={() => onCopy(session)}>
+            <Copy className="size-3.5 mr-2" />
+            {t("autoResearch.sidebar.copySession")}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"

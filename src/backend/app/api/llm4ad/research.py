@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, File, Header, Query, UploadFile, status
 from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 
@@ -21,6 +21,7 @@ from app.schemas.research import (
     ResearchAnalysisGenerateRequest,
     ResearchAnalysisGenerateResponse,
     ResearchAnalysisStopResponse,
+    ResearchArtifactImportResponse,
     ResearchArtifactListResponse,
     ResearchArtifactTranslateRequest,
     ResearchArtifactTranslateResponse,
@@ -349,6 +350,21 @@ def delete_session(
     """会话必须处于终态；``RUNNING`` / ``PAUSED`` 会返回 409。"""
     research_service.delete_session(db, session_id, current_user)
     return ResearchDeleteResponse(id=session_id)
+
+
+@router.post(
+    "/sessions/{session_id}/copy",
+    response_model=ResearchSessionItem,
+    status_code=status.HTTP_201_CREATED,
+    summary="复制一个科研会话（含 DB 全子树记录 + 落盘产物目录）",
+)
+def copy_session(
+    session_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """深度复制会话：新建 session/turn/message/log 全部新 UUID，外键在新 id 之间
+    重建映射（防主键冲突、关联表一一对应）；产物目录沿源码骨架复制到会话自身目录。
+    返回新会话。"""
+    return research_service.copy_session(db, session_id, current_user)
 
 
 # ---- 轮次 ----
@@ -769,6 +785,29 @@ def download_artifacts_archive(
     )
 
 
+@router.post(
+    "/sessions/{session_id}/artifacts/import",
+    response_model=ResearchArtifactImportResponse,
+    summary="上传 zip 解压并覆盖到产物目录（单个条目失败不中断）",
+)
+async def import_artifacts_zip(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    file: UploadFile = File(..., description="产物 zip，条目相对 run_dir"),
+):
+    """上传一个 zip，解压覆盖到该会话的产物目录。
+
+    - 已存在的文件直接覆盖（``overwritten`` 计数）；单个条目解压/写入失败会被捕获并记入
+      ``failed``，不中断整批导入；
+    - 防 zip-slip：越出 run_dir 的条目跳过并记入 ``failed``。
+    """
+    data = await file.read()
+    return research_service.import_artifacts_zip(
+        db, session_id, current_user, data, filename=file.filename
+    )
+
+
 @router.put(
     "/sessions/{session_id}/artifacts/content",
     response_model=ResearchArtifactWriteResponse,
@@ -800,23 +839,25 @@ def write_artifact(
 @router.get(
     "/sessions/{session_id}/generated",
     response_model=ResearchGeneratedResponse,
-    summary="获取所有 generated 解（内容内联，剥离大字段，按 stage 分组）",
+    summary="获取所有 generated 解（内容内联，剥离大字段，按算法名称分组）",
 )
 def list_generated(
     session_id: uuid.UUID,
     db: SessionDep,
     current_user: CurrentUser,
-    stage: int | None = Query(
-        default=None, description="仅返回该 stage 的解；不传返回全部"
+    algorithm: str | None = Query(
+        default=None,
+        description="仅返回该算法名称分组；不传返回全部",
     ),
 ):
-    """一次拿全 ``**/generated/*.json`` 解内容，免去前端逐个 download。
+    """一次拿全 ``stage-*/task_packages/{算法}/runs/*/{run_id}/generated/*.json``
+    解内容，免去前端逐个 download。
 
     大字段（``code_artifacts`` / ``generation_meta`` / ``worktree`` /
-    ``description``）按演化任务持久化口径剥离，按 stage 分组返回。
+    ``description``）按演化任务持久化口径剥离，按算法名称分组返回。
     """
     return research_service.list_generated_solutions(
-        db, session_id, current_user, stage=stage
+        db, session_id, current_user, algorithm=algorithm
     )
 
 

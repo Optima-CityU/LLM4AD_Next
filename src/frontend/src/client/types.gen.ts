@@ -2130,6 +2130,13 @@ export type ReportTemplatesResponse = {
  */
 export type ReportType = 'tech_change' | 'node_comparison' | 'chain_analysis' | 'champion_birth';
 
+export type research_import_artifacts_zip = {
+    /**
+     * 产物 zip，条目相对 run_dir
+     */
+    file: (Blob | File);
+};
+
 /**
  * 会话结果的结构化聚合（纯读盘、零 LLM），供前端直接渲染分析页。
  *
@@ -2284,6 +2291,32 @@ export type ResearchAnalysisStopResponse = {
     session_id: string;
     status: 'generating' | 'completed' | 'failed' | 'cancelled';
     message: string;
+};
+
+/**
+ * `POST /sessions/{sid}/artifacts/import` 响应：解压导入结果。
+ *
+ * ``failed`` 列出未成功写入的 zip 条目；单个条目失败不会中断整批导入。
+ */
+export type ResearchArtifactImportResponse = {
+    session_id: string;
+    run_dir?: (string | null);
+    /**
+     * 上传文件名 / 标识
+     */
+    source?: (string | null);
+    /**
+     * 成功写入的条目数
+     */
+    imported?: number;
+    /**
+     * 覆盖已存在文件的条目数
+     */
+    overwritten?: number;
+    /**
+     * 失败的 zip 条目名
+     */
+    failed?: Array<(string)>;
 };
 
 /**
@@ -2574,7 +2607,9 @@ export type ResearchFolderUpdateRequest = {
 /**
  * 单个 ``generated*.json`` 解，内容内联且已剥离大字段。
  *
- * 剥离策略复用演化任务持久化的
+ * 只扫描 ``stage-NN/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated*.json``
+ * 这条路径；``stage`` 字段存的是**算法名称**（task_packages 的下一级），不再是 ARC
+ * 阶段号。剥离策略复用演化任务持久化的
  * :data:`app.utils.log_persist.LIST_STRIPPED_GENERATED_FIELDS`
  * （``code_artifacts`` / ``generation_meta`` / ``worktree`` / ``description``
  * 置空），避免整段源码/长文本撑爆响应。
@@ -2589,9 +2624,9 @@ export type ResearchGeneratedItem = {
      */
     name: string;
     /**
-     * 来自哪个 ARC 阶段
+     * 算法名称（task_packages 下一级目录名，如 esn / mlp）
      */
-    stage?: (number | null);
+    stage?: (string | null);
     /**
      * llm4ad 演化 run 短 id（路径中 generated 的上一级目录名）
      */
@@ -2613,7 +2648,7 @@ export type ResearchGeneratedItem = {
 };
 
 /**
- * 所有 generated 解，内容内联、按 stage 分组。
+ * 所有 generated 解，内容内联、按算法名称分组。
  */
 export type ResearchGeneratedResponse = {
     session_id: string;
@@ -2622,13 +2657,13 @@ export type ResearchGeneratedResponse = {
 };
 
 /**
- * 按 stage 分组的 generated 解。
+ * 按算法名称分组的 generated 解。
  */
 export type ResearchGeneratedStageGroup = {
     /**
-     * stage 号；无法解析为 null
+     * 算法名称；无法解析为 null
      */
-    stage?: (number | null);
+    stage?: (string | null);
     items?: Array<ResearchGeneratedItem>;
 };
 
@@ -2778,9 +2813,13 @@ export type ResearchSessionCreateRequest = {
      */
     mode?: ResearchMode;
     /**
-     * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
+     * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）；空串表示未指定，原样透传给 ARC 处理。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
      */
-    metric_direction?: 'maximize' | 'minimize';
+    metric_direction?: 'maximize' | 'minimize' | '';
+    /**
+     * ARC experiment.metric_key：Stage-13 择优解析结果时按此列名取值；空串表示未指定，由后端回落 ARC 默认 'primary_metric'。
+     */
+    metric_key?: string;
     /**
      * 归属分组，可选
      */
@@ -2797,9 +2836,9 @@ export type ResearchSessionCreateRequest = {
 };
 
 /**
- * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
+ * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）；空串表示未指定，原样透传给 ARC 处理。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
  */
-export type metric_direction = 'maximize' | 'minimize';
+export type metric_direction = 'maximize' | 'minimize' | '';
 
 /**
  * 会话详情 + 分页消息 + 最近一轮。
@@ -2827,6 +2866,7 @@ export type ResearchSessionItem = {
     profile: string;
     mode: string;
     metric_direction: string;
+    metric_key: string;
     provider_id: (string | null);
     model_name: (string | null);
     status: ResearchSessionStatus;
@@ -2886,9 +2926,13 @@ export type ResearchSessionUpdateRequest = {
     folder_id?: (string | null);
     mode?: (ResearchMode | null);
     /**
-     * 指标优化方向；未提供不变
+     * 指标优化方向；空串表示清空（回落 ARC 默认）；未提供不变
      */
-    metric_direction?: ('maximize' | 'minimize' | null);
+    metric_direction?: ('maximize' | 'minimize' | '' | null);
+    /**
+     * ARC experiment.metric_key；空串表示清空（回落 ARC 默认）；未提供不变
+     */
+    metric_key?: (string | null);
     provider_id?: (string | null);
     model_name?: (string | null);
 };
@@ -4462,6 +4506,12 @@ export type Llm4AdResearchListLogsData = {
 
 export type Llm4AdResearchListLogsResponse = (ResearchLogPageResponse);
 
+export type Llm4AdResearchCopySessionData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchCopySessionResponse = (ResearchSessionItem);
+
 export type Llm4AdResearchStartTurnData = {
     requestBody: ResearchTurnStartRequest;
     sessionId: string;
@@ -4602,6 +4652,13 @@ export type Llm4AdResearchDownloadArtifactsArchiveData = {
 
 export type Llm4AdResearchDownloadArtifactsArchiveResponse = (unknown);
 
+export type Llm4AdResearchImportArtifactsZipData = {
+    formData: research_import_artifacts_zip;
+    sessionId: string;
+};
+
+export type Llm4AdResearchImportArtifactsZipResponse = (ResearchArtifactImportResponse);
+
 export type Llm4AdResearchWriteArtifactData = {
     /**
      * 相对 run_dir 的路径，如 stage-05/outline.md
@@ -4614,11 +4671,11 @@ export type Llm4AdResearchWriteArtifactData = {
 export type Llm4AdResearchWriteArtifactResponse = (ResearchArtifactWriteResponse);
 
 export type Llm4AdResearchListGeneratedData = {
-    sessionId: string;
     /**
-     * 仅返回该 stage 的解；不传返回全部
+     * 仅返回该算法名称分组；不传返回全部
      */
-    stage?: (number | null);
+    algorithm?: (string | null);
+    sessionId: string;
 };
 
 export type Llm4AdResearchListGeneratedResponse = (ResearchGeneratedResponse);

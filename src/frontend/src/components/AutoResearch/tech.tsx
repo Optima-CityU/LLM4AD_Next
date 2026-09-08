@@ -50,6 +50,16 @@ export const STAGE_GROUPS: StageGroup[] = [
 /** GATE 阶段（HITL 强制暂停点）：文献筛选 / 实验设计 / 质量门。 */
 export const GATE_STAGES = new Set([5, 9, 20])
 
+/**
+ * 接入本项目 llm4ad 演化引擎、与原生 ARC 行为不同的**单个阶段**。
+ *
+ * 注意是逐阶段而非整组：实验设计组（9-11）里只有 Stage 10 改为产出五段式问题描述
+ * / 种子算法配置；Stage 9 与 11 仍走原生 ARC 描述，只是产物格式不同、算法质量不变。
+ * 实验执行组（12-13）只有 Stage 13 用 LLM4AD 算法发现做迭代优化。分组徽章 / 顶轨
+ * 标签据此逐阶段判定，避免把未改动的阶段误标为 LLM4AD。
+ */
+export const LLM4AD_STAGES = new Set([10, 13])
+
 /** 质量门阶段号（收尾阶段起点，也是 degraded 决策的落点）。 */
 export const QUALITY_GATE_STAGE = 20
 

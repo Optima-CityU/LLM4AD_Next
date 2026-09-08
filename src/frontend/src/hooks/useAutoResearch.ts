@@ -656,6 +656,23 @@ export function useDeleteResearchSession() {
   })
 }
 
+/**
+ * 复制一个科研会话（深度拷贝 DB 全子树 + 落盘产物目录），返回新会话。
+ *
+ * 副本沿用原会话标题/画像/运行状态但开启全新生命周期（新 UUID、stream_id 清空），
+ * 故成功后只失效会话列表 + 文件夹计数，不牵连正在浏览的旧会话消息流。
+ */
+export function useCopyResearchSession() {
+  const inv = useInvalidator()
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      Llm4AdResearchService.copySession({ sessionId }),
+    onSuccess: () => {
+      inv.invalidateSessions()
+    },
+  })
+}
+
 // ---- Turns ----
 
 export function useStartResearchTurn() {
@@ -854,6 +871,35 @@ export function useResearchArtifactTree(sessionId: string | null) {
       }),
     enabled: !!sessionId,
     staleTime: 30_000,
+  })
+}
+
+/**
+ * 上传 zip 解压覆盖到产物目录（对齐 /artifacts/archive 的打包口径，逐条目相对
+ * run_dir）。成功后同时失效产物树 + 产物列表 + generated 演化数据，让导入的文件
+ * 立即出现在面板；不牵连会话列表 / 消息流。
+ */
+export function useImportResearchArtifacts() {
+  const qc = useQueryClient()
+  const inv = useInvalidator()
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      file,
+    }: {
+      sessionId: string
+      file: File
+    }) =>
+      Llm4AdResearchService.importArtifactsZip({
+        sessionId,
+        formData: { file },
+      }),
+    onSuccess: (_, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: researchKeys.artifactTree(sessionId) })
+      qc.invalidateQueries({ queryKey: researchKeys.artifacts(sessionId) })
+      qc.invalidateQueries({ queryKey: researchKeys.generated(sessionId) })
+      inv.invalidateSessionDetail(sessionId)
+    },
   })
 }
 

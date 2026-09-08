@@ -2,6 +2,7 @@ import {
   Activity,
   GitBranch,
   Layers,
+  ListStart,
   Loader2,
   Trophy,
   TrendingUp,
@@ -16,6 +17,13 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useResearchGenerated } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
 
@@ -211,23 +219,24 @@ export default function ExperimentPanel({
   const genQ = useResearchGenerated(sessionId, running)
   const [tab, setTab] = useState<ExperimentTab>("simulation")
 
-  // 只保留有个体的 stage 分组。
+  // 只保留有个体的算法分组。
   const groups = useMemo(
     () => (genQ.data?.groups ?? []).filter((g) => (g.items?.length ?? 0) > 0),
     [genQ.data],
   )
 
-  const [stage, setStage] = useState<number | null>(null)
+  const [stage, setStage] = useState<string | null>(null)
+  const stageKey = (a: string | null | undefined) => a ?? "?"
   useEffect(() => {
     if (groups.length === 0) return
-    const stages = groups.map((g) => g.stage ?? -1)
+    const stages = groups.map((g) => stageKey(g.stage))
     if (stage == null || !stages.includes(stage)) {
       setStage(stages[stages.length - 1])
     }
   }, [groups, stage])
 
   const activeGroup =
-    groups.find((g) => (g.stage ?? -1) === stage) ?? groups[groups.length - 1]
+    groups.find((g) => stageKey(g.stage) === stage) ?? groups[groups.length - 1]
   const data = useMemo(
     () => buildExpData(activeGroup?.items ?? []),
     [activeGroup?.items],
@@ -256,23 +265,30 @@ export default function ExperimentPanel({
       <div className="mb-2 flex items-center gap-1">
         <ExperimentTabToggle value={tab} onChange={setTab} />
       </div>
-      {/* stage 选择 */}
+      {/* 算法分组选择：对齐底部输入框的「选择算法」Select 样式（ListStart + 紧凑透明 trigger） */}
       {groups.length > 1 && (
-        <div className="mb-2 flex items-center gap-1.5">
-          <span className="text-[10px] text-muted-foreground">
-            {t("autoResearch.stages.title")}
-          </span>
-          <select
-            value={stage ?? ""}
-            onChange={(e) => setStage(Number(e.target.value))}
-            className="h-6 rounded border border-border/60 bg-background/60 px-1.5 text-[11px] focus:border-primary/50 focus:outline-none"
-          >
-            {groups.map((g) => (
-              <option key={g.stage ?? -1} value={g.stage ?? -1}>
-                #{g.stage ?? "?"}
-              </option>
-            ))}
-          </select>
+        <div className="mb-2 flex items-center gap-1">
+          <Select value={stage ?? ""} onValueChange={setStage}>
+            <SelectTrigger
+              size="sm"
+              aria-label={t("autoResearch.experiment.selectAlgorithm")}
+              className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 shrink-0"
+            >
+              <ListStart className="size-3 shrink-0" />
+              <SelectValue placeholder={t("autoResearch.experiment.selectAlgorithm")} />
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((g) => (
+                <SelectItem
+                  key={stageKey(g.stage)}
+                  value={stageKey(g.stage)}
+                  className="text-xs"
+                >
+                  {g.stage ?? "?"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

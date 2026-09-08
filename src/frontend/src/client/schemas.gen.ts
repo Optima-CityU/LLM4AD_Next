@@ -7105,6 +7105,65 @@ export const ResearchAnalysisStopResponseSchema = {
     description: '停止分析报告生成后的响应。'
 } as const;
 
+export const ResearchArtifactImportResponseSchema = {
+    properties: {
+        session_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Session Id'
+        },
+        run_dir: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Dir'
+        },
+        source: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source',
+            description: '上传文件名 / 标识'
+        },
+        imported: {
+            type: 'integer',
+            title: 'Imported',
+            description: '成功写入的条目数',
+            default: 0
+        },
+        overwritten: {
+            type: 'integer',
+            title: 'Overwritten',
+            description: '覆盖已存在文件的条目数',
+            default: 0
+        },
+        failed: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Failed',
+            description: '失败的 zip 条目名'
+        }
+    },
+    type: 'object',
+    required: ['session_id'],
+    title: 'ResearchArtifactImportResponse',
+    description: `\`POST /sessions/{sid}/artifacts/import\` 响应：解压导入结果。
+
+\`\`failed\`\` 列出未成功写入的 zip 条目；单个条目失败不会中断整批导入。`
+} as const;
+
 export const ResearchArtifactItemSchema = {
     properties: {
         path: {
@@ -7798,14 +7857,14 @@ export const ResearchGeneratedItemSchema = {
         stage: {
             anyOf: [
                 {
-                    type: 'integer'
+                    type: 'string'
                 },
                 {
                     type: 'null'
                 }
             ],
             title: 'Stage',
-            description: '来自哪个 ARC 阶段'
+            description: '算法名称（task_packages 下一级目录名，如 esn / mlp）'
         },
         run_id: {
             anyOf: [
@@ -7863,7 +7922,9 @@ export const ResearchGeneratedItemSchema = {
     title: 'ResearchGeneratedItem',
     description: `单个 \`\`generated/*.json\`\` 解，内容内联且已剥离大字段。
 
-剥离策略复用演化任务持久化的
+只扫描 \`\`stage-NN/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/*.json\`\`
+这条路径；\`\`stage\`\` 字段存的是**算法名称**（task_packages 的下一级），不再是 ARC
+阶段号。剥离策略复用演化任务持久化的
 :data:\`app.utils.log_persist.LIST_STRIPPED_GENERATED_FIELDS\`
 （\`\`code_artifacts\`\` / \`\`generation_meta\`\` / \`\`worktree\`\` / \`\`description\`\`
 置空），避免整段源码/长文本撑爆响应。`
@@ -7898,7 +7959,7 @@ export const ResearchGeneratedResponseSchema = {
     type: 'object',
     required: ['session_id', 'run_dir'],
     title: 'ResearchGeneratedResponse',
-    description: '所有 generated 解，内容内联、按 stage 分组。'
+    description: '所有 generated 解，内容内联、按算法名称分组。'
 } as const;
 
 export const ResearchGeneratedStageGroupSchema = {
@@ -7906,14 +7967,14 @@ export const ResearchGeneratedStageGroupSchema = {
         stage: {
             anyOf: [
                 {
-                    type: 'integer'
+                    type: 'string'
                 },
                 {
                     type: 'null'
                 }
             ],
             title: 'Stage',
-            description: 'stage 号；无法解析为 null'
+            description: '算法名称；无法解析为 null'
         },
         items: {
             items: {
@@ -7925,7 +7986,7 @@ export const ResearchGeneratedStageGroupSchema = {
     },
     type: 'object',
     title: 'ResearchGeneratedStageGroup',
-    description: '按 stage 分组的 generated 解。'
+    description: '按算法名称分组的 generated 解。'
 } as const;
 
 export const ResearchLLM4ADWorkspaceRefSchema = {
@@ -8370,10 +8431,17 @@ export const ResearchSessionCreateRequestSchema = {
         },
         metric_direction: {
             type: 'string',
-            enum: ['maximize', 'minimize'],
+            enum: ['maximize', 'minimize', ''],
             title: 'Metric Direction',
-            description: "指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。",
-            default: 'maximize'
+            description: "指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）；空串表示未指定，原样透传给 ARC 处理。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。",
+            default: ''
+        },
+        metric_key: {
+            type: 'string',
+            maxLength: 64,
+            title: 'Metric Key',
+            description: "ARC experiment.metric_key：Stage-13 择优解析结果时按此列名取值；空串表示未指定，由后端回落 ARC 默认 'primary_metric'。",
+            default: ''
         },
         folder_id: {
             anyOf: [
@@ -8520,6 +8588,10 @@ export const ResearchSessionItemSchema = {
             type: 'string',
             title: 'Metric Direction'
         },
+        metric_key: {
+            type: 'string',
+            title: 'Metric Key'
+        },
         provider_id: {
             anyOf: [
                 {
@@ -8647,7 +8719,7 @@ export const ResearchSessionItemSchema = {
         }
     },
     type: 'object',
-    required: ['id', 'user_id', 'folder_id', 'title', 'topic', 'profile', 'mode', 'metric_direction', 'provider_id', 'model_name', 'status', 'active_turn_id', 'active_stage', 'active_stage_name', 'run_dir', 'best_objective', 'best_code_sha256', 'ended_time', 'error', 'created_time', 'updated_time'],
+    required: ['id', 'user_id', 'folder_id', 'title', 'topic', 'profile', 'mode', 'metric_direction', 'metric_key', 'provider_id', 'model_name', 'status', 'active_turn_id', 'active_stage', 'active_stage_name', 'run_dir', 'best_objective', 'best_code_sha256', 'ended_time', 'error', 'created_time', 'updated_time'],
     title: 'ResearchSessionItem',
     description: '会话响应模型。'
 } as const;
@@ -8766,14 +8838,27 @@ export const ResearchSessionUpdateRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['maximize', 'minimize']
+                    enum: ['maximize', 'minimize', '']
                 },
                 {
                     type: 'null'
                 }
             ],
             title: 'Metric Direction',
-            description: '指标优化方向；未提供不变'
+            description: '指标优化方向；空串表示清空（回落 ARC 默认）；未提供不变'
+        },
+        metric_key: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Metric Key',
+            description: 'ARC experiment.metric_key；空串表示清空（回落 ARC 默认）；未提供不变'
         },
         provider_id: {
             anyOf: [
@@ -11582,6 +11667,20 @@ export const knowledge_add_source_filesSchema = {
     type: 'object',
     required: ['files'],
     title: 'Body_llm4ad.knowledge-add_source_files'
+} as const;
+
+export const research_import_artifacts_zipSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File',
+            description: '产物 zip，条目相对 run_dir'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_llm4ad.research-import_artifacts_zip'
 } as const;
 
 export const tasks_upload_task_dataSchema = {

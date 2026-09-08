@@ -16,9 +16,17 @@ import {
   Info,
   Loader2,
   RefreshCw,
+  Upload,
   X,
 } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -35,6 +43,7 @@ import {
 import {
   downloadResearchArtifact,
   downloadResearchArtifactsArchive,
+  useImportResearchArtifacts,
   useResearchArtifactTree,
   useResearchGenerated,
   useResearchState,
@@ -113,6 +122,11 @@ function PanelInner({
   )
   // 产物预览弹框：只保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
   const [previewPath, setPreviewPath] = useState<string | null>(null)
+  // 右侧面板可编辑产物：与门控编辑同口径——凡产物树里出现的文件名均可就地编辑。
+  // 后端 write_artifact 只拒绝 `.` 开头的内部点文件（树构建时已过滤），并把原文
+  // 备份到 hitl/snapshots/；故树里能点到的文件（含 checkpoint.json、hitl/ 引导文件）
+  // 都允许保存，与中间门控区点击产物后可编辑保持一致。
+  const editablePaths = useMemo(() => collectEditableFilePaths(root), [root])
 
   // 产物树展开态提升到此处，让标题行的「全部收起」能控制它。
   const [treeExpanded, setTreeExpanded] = useState<Set<string>>(new Set())
@@ -232,6 +246,46 @@ function PanelInner({
       .finally(() => setZipping(false))
   }, [session.id, zipping])
 
+  // 导入产物 zip：解压覆盖到 run_dir。成功后失效产物树/列表/演化解并提示统计；
+  // 部分条目失败只警告，不中断（后端单条目失败会记入 failed 并继续）。
+  const importMut = useImportResearchArtifacts()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const handlePickArtifactZip = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+  const handleImportZip = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = "" // 允许再次选择同一文件
+      if (!file) return
+      importMut.mutate(
+        { sessionId: session.id, file },
+        {
+          onSuccess: (res) => {
+            toast.success(
+              t("autoResearch.artifacts.importSuccess", {
+                imported: res.imported ?? 0,
+                overwritten: res.overwritten ?? 0,
+              }),
+            )
+            if ((res.failed?.length ?? 0) > 0) {
+              toast.warning(
+                t("autoResearch.artifacts.importPartial", {
+                  count: res.failed!.length,
+                }),
+              )
+            }
+          },
+          onError: (err: unknown) => {
+            const e2 = err as { body?: { detail?: string }; message?: string }
+            toast.error(e2?.body?.detail || e2?.message || "import failed")
+          },
+        },
+      )
+    },
+    [session.id, importMut, t],
+  )
+
   // 产物面板收起时：把「报告分析 / 研究日志 / 打开 IDE / 下载产物」四枚紧凑按钮
   // 注入顶栏右侧（语言/主题切换器左侧）。四者的弹层/抽屉/下载均走 portal 或纯动作，
   // 面板收起（width:0 + inert）也能正常触发；展开或会话卸载时自动清空注入。
@@ -291,10 +345,32 @@ function PanelInner({
             <DownloadCloud className="size-4" />
           )}
         </button>
+        <button
+          type="button"
+          onClick={handlePickArtifactZip}
+          disabled={importMut.isPending}
+          title={t("autoResearch.artifacts.import")}
+          aria-label={t("autoResearch.artifacts.import")}
+          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {importMut.isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Upload className="size-4" />
+          )}
+        </button>
       </div>,
     )
     return () => setHeaderRight(null)
-  }, [rightCollapsed, zipping, handleDownloadAll, setHeaderRight, t])
+  }, [
+    rightCollapsed,
+    zipping,
+    handleDownloadAll,
+    importMut.isPending,
+    handlePickArtifactZip,
+    setHeaderRight,
+    t,
+  ])
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -478,6 +554,19 @@ function PanelInner({
             <div className="flex items-center gap-0.5">
               <button
                 type="button"
+                onClick={handlePickArtifactZip}
+                disabled={importMut.isPending}
+                title={t("autoResearch.artifacts.import")}
+                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+              >
+                {importMut.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Upload className="size-3.5" />
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={() => void treeQ.refetch()}
                 disabled={treeQ.isFetching}
                 title={t("autoResearch.artifacts.refresh")}
@@ -529,10 +618,21 @@ function PanelInner({
         )}
       </CollapsibleSection>
 
+      {/* 导入产物 zip 的隐藏 file input：仅接受 zip，由「产物」标题行的导入按钮触发。 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        className="hidden"
+        onChange={handleImportZip}
+      />
+
       <ArtifactPreviewDialog
         sessionId={session.id}
         path={previewPath}
         onClose={() => setPreviewPath(null)}
+        readOnly={false}
+        editablePaths={editablePaths}
       />
 
       {/* 日志 / 运行历史底部抽屉（右侧面板唯一入口） */}
@@ -807,6 +907,29 @@ function topLevelDirs(root: ResearchArtifactTreeNode): Set<string> {
   const s = new Set<string>()
   for (const n of root.children ?? []) if (n.is_dir) s.add(n.path)
   return s
+}
+
+/**
+ * 收集产物树里所有可编辑文件的相对路径（右侧面板编辑范围）。
+ *
+ * 与门控编辑同口径但作用域取整棵树：凡产物树里能点到的非点文件都允许就地保存
+ * （后端 write_artifact 只拒绝 `.` 开头路径，树构建时已过滤这类内部点文件，并会
+ * 把原文备份到 hitl/snapshots/）。此前只允许 `stage-NN/` 下的文件，导致 checkpoint /
+ * hitl 等目录产物只读，与门控区可编辑行为不一致。
+ */
+function collectEditableFilePaths(
+  root: ResearchArtifactTreeNode | null,
+): string[] {
+  if (!root) return []
+  const out: string[] = []
+  const walk = (node: ResearchArtifactTreeNode) => {
+    for (const c of node.children ?? []) {
+      if (c.is_dir) walk(c)
+      else out.push(c.path)
+    }
+  }
+  walk(root)
+  return out
 }
 
 /**

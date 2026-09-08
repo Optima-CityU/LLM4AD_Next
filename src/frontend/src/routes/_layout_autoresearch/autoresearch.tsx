@@ -13,6 +13,7 @@ import SessionSidebar from "@/components/AutoResearch/SessionSidebar"
 import { TechPanel } from "@/components/AutoResearch/tech"
 import {
   useCreateResearchFolder,
+  useCopyResearchSession,
   useDeleteResearchFolder,
   useDeleteResearchSession,
   useResearchFolders,
@@ -70,6 +71,7 @@ function AutoResearchPage() {
   const deleteFolderMut = useDeleteResearchFolder()
   const updateSessionMut = useUpdateResearchSession()
   const deleteSessionMut = useDeleteResearchSession()
+  const copySessionMut = useCopyResearchSession()
 
   const folders = useMemo(() => foldersQ.data?.items ?? [], [foldersQ.data])
   // 未分组会话数：来自 folders 响应，供未分组分组头部计数 + 空态判定。
@@ -194,6 +196,21 @@ function AutoResearchPage() {
       const detail =
         (err as { body?: { detail?: string } })?.body?.detail ??
         t("autoResearch.sidebar.sessionRunning")
+      toast.error(detail)
+    }
+  }
+
+  // 复制会话：副本沿用原标题/画像/运行状态但开启全新生命周期（新 UUID、stream_id 清空）；
+  // 成功后跳转到副本并在侧栏可见。副本与原会话标题相同，靠列表上的展开区分。
+  const handleCopySession = async (id: string) => {
+    try {
+      const copy = await copySessionMut.mutateAsync(id)
+      setActiveSessionId(copy.id)
+      const title = copy.title || "?"
+      toast.success(t("autoResearch.sidebar.copySessionSuccess", { title }))
+    } catch (err: unknown) {
+      const detail =
+        (err as { body?: { detail?: string } })?.body?.detail ?? "error"
       toast.error(detail)
     }
   }
@@ -325,6 +342,7 @@ function AutoResearchPage() {
               onRenameSession={handleRenameSession}
               onMoveSession={handleMoveSession}
               onDeleteSession={handleDeleteSession}
+              onCopySession={handleCopySession}
               onSwitchProfile={handleSwitchProfile}
             />
           </TechPanel>

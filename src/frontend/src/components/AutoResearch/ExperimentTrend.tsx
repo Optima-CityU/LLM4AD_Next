@@ -1,8 +1,15 @@
-import { Loader2 } from "lucide-react"
+import { ListStart, Loader2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import TrendPanel from "@/components/Evolution/TaskDetail/TrendPanel"
 import { useResearchGenerated } from "@/hooks/useAutoResearch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { EvolutionProvider } from "./EvolutionProvider"
 import { convertToEvolutionData } from "./evolutionDataAdapter"
 
@@ -24,17 +31,18 @@ export default function ExperimentTrend({ sessionId, running }: Props) {
     [genQ.data],
   )
 
-  const [stage, setStage] = useState<number | null>(null)
+  const [stage, setStage] = useState<string | null>(null)
+  const stageKey = (a: string | null | undefined) => a ?? "?"
   useEffect(() => {
     if (groups.length === 0) return
-    const stages = groups.map((g) => g.stage ?? -1)
+    const stages = groups.map((g) => stageKey(g.stage))
     if (stage == null || !stages.includes(stage)) {
       setStage(stages[stages.length - 1])
     }
   }, [groups, stage])
 
   const activeGroup =
-    groups.find((g) => (g.stage ?? -1) === stage) ?? groups[groups.length - 1]
+    groups.find((g) => stageKey(g.stage) === stage) ?? groups[groups.length - 1]
 
   // 转换为 evolution 数据格式
   const evolutionData = useMemo(() => {
@@ -68,23 +76,30 @@ export default function ExperimentTrend({ sessionId, running }: Props) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* stage 选择 */}
+      {/* 算法分组选择：对齐底部输入框的「选择算法」Select 样式（ListStart + 紧凑透明 trigger） */}
       {groups.length > 1 && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40">
-          <span className="text-xs text-muted-foreground">
-            {t("autoResearch.stages.title")}
-          </span>
-          <select
-            value={stage ?? ""}
-            onChange={(e) => setStage(Number(e.target.value))}
-            className="h-7 rounded border border-border/60 bg-background/60 px-2 text-xs focus:border-primary/50 focus:outline-none"
-          >
-            {groups.map((g) => (
-              <option key={g.stage ?? -1} value={g.stage ?? -1}>
-                #{g.stage ?? "?"}
-              </option>
-            ))}
-          </select>
+        <div className="mb-2 flex items-center gap-1 px-4 py-2 border-b border-border/40">
+          <Select value={stage ?? ""} onValueChange={setStage}>
+            <SelectTrigger
+              size="sm"
+              aria-label={t("autoResearch.experiment.selectAlgorithm")}
+              className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 shrink-0"
+            >
+              <ListStart className="size-3 shrink-0" />
+              <SelectValue placeholder={t("autoResearch.experiment.selectAlgorithm")} />
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((g) => (
+                <SelectItem
+                  key={stageKey(g.stage)}
+                  value={stageKey(g.stage)}
+                  className="text-xs"
+                >
+                  {g.stage ?? "?"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 
 import {
   GATE_STAGES,
+  LLM4AD_STAGES,
   STAGE_GROUPS,
   type StageCell,
   type StageStatus,
@@ -29,14 +30,28 @@ interface Props {
   /** 从指定阶段运行（等价于底部设好起始阶段再点运行）。 */
   onRunFromStage?: (stage: number) => void
   /**
-   * 隐藏 LLM4AD 标识：ml_vision 画像下 9-13 阶段不接 LLM4AD 演化引擎，
-   * 去掉分组的 LLM4AD 徽章 / 专属样式，浮层来源提示也改为 ARC 原生。
+   * 隐藏 LLM4AD 标识：ml_vision 画像下不接 LLM4AD 演化引擎，去掉所有 LLM4AD
+   * 徽章 / 专属样式，浮层来源提示也改为 ARC 原生。
    */
   hideLlm4ad?: boolean
 }
 
-/** 接入本项目 llm4ad 的分组 key（实验设计 + 实验执行）——其余步骤走 ARC。 */
-const LLM4AD_GROUPS = new Set(["design", "execution"])
+/**
+ * 分组是否含 LLM4AD 演化引擎驱动的阶段（仅实验设计组的 Stage 10 与实验执行组的
+ * Stage 13）。分组级徽章「包含 LLM4AD 步骤」据此判定；具体哪一步被驱动由
+ * {@link isStageLlm4ad} 逐阶段判断。
+ */
+function groupHasLlm4ad(g: { from: number; to: number }): boolean {
+  for (let n = g.from; n <= g.to; n++) {
+    if (LLM4AD_STAGES.has(n)) return true
+  }
+  return false
+}
+
+/** 单个阶段是否由 LLM4AD 演化引擎驱动（与 `stages.descriptions` 的逐阶段口径一致）。 */
+export function isStageLlm4ad(stage: number): boolean {
+  return LLM4AD_STAGES.has(stage)
+}
 
 /** 分组聚合态：优先级 failed > running > waiting > done(全完成) > partial > pending。 */
 type GroupStatus =
@@ -126,7 +141,7 @@ export default function StageGroupRail({
         {groups.map(({ g, present, info }, gi) => {
           const isActivePhase =
             activeStage != null && activeStage >= g.from && activeStage <= g.to
-          const isLlm4ad = !hideLlm4ad && LLM4AD_GROUPS.has(g.key)
+          const isLlm4ad = !hideLlm4ad && groupHasLlm4ad(g)
 
           return (
             <Fragment key={g.key}>
@@ -468,12 +483,12 @@ function PhaseTimeline({
         </div>
       </div>
 
-      {/* 阶段来源提示：llm4ad 步骤 / 其余 ARC */}
+      {/* 阶段来源提示：含 LLM4AD 步骤的分组 / 其余 ARC */}
       <div className="px-3 pt-1.5 text-[10px] text-muted-foreground/70">
         {isLlm4ad
           ? t(
               "autoResearch.stages.poweredByLlm4ad",
-              "本步由 LLM4AD 演化引擎驱动",
+              "包含由 LLM4AD 演化引擎驱动的步骤",
             )
           : t("autoResearch.stages.poweredByArc", "由 AutoResearchClaw 驱动")}
       </div>
@@ -487,6 +502,7 @@ function PhaseTimeline({
             isActive={activeStage != null && cell.stage === activeStage}
             last={i === present.length - 1}
             hideLlm4ad={hideLlm4ad}
+            isLlm4ad={!hideLlm4ad && isStageLlm4ad(cell.stage)}
             onSelect={onSelect}
             canRunFromStage={canRunFromStage}
             runnableStages={runnableStages}
@@ -511,6 +527,7 @@ function TimelineRow({
   isActive,
   last,
   hideLlm4ad,
+  isLlm4ad,
   onSelect,
   canRunFromStage,
   runnableStages,
@@ -520,6 +537,8 @@ function TimelineRow({
   isActive: boolean
   last: boolean
   hideLlm4ad?: boolean
+  /** 该阶段是否由 LLM4AD 演化引擎驱动（逐阶段，非整组）。 */
+  isLlm4ad?: boolean
   onSelect: (cell: StageCell) => void
   canRunFromStage?: boolean
   runnableStages?: Set<number>
@@ -591,6 +610,11 @@ function TimelineRow({
               {isGate && (
                 <span className="shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
                   GATE
+                </span>
+              )}
+              {isLlm4ad && (
+                <span className="shrink-0 rounded bg-primary/15 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                  LLM4AD
                 </span>
               )}
             </div>

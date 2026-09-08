@@ -28,6 +28,7 @@ class SessionSnapshot:
     profile: str
     mode: str
     metric_direction: str
+    metric_key: str
     provider_id: str | None
     model_name: str | None
     run_dir: str | None
@@ -54,7 +55,8 @@ def snap_session(session: ResearchSession) -> SessionSnapshot:
         topic=session.topic or "",
         profile=session.profile,
         mode=session.mode,
-        metric_direction=session.metric_direction or "maximize",
+        metric_direction=session.metric_direction,
+        metric_key=session.metric_key,
         provider_id=session.provider_id,
         model_name=session.model_name,
         run_dir=session.run_dir,
