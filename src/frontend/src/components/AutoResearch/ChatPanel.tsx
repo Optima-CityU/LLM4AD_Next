@@ -51,6 +51,7 @@ import BottomComposer, { type RunOverrides } from "./BottomComposer"
 import MessageItem from "./MessageItem"
 import { ML_VISION_PROFILE } from "./shared"
 import { StageProgressBar } from "./StageProgress"
+import { buildStageRoadmap } from "./tech"
 import type { StreamLogEntry } from "./StreamLogConsole"
 import StageTimeline, {
   type StageEntry,
@@ -300,6 +301,13 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     refetchInterval: false,
   })
   const displayStages = stateQ.data?.stages ?? []
+  // 底部「起始阶段」选择器用的完整 23 阶段清单：已跑到的阶段保留真实态，未跑到
+  // 的阶段合成为 pending。这样用户也能从尚未执行过的后续阶段起步（后端按
+  // --from-stage 接受任意合法 stage 号）。默认选中仍在下方重置为最后一个真实阶段。
+  const displayStageOptions = useMemo(
+    () => buildStageRoadmap(displayStages),
+    [displayStages],
+  )
 
   // 运行配置（provider / model / mode / 起始阶段）提升到此，让底部运行工具行与
   // 顶部阶段轨的「从此步运行」共用同一份参数——从阶段点运行 == 设好起始阶段再点运行。
@@ -1111,7 +1119,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           running={session.status === "running"}
           paused={session.status === "paused"}
           sending={busy}
-          stages={displayStages}
+          stages={displayStageOptions}
           canRetry={canRetry}
           provider={runProvider}
           model={runModel}

@@ -502,10 +502,11 @@ def copy_session(
     db.flush()
 
     # 3) 补齐 turn.respond_to_message_id（消息已建，映射可解）
-    for t, new_turn in turn_map.items():
-        if t.respond_to_message_id:
-            new_msg = message_map.get(t.respond_to_message_id)
+    for old_turn in old_turns:
+        if old_turn.respond_to_message_id:
+            new_msg = message_map.get(old_turn.respond_to_message_id)
             if new_msg is not None:
+                new_turn = turn_map[old_turn.id]
                 new_turn.respond_to_message_id = new_msg.id
 
     # 4) 复制 log

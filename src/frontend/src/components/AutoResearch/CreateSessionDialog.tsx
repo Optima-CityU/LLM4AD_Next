@@ -35,10 +35,10 @@ import { cn } from "@/lib/utils"
 import ProviderModelPicker from "./ProviderModelPicker"
 import {
   METRIC_DIRECTION_OPTIONS,
-  MODE_OPTIONS,
-  PROFILE_OPTIONS,
-  metricDirectionToApi,
   type MetricDirection,
+  MODE_OPTIONS,
+  metricDirectionToApi,
+  PROFILE_OPTIONS,
   type ResearchProfile,
 } from "./shared"
 import { SectionLabel } from "./tech"
@@ -69,7 +69,8 @@ export default function CreateSessionDialog({
   const [modelName, setModelName] = useState("")
   const [mode, setMode] = useState<ResearchMode>("co-pilot")
   const [profile, setProfile] = useState<ResearchProfile>("algorithm_evolution")
-  const [metricDirection, setMetricDirection] = useState<MetricDirection>("auto")
+  const [metricDirection, setMetricDirection] =
+    useState<MetricDirection>("auto")
   const [metricKey, setMetricKey] = useState("")
   const [autoStart, setAutoStart] = useState(false)
   const [topicError, setTopicError] = useState("")
@@ -201,7 +202,7 @@ export default function CreateSessionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
+        <div className="space-y-2.5 py-2">
           <Field label={t("autoResearch.create.topicLabel")} error={topicError}>
             <div className="relative">
               <textarea
@@ -276,7 +277,7 @@ export default function CreateSessionDialog({
                     type="button"
                     onClick={() => setProfile(p as ResearchProfile)}
                     className={cn(
-                      "group relative rounded-lg px-4 py-3 text-left transition-all",
+                      "group relative rounded-lg px-3 py-2.5 text-left transition-all",
                       "border-l border-r border-border/60",
                       profile === p
                         ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
@@ -287,7 +288,7 @@ export default function CreateSessionDialog({
                       {/* 选中指示器 */}
                       <div
                         className={cn(
-                          "mt-0.5 size-4 shrink-0 rounded-full border-2 transition-all",
+                          "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
                           profile === p
                             ? "border-primary bg-primary"
                             : "border-muted-foreground/40 bg-background",
@@ -299,10 +300,10 @@ export default function CreateSessionDialog({
                           </div>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex-1 min-w-0 space-y-0.5">
                         <div
                           className={cn(
-                            "text-sm font-medium transition-colors",
+                            "text-[13px] font-medium transition-colors",
                             profile === p
                               ? "text-foreground"
                               : "text-foreground/80 group-hover:text-foreground",
@@ -310,7 +311,7 @@ export default function CreateSessionDialog({
                         >
                           {t(`autoResearch.profile.${p}`)}
                         </div>
-                        <div className="text-[11px] leading-relaxed text-muted-foreground">
+                        <div className="text-[11px] leading-snug text-muted-foreground">
                           {t(`autoResearch.profileDesc.${p}`)}
                         </div>
                       </div>
@@ -322,52 +323,45 @@ export default function CreateSessionDialog({
           </Field>
 
           <Field label={t("autoResearch.create.metricDirectionLabel")}>
-            <div className="grid grid-cols-3 gap-3">
+            <div
+              role="radiogroup"
+              aria-label={t("autoResearch.create.metricDirectionLabel")}
+              className="grid grid-cols-3 gap-2"
+            >
               {METRIC_DIRECTION_OPTIONS.map((d) => (
-                <button
+                <label
                   key={d}
-                  type="button"
-                  onClick={() => setMetricDirection(d as MetricDirection)}
                   className={cn(
-                    "group relative rounded-lg px-4 py-3 text-left transition-all",
-                    "border-l border-r border-border/60",
+                    "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 transition-all",
                     metricDirection === d
-                      ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
-                      : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
+                      ? "border-primary/60 bg-primary/10"
+                      : "border-border/60 hover:border-primary/50 hover:bg-primary/5",
                   )}
                 >
-                  <div className="flex items-start gap-2">
-                    <div
+                  <input
+                    type="radio"
+                    name="metric-direction"
+                    value={d}
+                    checked={metricDirection === d}
+                    onChange={() => setMetricDirection(d as MetricDirection)}
+                    className="mt-0.5 size-3.5 shrink-0 accent-primary"
+                  />
+                  <span className="min-w-0 space-y-0.5">
+                    <span
                       className={cn(
-                        "mt-0.5 size-4 shrink-0 rounded-full border-2 transition-all",
+                        "block text-[12px] font-medium leading-tight",
                         metricDirection === d
-                          ? "border-primary bg-primary"
-                          : "border-muted-foreground/40 bg-background",
+                          ? "text-foreground"
+                          : "text-foreground/80",
                       )}
                     >
-                      {metricDirection === d && (
-                        <div className="size-full flex items-center justify-center">
-                          <div className="size-1.5 rounded-full bg-primary-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div
-                        className={cn(
-                          "text-sm font-medium transition-colors",
-                          metricDirection === d
-                            ? "text-foreground"
-                            : "text-foreground/80 group-hover:text-foreground",
-                        )}
-                      >
-                        {t(`autoResearch.metricDirection.${d}`)}
-                      </div>
-                      <div className="text-[11px] leading-relaxed text-muted-foreground">
-                        {t(`autoResearch.metricDirection.${d}Desc`)}
-                      </div>
-                    </div>
-                  </div>
-                </button>
+                      {t(`autoResearch.metricDirection.${d}`)}
+                    </span>
+                    <span className="block text-[10px] leading-snug text-muted-foreground">
+                      {t(`autoResearch.metricDirection.${d}Desc`)}
+                    </span>
+                  </span>
+                </label>
               ))}
             </div>
           </Field>

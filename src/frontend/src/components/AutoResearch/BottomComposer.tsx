@@ -16,7 +16,6 @@ import type {
   ResearchMessageItem,
   ResearchMode,
   ResearchSessionItem,
-  ResearchStageSnapshot,
 } from "@/client"
 import {
   Popover,
@@ -41,7 +40,7 @@ import { cn } from "@/lib/utils"
 import GateHeader, { gateActionClass, getGateActions } from "./GatePanel"
 import ProviderModelPicker from "./ProviderModelPicker"
 import { MODE_OPTIONS } from "./shared"
-import { stageNameByLang } from "./tech"
+import { type StageCell, stageNameByLang } from "./tech"
 
 // 门控动作里哪些必须给理由 / 哪些把理由当 guidance 传入。理由取自底部输入框。
 const NEEDS_REASON = new Set(["reject", "inject"])
@@ -68,7 +67,9 @@ interface Props {
   running: boolean
   paused: boolean
   sending: boolean
-  stages: ResearchStageSnapshot[]
+  /** 完整 23 阶段清单（合成未跑到的阶段为 pending），供「起始阶段」选择器列出全部
+   *  可起步阶段——未执行过的后续阶段也可选。 */
+  stages: StageCell[]
   canRetry: boolean
   /** 运行配置（受控，提升到 ChatPanel 与顶部阶段轨共用）。 */
   provider: string

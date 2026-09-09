@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -12,8 +12,18 @@ import HeaderSessionSwitcher from "@/components/AutoResearch/HeaderSessionSwitch
 import SessionSidebar from "@/components/AutoResearch/SessionSidebar"
 import { TechPanel } from "@/components/AutoResearch/tech"
 import {
-  useCreateResearchFolder,
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Button } from "@/components/ui/button"
+import {
   useCopyResearchSession,
+  useCreateResearchFolder,
   useDeleteResearchFolder,
   useDeleteResearchSession,
   useResearchFolders,
@@ -202,9 +212,13 @@ function AutoResearchPage() {
 
   // 复制会话：副本沿用原标题/画像/运行状态但开启全新生命周期（新 UUID、stream_id 清空）；
   // 成功后跳转到副本并在侧栏可见。副本与原会话标题相同，靠列表上的展开区分。
+  // 复制是不可逆的落盘操作，先经二次确认。
+  const [copyTarget, setCopyTarget] = useState<ResearchSessionItem | null>(null)
+  const [copyBusy, setCopyBusy] = useState(false)
   const handleCopySession = async (id: string) => {
     try {
       const copy = await copySessionMut.mutateAsync(id)
+      setCopyTarget(null)
       setActiveSessionId(copy.id)
       const title = copy.title || "?"
       toast.success(t("autoResearch.sidebar.copySessionSuccess", { title }))
@@ -212,6 +226,8 @@ function AutoResearchPage() {
       const detail =
         (err as { body?: { detail?: string } })?.body?.detail ?? "error"
       toast.error(detail)
+    } finally {
+      setCopyBusy(false)
     }
   }
 
@@ -342,7 +358,7 @@ function AutoResearchPage() {
               onRenameSession={handleRenameSession}
               onMoveSession={handleMoveSession}
               onDeleteSession={handleDeleteSession}
-              onCopySession={handleCopySession}
+              onCopySession={(s) => setCopyTarget(s)}
               onSwitchProfile={handleSwitchProfile}
             />
           </TechPanel>
@@ -432,6 +448,45 @@ function AutoResearchPage() {
         initialFolderId={createInitialFolder}
         onCreated={handleCreated}
       />
+
+      {/* 复制会话二次确认：复制会深度拷贝 DB + 落盘产物，先确认再执行。 */}
+      <AlertDialog
+        open={!!copyTarget}
+        onOpenChange={(o) => !o && !copyBusy && setCopyTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("autoResearch.sidebar.copySession")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("autoResearch.sidebar.copySessionConfirm", {
+                title: copyTarget?.title ?? "",
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={copyBusy}>
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <Button
+              disabled={copyBusy}
+              onClick={() => {
+                if (!copyTarget) return
+                setCopyBusy(true)
+                void handleCopySession(copyTarget.id)
+              }}
+            >
+              {copyBusy && <Loader2 className="size-4 animate-spin" />}
+              {copyBusy
+                ? t("autoResearch.sidebar.copying", {
+                    defaultValue: "复制中...",
+                  })
+                : t("common.confirm")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

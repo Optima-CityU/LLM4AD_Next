@@ -94,7 +94,7 @@ interface Props {
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onDeleteSession: (id: string) => Promise<void> | void
   /** 复制一个科研会话（深度拷贝 DB + 落盘产物），成功后由父层跳转到副本。 */
-  onCopySession: (id: string) => Promise<void> | void
+  onCopySession: (session: ResearchSessionItem) => Promise<void> | void
   /** 切换会话 profile（实验类型），会清空第 9 步之后的产物。 */
   onSwitchProfile: (id: string, profile: string) => Promise<void> | void
 }
@@ -397,7 +397,7 @@ export default function SessionSidebar({
             activeSessionId={activeSessionId}
             onSelectSession={onSelectSession}
             onDeleteSession={setDeleteSession}
-            onCopySession={(s) => onCopySession(s.id)}
+            onCopySession={onCopySession}
             onRenameSession={(s) => {
               setRenameSessionTitle(s.title)
               setRenameSession(s)
@@ -438,7 +438,7 @@ export default function SessionSidebar({
             activeSessionId={activeSessionId}
             onSelectSession={onSelectSession}
             onDeleteSession={setDeleteSession}
-            onCopySession={(s) => onCopySession(s.id)}
+            onCopySession={onCopySession}
             onRenameSession={(s) => {
               setRenameSessionTitle(s.title)
               setRenameSession(s)
@@ -485,15 +485,15 @@ export default function SessionSidebar({
               activeSessionId={activeSessionId}
               onSelectSession={onSelectSession}
               onDeleteSession={setDeleteSession}
-              onCopySession={(s) => onCopySession(s.id)}
+              onCopySession={onCopySession}
               onRenameSession={(s) => {
                 setRenameSessionTitle(s.title)
                 setRenameSession(s)
               }}
               onMoveSession={onMoveSession}
               onSwitchProfile={(s, target) =>
-              setSwitchTarget({ session: s, profile: target })
-            }
+                setSwitchTarget({ session: s, profile: target })
+              }
               expanded={expanded.has(folder.id)}
               onToggle={() => toggleExpanded(folder.id)}
               dragSession={dragSession}

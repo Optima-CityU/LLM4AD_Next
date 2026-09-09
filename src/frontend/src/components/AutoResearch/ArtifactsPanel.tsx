@@ -8,7 +8,6 @@ import {
   Download,
   DownloadCloud,
   FileBarChart,
-  ScrollText,
   FlaskConical,
   Folder,
   FolderOpen,
@@ -16,6 +15,7 @@ import {
   Info,
   Loader2,
   RefreshCw,
+  ScrollText,
   Upload,
   X,
 } from "lucide-react"
@@ -33,10 +33,12 @@ import { toast } from "sonner"
 import type { ResearchArtifactTreeNode, ResearchSessionItem } from "@/client"
 import { UtilsCodeServerService } from "@/client"
 import { useTheme } from "@/components/theme-provider"
+import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -57,9 +59,7 @@ import ArtifactPreviewDialog, {
 } from "./ArtifactPreviewDialog"
 import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
-import ResearchLogDrawer, {
-  type ResearchDrawerTab,
-} from "./ResearchLogDrawer"
+import ResearchLogDrawer, { type ResearchDrawerTab } from "./ResearchLogDrawer"
 import { ML_VISION_PROFILE } from "./shared"
 import { SectionLabel, StatusPill, stageNameByLang } from "./tech"
 
@@ -180,8 +180,7 @@ function PanelInner({
 
   // 日志 / 运行历史底部抽屉（右侧面板唯一入口，按需查看）。
   const [logDrawerOpen, setLogDrawerOpen] = useState(false)
-  const [logDrawerTab, setLogDrawerTab] =
-    useState<ResearchDrawerTab>("logs")
+  const [logDrawerTab, setLogDrawerTab] = useState<ResearchDrawerTab>("logs")
 
   // IDE：与 evolution 一致，先拿 code token 启动容器，再加载 iframe。
   const { resolvedTheme } = useTheme()
@@ -211,9 +210,7 @@ function PanelInner({
         setIdeState("error")
         const e = err as { body?: { detail?: string }; message?: string }
         setIdeError(
-          e?.body?.detail ||
-            e?.message ||
-            t("evolution.getCodeTokenFailed"),
+          e?.body?.detail || e?.message || t("evolution.getCodeTokenFailed"),
         )
       })
   }, [resolvedTheme, t])
@@ -248,16 +245,28 @@ function PanelInner({
 
   // 导入产物 zip：解压覆盖到 run_dir。成功后失效产物树/列表/演化解并提示统计；
   // 部分条目失败只警告，不中断（后端单条目失败会记入 failed 并继续）。
+  // 导入前先解析 zip 文件名列表，与会话现有产物比对：有同名冲突时先弹二次确认，
+  // 避免用户对「覆盖已存在文件」无感知。
   const importMut = useImportResearchArtifacts()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // 待确认的导入文件 + 预检出的同名覆盖数。null = 无待确认文件。
+  const [pendingImport, setPendingImport] = useState<{
+    file: File
+    overwriteCount: number
+  } | null>(null)
+  // 解析 zip（读取本地文件）进行中：禁用导入按钮防止连点。
+  const [analyzingZip, setAnalyzingZip] = useState(false)
+
   const handlePickArtifactZip = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
-  const handleImportZip = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      e.target.value = "" // 允许再次选择同一文件
-      if (!file) return
+
+  // 预检：从树里收集所有文件相对路径，用于判定「同名覆盖」。
+  const existingPaths = useMemo(() => collectFilePaths(root), [root])
+
+  // 真正发起导入：成功失效产物树/列表/演化解并提示统计；部分条目失败只警告。
+  const doImport = useCallback(
+    (file: File) => {
       importMut.mutate(
         { sessionId: session.id, file },
         {
@@ -285,6 +294,41 @@ function PanelInner({
     },
     [session.id, importMut, t],
   )
+
+  const handleImportZip = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = "" // 允许再次选择同一文件
+      if (!file) return
+      setAnalyzingZip(true)
+      try {
+        // 解析 zip 内文件名（仅 central directory，不解压内容），与现有产物比对。
+        const names = await readZipEntryNames(file)
+        const overwriteCount = names.reduce((n, name) => {
+          const p = name.replace(/\\/g, "/").replace(/^\.?\//, "")
+          return n + (existingPaths.has(p) ? 1 : 0)
+        }, 0)
+        if (overwriteCount > 0) {
+          setPendingImport({ file, overwriteCount })
+          return
+        }
+      } catch {
+        // 解析失败时放弃预检：直接走导入（由后端幂等处理），确认逻辑跳过。
+      } finally {
+        setAnalyzingZip(false)
+      }
+      doImport(file)
+    },
+    [doImport, existingPaths],
+  )
+
+  // 用户确认覆盖后真正导入。
+  const confirmImport = useCallback(() => {
+    if (!pendingImport) return
+    const { file } = pendingImport
+    setPendingImport(null)
+    doImport(file)
+  }, [pendingImport, doImport])
 
   // 产物面板收起时：把「报告分析 / 研究日志 / 打开 IDE / 下载产物」四枚紧凑按钮
   // 注入顶栏右侧（语言/主题切换器左侧）。四者的弹层/抽屉/下载均走 portal 或纯动作，
@@ -348,12 +392,12 @@ function PanelInner({
         <button
           type="button"
           onClick={handlePickArtifactZip}
-          disabled={importMut.isPending}
+          disabled={importMut.isPending || analyzingZip}
           title={t("autoResearch.artifacts.import")}
           aria-label={t("autoResearch.artifacts.import")}
           className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {importMut.isPending ? (
+          {importMut.isPending || analyzingZip ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
             <Upload className="size-4" />
@@ -367,6 +411,7 @@ function PanelInner({
     zipping,
     handleDownloadAll,
     importMut.isPending,
+    analyzingZip,
     handlePickArtifactZip,
     setHeaderRight,
     t,
@@ -555,11 +600,11 @@ function PanelInner({
               <button
                 type="button"
                 onClick={handlePickArtifactZip}
-                disabled={importMut.isPending}
+                disabled={importMut.isPending || analyzingZip}
                 title={t("autoResearch.artifacts.import")}
                 className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
               >
-                {importMut.isPending ? (
+                {importMut.isPending || analyzingZip ? (
                   <Loader2 className="size-3.5 animate-spin" />
                 ) : (
                   <Upload className="size-3.5" />
@@ -573,10 +618,7 @@ function PanelInner({
                 className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
               >
                 <RefreshCw
-                  className={cn(
-                    "size-3.5",
-                    treeQ.isFetching && "animate-spin",
-                  )}
+                  className={cn("size-3.5", treeQ.isFetching && "animate-spin")}
                 />
               </button>
               <button
@@ -626,6 +668,40 @@ function PanelInner({
         className="hidden"
         onChange={handleImportZip}
       />
+
+      {/* 导入覆盖确认：zip 与会话内同名文件重名时先确认再覆盖。 */}
+      <Dialog
+        open={!!pendingImport}
+        onOpenChange={(o) => !o && setPendingImport(null)}
+      >
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>
+              {t("autoResearch.artifacts.importOverwriteTitle")}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {t("autoResearch.artifacts.importOverwriteConfirm", {
+              count: pendingImport?.overwriteCount ?? 0,
+            })}
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={importMut.isPending}
+              onClick={() => setPendingImport(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button disabled={importMut.isPending} onClick={confirmImport}>
+              {importMut.isPending && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              {t("common.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ArtifactPreviewDialog
         sessionId={session.id}
@@ -765,6 +841,99 @@ function PanelInner({
       </Dialog>
     </div>
   )
+}
+
+/**
+ * 收集产物树里所有文件的相对路径（用于判定 zip 导入的同名覆盖）。
+ * 与 collectEditableFilePaths 同构，但只取 path 字符串集合。
+ */
+function collectFilePaths(root: ResearchArtifactTreeNode | null): Set<string> {
+  const out = new Set<string>()
+  if (!root) return out
+  const walk = (node: ResearchArtifactTreeNode) => {
+    for (const c of node.children ?? []) {
+      if (c.is_dir) walk(c)
+      else out.add(c.path)
+    }
+  }
+  walk(root)
+  return out
+}
+
+/**
+ * 读取 zip 内所有条目名（仅解析 central directory，不解压文件内容）。
+ *
+ * 不用外部 zip 库，避免为此引入新依赖：直接读 EOCD 定位 central directory，
+ * 遍历条目取文件名。带目录前缀的条目名会被原样返回（调用方负责归一化），
+ * 目录条目（以 `/` 结尾）不参与比较。解析失败时抛出，由调用方降级为直接导入。
+ */
+async function readZipEntryNames(file: File): Promise<string[]> {
+  const buf = await file.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  const dv = new DataView(buf)
+
+  // 从文件末尾向前扫描 EOCD 签名 0x06054b50（允许注释，最多 65535 + 22 字节）。
+  const EOCD = 0x06054b50
+  let eocd = -1
+  const tail = Math.min(bytes.length, 22 + 65535)
+  for (let i = bytes.length - tail; i <= bytes.length - 22; i++) {
+    if (dv.getUint32(i, true) === EOCD) {
+      eocd = i
+      break
+    }
+  }
+  if (eocd < 0) {
+    // 空 zip 或非法结构：按无条目处理（不抛，避免阻断导入）。
+    return []
+  }
+
+  const totalEntries = dv.getUint16(eocd + 10, true)
+  const offset = dv.getUint32(eocd + 16, true)
+
+  // ZIP64：EOCD 里条目数/偏移为 0xFFFF/0xFFFFFFFF 时，从 ZIP64 EOCD 读真实值。
+  const locator = eocd - 20
+  if (locator >= 0 && dv.getUint32(locator, true) === 0x07064b50) {
+    const zip64 = Number(dv.getBigUint64(locator + 8, true))
+    if (zip64 >= 0 && zip64 + 56 <= bytes.length) {
+      try {
+        const total = Number(dv.getBigUint64(zip64 + 32, true))
+        const off = Number(dv.getBigUint64(zip64 + 48, true))
+        if (total > 0) {
+          return readCentralDir(bytes, dv, total, off)
+        }
+      } catch {
+        // ZIP64 定位失败回退经典读取
+      }
+    }
+  }
+
+  return readCentralDir(bytes, dv, totalEntries, offset)
+}
+
+/** 从 central directory 读取 `count` 个条目的文件名。 */
+function readCentralDir(
+  bytes: Uint8Array,
+  dv: DataView,
+  count: number,
+  offset: number,
+): string[] {
+  const names: string[] = []
+  const decoder = new TextDecoder()
+  let ptr = offset
+  for (let i = 0; i < count; i++) {
+    // 中央目录条目头签名 0x02014b50
+    if (ptr + 46 > bytes.length || dv.getUint32(ptr, true) !== 0x02014b50) {
+      throw new Error("invalid central directory")
+    }
+    const nameLen = dv.getUint16(ptr + 28, true)
+    const extraLen = dv.getUint16(ptr + 30, true)
+    const commentLen = dv.getUint16(ptr + 32, true)
+    const nameBytes = bytes.subarray(ptr + 46, ptr + 46 + nameLen)
+    const name = decoder.decode(nameBytes)
+    if (!name.endsWith("/")) names.push(name)
+    ptr += 46 + nameLen + extraLen + commentLen
+  }
+  return names
 }
 
 /**
