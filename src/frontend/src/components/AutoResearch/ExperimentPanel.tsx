@@ -24,8 +24,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useResearchGenerated } from "@/hooks/useAutoResearch"
-import { cn } from "@/lib/utils"
 
 /**
  * 右侧「实验」区：llm4ad 演化的仿真概览 + 趋势分析，接入真实 generated 数据。
@@ -163,7 +168,15 @@ function buildExpData(items: ResearchGeneratedItem[]): ExpData {
   }
 }
 
-/** 演化仿真 ⇄ 趋势分析切换段控件（放在区域标题行，与标题水平对齐）。 */
+/**
+ * 演化仿真 ⇄ 趋势分析切换按钮。
+ *
+ * 段控件（两个并排选项）要占掉两枚按钮的宽度，而这一行同时还要放算法分组
+ * 选择器，窄面板下会很挤。这里改成单枚按钮：按钮上显示的是**即将切到的视图**
+ * （图标 + 文案），点一下即互换，于是同一时刻只需要一个目标词的宽度。
+ * 因为在按钮上写的是目标态而非当前态，语义容易读反，故 hover 用 tooltip
+ * 明确写出「点击切换到 X」，避免歧义。
+ */
 export function ExperimentTabToggle({
   value,
   onChange,
@@ -172,39 +185,35 @@ export function ExperimentTabToggle({
   onChange: (v: ExperimentTab) => void
 }) {
   const { t } = useTranslation()
-  const items: { key: ExperimentTab; icon: typeof Activity; label: string }[] =
-    [
-      {
-        key: "simulation",
-        icon: Activity,
-        label: t("autoResearch.experiment.simulation"),
-      },
-      {
-        key: "trend",
-        icon: TrendingUp,
-        label: t("autoResearch.experiment.trend"),
-      },
-    ]
+  const target: ExperimentTab = value === "simulation" ? "trend" : "simulation"
+  const TargetIcon = target === "simulation" ? Activity : TrendingUp
+  const targetLabel = t(
+    target === "simulation"
+      ? "autoResearch.experiment.simulation"
+      : "autoResearch.experiment.trend",
+  )
+
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-card/60 p-0.5">
-      {items.map(({ key, icon: Icon, label }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChange(key)}
-          aria-pressed={value === key}
-          className={cn(
-            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
-            value === key
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:text-foreground/80",
-          )}
-        >
-          <Icon className="size-3" />
-          {label}
-        </button>
-      ))}
-    </div>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => onChange(target)}
+            aria-label={t("autoResearch.experiment.switchTo", {
+              view: targetLabel,
+            })}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 bg-card/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+          >
+            <TargetIcon className="size-3" />
+            {targetLabel}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="px-2 py-1 text-[11px]">
+          {t("autoResearch.experiment.switchTo", { view: targetLabel })}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -261,13 +270,11 @@ export default function ExperimentPanel({
 
   return (
     <div>
-      {/* 视图切换（演化仿真在左 / 趋势分析在右） */}
-      <div className="mb-2 flex items-center gap-1">
-        <ExperimentTabToggle value={tab} onChange={setTab} />
-      </div>
-      {/* 算法分组选择：对齐底部输入框的「选择算法」Select 样式（ListStart + 紧凑透明 trigger） */}
-      {groups.length > 1 && (
-        <div className="mb-2 flex items-center gap-1">
+      {/* 控制行：左侧算法分组选择、右侧视图切换，两端对齐（中间靠 justify-between
+          撑开）。只有一个分组时 Select 不渲染，此时左侧留一个空占位框保住对齐，
+          切换按钮不会被推到左端。 */}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        {groups.length > 1 ? (
           <Select value={stage ?? ""} onValueChange={setStage}>
             <SelectTrigger
               size="sm"
@@ -289,18 +296,17 @@ export default function ExperimentPanel({
               ))}
             </SelectContent>
           </Select>
-        </div>
-      )}
+        ) : (
+          <span />
+        )}
+        <ExperimentTabToggle value={tab} onChange={setTab} />
+      </div>
 
       {tab === "simulation" ? (
         <SimulationView data={data} />
       ) : (
         <TrendView data={data} />
       )}
-
-      <p className="mt-1.5 text-[10px] text-muted-foreground/50">
-        {t("autoResearch.experiment.population")}: {data.population}
-      </p>
     </div>
   )
 }

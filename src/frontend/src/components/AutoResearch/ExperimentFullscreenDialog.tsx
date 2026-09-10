@@ -96,15 +96,14 @@ export default function ExperimentFullscreenDialog({
             </DialogClose>
           </DialogHeader>
 
-          {/* 内容区：根据 tab 切换显示，居中最大宽度 */}
-          <div className="min-h-0 overflow-hidden flex items-center justify-center p-8">
-            <div className="w-full h-full max-w-7xl">
-              {activeTab === "simulation" ? (
-                <ExperimentSimulation sessionId={sessionId} running={running} />
-              ) : (
-                <ExperimentTrend sessionId={sessionId} running={running} />
-              )}
-            </div>
+          {/* 内容区：横向铺满整屏宽（不再居中限宽——演化图 / 趋势图都是按容器宽度
+              自适应的，限宽只会让两侧留白）。只留少量内边距分隔顶栏与边框。 */}
+          <div className="min-h-0 min-w-0 overflow-hidden p-3">
+            {activeTab === "simulation" ? (
+              <ExperimentSimulation sessionId={sessionId} running={running} />
+            ) : (
+              <ExperimentTrend sessionId={sessionId} running={running} />
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -4,6 +4,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Clock,
   Code,
   Download,
   DownloadCloud,
@@ -50,7 +51,6 @@ import {
   useResearchGenerated,
   useResearchState,
 } from "@/hooks/useAutoResearch"
-import { useAutoResearchHeader } from "@/hooks/useAutoResearchHeader"
 import { cn } from "@/lib/utils"
 import AnalysisReport from "./AnalysisReport"
 import ArtifactPreviewDialog, {
@@ -61,25 +61,28 @@ import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
 import ResearchLogDrawer, { type ResearchDrawerTab } from "./ResearchLogDrawer"
 import { ML_VISION_PROFILE } from "./shared"
-import { SectionLabel, StatusPill, stageNameByLang } from "./tech"
+import { SectionLabel, StatusPill } from "./tech"
 
 // 重启 IDE 冷却：与 evolution 的 InitializedView 保持一致，防止连点。
 const IDE_REFRESH_COOLDOWN_MS = 3000
 
 interface Props {
   session: ResearchSessionItem | null
-  /** 右侧产物面板是否收起：收起时把四枚操作按钮注入顶栏右侧。 */
+  /**
+   * @deprecated 右侧面板是否收起。产物操作按钮已固定在面板内的「产物」区，收起时
+   * 不再向顶栏注入镜像按钮，故该字段当前不再参与渲染，保留仅为兼容调用方。
+   */
   rightCollapsed?: boolean
 }
 
 /**
- * 右侧面板：三个可收起区域——实验（演化仿真 / 趋势分析）、产物（文件树）、
- * 最优解（快照 + 指标）。收起交互对齐 evolution 右侧面板。
+ * 右侧面板：三个区域——任务信息（常显）、实验（演化仿真 / 趋势分析，可收起）、
+ * 产物（文件树，常显）。
  *
  * 无整体滚动条：面板本体不滚，每个区域内容各自纵向滚动（产物区占剩余空间并
- * 滚动，其余区域按内容高度、超出才滚）。实验切换与产物「全部收起」放在各自
- * 标题行以省纵向空间。产物树点文件名预览、点下载图标下载；顶部一键折叠到第一层，
- * 每个目录可递归展开全部子孙。
+ * 滚动，其余区域按内容高度、超出才滚）。产物区的操作按钮（打开 IDE / 下载 /
+ * 导入 / 刷新）固定在操作行内常显，不再随折叠态在顶栏与面板之间跳动。
+ * 产物树点文件名预览、点下载图标下载；每个目录可递归展开全部子孙。
  */
 export default function ArtifactsPanel({ session, rightCollapsed }: Props) {
   const { t } = useTranslation()
@@ -99,12 +102,12 @@ export default function ArtifactsPanel({ session, rightCollapsed }: Props) {
 
 function PanelInner({
   session,
-  rightCollapsed,
+  rightCollapsed: _rightCollapsed,
 }: {
   session: ResearchSessionItem
   rightCollapsed?: boolean
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const state = useResearchState(session.id, {
     // SSE 实时推送，不需要轮询
     refetchInterval: false,
@@ -152,18 +155,13 @@ function PanelInner({
       for (const p of collectDirPaths(node)) n.add(p)
       return n
     })
+  // 树级「全部展开 / 全部收起」：此前挂在可折叠标题行的右侧，产物区改为常显后
+  // 移到标题行右端（操作行留给四枚产物按钮），保持「一键折叠到第一层」的能力。
+  const expandAllDirs = () =>
+    setTreeExpanded(root ? new Set(collectDirPaths(root)) : new Set())
 
   // 任务信息取最新态：state 查询比 session prop 更实时，缺失时回退 session。
   const status = state.data?.status ?? session.status
-  const activeStageNum = state.data?.active_stage ?? session.active_stage
-  // 当前阶段名优先本地化短名（对齐顶部进度轨与消息流），回退后端英文枚举名，
-  // 避免任务信息区出现 CODE_GENERATION 这类原始枚举。
-  const activeStageName =
-    (activeStageNum != null
-      ? stageNameByLang(activeStageNum, i18n.language)
-      : "") ||
-    state.data?.active_stage_name ||
-    session.active_stage_name
 
   // 运行中每秒 tick，驱动进行中会话的运行时长实时走秒（fmtDuration 无 end 时
   // 用 Date.now() 计算，不 tick 就会定格在首帧）。非进行中不启用，避免空转。
@@ -330,92 +328,8 @@ function PanelInner({
     doImport(file)
   }, [pendingImport, doImport])
 
-  // 产物面板收起时：把「报告分析 / 研究日志 / 打开 IDE / 下载产物」四枚紧凑按钮
-  // 注入顶栏右侧（语言/主题切换器左侧）。四者的弹层/抽屉/下载均走 portal 或纯动作，
-  // 面板收起（width:0 + inert）也能正常触发；展开或会话卸载时自动清空注入。
-  const { setHeaderRight } = useAutoResearchHeader()
-  useEffect(() => {
-    if (!rightCollapsed) {
-      setHeaderRight(null)
-      return
-    }
-    setHeaderRight(
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => setTool("report")}
-          title={t("autoResearch.mainTabs.report")}
-          aria-label={t("autoResearch.mainTabs.report")}
-          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
-        >
-          <FileBarChart className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setLogDrawerTab("logs")
-            setLogDrawerOpen(true)
-          }}
-          title={t("autoResearch.mainTabs.logsFull", {
-            defaultValue: "完整日志",
-          })}
-          aria-label={t("autoResearch.mainTabs.logsFull", {
-            defaultValue: "完整日志",
-          })}
-          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
-        >
-          <ScrollText className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setTool("ide")}
-          title={t("autoResearch.mainTabs.ide")}
-          aria-label={t("autoResearch.mainTabs.ide")}
-          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors"
-        >
-          <Code className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={handleDownloadAll}
-          disabled={zipping}
-          title={t("autoResearch.artifacts.downloadAll")}
-          aria-label={t("autoResearch.artifacts.downloadAll")}
-          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {zipping ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <DownloadCloud className="size-4" />
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={handlePickArtifactZip}
-          disabled={importMut.isPending || analyzingZip}
-          title={t("autoResearch.artifacts.import")}
-          aria-label={t("autoResearch.artifacts.import")}
-          className="grid place-items-center size-7 rounded-md border border-border/70 bg-card shadow-sm text-primary hover:bg-primary/10 hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {importMut.isPending || analyzingZip ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Upload className="size-4" />
-          )}
-        </button>
-      </div>,
-    )
-    return () => setHeaderRight(null)
-  }, [
-    rightCollapsed,
-    zipping,
-    handleDownloadAll,
-    importMut.isPending,
-    analyzingZip,
-    handlePickArtifactZip,
-    setHeaderRight,
-    t,
-  ])
+  // 面板收起时不再向顶栏注入任何操作按钮：产物相关的四枚按钮已固定在「产物」区
+  // 的操作行（面板收起时随面板一起隐藏，展开即恢复），不再需要在顶栏留一份镜像。
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -431,33 +345,42 @@ function PanelInner({
           <StatusPill status={status} />
         </div>
         <div className="px-3 pb-3 space-y-3">
-          {/* 研究主题：直接显示内容，无 label、无嵌套面板 */}
+          {/* 研究主题：直接显示内容，无 label、无嵌套面板；最多两行，
+              超出省略并挂 title 供悬停看全文 */}
           <p
-            className="text-[13px] font-semibold text-foreground leading-relaxed line-clamp-3"
+            className="text-[13px] font-semibold text-foreground leading-relaxed line-clamp-2"
             title={session.topic}
           >
             {session.topic || "—"}
           </p>
 
-          {/* 运行进度：当前阶段 / 创建时间 / 运行时长（平铺，无嵌套面板） */}
-          <div className="space-y-1.5">
-            <InfoRow
-              label={t("autoResearch.state.activeStage")}
-              value={
-                activeStageName ||
-                (activeStageNum != null ? `#${activeStageNum}` : null)
-              }
-            />
-            <InfoRow
-              label={t("autoResearch.state.createdAt")}
-              value={fmtDateTime(session.created_time)}
-              mono
-            />
-            <InfoRow
-              label={t("autoResearch.state.duration")}
-              value={fmtDuration(session.created_time, session.ended_time)}
-              mono
-            />
+          {/* 运行元信息：创建时间 + 运行时长并排一行，不写 label——时间戳的形态
+              与等宽时长本身可辨，标签只是冗余。右侧时长用浅底 chip 与左侧时间戳
+              拉开层次（「什么时候建的」是背景信息，「跑了多久」才是要盯的值），
+              未结束时点一颗脉冲圆点表示仍在累计。悬停仍有 title 兜底说明。 */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <Clock className="size-3 shrink-0 text-muted-foreground/50" />
+            <span
+              className="min-w-0 truncate font-mono tabular-nums text-muted-foreground"
+              title={t("autoResearch.state.createdAt")}
+            >
+              {fmtDateTime(session.created_time) ?? "—"}
+            </span>
+            <span
+              className={cn(
+                "ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] tabular-nums",
+                isRunning ? "text-primary/90" : "text-foreground/70",
+              )}
+              title={t("autoResearch.state.duration")}
+            >
+              {isRunning && (
+                <span className="relative flex size-1.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
+                </span>
+              )}
+              {fmtDuration(session.created_time, session.ended_time) ?? "—"}
+            </span>
           </div>
 
           {/* 错误信息（仅失败时） */}
@@ -474,10 +397,10 @@ function PanelInner({
         </div>
       </div>
 
-      {/* 面板级操作条：报告分析 / 研究日志 / 打开 IDE / 下载产物。这四项是对整个
-          研究会话的平级操作入口，不隶属「产物」，故置于任务信息下方、其余区域之上。
-          统一主色点缀（无语义的多色只会制造噪音）：图标着主色以保证可供性/可点感，
-          表面中性实底 + 细阴影强化按钮质感，hover 再整体提亮。 */}
+      {/* 面板级操作条：报告分析 / 研究日志。这两项是对整个会话的平级入口（弹层 / 抽屉），
+          故置于任务信息下方、其余区域之上。统一主色点缀（无语义的多色只会制造噪音）：
+          图标着主色以保证可供性/可点感，表面中性实底 + 细阴影强化按钮质感。
+          产物相关的操作（打开 IDE / 下载 / 导入 / 刷新）已下移到「产物」区，见下方。 */}
       <div className="grid grid-cols-2 gap-1.5 px-3 py-2.5 shrink-0 border-b border-border/40">
         {/* 报告分析 */}
         <button
@@ -513,41 +436,6 @@ function PanelInner({
             {t("autoResearch.mainTabs.logsFull", {
               defaultValue: "完整日志",
             })}
-          </div>
-        </button>
-
-        {/* 打开 IDE */}
-        <button
-          type="button"
-          onClick={() => setTool("ide")}
-          title={t("autoResearch.mainTabs.ide")}
-          className="group flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200"
-        >
-          <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
-            <Code className="size-3.5 text-primary" />
-          </div>
-          <div className="min-w-0 text-[11px] font-semibold text-foreground/90 truncate">
-            {t("autoResearch.mainTabs.ide")}
-          </div>
-        </button>
-
-        {/* 下载产物 */}
-        <button
-          type="button"
-          onClick={handleDownloadAll}
-          disabled={zipping}
-          title={t("autoResearch.artifacts.downloadAll")}
-          className="group flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg border border-border/70 bg-card shadow-sm hover:bg-primary/5 hover:border-primary/40 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-card disabled:hover:border-border/70"
-        >
-          <div className="grid place-items-center size-6 rounded-md bg-primary/10 group-hover:bg-primary/15 transition-colors duration-200">
-            {zipping ? (
-              <Loader2 className="size-3.5 text-primary animate-spin" />
-            ) : (
-              <DownloadCloud className="size-3.5 text-primary" />
-            )}
-          </div>
-          <div className="min-w-0 text-[11px] font-semibold text-foreground/90 truncate">
-            {t("autoResearch.mainTabs.download")}
           </div>
         </button>
       </div>
@@ -588,77 +476,105 @@ function PanelInner({
         </CollapsibleSection>
       )}
 
-      {/* 2. 产物文件树（中间）：占剩余空间并内部滚动；报告/IDE 入口置于内容顶部，
-          刷新 / 全部收起放标题行右侧 */}
-      <CollapsibleSection
-        icon={FolderTree}
-        title={t("autoResearch.tabs.artifacts")}
-        grow
-        right={
-          root && (
-            <div className="flex items-center gap-0.5">
-              <button
-                type="button"
-                onClick={handlePickArtifactZip}
-                disabled={importMut.isPending || analyzingZip}
-                title={t("autoResearch.artifacts.import")}
-                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-              >
-                {importMut.isPending || analyzingZip ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Upload className="size-3.5" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => void treeQ.refetch()}
-                disabled={treeQ.isFetching}
-                title={t("autoResearch.artifacts.refresh")}
-                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw
-                  className={cn("size-3.5", treeQ.isFetching && "animate-spin")}
+      {/* 2. 产物（中间）：常显不可折叠——标题行（图标 + 标题 + 操作按钮组）+ 文件树；
+          树占剩余空间并内部滚动。 */}
+      <div className="flex-1 min-h-0 flex flex-col border-b border-border/40">
+        {/* 标题行：图标 + 标题 + 操作按钮组。按钮分两组——
+            ① 打开 IDE / 导出 / 导入 + 刷新：会话级动作，前三枚带文字标签（面板宽度
+               不够时优先压缩标题，这三枚的文案不会掉）；
+            ② 全部展开 / 全部收起：树级视图动作，纯图标 + tooltip，用竖线与左侧隔开。
+            该区常显，故不再需要折叠箭头。 */}
+        <div className="flex items-center h-9 pl-3 pr-1.5 gap-1.5 shrink-0">
+          <FolderTree className="size-3.5 text-primary/80 shrink-0" />
+          <span className="flex-1 min-w-0 text-[11px] font-semibold uppercase tracking-wider text-foreground/80 truncate">
+            {t("autoResearch.tabs.artifacts")}
+          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            {/* 打开 IDE 编辑器弹层 */}
+            <ArtifactLabelButton
+              icon={Code}
+              label={t("autoResearch.artifacts.ideEditor")}
+              title={t("autoResearch.mainTabs.ide")}
+              onClick={() => setTool("ide")}
+            />
+            {/* 下载产物（打包为 zip） */}
+            <ArtifactLabelButton
+              icon={DownloadCloud}
+              label={t("autoResearch.artifacts.export")}
+              title={t("autoResearch.artifacts.downloadAll")}
+              busy={zipping}
+              disabled={zipping}
+              onClick={handleDownloadAll}
+            />
+            {/* 导入产物（zip 覆盖导入） */}
+            <ArtifactLabelButton
+              icon={Upload}
+              label={t("autoResearch.artifacts.importShort")}
+              title={t("autoResearch.artifacts.import")}
+              busy={importMut.isPending || analyzingZip}
+              disabled={importMut.isPending || analyzingZip}
+              onClick={handlePickArtifactZip}
+            />
+            {/* 刷新产物列表 */}
+            <ArtifactIconButton
+              icon={RefreshCw}
+              title={t("autoResearch.artifacts.refresh")}
+              busy={treeQ.isFetching}
+              disabled={treeQ.isFetching}
+              onClick={() => void treeQ.refetch()}
+            />
+            {root && (
+              <>
+                <span
+                  aria-hidden
+                  className="ml-0.5 h-4 w-px shrink-0 bg-border/60"
                 />
-              </button>
-              <button
-                type="button"
-                onClick={() => setTreeExpanded(new Set())}
-                title={t("autoResearch.artifacts.collapseAll")}
-                className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              >
-                <ChevronsDownUp className="size-3.5" />
-              </button>
-            </div>
-          )
-        }
-      >
-        {treeQ.isLoading ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
-            <Loader2 className="size-4 animate-spin" />
-            {t("autoResearch.artifacts.loading")}
+                <ArtifactIconButton
+                  icon={ChevronsUpDown}
+                  title={t("autoResearch.artifacts.expandAll", {
+                    defaultValue: "全部展开",
+                  })}
+                  onClick={expandAllDirs}
+                />
+                <ArtifactIconButton
+                  icon={ChevronsDownUp}
+                  title={t("autoResearch.artifacts.collapseAll")}
+                  onClick={() => setTreeExpanded(new Set())}
+                />
+              </>
+            )}
           </div>
-        ) : !root ? (
-          <p className="text-xs text-muted-foreground/60 py-3">
-            {t("autoResearch.artifacts.empty")}
-          </p>
-        ) : (
-          <ul className="space-y-0.5">
-            {(root.children ?? []).map((node) => (
-              <TreeNode
-                key={node.path}
-                node={node}
-                depth={0}
-                sessionId={session.id}
-                expanded={treeExpanded}
-                onToggle={toggleDir}
-                onExpandDir={expandDir}
-                onPreview={setPreviewPath}
-              />
-            ))}
-          </ul>
-        )}
-      </CollapsibleSection>
+        </div>
+
+        {/* 文件树：占剩余空间，内部滚动 */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3">
+          {treeQ.isLoading ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
+              <Loader2 className="size-4 animate-spin" />
+              {t("autoResearch.artifacts.loading")}
+            </div>
+          ) : !root ? (
+            <p className="text-xs text-muted-foreground/60 py-3">
+              {t("autoResearch.artifacts.empty")}
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {(root.children ?? []).map((node) => (
+                <TreeNode
+                  key={node.path}
+                  node={node}
+                  depth={0}
+                  sessionId={session.id}
+                  expanded={treeExpanded}
+                  onToggle={toggleDir}
+                  onExpandDir={expandDir}
+                  onPreview={setPreviewPath}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
 
       {/* 导入产物 zip 的隐藏 file input：仅接受 zip，由「产物」标题行的导入按钮触发。 */}
       <input
@@ -844,6 +760,72 @@ function PanelInner({
 }
 
 /**
+ * 产物标题行里的图标按钮（刷新 / 全部展开 / 全部收起）：size-6、无文字，含义由
+ * tooltip 承载。`busy` 时图标换成转圈并禁用，避免刷新连点。
+ */
+function ArtifactIconButton({
+  icon: Icon,
+  title,
+  busy = false,
+  disabled = false,
+  onClick,
+}: {
+  icon: typeof RefreshCw
+  title: string
+  busy?: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="grid place-items-center size-6 rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+    >
+      <Icon className={cn("size-3.5", busy && "animate-spin")} />
+    </button>
+  )
+}
+
+/**
+ * 产物标题行里的带文字标签按钮（打开 IDE / 导出 / 导入）：核心动作，值得占用横向
+ * 空间显式命名。面板默认宽度只有 384px，故做成 px-1.5 的窄胶囊（图标 3、文字 10px），
+ * 文案本身不 truncate——宽度不够时优先压缩左侧标题。
+ */
+function ArtifactLabelButton({
+  icon: Icon,
+  label,
+  title,
+  busy = false,
+  disabled = false,
+  onClick,
+}: {
+  icon: typeof Code
+  label: string
+  title: string
+  busy?: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="inline-flex items-center gap-1 h-6 px-1.5 rounded border border-border/70 bg-card text-[10px] font-medium text-foreground/80 whitespace-nowrap shrink-0 shadow-sm hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-foreground/80 disabled:hover:border-border/70 disabled:hover:bg-card"
+    >
+      <Icon className={cn("size-3 shrink-0 text-primary", busy && "animate-spin")} />
+      {label}
+    </button>
+  )
+}
+
+/**
  * 收集产物树里所有文件的相对路径（用于判定 zip 导入的同名覆盖）。
  * 与 collectEditableFilePaths 同构，但只取 path 字符串集合。
  */
@@ -934,34 +916,6 @@ function readCentralDir(
     ptr += 46 + nameLen + extraLen + commentLen
   }
   return names
-}
-
-/**
- * 任务信息里的「标签 — 值」单行：标签左对齐、值右对齐并截断，值缺失显示占位符。
- */
-function InfoRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string
-  value?: string | null
-  mono?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-xs text-muted-foreground shrink-0">{label}</span>
-      <span
-        className={cn(
-          "text-xs font-medium text-foreground/90 truncate",
-          mono && "font-mono text-muted-foreground/90",
-        )}
-        title={value ?? undefined}
-      >
-        {value || "—"}
-      </span>
-    </div>
-  )
 }
 
 /** ISO 时间串 → 本地可读「YYYY-MM-DD HH:mm」，无值返回 null。 */
