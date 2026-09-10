@@ -1,0 +1,13 @@
+# IslandGA (Island Genetic Algorithm) - Recommended Parameters
+# Reference: classic distributed evolutionary computation model
+
+evolution:
+  type: "island_ga"
+  max_generations: 50          # increase for harder problems
+  num_islands: 5               # number of independent island sub-populations
+  island_population_size: 20   # individuals per island (total = islands x island_population_size)
+  migration_interval: 5        # generations between inter-island migration events
+  migration_rate: 0.1          # fraction of individuals migrated from the source island
+  migration_strategy: "best"   # select migrants: "best" / "random" / "elite" / "worst"
+  migration_topology: "ring"   # island connectivity: "ring" / "full" / "hierarchy" / "mesh"
+  parallel_islands: true       # evolve islands in parallel (false = sequential)

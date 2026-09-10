@@ -28,6 +28,9 @@ algo-design/
 ├── nsga2/                 # NSGA-II
 ├── moead/                 # MOEA/D
 ├── mcts-ahd/              # MCTS for AHD
+├── island-ga/             # Island Genetic Algorithm
+├── diverse-island-ga/     # Diversity-oriented Island GA
+├── dyca/                  # Dynamic Clustering Adaptive
 └── use_example/           # Complete usage example
     ├── README.md          # Example overview
     ├── skill_with_task.md # Integration guide

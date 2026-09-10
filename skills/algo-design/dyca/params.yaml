@@ -1,0 +1,19 @@
+# DyCA (Dynamic Clustering Adaptive) - Recommended Parameters
+# Reference: LLM4AD_Next instance-aware multi-pool evolution model
+
+evolution:
+  type: "dyca"
+  max_generations: 50          # increase for harder problems
+  n_clusters: 3                # number of instance clusters (>= 2)
+  clustering_method: "kmeans"  # "kmeans" or "agglomerative"
+  recluster_interval: 5        # generations between reclustering checks
+  ari_threshold: 0.8           # ARI stability threshold (0-1); skip reclustering above this
+  n_anchors: 5                 # anchor algorithms used to build instance feature vectors
+  generalist_pool_size: 10     # max generalist pool capacity
+  specialist_pool_size: 10     # max specialist pool capacity per cluster
+  complementary_pool_size: 10  # max complementary pool capacity
+  elite_archive_size: 5        # elite algorithms archived per cluster
+  sos_stagnation_threshold: 3  # generations without improvement before triggering SOS
+  base_complementary_ratio: 0.2  # base resource fraction for complementary pool (0-1)
+  offspring_per_generation: 5  # new individuals produced per generation
+  using_mode: false            # true = freeze clustering, run only specialist evolution

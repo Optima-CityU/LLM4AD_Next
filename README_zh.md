@@ -76,17 +76,18 @@ uv run llm4ad chat
 
 ## 搜索方法（自动启发式设计）
 
-从原始 [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) 平台迁移的自动启发式设计（AHD）搜索方法的迁移状态。
+原始 [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) 平台的自动启发式设计（AHD）搜索方法总览。**实现** = 该方法在代码库中是否有可运行的 orchestrator 实现；**Skill** = 是否有面向 coding agent 的算法设计 Skill。
 
-| 方法 | 状态 | Skill | 方法 | 状态 | Skill |
+| 方法 | 实现 | Skill | 方法 | 实现 | Skill |
+|--------|------|-------|--------|------|-------|
 |--------|--------|-------|--------|--------|-------|
-| **IslandGA** | ✅ 可用 | ⏳ 待开发 | **FunSearch** | ⏳ 待迁移 | 🧩 可用 |
-| **Diverse Island GA** | ✅ 可用 | ⏳ 待开发 | **HillClimb** | ⏳ 待迁移 | ⏳ 待开发 |
-| **MEoH** | ✅ 可用 | 🧩 可用 | **LHNS** | ⏳ 待迁移 | ⏳ 待开发 |
-| **DyCA** | ✅ 可用 | ⏳ 待开发 | **LLaMEA** | ⏳ 待迁移 | ⏳ 待开发 |
-| **EoH** | ✅ 可用 | 🧩 可用 | **MLES** | ⏳ 待迁移 | ⏳ 待开发 |
-| **ReEvo** | ✅ 可用 | 🧩 可用 | **MOEA/D** | ⏳ 待迁移 | 🧩 可用 |
-| **MCTS-AHD** | ✅ 可用 | 🧩 可用 | **NSGA-II** | ⏳ 待迁移 | 🧩 可用 |
+| **IslandGA** | ✅ 可用 | ✅ 可用 | **FunSearch** | ⏳ 待迁移 | ✅ 可用 |
+| **Diverse Island GA** | ✅ 可用 | ✅ 可用 | **HillClimb** | ⏳ 待迁移 | ⏳ 待开发 |
+| **MEoH** | ✅ 可用 | ✅ 可用 | **LHNS** | ⏳ 待迁移 | ⏳ 待开发 |
+| **DyCA** | ✅ 可用 | ✅ 可用 | **LLaMEA** | ⏳ 待迁移 | ⏳ 待开发 |
+| **EoH** | ✅ 可用 | ✅ 可用 | **MLES** | ⏳ 待迁移 | ⏳ 待开发 |
+| **ReEvo** | ✅ 可用 | ✅ 可用 | **MOEA/D** | ⏳ 待迁移 | ✅ 可用 |
+| **MCTS-AHD** | ✅ 可用 | ✅ 可用 | **NSGA-II** | ⏳ 待迁移 | ✅ 可用 |
 | | | | **PartEvo** | ⏳ 待迁移 | ⏳ 待开发 |
 | | | | **RandSample** | ⏳ 待迁移 | ⏳ 待开发 |
 

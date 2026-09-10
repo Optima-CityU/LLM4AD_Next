@@ -76,17 +76,18 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 
 ## Search Methods (Automatic Heuristic Design)
 
-Migration status of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform.
+Overview of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform. **Impl** = whether the method has a working orchestrator implementation in code; **Skill** = whether an algorithm design skill is available for coding agents.
 
-| Method | Status | Skill | Method | Status | Skill |
+| Method | Impl | Skill | Method | Impl | Skill |
+|--------|------|-------|--------|------|-------|
 |--------|--------|-------|--------|--------|-------|
-| **IslandGA** | ✅ Available | ⏳ Pending | **FunSearch** | ⏳ Pending | 🧩 Available |
-| **Diverse Island GA** | ✅ Available | ⏳ Pending | **HillClimb** | ⏳ Pending | ⏳ Pending |
-| **MEoH** | ✅ Available | 🧩 Available | **LHNS** | ⏳ Pending | ⏳ Pending |
-| **DyCA** | ✅ Available | ⏳ Pending | **LLaMEA** | ⏳ Pending | ⏳ Pending |
-| **EoH** | ✅ Available | 🧩 Available | **MLES** | ⏳ Pending | ⏳ Pending |
-| **ReEvo** | ✅ Available | 🧩 Available | **MOEA/D** | ⏳ Pending | 🧩 Available |
-| **MCTS-AHD** | ✅ Available | 🧩 Available | **NSGA-II** | ⏳ Pending | 🧩 Available |
+| **IslandGA** | ✅ Available | ✅ Available | **FunSearch** | ⏳ Pending | ✅ Available |
+| **Diverse Island GA** | ✅ Available | ✅ Available | **HillClimb** | ⏳ Pending | ⏳ Pending |
+| **MEoH** | ✅ Available | ✅ Available | **LHNS** | ⏳ Pending | ⏳ Pending |
+| **DyCA** | ✅ Available | ✅ Available | **LLaMEA** | ⏳ Pending | ⏳ Pending |
+| **EoH** | ✅ Available | ✅ Available | **MLES** | ⏳ Pending | ⏳ Pending |
+| **ReEvo** | ✅ Available | ✅ Available | **MOEA/D** | ⏳ Pending | ✅ Available |
+| **MCTS-AHD** | ✅ Available | ✅ Available | **NSGA-II** | ⏳ Pending | ✅ Available |
 | | | | **PartEvo** | ⏳ Pending | ⏳ Pending |
 | | | | **RandSample** | ⏳ Pending | ⏳ Pending |
 
