@@ -76,7 +76,7 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 
 ## Search Methods (Automatic Heuristic Design)
 
-Overview of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform. **Impl** = whether the method has a working orchestrator implementation in code; **Skill** = whether a prompt-based skill definition (SKILL.md + params.yaml) is available for coding agents.
+Overview of the Automatic Heuristic Design (AHD) search methods from the original [LLM4AD](https://github.com/Optima-CityU/LLM4AD/tree/main/llm4ad) platform. **Impl** = whether the method has a working orchestrator implementation in code; **Skill** = whether an algorithm design skill is available for coding agents.
 
 | Method | Impl | Skill | Method | Impl | Skill |
 |--------|------|-------|--------|------|-------|
