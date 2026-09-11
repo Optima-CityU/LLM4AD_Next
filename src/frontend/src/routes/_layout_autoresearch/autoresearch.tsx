@@ -1,6 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import {
+  ChevronLeft,
+  ChevronRight,
+  DownloadCloud,
+  Loader2,
+  Repeat,
+} from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -8,6 +14,7 @@ import type { ResearchSessionItem, ResearchSessionStatus } from "@/client"
 import ArtifactsPanel from "@/components/AutoResearch/ArtifactsPanel"
 import ChatPanel from "@/components/AutoResearch/ChatPanel"
 import CreateSessionDialog from "@/components/AutoResearch/CreateSessionDialog"
+import EditSessionDialog from "@/components/AutoResearch/EditSessionDialog"
 import HeaderSessionSwitcher from "@/components/AutoResearch/HeaderSessionSwitcher"
 import SessionSidebar from "@/components/AutoResearch/SessionSidebar"
 import { TechPanel } from "@/components/AutoResearch/tech"
@@ -22,6 +29,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  downloadResearchArtifactsArchive,
   useCopyResearchSession,
   useCreateResearchFolder,
   useDeleteResearchFolder,
@@ -156,20 +172,6 @@ function AutoResearchPage() {
     }
   }
 
-  const handleRenameSession = async (id: string, title: string) => {
-    try {
-      await updateSessionMut.mutateAsync({
-        sessionId: id,
-        body: { title },
-      })
-    } catch (err: unknown) {
-      const detail =
-        (err as { body?: { detail?: string } })?.body?.detail ?? "error"
-      toast.error(detail)
-      throw err
-    }
-  }
-
   const handleMoveSession = async (id: string, folderId: string | null) => {
     try {
       await updateSessionMut.mutateAsync({
@@ -184,17 +186,22 @@ function AutoResearchPage() {
     }
   }
 
-  const handleSwitchProfile = async (id: string, profile: string) => {
+  // 返回值即「是否已生效」：编辑弹框据此决定保存后是关闭还是留在原地。
+  const handleSwitchProfile = async (
+    s: ResearchSessionItem,
+    profile: string,
+  ) => {
     try {
       await updateSessionMut.mutateAsync({
-        sessionId: id,
+        sessionId: s.id,
         body: { profile },
       })
+      return true
     } catch (err: unknown) {
       const detail =
         (err as { body?: { detail?: string } })?.body?.detail ?? "error"
       toast.error(detail)
-      throw err
+      return false
     }
   }
 
@@ -229,6 +236,39 @@ function AutoResearchPage() {
     } finally {
       setCopyBusy(false)
     }
+  }
+
+  // 编辑弹框：待编辑会话 + 跨类 profile 切换的挂起请求（等用户在确认框里拍板）。
+  const [editTarget, setEditTarget] = useState<ResearchSessionItem | null>(null)
+  const [switchTarget, setSwitchTarget] = useState<ResearchSessionItem | null>(
+    null,
+  )
+  const [pendingProfile, setPendingProfile] = useState<string>("")
+  const [switchDownloading, setSwitchDownloading] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  // 确认框的 resolve：由它的按钮回调兑现，让编辑弹框能 await 用户的决定。
+  const switchResolve = useRef<((ok: boolean) => void) | null>(null)
+
+  /**
+   * 跨类 profile 切换的二次确认：弹「清空产物」警告（带打包下载入口），
+   * 用户确认才真正提交。返回 true = 已切换成功，false = 放弃或失败。
+   */
+  const confirmSwitchProfile = (
+    session: ResearchSessionItem,
+    profile: string,
+  ) =>
+    new Promise<boolean>((resolve) => {
+      switchResolve.current = resolve
+      setPendingProfile(profile)
+      setSwitchTarget(session)
+    })
+
+  const settleSwitch = (ok: boolean) => {
+    setSwitchTarget(null)
+    setPendingProfile("")
+    const resolve = switchResolve.current
+    switchResolve.current = null
+    resolve?.(ok)
   }
 
   const [leftCollapsed, setLeftCollapsed] = usePersistentState(
@@ -355,11 +395,13 @@ function AutoResearchPage() {
               onCreateFolder={handleCreateFolder}
               onRenameFolder={handleRenameFolder}
               onDeleteFolder={handleDeleteFolder}
-              onRenameSession={handleRenameSession}
+              onEditSession={(s) => setEditTarget(s)}
               onMoveSession={handleMoveSession}
               onDeleteSession={handleDeleteSession}
               onCopySession={(s) => setCopyTarget(s)}
-              onSwitchProfile={handleSwitchProfile}
+              onSwitchProfile={(s, profile) => {
+                void confirmSwitchProfile(s, profile)
+              }}
             />
           </TechPanel>
         </div>
@@ -448,6 +490,100 @@ function AutoResearchPage() {
         initialFolderId={createInitialFolder}
         onCreated={handleCreated}
       />
+
+      {/* 编辑会话：字段与新建弹框同款，但没有模板选择与「创建并运行」。 */}
+      <EditSessionDialog
+        open={!!editTarget}
+        onOpenChange={(o) => !o && setEditTarget(null)}
+        session={editTarget}
+        folders={folders}
+        onProfileSwitchRequired={confirmSwitchProfile}
+      />
+
+      {/* 切换实验类型二次确认：警告将清空第 9 步之后产物 + 打包下载入口。
+          侧栏菜单与编辑弹框共用：前者 fire-and-forget，后者 await 结果。 */}
+      <Dialog
+        open={!!switchTarget}
+        onOpenChange={(open) => {
+          if (!open) settleSwitch(false)
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]" preventOutsideClose>
+          <DialogHeader>
+            <DialogTitle>
+              {t("autoResearch.sidebar.switchProfileTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed">
+              {switchTarget &&
+                t("autoResearch.sidebar.switchProfileConfirm", {
+                  target: t(`autoResearch.profile.${pendingProfile}`),
+                })}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* 产物打包下载：与右侧「打包下载全部」同一接口 */}
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] p-3 space-y-2">
+            <p className="text-xs text-amber-600 dark:text-amber-300/90 leading-relaxed">
+              {t("autoResearch.sidebar.switchProfileDownloadHint")}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-1.5"
+              disabled={switchDownloading}
+              onClick={() => {
+                if (!switchTarget || switchDownloading) return
+                setSwitchDownloading(true)
+                void downloadResearchArtifactsArchive(switchTarget.id)
+                  .catch((err: unknown) =>
+                    toast.error((err as Error)?.message ?? "download failed"),
+                  )
+                  .finally(() => setSwitchDownloading(false))
+              }}
+            >
+              {switchDownloading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <DownloadCloud className="size-3.5" />
+              )}
+              {t("autoResearch.artifacts.downloadAll")}
+            </Button>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={switching}
+              onClick={() => settleSwitch(false)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={switching}
+              onClick={async () => {
+                if (!switchTarget || !pendingProfile) return
+                setSwitching(true)
+                try {
+                  const ok = await handleSwitchProfile(
+                    switchTarget,
+                    pendingProfile,
+                  )
+                  settleSwitch(ok)
+                } finally {
+                  setSwitching(false)
+                }
+              }}
+            >
+              {switching ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Repeat className="size-3.5" />
+              )}
+              {t("common.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 复制会话二次确认：复制会深度拷贝 DB + 落盘产物，先确认再执行。 */}
       <AlertDialog

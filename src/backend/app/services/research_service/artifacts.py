@@ -40,12 +40,23 @@ from app.utils.log_persist import strip_generated_fields_for_list
 
 from ._common import _get_session
 
-# 只认「llm4ad 演化产物」这一条路径：
-#   stage-{NN}[/_...]/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/{文件}.json
+# 只认「llm4ad 演化产物」这一条路径，且**只认 Stage 13**：
+#   stage-13/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/{文件}.json
+#
+# task_packages/ 是 ARC Stage 13（ITERATIVE_REFINE）独有的产物——由 researchclaw 的
+# ``_generate_llm4ad_task_packages()`` 写出，其 stage_dir 恒为 ``run_dir/"stage-13"``。
+# 故这里把阶段号写死，而不是沿用 ``stage-\d+``：本面板是「本会话演化结果」的展示位，
+# 多带一个 stage 分组只会误导。
+#
+# 目录名**必须精确等于 stage-13**，不接任何后缀（/ _v1 / _ITERATIVE_REFINE 都不认）：
+# 演化产物只落在当前生效的那个 stage-13 目录里，回跳产生的版本快照是历史遗留，
+# 一并列出来会让同一份结果出现两次。
+#
 # 其中 run_id 仅允许字母+数字组合（用户约定），任务名（runs 下一级）不固定。
 # generated 目录下**只取一层的 .json 文件**（不递归），避免捞到无关嵌套数据。
+_GENERATED_STAGE_DIR = "stage-13"
 _GENERATED_PATH_RE = re.compile(
-    r"^stage-\d+(?:_[^/]+)?/task_packages/(?P<algo>[^/]+)/runs/[^/]+/"
+    rf"^{_GENERATED_STAGE_DIR}/task_packages/(?P<algo>[^/]+)/runs/[^/]+/"
     r"(?P<run_id>[A-Za-z0-9]+)/generated/(?P<file>[^/]+\.json)$"
 )
 
@@ -189,12 +200,12 @@ def list_generated_solutions(
     *,
     algorithm: str | None = None,
 ) -> ResearchGeneratedResponse:
-    """扫描 run_dir 下 ``stage-*/task_packages/{算法}/runs/{任务}/{run_id}/generated/*.json``，
+    """扫描 run_dir 下 ``stage-13/task_packages/{算法}/runs/{任务}/{run_id}/generated/*.json``，
     内容内联、按**算法名称**分组。
 
-    只认 llm4ad 演化产物这条固定路径（见 :data:`_GENERATED_PATH_RE`），不递归
-    ``generated`` 目录。大字段按演化持久化口径剥离（见
-    :func:`_load_stripped_generated`），前端一次拿全，无需再逐个 download。
+    只认 llm4ad 演化产物这条固定路径（见 :data:`_GENERATED_PATH_RE`）——阶段锁死
+    Stage 13、目录名不带后缀，不递归 ``generated`` 目录。大字段按演化持久化口径剥离
+    （见 :func:`_load_stripped_generated`），前端一次拿全，无需再逐个 download。
     ``algorithm`` 非空时只返回该算法分组。
     """
     session = _get_session(db, session_id, user)

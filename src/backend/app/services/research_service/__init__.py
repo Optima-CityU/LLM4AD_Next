@@ -44,6 +44,11 @@ from .sessions import (
     list_sessions,
     update_session,
 )
+from .templates import (
+    get_template_detail,
+    list_topics,
+    templates_available,
+)
 from .translate import (
     get_translate_stream_type,
     stop_translation,
@@ -73,6 +78,7 @@ __all__ = [
     "get_session_detail",
     "get_state",
     "get_stream_context",
+    "get_template_detail",
     "get_translate_stream_type",
     "get_turn",
     "import_artifacts_zip",
@@ -84,6 +90,7 @@ __all__ = [
     "list_messages",
     "list_session_turns",
     "list_sessions",
+    "list_topics",
     "reorder_folders",
     "resolve_artifact_path",
     "retry_turn",
@@ -92,6 +99,7 @@ __all__ = [
     "stop_analysis_report",
     "stop_translation",
     "stop_turn",
+    "templates_available",
     "translate_artifact",
     "update_folder",
     "update_session",

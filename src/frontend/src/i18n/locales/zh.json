@@ -3175,12 +3175,12 @@
       "sessionOptions": "会话操作",
       "folderOptions": "分组操作",
       "deleteSession": "删除会话",
+      "editSession": "编辑会话",
       "copySession": "复制会话",
       "copySessionSuccess": "已复制会话「{{title}}」",
-      "copySessionConfirm": "将复制会话「{{title}}」，生成一个沿用主题与画像、拥有全新运行现场的副本。是否继续？",
+      "copySessionConfirm": "确认复制会话「{{title}}」？副本拥有全新的独立运行历史、产物与演化状态，标题会自动加后缀「（副本）」。",
       "copying": "复制中...",
       "deleteSessionConfirm": "删除会话「{{title}}」？其落盘产物也会一并删除。",
-      "renameSession": "重命名",
       "switchProfile": "切换模式",
       "switchProfileTitle": "切换实验类型",
       "switchProfileConfirm": "切换到「{{target}}」后，将清空当前会话第 9 步之后的所有产物，且不可恢复。请先下载并妥善保存需要的产物再继续。",
@@ -3430,7 +3430,23 @@
       "workspaceTaskIdPlaceholder": "已有任务 ID",
       "create": "创建",
       "createAndStart": "创建并运行",
-      "creating": "创建中..."
+      "creating": "创建中...",
+      "templateLabel": "课题模板（可选）",
+      "templatePlaceholder": "从 ARC-Bench 课题库选择一个起点",
+      "templateClear": "取消选择",
+      "templateSearch": "搜索",
+      "templateAllDomains": "全部",
+      "templateEmpty": "没有匹配的课题",
+      "templateLoadFailed": "课题模板加载失败（后端镜像可能未装 arc-templates）",
+      "templatePreset": "预置 stage 7-9",
+      "templateHypotheses": "{{n}} 条假设"
+    },
+    "edit": {
+      "title": "编辑会话",
+      "subtitle": "修改会话配置；未改动的字段不会提交。",
+      "saving": "保存中...",
+      "saved": "已保存",
+      "profilePurgeHint": "切换实验类型会清空第 9 步之后的产物且不可恢复，保存时会先弹出确认。"
     },
     "metricDirection": {
       "maximize": "最大化",
@@ -3506,6 +3522,9 @@
       "topicTooLong": "主题最多 {{max}} 个字符",
       "step1": "确认研究主题",
       "step2": "点击开始研究",
+      "startFromStage10": "从阶段 10 开始",
+      "templateReadySubtitle": "已从课题模板预置阶段 07–09 的产物，将从阶段 10 继续",
+      "templateReadyHint": "模板已提供文献综述、假设与实验设计，AI 将从代码生成阶段继续；您可以随时查看进度或介入调整",
       "startResearch": "开始研究",
       "starting": "启动中..."
     },
@@ -3796,6 +3815,13 @@
       "generation": "代数",
       "score": "得分",
       "fullValueHint": "完整值（未四舍五入）"
+    },
+    "templateDomain": {
+      "ml": "机器学习",
+      "physics": "物理",
+      "biology": "生物",
+      "statistics": "统计",
+      "quantum": "量子"
     }
   },
   "liveCode": {

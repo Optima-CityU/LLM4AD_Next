@@ -49,6 +49,8 @@ from app.schemas.research import (
     ResearchStageGuideRequest,
     ResearchStageGuideResponse,
     ResearchStateResponse,
+    ResearchTemplateDetailResponse,
+    ResearchTemplateListResponse,
     ResearchTurnItem,
     ResearchTurnListResponse,
     ResearchTurnRetryRequest,
@@ -140,6 +142,39 @@ def delete_folder(
     """删除文件夹本体；子内容通过 ``ON DELETE SET NULL`` 保留。"""
     research_service.delete_folder(db, folder_id, current_user)
     return ResearchDeleteResponse(id=folder_id)
+
+
+# ---- 课题模板（ARC-Bench）----
+
+
+@router.get(
+    "/templates",
+    response_model=ResearchTemplateListResponse,
+    summary="列出 ARC-Bench 课题模板（供「从模板创建」选题器）",
+)
+def list_templates(
+    domain: str | None = Query(
+        default=None,
+        description="域过滤：ml / physics / biology / statistics / quantum；不传=全部",
+    ),
+):
+    """静态课题注册表，按域分组。镜像未装 ``arc-templates`` extra 时 ``available=False``。"""
+    items = research_service.list_topics(domain)
+    return ResearchTemplateListResponse(
+        items=items,
+        total=len(items),
+        available=research_service.templates_available(),
+    )
+
+
+@router.get(
+    "/templates/{topic_id}",
+    response_model=ResearchTemplateDetailResponse,
+    summary="课题模板详情（briefing + 假设 + 实验设计预览）",
+)
+def get_template(topic_id: str):
+    """课题 id 不存在时 404；未装 extra 时同样 404（列表已告知 unavailable）。"""
+    return research_service.get_template_detail(topic_id)
 
 
 # ---- 会话 ----
@@ -850,9 +885,11 @@ def list_generated(
         description="仅返回该算法名称分组；不传返回全部",
     ),
 ):
-    """一次拿全 ``stage-*/task_packages/{算法}/runs/*/{run_id}/generated/*.json``
+    """一次拿全 ``stage-13/task_packages/{算法}/runs/*/{run_id}/generated/*.json``
     解内容，免去前端逐个 download。
 
+    只认 Stage 13（``ITERATIVE_REFINE``）这一处演化产物目录，且目录名精确为
+    ``stage-13``——回跳产生的 ``stage-13_v1`` 等历史快照不列（否则同一份结果会出现两次）。
     大字段（``code_artifacts`` / ``generation_meta`` / ``worktree`` /
     ``description``）按演化任务持久化口径剥离，按算法名称分组返回。
     """

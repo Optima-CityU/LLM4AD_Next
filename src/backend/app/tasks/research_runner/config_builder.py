@@ -319,6 +319,7 @@ def build_arc_config(
             # Stage 13 择优后的演化增强。字段对齐 AutoResearchClawAD2/config.arc.yaml，
             # 不配 target —— 目标算法由 LLM 三路分类自动选择（排除 baseline + 消融，其余全选）。
             "llm4ad_boost": {
+                "run_evolution_in_package":True,
                 "enabled": True,
                 # 失败降级：记录告警并沿用 Stage 13 原有最优，不中断流水线
                 "fail_silently": True,
@@ -337,6 +338,7 @@ def build_arc_config(
                         "migration_interval": 5,
                         "migration_rate": 0.1,
                     },
+                    "evolve_scope": {"categories": ["proposed"]}
                 },
                 "resources": {
                     "time_budget_sec": 3600,

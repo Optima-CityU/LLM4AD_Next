@@ -136,6 +136,22 @@ export default function BottomComposer({
     status === "completed" || status === "failed" || status === "cancelled"
   const showRunTools = status === "pending" || terminal
 
+  // 起始阶段只在「有意义」时显式带上：
+  // - 终态：允许任意起点重跑（含回退到更早阶段）。
+  // - pending 且用户把起点调到了已跑产物**之后**（模板种子会话已到 9，选 10+）：
+  //   显式传，让选择器真的生效。默认值「最后一个已完成阶段」不传——后端对「run_dir
+  //   有 stage-09 产物 + 尚无 pipeline 轮」的会话会自行取 10，而显式传 9 会触发
+  //   profile_switch 从 9 重置、删掉模板刚物化的 exp_plan。其余 pending 会话不传
+  //   （ARC 自会从头跑）。
+  const lastDoneStage = stages.reduce((max, s) => (s.stage > max ? s.stage : max), 0)
+  const pickedStage = fromStage ? Number(fromStage) : null
+  const forwardFromStage =
+    (terminal && fromStage) ||
+    (status === "pending" && pickedStage !== null && pickedStage > lastDoneStage
+      ? fromStage
+      : undefined) ||
+    undefined
+
   // 统一的「运行中」：协作轮（问 AI）与流水线轮底层都是「正在运行」，底部这块
   // 不再区分二者——都禁用输入、走边框流光、只显示停止。pipelineRunning 仅在需要
   // 判定「是否流水线态」的极少数处保留（当前已无差异，统一用 isRunning）。
@@ -176,7 +192,7 @@ export default function BottomComposer({
       provider_id: provider.trim() || undefined,
       model_name: model.trim() || undefined,
       mode,
-      from_stage: terminal && fromStage ? fromStage : undefined,
+      from_stage: forwardFromStage,
     })
   }
 

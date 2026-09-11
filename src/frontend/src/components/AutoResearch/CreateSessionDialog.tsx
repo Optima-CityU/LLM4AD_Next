@@ -8,6 +8,7 @@ import type {
   ResearchMode,
   ResearchSessionCreateRequest,
   ResearchSessionItem,
+  ResearchTemplateItem,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -42,6 +43,7 @@ import {
   type ResearchProfile,
 } from "./shared"
 import { SectionLabel } from "./tech"
+import TemplatePicker from "./TemplatePicker"
 
 interface Props {
   open: boolean
@@ -64,6 +66,7 @@ export default function CreateSessionDialog({
   const { t } = useTranslation()
   const [topic, setTopic] = useState("")
   const [title, setTitle] = useState("")
+  const [templateId, setTemplateId] = useState("")
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const [providerId, setProviderId] = useState("default")
   const [modelName, setModelName] = useState("")
@@ -95,6 +98,7 @@ export default function CreateSessionDialog({
   const reset = () => {
     setTopic("")
     setTitle("")
+    setTemplateId("")
     setFolderId(initialFolderId)
     setProviderId("default")
     setModelName("")
@@ -108,9 +112,30 @@ export default function CreateSessionDialog({
     createdRef.current = null
   }
 
+  /**
+   * 选中/清空课题模板。模板只是建会话时的一次性输入，选中即把它的题面 / 标题 /
+   * 指标预填进表单（仍可手改）；清空时题面留空，由后端在无 template_id 时报 400。
+   */
+  const handleTemplateChange = (
+    topicId: string,
+    item: ResearchTemplateItem | null,
+  ) => {
+    setTemplateId(topicId)
+    if (!item) return
+    setTopic(item.topic || "")
+    setTopicError("")
+    setTitle(item.title || "")
+    setTitleError("")
+    if (item.metric_key) setMetricKey(item.metric_key)
+    if (item.metric_direction === "maximize" || item.metric_direction === "minimize") {
+      setMetricDirection(item.metric_direction)
+    }
+  }
+
   const handleSubmit = async () => {
     const trimmed = topic.trim()
-    if (trimmed.length < TOPIC_MIN) {
+    // 选了模板时空题面是合法的：后端会用 manifest 派生 topic。
+    if (!templateId && trimmed.length < TOPIC_MIN) {
       setTopicError(
         t("autoResearch.chat.topicTooShort", {
           defaultValue: "主题至少需要 {{min}} 个字符",
@@ -154,6 +179,8 @@ export default function CreateSessionDialog({
           profile,
           metric_direction: metricDirectionToApi(metricDirection),
           metric_key: metricKey.trim() || undefined,
+          // 给定即走「从模板创建」：后端把 ARC-Bench stage-07/08/09 产物物化进 run_dir。
+          template_id: templateId || undefined,
         } as ResearchSessionCreateRequest))
       createdRef.current = created
 
@@ -203,6 +230,8 @@ export default function CreateSessionDialog({
         </DialogHeader>
 
         <div className="space-y-2.5 py-2">
+          <TemplatePicker value={templateId} onChange={handleTemplateChange} />
+
           <Field label={t("autoResearch.create.topicLabel")} error={topicError}>
             <div className="relative">
               <textarea
@@ -448,7 +477,7 @@ export default function CreateSessionDialog({
           </Button>
           <Button
             onClick={() => void handleSubmit()}
-            disabled={submitting || !topic.trim()}
+            disabled={submitting || (!templateId && !topic.trim())}
           >
             {submitting && <Loader2 className="size-4 animate-spin" />}
             {submitting

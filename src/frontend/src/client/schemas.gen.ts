@@ -8413,9 +8413,22 @@ export const ResearchSessionCreateRequestSchema = {
         topic: {
             type: 'string',
             maxLength: 20000,
-            minLength: 1,
             title: 'Topic',
-            description: '研究问题 / 主题'
+            description: '研究问题 / 主题。传 template_id 时可留空，后端用模板 manifest 派生；两者都空则 400。',
+            default: ''
+        },
+        template_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 64
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Template Id',
+            description: 'ARC-Bench 课题 id（如 ML01）：给定则建会话时把 stage-07/08/09 产物直接物化进 run_dir。纯初始化入参，不落库；显式传的 topic / metric_key / metric_direction 优先于模板值。'
         },
         profile: {
             type: 'string',
@@ -8494,7 +8507,6 @@ export const ResearchSessionCreateRequestSchema = {
         }
     },
     type: 'object',
-    required: ['topic'],
     title: 'ResearchSessionCreateRequest',
     description: '创建会话（不立即触发首轮）。'
 } as const;
@@ -9080,6 +9092,165 @@ export const ResearchStateResponseSchema = {
 
 比 SSE 流更"高层"：只有当前阶段号 + 进度、最优个体、最近关键 metrics。
 前端列表页 / 详情页头部展示用。`
+} as const;
+
+export const ResearchTemplateDetailResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id',
+            description: '课题 id，如 ML01'
+        },
+        title: {
+            type: 'string',
+            title: 'Title',
+            description: '展示名（由课题文本首句派生）'
+        },
+        topic: {
+            type: 'string',
+            title: 'Topic',
+            description: '课题描述原文'
+        },
+        domains: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Domains',
+            description: 'ARC 域标签'
+        },
+        metric_key: {
+            type: 'string',
+            title: 'Metric Key',
+            description: '该课题建议的指标列名',
+            default: ''
+        },
+        metric_direction: {
+            type: 'string',
+            title: 'Metric Direction',
+            description: "'maximize' / 'minimize' / ''（未指定）",
+            default: ''
+        },
+        domain: {
+            type: 'string',
+            title: 'Domain',
+            description: '域目录名：ml / physics / …',
+            default: ''
+        },
+        domain_label: {
+            type: 'string',
+            title: 'Domain Label',
+            description: '域展示名',
+            default: ''
+        },
+        synthesis: {
+            type: 'string',
+            title: 'Synthesis',
+            description: '上游 briefing 全文',
+            default: ''
+        },
+        hypotheses: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Hypotheses',
+            description: '假设列表（id / statement / measurable）'
+        },
+        experiment_design: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Experiment Design',
+            description: '实验设计（问题 / 条件 / 指标 / 数据集）'
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'topic'],
+    title: 'ResearchTemplateDetailResponse',
+    description: '模板详情：摘要 + manifest 全文（创建对话框预览用）。'
+} as const;
+
+export const ResearchTemplateItemSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id',
+            description: '课题 id，如 ML01'
+        },
+        title: {
+            type: 'string',
+            title: 'Title',
+            description: '展示名（由课题文本首句派生）'
+        },
+        topic: {
+            type: 'string',
+            title: 'Topic',
+            description: '课题描述原文'
+        },
+        domains: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Domains',
+            description: 'ARC 域标签'
+        },
+        metric_key: {
+            type: 'string',
+            title: 'Metric Key',
+            description: '该课题建议的指标列名',
+            default: ''
+        },
+        metric_direction: {
+            type: 'string',
+            title: 'Metric Direction',
+            description: "'maximize' / 'minimize' / ''（未指定）",
+            default: ''
+        },
+        domain: {
+            type: 'string',
+            title: 'Domain',
+            description: '域目录名：ml / physics / …',
+            default: ''
+        },
+        domain_label: {
+            type: 'string',
+            title: 'Domain Label',
+            description: '域展示名',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'topic'],
+    title: 'ResearchTemplateItem',
+    description: '课题模板摘要（picker 列表用）。'
+} as const;
+
+export const ResearchTemplateListResponseSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/ResearchTemplateItem'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        total: {
+            type: 'integer',
+            title: 'Total',
+            default: 0
+        },
+        available: {
+            type: 'boolean',
+            title: 'Available',
+            description: '镜像是否装了 arc-templates extra；False 时 items 恒为空',
+            default: true
+        }
+    },
+    type: 'object',
+    title: 'ResearchTemplateListResponse',
+    description: '模板列表响应。'
 } as const;
 
 export const ResearchTurnItemSchema = {

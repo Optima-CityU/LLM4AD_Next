@@ -192,6 +192,11 @@ def _bootstrap(
 
     RUNNING 状态由 :func:`_on_research_task_prerun` 提前写入，本函数
     只读快照，不再动 session/turn 状态。
+
+    run_dir 里若留有 ``checkpoint.json`` 却没有模板签名的 ``stage-09/exp_plan.yaml``
+    （用户切过 profile 类型、或建会话时物化失败/被清），这里补跑一次
+    :func:`templates.materialize`。产物落盘是 ARC 侧隐式契约的最新状态来源，磁盘本身
+    就是「有没有预置模板」的唯一真源，故无需任何 session 字段。
     """
     with get_db_session() as db:
         session = db.get(ResearchSession, session_id)
@@ -202,7 +207,25 @@ def _bootstrap(
         turn_snap = snap_turn(turn)
     run_dir = resolve_run_dir(session_snap)
     run_dir.mkdir(parents=True, exist_ok=True)
+    _rematerialize_if_needed(run_dir)
     return session_snap, turn_snap, run_dir
+
+
+def _rematerialize_if_needed(run_dir: Path) -> None:
+    """``checkpoint.json`` 在、模板签名产物不在时，按 checkpoint 重跑 ARC-Bench prepare。
+
+    这是「模板产物被清掉」的唯一修复点：:func:`profile_switch.purge_stage_artifacts`
+    会删 ``stage-NN``（NN>=9）目录，其中含 ``stage-09/exp_plan.yaml``，但 ``checkpoint.json``
+    与 ``stage-07/08`` 保留——据此可辨认出「曾物化过」，再补回第 9 步。
+    """
+    from app.services.research_service.templates import (
+        is_materialized,
+        rematerialize,
+    )
+
+    if is_materialized(run_dir) or not (run_dir / "checkpoint.json").is_file():
+        return
+    rematerialize(run_dir)
 
 
 def _build_arc_config_dict(
