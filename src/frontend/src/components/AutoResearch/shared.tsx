@@ -16,10 +16,7 @@ import type { ResearchMode } from "@/client"
  *
  * 当前只显示：full-auto（全自动）和 co-pilot（协作）
  */
-export const MODE_OPTIONS: ResearchMode[] = [
-  "full-auto",
-  "co-pilot",
-]
+export const MODE_OPTIONS: ResearchMode[] = ["full-auto", "co-pilot"]
 
 /**
  * ARC domain profile（领域画像）。决定 9-13 阶段由哪套引擎驱动：
@@ -39,11 +36,17 @@ export const ML_VISION_PROFILE = "ml_vision"
  *   - ``minimize``：指标越小越好（如损失、误差、运行时间）
  *   - ``auto``：留空字符串（未指定），由 ARC 侧按默认决定
  */
-export const METRIC_DIRECTION_OPTIONS = ["maximize", "minimize", "auto"] as const
+export const METRIC_DIRECTION_OPTIONS = [
+  "maximize",
+  "minimize",
+  "auto",
+] as const
 
 export type MetricDirection = (typeof METRIC_DIRECTION_OPTIONS)[number]
 
 /** MetricDirection → 后端 `metric_direction` 的值（auto 映射为空串）。 */
-export function metricDirectionToApi(d: MetricDirection): string {
+export function metricDirectionToApi(
+  d: MetricDirection,
+): "" | "maximize" | "minimize" {
   return d === "auto" ? "" : d
 }

@@ -33,11 +33,11 @@ _RESET_FROM_STAGE = 9
 def _is_sandbox_profile(profile: str | None) -> bool:
     """profile 是否属于 sandbox 直跑类（当前仅 ``ml_vision``）。
 
-    复用 config_builder 的 ``_SANDBOX_PROFILES``，避免两处硬编码同一集合。
+    复用 config_builder 的 :func:`is_sandbox_profile`，避免同一集合两处硬编码。
     """
-    from app.tasks.research_runner.config_builder import _SANDBOX_PROFILES
+    from app.tasks.research_runner.config_builder import is_sandbox_profile
 
-    return profile in _SANDBOX_PROFILES
+    return is_sandbox_profile(profile)
 
 
 def is_cross_type_switch(old_profile: str | None, new_profile: str | None) -> bool:

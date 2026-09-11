@@ -3,20 +3,21 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  DownloadCloud,
+  FolderInput,
   FolderPlus,
   ListFilter,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Plus,
   Repeat,
   Search,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import type {
   ResearchFolderItem,
@@ -37,7 +38,6 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -54,7 +54,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
-  downloadResearchArtifactsArchive,
   useInfiniteFolderSessions,
   useInfiniteSearchSessions,
 } from "@/hooks/useAutoResearch"
@@ -90,13 +89,17 @@ interface Props {
   onCreateFolder: (name: string) => Promise<void> | void
   onRenameFolder: (id: string, name: string) => Promise<void> | void
   onDeleteFolder: (id: string) => Promise<void> | void
-  onRenameSession: (id: string, title: string) => Promise<void> | void
+  /** 打开编辑弹框（标题 / 主题 / 实验类型 / 指标 / 分组 / 模式 / 供应商）。 */
+  onEditSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onDeleteSession: (id: string) => Promise<void> | void
   /** 复制一个科研会话（深度拷贝 DB + 落盘产物），成功后由父层跳转到副本。 */
   onCopySession: (session: ResearchSessionItem) => Promise<void> | void
   /** 切换会话 profile（实验类型），会清空第 9 步之后的产物。 */
-  onSwitchProfile: (id: string, profile: string) => Promise<void> | void
+  onSwitchProfile: (
+    s: ResearchSessionItem,
+    profile: string,
+  ) => Promise<void> | void
 }
 
 /** 可筛选的会话状态（枚举子集，覆盖用户会关注的运行态）。 */
@@ -133,7 +136,7 @@ export default function SessionSidebar({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
-  onRenameSession,
+  onEditSession,
   onMoveSession,
   onDeleteSession,
   onCopySession,
@@ -149,23 +152,12 @@ export default function SessionSidebar({
   const [deleteFolder, setDeleteFolder] = useState<ResearchFolderItem | null>(
     null,
   )
-  const [renameSession, setRenameSession] =
-    useState<ResearchSessionItem | null>(null)
-  const [renameSessionTitle, setRenameSessionTitle] = useState("")
   const [deleteSession, setDeleteSession] =
     useState<ResearchSessionItem | null>(null)
   // 异步操作提交中标记：给对话框主按钮上 loading/disabled，避免慢网络下重复提交
   // （重复建文件夹/重复删除），并给出「正在进行」的可见反馈。
   const [folderBusy, setFolderBusy] = useState(false)
   const [sessionBusy, setSessionBusy] = useState(false)
-  // 切换实验类型：待确认的会话 + 目标 profile（null=对话框关闭）+ 产物打包下载中标记 + 切换提交中标记。
-  const [switchTarget, setSwitchTarget] = useState<{
-    session: ResearchSessionItem
-    profile: string
-  } | null>(null)
-  const [switchDownloading, setSwitchDownloading] = useState(false)
-  const [switching, setSwitching] = useState(false)
-
   // 拖放：正在拖的会话 + 当前悬停的放置目标分组 key（null=未分组假分组用 "__ungrouped__"）。
   const [dragSession, setDragSession] = useState<{
     id: string
@@ -251,21 +243,6 @@ export default function SessionSidebar({
       /* keep dialog */
     } finally {
       setFolderBusy(false)
-    }
-  }
-
-  const handleRenameSession = async () => {
-    if (!renameSession || sessionBusy) return
-    const title = renameSessionTitle.trim()
-    if (!title) return
-    setSessionBusy(true)
-    try {
-      await onRenameSession(renameSession.id, title)
-      setRenameSession(null)
-    } catch (_) {
-      /* keep dialog */
-    } finally {
-      setSessionBusy(false)
     }
   }
 
@@ -398,14 +375,9 @@ export default function SessionSidebar({
             onSelectSession={onSelectSession}
             onDeleteSession={setDeleteSession}
             onCopySession={onCopySession}
-            onRenameSession={(s) => {
-              setRenameSessionTitle(s.title)
-              setRenameSession(s)
-            }}
+            onEditSession={onEditSession}
             onMoveSession={onMoveSession}
-            onSwitchProfile={(s, target) =>
-              setSwitchTarget({ session: s, profile: target })
-            }
+            onSwitchProfile={onSwitchProfile}
             onClearFilters={() => {
               onSearchChange("")
               onClearStatus()
@@ -439,14 +411,9 @@ export default function SessionSidebar({
             onSelectSession={onSelectSession}
             onDeleteSession={setDeleteSession}
             onCopySession={onCopySession}
-            onRenameSession={(s) => {
-              setRenameSessionTitle(s.title)
-              setRenameSession(s)
-            }}
+            onEditSession={onEditSession}
             onMoveSession={onMoveSession}
-            onSwitchProfile={(s, target) =>
-              setSwitchTarget({ session: s, profile: target })
-            }
+            onSwitchProfile={onSwitchProfile}
             expanded={expanded.has("__ungrouped__")}
             onToggle={() => toggleExpanded("__ungrouped__")}
             dragSession={dragSession}
@@ -486,14 +453,9 @@ export default function SessionSidebar({
               onSelectSession={onSelectSession}
               onDeleteSession={setDeleteSession}
               onCopySession={onCopySession}
-              onRenameSession={(s) => {
-                setRenameSessionTitle(s.title)
-                setRenameSession(s)
-              }}
+              onEditSession={onEditSession}
               onMoveSession={onMoveSession}
-              onSwitchProfile={(s, target) =>
-                setSwitchTarget({ session: s, profile: target })
-              }
+              onSwitchProfile={onSwitchProfile}
               expanded={expanded.has(folder.id)}
               onToggle={() => toggleExpanded(folder.id)}
               dragSession={dragSession}
@@ -520,10 +482,12 @@ export default function SessionSidebar({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-40">
+                    {/* 与 session 菜单同一套规则：间距交给 Item 的 gap-2，图标
+                        显式给灰，不写 mr-2（会与 gap-2 叠加成双倍间距）。 */}
                     <DropdownMenuItem
                       onSelect={() => onCreateSession(folder.id)}
                     >
-                      <Plus className="size-3.5 mr-2" />
+                      <Plus className="size-3.5 text-muted-foreground" />
                       {t("autoResearch.sidebar.newSession")}
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -536,7 +500,7 @@ export default function SessionSidebar({
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
+                      variant="destructive"
                       onSelect={() => setDeleteFolder(folder)}
                     >
                       {t("autoResearch.sidebar.deleteFolder")}
@@ -669,61 +633,6 @@ export default function SessionSidebar({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Rename session dialog */}
-      <Dialog
-        open={!!renameSession}
-        onOpenChange={(open) => !open && setRenameSession(null)}
-      >
-        <DialogContent className="sm:max-w-[360px]" preventOutsideClose>
-          <DialogHeader>
-            <DialogTitle>{t("autoResearch.sidebar.renameSession")}</DialogTitle>
-          </DialogHeader>
-          <div className="py-3">
-            <div className="relative">
-              <Input
-                value={renameSessionTitle}
-                onChange={(e) => setRenameSessionTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleRenameSession()
-                }}
-                maxLength={255}
-                autoFocus
-              />
-              {/* 字数统计 */}
-              {renameSessionTitle.length > 0 && (
-                <div
-                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
-                    renameSessionTitle.length > 255
-                      ? "bg-destructive/90 text-destructive-foreground"
-                      : renameSessionTitle.length > 229
-                        ? "bg-amber-500/90 text-white"
-                        : "bg-muted/80 text-muted-foreground"
-                  }`}
-                >
-                  {renameSessionTitle.length} / 255
-                </div>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={sessionBusy}
-              onClick={() => setRenameSession(null)}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              onClick={() => void handleRenameSession()}
-              disabled={!renameSessionTitle.trim() || sessionBusy}
-            >
-              {sessionBusy && <Loader2 className="size-4 animate-spin" />}
-              {t("common.save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Delete session confirm */}
       <AlertDialog
         open={!!deleteSession}
@@ -765,92 +674,6 @@ export default function SessionSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* 切换实验类型确认：警告将清空第 9 步之后产物，提供打包下载入口 */}
-      <Dialog
-        open={!!switchTarget}
-        onOpenChange={(open) => {
-          if (!open && !switching) setSwitchTarget(null)
-        }}
-      >
-        <DialogContent className="sm:max-w-[440px]" preventOutsideClose>
-          <DialogHeader>
-            <DialogTitle>
-              {t("autoResearch.sidebar.switchProfileTitle")}
-            </DialogTitle>
-            <DialogDescription className="text-xs leading-relaxed">
-              {switchTarget &&
-                t("autoResearch.sidebar.switchProfileConfirm", {
-                  target: t(`autoResearch.profile.${switchTarget.profile}`),
-                })}
-            </DialogDescription>
-          </DialogHeader>
-
-          {/* 产物打包下载：与右侧「打包下载全部」同一接口 */}
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] p-3 space-y-2">
-            <p className="text-xs text-amber-600 dark:text-amber-300/90 leading-relaxed">
-              {t("autoResearch.sidebar.switchProfileDownloadHint")}
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full gap-1.5"
-              disabled={switchDownloading}
-              onClick={() => {
-                if (!switchTarget || switchDownloading) return
-                setSwitchDownloading(true)
-                void downloadResearchArtifactsArchive(switchTarget.session.id)
-                  .catch((err: unknown) =>
-                    toast.error((err as Error)?.message ?? "download failed"),
-                  )
-                  .finally(() => setSwitchDownloading(false))
-              }}
-            >
-              {switchDownloading ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <DownloadCloud className="size-3.5" />
-              )}
-              {t("autoResearch.artifacts.downloadAll")}
-            </Button>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={switching}
-              onClick={() => setSwitchTarget(null)}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              disabled={switching}
-              onClick={async () => {
-                if (!switchTarget) return
-                setSwitching(true)
-                try {
-                  await onSwitchProfile(
-                    switchTarget.session.id,
-                    switchTarget.profile,
-                  )
-                  setSwitchTarget(null)
-                } catch (_) {
-                  /* 父层已 toast，保持对话框打开 */
-                } finally {
-                  setSwitching(false)
-                }
-              }}
-            >
-              {switching ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Repeat className="size-3.5" />
-              )}
-              {t("common.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </aside>
   )
 }
@@ -866,7 +689,7 @@ interface FolderGroupProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (s: ResearchSessionItem) => void
   onCopySession: (s: ResearchSessionItem) => void
-  onRenameSession: (s: ResearchSessionItem) => void
+  onEditSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onSwitchProfile: (s: ResearchSessionItem, target: string) => void
   headerActions?: React.ReactNode
@@ -894,7 +717,7 @@ function FolderSessionGroup({
   onSelectSession,
   onDeleteSession,
   onCopySession,
-  onRenameSession,
+  onEditSession,
   onMoveSession,
   onSwitchProfile,
   headerActions,
@@ -999,7 +822,7 @@ function FolderSessionGroup({
               onDragStart={onDragStartSession}
               onDragEnd={onDragEndSession}
               onSelect={onSelectSession}
-              onRename={onRenameSession}
+              onEdit={onEditSession}
               onMove={onMoveSession}
               onDelete={onDeleteSession}
               onCopy={onCopySession}
@@ -1052,7 +875,7 @@ interface SearchResultsProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (s: ResearchSessionItem) => void
   onCopySession: (s: ResearchSessionItem) => void
-  onRenameSession: (s: ResearchSessionItem) => void
+  onEditSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
   onSwitchProfile: (s: ResearchSessionItem, target: string) => void
   onClearFilters: () => void
@@ -1067,7 +890,7 @@ function SearchResults({
   onSelectSession,
   onDeleteSession,
   onCopySession,
-  onRenameSession,
+  onEditSession,
   onMoveSession,
   onSwitchProfile,
   onClearFilters,
@@ -1136,7 +959,7 @@ function SearchResults({
             isActive={session.id === activeSessionId}
             draggable={false}
             onSelect={onSelectSession}
-            onRename={onRenameSession}
+            onEdit={onEditSession}
             onMove={onMoveSession}
             onDelete={onDeleteSession}
             onCopy={onCopySession}
@@ -1166,7 +989,7 @@ interface SessionRowProps {
   onDragStart?: (drag: { id: string; folderId: string | null }) => void
   onDragEnd?: () => void
   onSelect: (id: string) => void
-  onRename: (s: ResearchSessionItem) => void
+  onEdit: (s: ResearchSessionItem) => void
   onMove: (id: string, folderId: string | null) => Promise<void> | void
   onDelete: (s: ResearchSessionItem) => void
   onCopy: (s: ResearchSessionItem) => void
@@ -1203,7 +1026,7 @@ function SessionRow({
   onDragStart,
   onDragEnd,
   onSelect,
-  onRename,
+  onEdit,
   onMove,
   onDelete,
   onCopy,
@@ -1301,11 +1124,22 @@ function SessionRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem onSelect={() => onRename(session)}>
-            {t("autoResearch.sidebar.renameSession")}
+          {/* 图标统一 size-3.5 + 显式 text-muted-foreground：DropdownMenuItem 会自动
+              把无颜色类的图标压成 muted，SubTrigger 原先不会，两者并排时就是
+              「一个灰一个纯白」。现在两边用同一个色值显式写死，颜色不再取决于
+              容器规则；hover 时容器把文字转成 accent-foreground，图标保持灰调，
+              只做轻微提亮，不会突然跳白。 */}
+          <DropdownMenuItem onSelect={() => onEdit(session)}>
+            <Pencil className="size-3.5 text-muted-foreground" />
+            {t("autoResearch.sidebar.editSession")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onCopy(session)}>
+            <Copy className="size-3.5 text-muted-foreground" />
+            {t("autoResearch.sidebar.copySession")}
           </DropdownMenuItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
+              <FolderInput className="size-3.5 text-muted-foreground" />
               {t("autoResearch.sidebar.moveTo")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-44">
@@ -1327,9 +1161,10 @@ function SessionRow({
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          <DropdownMenuSeparator />
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <Repeat className="size-3.5 mr-2" />
+              <Repeat className="size-3.5 text-muted-foreground" />
               {t("autoResearch.sidebar.switchProfile")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-44">
@@ -1344,15 +1179,13 @@ function SessionRow({
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <DropdownMenuItem onSelect={() => onCopy(session)}>
-            <Copy className="size-3.5 mr-2" />
-            {t("autoResearch.sidebar.copySession")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          {/* 危险的删除走 destructive 变体：文字由变体类转红，图标则不再写
+              灰色（写灰会盖掉变体的 !text-destructive），跟着一行整体变红。 */}
           <DropdownMenuItem
-            className="text-destructive focus:text-destructive"
+            variant="destructive"
             onSelect={() => onDelete(session)}
           >
+            <Trash2 className="size-3.5" />
             {t("autoResearch.sidebar.deleteSession")}
           </DropdownMenuItem>
         </DropdownMenuContent>

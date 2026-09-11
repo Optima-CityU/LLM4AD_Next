@@ -2,7 +2,7 @@ import {
   Check,
   CircleDot,
   Clock,
-  Download,
+  Code,
   Loader2,
   MessageSquarePlus,
   X,
@@ -20,18 +20,18 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import {
-  downloadResearchArtifact,
   useInjectStageGuidance,
   useResearchArtifactTree,
 } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
-
-import ArtifactPreviewDialog, {
-  FileKindIcon,
-  formatSize,
-  type PreviewFile,
-} from "./ArtifactPreviewDialog"
-// PreviewFile 仍用于抽屉内自己的 stage 文件列表类型。
+import ArtifactPreviewDialog from "./ArtifactPreviewDialog"
+import {
+  ArtifactIconButton,
+  ArtifactTree,
+  ArtifactTreeControls,
+  useArtifactTreeExpansion,
+} from "./ArtifactTree"
+import IdeDialog from "./IdeDialog"
 import type { StageCell, StageStatus } from "./tech"
 
 interface Props {
@@ -50,8 +50,9 @@ interface Props {
  * 状态 / 耗时 / 产物，并注入引导——把"横向看流程、侧边看细节"分工开来，避免
  * 顶部进度带越展开越高、挤压对话区。
  *
- * 三段式：① 状态与耗时；② 本阶段产物（从产物树里定位 `stage-NN` 目录，列出
- * 文件，点名预览、点图标下载）；③ 注入引导（复用 `useInjectStageGuidance`）。
+ * 三段式：① 状态与耗时；② 本阶段产物（从产物树里定位 `stage-NN` 目录，以与右侧
+ * 产物面板同款的树展示，带展开/折叠/刷新/打开 IDE，点名预览、悬停看全路径与
+ * mtime、点图标下载）；③ 注入引导（复用 `useInjectStageGuidance`）。
  */
 export default function StageDetailDrawer({
   sessionId,
@@ -67,12 +68,21 @@ export default function StageDetailDrawer({
   )
 
   const treeQ = useResearchArtifactTree(cell ? sessionId : null)
-  const stageFiles = useMemo(
-    () => (cell ? collectStageFiles(treeQ.data?.root ?? null, cell.stage) : []),
+  // 本阶段子树（`stage-NN` 目录节点）：抽屉只展示该阶段的产物，与右侧面板的
+  // 整棵树不同源但同款渲染（共用 ArtifactTree）。
+  const stageRoot = useMemo(
+    () => (cell ? findStageDir(treeQ.data?.root ?? null, cell.stage) : null),
     [treeQ.data, cell],
+  )
+  // 树形态下默认展开第一层，切换阶段时按阶段号重新展开。
+  const tree = useArtifactTreeExpansion(
+    stageRoot,
+    cell ? String(cell.stage) : null,
   )
   // 产物预览弹框：保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
   const [previewPath, setPreviewPath] = useState<string | null>(null)
+  // IDE 弹层：与右侧产物面板同一入口，直接打开本会话工作区。
+  const [ideOpen, setIdeOpen] = useState(false)
 
   const [text, setText] = useState("")
   const [noteError, setNoteError] = useState(false)
@@ -156,124 +166,118 @@ export default function StageDetailDrawer({
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4">
-                {/* ① 阶段描述 */}
-                {cell && (
-                  <Section title={t("common.description", "描述")}>
-                    <p className="text-xs leading-relaxed text-foreground/80">
-                      {(hideLlm4ad &&
-                        t(
-                          `autoResearch.stages.descriptionsMlVision.${cell.stage}`,
-                          "",
-                        )) ||
-                        t(`autoResearch.stages.descriptions.${cell.stage}`, "")}
-                    </p>
-                  </Section>
-                )}
-
-                {/* ② 时间 / 错误 */}
-                <Timing snapshot={snapshot} />
-
-                {/* ② 本阶段产物 */}
-                <Section title={t("autoResearch.form.outputFiles")}>
-                  {treeQ.isLoading ? (
-                    <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-                      <Loader2 className="size-3.5 animate-spin" />
-                      {t("autoResearch.artifacts.loading")}
-                    </div>
-                  ) : stageFiles.length === 0 ? (
-                    <p className="py-1.5 text-[11px] text-muted-foreground/60">
-                      {t("autoResearch.stages.noArtifacts")}
-                    </p>
-                  ) : (
-                    <ul className="space-y-0.5">
-                      {stageFiles.map((f) => (
-                        <li
-                          key={f.path}
-                          className="group flex items-center gap-1.5 rounded px-1 py-1 text-xs hover:bg-primary/[0.06]"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setPreviewPath(f.path)}
-                            className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
-                          >
-                            <FileKindIcon name={f.name} />
-                            <span
-                              className="flex-1 truncate text-foreground/80"
-                              title={f.path}
-                            >
-                              {f.name}
-                            </span>
-                            {f.size != null && (
-                              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
-                                {formatSize(f.size)}
-                              </span>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void downloadResearchArtifact(
-                                sessionId,
-                                f.path,
-                              ).catch((err: unknown) =>
-                                toast.error(
-                                  (err as Error)?.message ?? "download failed",
-                                ),
-                              )
-                            }
-                            title={t("autoResearch.artifacts.download")}
-                            className="shrink-0 text-muted-foreground/50 opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
-                          >
-                            <Download className="size-3" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+              {/* 三段固定骨架：头部信息 → 只让产物树滚 → 引导区钉在底部。
+                  滚动条只出现在产物树：引导的 textarea + 保存按钮常驻可见，不再
+                  被长产物列表挤出视口；产物区吃掉中间剩余高度，树越长它越省空间。 */}
+              <div className="flex flex-col flex-1 min-h-0">
+                {/* ① 阶段描述 / ② 时间、错误：定高，不参与滚动 */}
+                <div className="shrink-0 px-4 pt-3 pb-3 space-y-4 border-b border-border/40">
+                  {cell && (
+                    <Section title={t("common.description", "描述")}>
+                      <p className="text-xs leading-relaxed text-foreground/80">
+                        {(hideLlm4ad &&
+                          t(
+                            `autoResearch.stages.descriptionsMlVision.${cell.stage}`,
+                            "",
+                          )) ||
+                          t(
+                            `autoResearch.stages.descriptions.${cell.stage}`,
+                            "",
+                          )}
+                      </p>
+                    </Section>
                   )}
-                </Section>
 
-                {/* ③ 注入引导 */}
-                <Section
-                  title={t("autoResearch.stages.injectGuidance")}
-                  icon={
-                    <MessageSquarePlus className="size-3.5 text-primary/70" />
-                  }
-                >
-                  <p className="mb-1.5 text-[10px] leading-snug text-muted-foreground/70">
-                    {t("autoResearch.stages.guidanceHint")}
-                  </p>
-                  <textarea
-                    value={text}
-                    onChange={(e) => {
-                      setText(e.target.value)
-                      if (noteError) setNoteError(false)
-                    }}
-                    rows={4}
-                    placeholder={t("autoResearch.stages.guidancePlaceholder")}
-                    className={cn(
-                      "w-full resize-none rounded-md border bg-background/60 px-2.5 py-2 text-xs transition-colors focus:outline-none focus:ring-1",
-                      noteError
-                        ? "border-destructive focus:ring-destructive/30"
-                        : "border-border/60 focus:border-primary/50 focus:ring-primary/30",
-                    )}
-                  />
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => void submitGuidance()}
-                      disabled={injectMut.isPending}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary shadow-[0_0_10px] shadow-primary/20 transition-all hover:bg-primary/25 disabled:opacity-60"
-                    >
-                      {injectMut.isPending ? (
+                  <Timing snapshot={snapshot} />
+                </div>
+
+                {/* ③ 本阶段产物：唯一滚动区，与右侧产物面板同款的树（图标 + 操作行
+                    + 悬停卡片），只是作用域收敛到本阶段的 `stage-NN` 目录 */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+                  <Section
+                    title={t("autoResearch.form.outputFiles")}
+                    right={
+                      <ArtifactTreeControls
+                        canExpand={!!stageRoot?.children?.length}
+                        onExpandAll={tree.expandAll}
+                        onCollapseAll={tree.collapseAll}
+                        onRefresh={() => void treeQ.refetch()}
+                        refreshing={treeQ.isFetching}
+                        extra={
+                          <ArtifactIconButton
+                            icon={Code}
+                            title={t("autoResearch.mainTabs.ide")}
+                            onClick={() => setIdeOpen(true)}
+                          />
+                        }
+                      />
+                    }
+                  >
+                    {treeQ.isLoading ? (
+                      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
                         <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <MessageSquarePlus className="size-3.5" />
+                        {t("autoResearch.artifacts.loading")}
+                      </div>
+                    ) : !stageRoot?.children?.length ? (
+                      <p className="py-1.5 text-[11px] text-muted-foreground/60">
+                        {t("autoResearch.stages.noArtifacts")}
+                      </p>
+                    ) : (
+                      <ArtifactTree
+                        root={stageRoot}
+                        sessionId={sessionId}
+                        expanded={tree.expanded}
+                        onToggle={tree.toggleDir}
+                        onExpandDir={tree.expandDir}
+                        onPreview={setPreviewPath}
+                      />
+                    )}
+                  </Section>
+                </div>
+
+                {/* ④ 注入引导：钉在底部常驻，textarea 自身可拉伸但区块高度固定 */}
+                <div className="shrink-0 border-t border-border/50 bg-card/30 px-4 py-3">
+                  <Section
+                    title={t("autoResearch.stages.injectGuidance")}
+                    icon={
+                      <MessageSquarePlus className="size-3.5 text-primary/70" />
+                    }
+                  >
+                    <p className="mb-1.5 text-[10px] leading-snug text-muted-foreground/70">
+                      {t("autoResearch.stages.guidanceHint")}
+                    </p>
+                    <textarea
+                      value={text}
+                      onChange={(e) => {
+                        setText(e.target.value)
+                        if (noteError) setNoteError(false)
+                      }}
+                      rows={4}
+                      placeholder={t("autoResearch.stages.guidancePlaceholder")}
+                      className={cn(
+                        "w-full resize-none rounded-md border bg-background/60 px-2.5 py-2 text-xs transition-colors focus:outline-none focus:ring-1",
+                        noteError
+                          ? "border-destructive focus:ring-destructive/30"
+                          : "border-border/60 focus:border-primary/50 focus:ring-primary/30",
                       )}
-                      {t("autoResearch.stages.saveGuidance")}
-                    </button>
-                  </div>
-                </Section>
+                    />
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void submitGuidance()}
+                        disabled={injectMut.isPending}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary shadow-[0_0_10px] shadow-primary/20 transition-all hover:bg-primary/25 disabled:opacity-60"
+                      >
+                        {injectMut.isPending ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <MessageSquarePlus className="size-3.5" />
+                        )}
+                        {t("autoResearch.stages.saveGuidance")}
+                      </button>
+                    </div>
+                  </Section>
+                </div>
               </div>
             </>
           )}
@@ -285,6 +289,15 @@ export default function StageDetailDrawer({
         path={previewPath}
         onClose={() => setPreviewPath(null)}
       />
+
+      {/* IDE 弹层（按需挂载，关闭即卸载，加载态随之复位） */}
+      {ideOpen && (
+        <IdeDialog
+          sessionId={sessionId}
+          open={ideOpen}
+          onOpenChange={setIdeOpen}
+        />
+      )}
     </>
   )
 }
@@ -346,10 +359,13 @@ function Row({
 function Section({
   title,
   icon,
+  right,
   children,
 }: {
   title: string
   icon?: ReactNode
+  /** 标题行右侧的动作区（如产物树的展开/折叠/刷新/IDE）。 */
+  right?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -359,40 +375,36 @@ function Section({
         <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground/80">
           {title}
         </span>
+        {right && <div className="ml-auto flex items-center">{right}</div>}
       </div>
       {children}
     </div>
   )
 }
 
-/** 递归收集某阶段目录（`stage-NN`）下的全部文件（扁平）。 */
-function collectStageFiles(
+/**
+ * 在产物树里定位某阶段的目录节点（`stage-NN`）。阶段目录固定在 run_dir 直下，
+ * 但仍递归查找以兼容未来可能的中间层级。
+ *
+ * @returns 命中返回该目录节点，未命中返回 null。
+ */
+function findStageDir(
   root: ResearchArtifactTreeNode | null,
   stage: number,
-): PreviewFile[] {
-  if (!root) return []
+): ResearchArtifactTreeNode | null {
+  if (!root) return null
   const dirName = `stage-${String(stage).padStart(2, "0")}`
-  const findDir = (
+  const walk = (
     node: ResearchArtifactTreeNode,
   ): ResearchArtifactTreeNode | null => {
     if (node.is_dir && node.name === dirName) return node
     for (const c of node.children ?? []) {
-      const hit = findDir(c)
+      const hit = walk(c)
       if (hit) return hit
     }
     return null
   }
-  const dir = findDir(root)
-  if (!dir) return []
-  const files: PreviewFile[] = []
-  const walk = (node: ResearchArtifactTreeNode) => {
-    for (const c of node.children ?? []) {
-      if (c.is_dir) walk(c)
-      else files.push({ path: c.path, name: c.name, size: c.size ?? null })
-    }
-  }
-  walk(dir)
-  return files
+  return walk(root)
 }
 
 /** 阶段状态的图标 + 徽章 + 胶囊配色（与消息胶囊 / 顶部进度轨一致）。 */

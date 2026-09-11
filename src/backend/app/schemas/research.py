@@ -24,6 +24,47 @@ from app.models.research import (
     ResearchTurnStatus,
 )
 
+# ---- 课题模板（ARC-Bench）----
+
+
+class ResearchTemplateItem(BaseModel):
+    """课题模板摘要（picker 列表用）。"""
+
+    id: str = Field(description="课题 id，如 ML01")
+    title: str = Field(description="展示名（取 manifest 的 title，读不到则截断题面）")
+    topic: str = Field(description="课题描述原文")
+    domains: list[str] = Field(default_factory=list, description="ARC 域标签")
+    metric_key: str = Field(default="", description="该课题建议的指标列名")
+    metric_direction: str = Field(
+        default="", description="'maximize' / 'minimize' / ''（未指定）"
+    )
+    domain: str = Field(default="", description="域目录名：ml / physics / …")
+    domain_label: str = Field(default="", description="域展示名")
+
+
+class ResearchTemplateListResponse(BaseModel):
+    """模板列表响应。"""
+
+    items: list[ResearchTemplateItem] = Field(default_factory=list)
+    total: int = 0
+    available: bool = Field(
+        default=True,
+        description="镜像是否装了 arc-templates extra；False 时 items 恒为空",
+    )
+
+
+class ResearchTemplateDetailResponse(ResearchTemplateItem):
+    """模板详情：摘要 + manifest 全文（创建对话框预览用）。"""
+
+    synthesis: str = Field(default="", description="上游 briefing 全文")
+    hypotheses: list[dict[str, Any]] = Field(
+        default_factory=list, description="假设列表（id / statement / measurable）"
+    )
+    experiment_design: dict[str, Any] = Field(
+        default_factory=dict, description="实验设计（问题 / 条件 / 指标 / 数据集）"
+    )
+
+
 # ---- 分组文件夹 ----
 
 
@@ -153,7 +194,21 @@ class ResearchSessionCreateRequest(BaseModel):
         description="会话显示名；缺省时后端用 topic 前 60 字符生成",
     )
     topic: str = Field(
-        min_length=1, max_length=20000, description="研究问题 / 主题"
+        default="",
+        max_length=20000,
+        description=(
+            "研究问题 / 主题。传 template_id 时可留空，后端用模板 manifest 派生；"
+            "两者都空则 400。"
+        ),
+    )
+    template_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "ARC-Bench 课题 id（如 ML01）：给定则建会话时把 stage-07/08/09 产物"
+            "直接物化进 run_dir。纯初始化入参，不落库；显式传的 topic / "
+            "metric_key / metric_direction 优先于模板值。"
+        ),
     )
     profile: str = Field(
         default="algorithm_evolution",

@@ -24,6 +24,11 @@ import type {
   ResearchSessionItem,
 } from "@/client"
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
+import {
   researchKeys,
   useResearchLogs,
   useResearchSessionDetail,
@@ -41,23 +46,18 @@ import {
   useResearchStream,
 } from "@/hooks/useResearchStream"
 import { cn } from "@/lib/utils"
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card"
 
 import BottomComposer, { type RunOverrides } from "./BottomComposer"
 import MessageItem from "./MessageItem"
-import { ML_VISION_PROFILE } from "./shared"
 import { StageProgressBar } from "./StageProgress"
-import { buildStageRoadmap } from "./tech"
-import type { StreamLogEntry } from "./StreamLogConsole"
 import StageTimeline, {
   type StageEntry,
   type StageStatus,
 } from "./StageTimeline"
+import type { StreamLogEntry } from "./StreamLogConsole"
+import { ML_VISION_PROFILE } from "./shared"
 import TurnLogPanel from "./TurnLogPanel"
+import { buildStageRoadmap } from "./tech"
 
 interface Props {
   session: ResearchSessionItem | null
@@ -142,9 +142,9 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
     }
     if (stage === lastStage && lastIdx >= 0) {
       // 与上一条同阶段且紧邻 → 状态叠加
-      ;(items[lastIdx] as Extract<RenderItem, { kind: "stage" }>).entry.statuses.push(
-        st,
-      )
+      ;(
+        items[lastIdx] as Extract<RenderItem, { kind: "stage" }>
+      ).entry.statuses.push(st)
     } else {
       const occurrence = (occByStage.get(stage) ?? 0) + 1
       occByStage.set(stage, occurrence)
@@ -324,11 +324,16 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     setRunProvider(session.provider_id ?? "")
     setRunModel(session.model_name ?? "")
     setRunMode((session.mode as ResearchMode) ?? "co-pilot")
-    setRunFromStage(
-      displayStages.length > 0
-        ? String(displayStages[displayStages.length - 1].stage)
-        : "",
-    )
+    // 起始阶段默认取「最后一个已有产物之后的一步」：普通新会话没有产物，退化成
+    // 空串（不显式传，ARC 自会从头跑）；模板种子会话已有 7/8/9，取值 10，与后端
+    // start_turn 在「run_dir 有模板产物」时的缺省完全一致——显式传 9 会让
+    // profile_switch 从 9 重置，删掉刚物化的 exp_plan。
+    const done = displayStages.filter((s) => s.status === "done")
+    const lastDone =
+      done.length > 0
+        ? done.reduce((max, s) => (s.stage > max ? s.stage : max), 0)
+        : 0
+    setRunFromStage(lastDone > 0 ? String(lastDone + 1) : "")
   }, [
     session.id,
     session.provider_id,
@@ -428,6 +433,25 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     () =>
       gateMessage ? messages.filter((m) => m.id !== gateMessage.id) : messages,
     [messages, gateMessage],
+  )
+
+  // 模板种子会话：pending 且历史里只有 stage_transition。
+  //
+  // 「从模板创建」会在建会话时预置一枚种子轮 + 7/8/9 各一对 running/done 的
+  // stage_transition 消息（后端 _seed_template_checkpoint），让阶段轨立刻显示
+  // 「已跑到 9」。副作用是消息列表非空：`messages.length === 0` 的启动入口不再
+  // 命中，而 pending 又隐藏了底部操作区，于是两个入口同时消失——用户看不到任何
+  // 运行按钮。这里识别出这种「只有阶段痕迹、没有任何对话」的会话，让它继续走
+  // 空态启动入口（EmptyState），并放行底部操作区。
+  //
+  // 用「全部是 stage_transition」而非「消息数 == 6」：换模板/重物化时条数会变，
+  // 且真实跑过一轮的会话必然含非 stage_transition 消息（user/assistant/log）。
+  const seedOnly = useMemo(
+    () =>
+      session.status === "pending" &&
+      renderedMessages.length > 0 &&
+      renderedMessages.every((m) => m.event_type === "stage_transition"),
+    [session.status, renderedMessages],
   )
 
   const LOG_CAP = 500
@@ -658,7 +682,8 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           // 后端已在 SSE data 中回填 message_id（streaming.py:226），优先使用它作为
           // DB 主键；未提供时回退到 event_key 合成临时 ID（向后兼容）。
           const messageId =
-            (evt.message_id as string | undefined) ?? `live:${currentTurnId}:${evt.event_key}`
+            (evt.message_id as string | undefined) ??
+            `live:${currentTurnId}:${evt.event_key}`
           setLiveMessages((prev) => {
             const existing = prev.find((message) => message.id === messageId)
             const liveMessage: ResearchMessageItem = {
@@ -779,7 +804,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     const box = scrollBox.current
     // 运行中用户上滚回看历史时不强行拽回底部；离底部超过 ~120px 就不自动跟随。
     // 但如果 collabBusy 刚变为 true（刚发送消息），则强制滚动到底部
-    if (box && box.scrollHeight - box.scrollTop - box.clientHeight > 120 && !collabBusy) {
+    if (
+      box &&
+      box.scrollHeight - box.scrollTop - box.clientHeight > 120 &&
+      !collabBusy
+    ) {
       return
     }
     scrollAnchor.current?.scrollIntoView({ behavior: "smooth" })
@@ -1019,16 +1048,15 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
             ) : messages.length === 0 ? (
               <EmptyState session={session} onRun={handleRun} running={busy} />
             ) : (
-              <div className={cn(
-                "py-3 space-y-1",
-                // 运行中或协作中时，添加底部内边距，确保内容不被遮挡
-                (busy || collabBusy) && "pb-24"
-              )}>
+              <div
+                className={cn(
+                  "py-3 space-y-1",
+                  // 运行中或协作中时，添加底部内边距，确保内容不被遮挡
+                  (busy || collabBusy) && "pb-24",
+                )}
+              >
                 {groupedMessages.map((group) => (
-                  <div
-                    key={group.turnId}
-                    className="group/turn relative pl-3"
-                  >
+                  <div key={group.turnId} className="group/turn relative pl-3">
                     {/* 左侧竖线：hover 时高亮 */}
                     <span
                       aria-hidden
@@ -1110,8 +1138,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         )}
       </div>
 
-      {/* pending 状态不显示底部操作区，由 EmptyState 承载启动入口 */}
-      {session.status !== "pending" && (
+      {/* pending 状态不显示底部操作区，由 EmptyState 承载启动入口。
+          例外：模板种子会话（seedOnly）历史里已有阶段痕迹、阶段轨也有内容，
+          底部会被 EmptyState 顶掉后空出一大片，故照常放行——它已预置 7/8/9，
+          从阶段 10 起步是有效操作。 */}
+      {session.status !== "pending" || seedOnly ? (
         <BottomComposer
           session={session}
           gateMessage={gateMessage}
@@ -1137,7 +1168,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           onRetry={handleRetry}
           onGateSubmit={handleFormSubmit}
         />
-      )}
+      ) : null}
     </div>
   )
 }
@@ -1145,6 +1176,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 /**
  * 消息为空时的占位：pending（会话已建、待开跑）与已选会话无消息两种文案，
  * 配图标 + 引导语，避免单薄的一行灰字。pending 状态显示可编辑 topic + 运行按钮。
+ *
+ * 模板种子会话（预置了 stage-07/08/09）不走这里：它历史里已有阶段痕迹，走消息列表
+ * 更贴合实际状态，也不再需要单独换一套「从阶段 10 继续」的文案。
  */
 function EmptyState({
   session,

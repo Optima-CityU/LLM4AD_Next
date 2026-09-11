@@ -31,7 +31,25 @@ ARC_API_KEY_ENV = "RESEARCH_ARC_API_KEY"
 
 # profile → experiment.mode=sandbox 的域集合。这些域的实验在容器内以 sandbox
 # 直跑（而非 llm4ad_agent 演化），需额外注入顶层 sandbox 配置块。
+# 该集合同时决定 experiment.llm4ad_boost.enabled 的开关（见 build_arc_config）：
+# sandbox 类 profile 的实验本身就是「直跑候选代码」，没有演化增强这一环，
+# 故不启用 boost；只有演化类 profile（如 algorithm_evolution）才启用。
 _SANDBOX_PROFILES = {"ml_vision"}
+
+
+def is_sandbox_profile(profile: str | None) -> bool:
+    """profile 是否属于 sandbox 直跑类（当前仅 ``ml_vision``）。
+
+    ``research_service.profile_switch`` 复用本函数判定跨类切换，避免同一集合
+    两处硬编码。
+
+    Args:
+        profile: ARC domain profile id（如 ``ml_vision`` / ``algorithm_evolution``）。
+
+    Returns:
+        属于 sandbox 直跑类返回 True；None 或不认识的值返回 False（按演化类处理）。
+    """
+    return profile in _SANDBOX_PROFILES
 
 
 def _detect_sandbox_python_path() -> str:
@@ -318,8 +336,12 @@ def build_arc_config(
             "metric_direction": session.metric_direction,
             # Stage 13 择优后的演化增强。字段对齐 AutoResearchClawAD2/config.arc.yaml，
             # 不配 target —— 目标算法由 LLM 三路分类自动选择（排除 baseline + 消融，其余全选）。
+            # enabled 按 profile 开关：sandbox 类（ml_vision）实验是 direct-run 候选，
+            # 没有「择优后再演化」这一环，强行开 boost 只会让 Stage 13 后空跑一轮；
+            # 只有演化类 profile（算法设计/演化科目）才启用。
             "llm4ad_boost": {
-                "enabled": True,
+                "run_evolution_in_package":True,
+                "enabled": not is_sandbox_profile(session.profile),
                 # 失败降级：记录告警并沿用 Stage 13 原有最优，不中断流水线
                 "fail_silently": True,
                 "evolution": {
@@ -327,16 +349,17 @@ def build_arc_config(
                     # 对齐 AutoResearchClawAD2/config.arc.yaml 的 10。参考配置就是 10；
                     # 4 代对优化类课题太少，常常一代全灭(如候选全被判语法错误)就收尾，
                     # 迁移到 10 大幅提高演化出分/择优改进的概率。
-                    "max_generations": 10,
+                    "max_generations": 20,
                     "elite_ratio": 0.2,
                     "mutation_rate": 0.6,
                     "crossover_rate": 0.3,
                     "island": {
                         "num_islands": 4,
                         "island_population_size": 4,
-                        "migration_interval": 5,
+                        "migration_interval": 10,
                         "migration_rate": 0.1,
                     },
+                    "evolve_scope": {"categories": ["proposed"]}
                 },
                 "resources": {
                     "time_budget_sec": 3600,

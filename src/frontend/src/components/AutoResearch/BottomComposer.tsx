@@ -136,6 +136,28 @@ export default function BottomComposer({
     status === "completed" || status === "failed" || status === "cancelled"
   const showRunTools = status === "pending" || terminal
 
+  // 起始阶段：pending 与终态都可用。是否**显式下发**取决于它与「本会话的天然起点」
+  // 是否一致——一致就不传，让后端按自己的规则决定（普通会话从头跑；模板种子会话
+  // 自动取 10，见 turns.start_turn）。这条区别很要紧：模板会话已物化 stage-07/08/09，
+  // 显式传 9 会触发 profile_switch 从 9 重置、删掉刚物化的 exp_plan，显式传 10 才是
+  // 无害的等价续跑。终态没有天然起点（用户就是要从某步重跑），一律显式带上。
+  const lastDoneStage = stages.reduce((max, s) => {
+    if (s.status !== "done") return max
+    return s.stage > max ? s.stage : max
+  }, 0)
+  const pickedStage = fromStage ? Number(fromStage) : null
+  const naturalStage = lastDoneStage > 0 ? lastDoneStage + 1 : null
+  const showStagePicker =
+    (terminal || status === "pending") && stages.length > 0
+  const forwardFromStage =
+    pickedStage === null
+      ? undefined
+      : terminal
+        ? fromStage
+        : pickedStage !== naturalStage
+          ? fromStage
+          : undefined
+
   // 统一的「运行中」：协作轮（问 AI）与流水线轮底层都是「正在运行」，底部这块
   // 不再区分二者——都禁用输入、走边框流光、只显示停止。pipelineRunning 仅在需要
   // 判定「是否流水线态」的极少数处保留（当前已无差异，统一用 isRunning）。
@@ -176,13 +198,14 @@ export default function BottomComposer({
       provider_id: provider.trim() || undefined,
       model_name: model.trim() || undefined,
       mode,
-      from_stage: terminal && fromStage ? fromStage : undefined,
+      from_stage: forwardFromStage,
     })
   }
 
   const providerList = providersData?.items ?? []
   const selectedProvider = providerList.find((p) => p.id === provider)
-  const defaultProviderName = defaultModels?.planner_provider_name || t("autoResearch.provider.default")
+  const defaultProviderName =
+    defaultModels?.planner_provider_name || t("autoResearch.provider.default")
   const defaultModelName = defaultModels?.planner_model_name || ""
 
   const providerLabel = (() => {
@@ -278,7 +301,9 @@ export default function BottomComposer({
                 if (noteError) setNoteError(false)
                 textareaRef.current?.focus()
               }}
-              title={t("autoResearch.chat.clearInput", { defaultValue: "清空" })}
+              title={t("autoResearch.chat.clearInput", {
+                defaultValue: "清空",
+              })}
               aria-label={t("autoResearch.chat.clearInput", {
                 defaultValue: "清空",
               })}
@@ -292,7 +317,7 @@ export default function BottomComposer({
     </div>
   )
 
-  // 工具栏左簇：模式开关 + 模型选择器 + （终态）起始阶段。三态位置恒定。
+  // 工具栏左簇：模式开关 + 模型选择器 + 起始阶段（pending / 终态）。三态位置恒定。
   const toolbarLeft = (
     <div className="flex items-center gap-1 min-w-0">
       <div
@@ -335,7 +360,12 @@ export default function BottomComposer({
             <ChevronDown className="size-3 shrink-0 opacity-60" />
           </button>
         </PopoverTrigger>
-        <PopoverContent className="w-105 p-3" align="start" side="top" sideOffset={8}>
+        <PopoverContent
+          className="w-105 p-3"
+          align="start"
+          side="top"
+          sideOffset={8}
+        >
           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5 px-0.5">
             {t("autoResearch.create.providerLabel")} / Model
           </p>
@@ -347,10 +377,13 @@ export default function BottomComposer({
         </PopoverContent>
       </Popover>
 
-      {/* 起始阶段：仅终态可从某步重跑。运行中（协作/流水线）隐藏，保持一致。 */}
-      {terminal && !isRunning && stages.length > 0 && (
+      {/* 起始阶段：pending / 终态都可用，运行中（协作/流水线）隐藏，保持一致。
+          pending 下它就是「这次从第几步起跑」；终态下是「从哪一步重跑」。 */}
+      {showStagePicker && !isRunning && (
         <Select
-          value={fromStage || "__begin__"}
+          value={
+            fromStage || (naturalStage ? String(naturalStage) : "__begin__")
+          }
           onValueChange={(v) => onFromStageChange(v === "__begin__" ? "" : v)}
         >
           <Tooltip>
@@ -373,7 +406,11 @@ export default function BottomComposer({
               {t("autoResearch.input.fromStageBegin")}
             </SelectItem>
             {stages.map((s) => (
-              <SelectItem key={s.stage} value={String(s.stage)} className="text-xs">
+              <SelectItem
+                key={s.stage}
+                value={String(s.stage)}
+                className="text-xs"
+              >
                 #{s.stage} {stageNameByLang(s.stage, i18n.language) || s.name}
               </SelectItem>
             ))}
@@ -606,4 +643,3 @@ export default function BottomComposer({
     </div>
   )
 }
-
