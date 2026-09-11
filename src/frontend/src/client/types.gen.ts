@@ -2801,9 +2801,13 @@ export type ResearchSessionCreateRequest = {
      */
     title?: (string | null);
     /**
-     * 研究问题 / 主题
+     * 研究问题 / 主题。传 template_id 时可留空，后端用模板 manifest 派生；两者都空则 400。
      */
-    topic: string;
+    topic?: string;
+    /**
+     * ARC-Bench 课题 id（如 ML01）：给定则建会话时把 stage-07/08/09 产物直接物化进 run_dir。纯初始化入参，不落库；显式传的 topic / metric_key / metric_direction 优先于模板值。
+     */
+    template_id?: (string | null);
     /**
      * ARC domain profile id
      */
@@ -2992,6 +2996,110 @@ export type ResearchStateResponse = {
         [key: string]: unknown;
     };
     updated_at?: (string | null);
+};
+
+/**
+ * 模板详情：摘要 + manifest 全文（创建对话框预览用）。
+ */
+export type ResearchTemplateDetailResponse = {
+    /**
+     * 课题 id，如 ML01
+     */
+    id: string;
+    /**
+     * 展示名（由课题文本首句派生）
+     */
+    title: string;
+    /**
+     * 课题描述原文
+     */
+    topic: string;
+    /**
+     * ARC 域标签
+     */
+    domains?: Array<(string)>;
+    /**
+     * 该课题建议的指标列名
+     */
+    metric_key?: string;
+    /**
+     * 'maximize' / 'minimize' / ''（未指定）
+     */
+    metric_direction?: string;
+    /**
+     * 域目录名：ml / physics / …
+     */
+    domain?: string;
+    /**
+     * 域展示名
+     */
+    domain_label?: string;
+    /**
+     * 上游 briefing 全文
+     */
+    synthesis?: string;
+    /**
+     * 假设列表（id / statement / measurable）
+     */
+    hypotheses?: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * 实验设计（问题 / 条件 / 指标 / 数据集）
+     */
+    experiment_design?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * 课题模板摘要（picker 列表用）。
+ */
+export type ResearchTemplateItem = {
+    /**
+     * 课题 id，如 ML01
+     */
+    id: string;
+    /**
+     * 展示名（由课题文本首句派生）
+     */
+    title: string;
+    /**
+     * 课题描述原文
+     */
+    topic: string;
+    /**
+     * ARC 域标签
+     */
+    domains?: Array<(string)>;
+    /**
+     * 该课题建议的指标列名
+     */
+    metric_key?: string;
+    /**
+     * 'maximize' / 'minimize' / ''（未指定）
+     */
+    metric_direction?: string;
+    /**
+     * 域目录名：ml / physics / …
+     */
+    domain?: string;
+    /**
+     * 域展示名
+     */
+    domain_label?: string;
+};
+
+/**
+ * 模板列表响应。
+ */
+export type ResearchTemplateListResponse = {
+    items?: Array<ResearchTemplateItem>;
+    total?: number;
+    /**
+     * 镜像是否装了 arc-templates extra；False 时 items 恒为空
+     */
+    available?: boolean;
 };
 
 /**
@@ -4388,6 +4496,21 @@ export type Llm4AdResearchDeleteFolderData = {
 };
 
 export type Llm4AdResearchDeleteFolderResponse = (ResearchDeleteResponse);
+
+export type Llm4AdResearchListTemplatesData = {
+    /**
+     * 域过滤：ml / physics / biology / statistics / quantum；不传=全部
+     */
+    domain?: (string | null);
+};
+
+export type Llm4AdResearchListTemplatesResponse = (ResearchTemplateListResponse);
+
+export type Llm4AdResearchGetTemplateData = {
+    topicId: string;
+};
+
+export type Llm4AdResearchGetTemplateResponse = (ResearchTemplateDetailResponse);
 
 export type Llm4AdResearchListSessionsData = {
     /**

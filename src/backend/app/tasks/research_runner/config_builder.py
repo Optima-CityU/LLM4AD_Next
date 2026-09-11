@@ -337,6 +337,7 @@ def build_arc_config(
                         "migration_interval": 5,
                         "migration_rate": 0.1,
                     },
+                    "evolve_scope": {"categories": ["proposed"]}
                 },
                 "resources": {
                     "time_budget_sec": 3600,

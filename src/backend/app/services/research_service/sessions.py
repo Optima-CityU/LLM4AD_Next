@@ -28,6 +28,7 @@ from app.core.redis import delete_research_stream
 from app.models.research import (
     ResearchLog,
     ResearchMessage,
+    ResearchMessageRole,
     ResearchSession,
     ResearchSessionStatus,
     ResearchTurn,
@@ -45,6 +46,7 @@ from app.schemas.research import (
     ResearchTurnItem,
 )
 from app.tasks.research_runner import cleanup_run_dir, stage_display_name
+from app.tasks.research_runner.snapshots import resolve_run_dir, snap_session
 
 from ._common import (
     _encode_reverse_cursor,
@@ -58,6 +60,7 @@ from .profile_switch import (
     purge_stage_artifacts,
     purge_stage_data,
 )
+from .templates import derive_topic, load_manifest, materialize, rematerialize
 
 # 会话 title 兜底策略：优先用户传的 title；否则从 topic 截取，超长加省略号。
 _TITLE_MAX = 60
@@ -75,14 +78,115 @@ def _derive_session_title(explicit: str | None, topic: str) -> str:
     return normalized[: _TITLE_MAX - 1] + "…"
 
 
+def _seed_template_checkpoint(
+    db: Session,
+    session: ResearchSession,
+    *,
+    topic_id: str,
+) -> None:
+    """把「模板已预置 stage-07/08/09」写成一枚种子轮 + 6 条 stage 事件。
+
+    run_dir 里已有 stage-07/08/09 产物与 ``checkpoint.json``（见
+    :func:`templates.materialize`），若 DB 里没有任何痕迹，前端阶段 rail 会显示
+    空白。这里补一条 ``COMPLETED`` 的种子轮 + 每个阶段一对
+    ``running``/``done`` 的 ``stage_transition`` 消息，让 :func:`get_state` 的
+    回放逻辑（只读 ``event_type == "stage_transition"`` 的行）重建出「7/8/9 已完成」。
+
+    刻意**不**置 ``session.status``：会话仍是 ``PENDING``，首轮走的是
+    :func:`turns.start_turn` 的「新建 turn」路径，与非模板会话完全一致。种子轮只是
+    这批消息的 FK 载体（``ResearchMessage.turn_id`` 非空）。
+
+    Args:
+        db: 数据库会话（调用方负责 commit）。
+        session: 已 flush 出 id 的会话行。
+        topic_id: 课题 id，仅用于文案。
+    """
+    now = _now_utc()
+    turn = ResearchTurn(
+        id=uuid.uuid4(),
+        session_id=session.id,
+        status=ResearchTurnStatus.COMPLETED.value,
+        from_stage="7",
+        to_stage="9",
+        user_input=f"initialized from template {topic_id}",
+        started_at=now,
+        ended_at=now,
+    )
+    db.add(turn)
+    db.flush()
+
+    for seq, stage in enumerate((7, 8, 9), start=1):
+        name = stage_display_name(stage)
+        for offset, status in enumerate(("running", "done")):
+            db.add(
+                ResearchMessage(
+                    session_id=session.id,
+                    turn_id=turn.id,
+                    role=ResearchMessageRole.SYSTEM,
+                    content=f"[stage-{stage}] {name} {status}",
+                    turn_status=ResearchTurnStatus.COMPLETED.value,
+                    event_type="stage_transition",
+                    event_key=f"stage_transition:{seq}{offset}",
+                    stage=stage,
+                    seq=seq * 10 + offset,
+                    payload={
+                        "kind": "stage_progress",
+                        "stage": stage,
+                        "name": name,
+                        "status": status,
+                    },
+                )
+            )
+
+
 def create_session(
     db: Session, request: ResearchSessionCreateRequest, user: models.User
 ) -> ResearchSessionItem:
-    """新建会话（不立即启动首轮）。"""
+    """新建会话（不立即启动首轮）。
+
+    ``request.template_id`` 给定即走「从模板创建」：把 ARC-Bench 课题的
+    stage-07/08/09 产物物化进 run_dir，并补一枚种子轮 + 7/8/9 的 stage 事件。
+    其余流程与非模板会话完全一致——模板只是**创建时的一次性初始化输入**，不落任何
+    session 字段，后续对会话的读写路径无需感知它。
+    """
     if request.folder_id is not None:
         _get_folder(db, request.folder_id, user)
 
-    title = _derive_session_title(request.title, request.topic)
+    topic = (request.topic or "").strip()
+    title = request.title
+    metric_direction = request.metric_direction
+    metric_key = request.metric_key
+    profile = request.profile
+    manifest: dict[str, Any] | None = None
+
+    if request.template_id:
+        # 课题不存在 / 镜像未装 extra 都在这里 404 / 503，早于任何写库。
+        manifest = load_manifest(request.template_id)
+        if not topic:
+            topic = derive_topic(manifest)
+        if not title:
+            # 模板标题比派生 topic 全文更适合当会话名。
+            title = str(manifest.get("title") or request.template_id)
+        metrics = (manifest.get("experiment_design") or {}).get("metrics") or []
+        if metrics:
+            # 与 run_bench_init.materialize_config 同款：取首个 metric。
+            # 显式传值优先——用户可以在建会话时覆盖模板建议。
+            primary = metrics[0]
+            if not metric_key:
+                metric_key = str(primary.get("name") or "")
+            if not metric_direction:
+                direction = str(primary.get("direction") or "")
+                if direction in ("maximize", "minimize"):
+                    metric_direction = direction
+        # profile 与模板域无关（config_builder 恒用 mathematics_optimization），
+        # 不按域改写；模板自带的 domain_profile.json 由容器内 stage-10 消费。
+
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="topic is required when template_id is not given",
+        )
+
     workspace_dict = (
         request.llm4ad_workspace.model_dump(mode="json")
         if request.llm4ad_workspace
@@ -92,19 +196,43 @@ def create_session(
     session = ResearchSession(
         user_id=user.id,
         folder_id=request.folder_id,
-        title=title,
-        topic=request.topic,
-        profile=request.profile,
+        title=_derive_session_title(title, topic),
+        topic=topic,
+        profile=profile,
         mode=request.mode.value,
-        metric_direction=request.metric_direction,
-        metric_key=request.metric_key,
+        metric_direction=metric_direction,
+        metric_key=metric_key,
         provider_id=request.provider_id,
         model_name=request.model_name,
         llm4ad_workspace=workspace_dict,
     )
+    if request.template_id:
+        # run_dir 在建会话时就定下来并落库：与 _bootstrap 的 resolve_run_dir 同口径
+        # （session.run_dir 优先），物化与后续 pipeline 读写必然同一目录。
+        session.run_dir = str(
+            resolve_run_dir(snap_session(session))
+        )
     db.add(session)
     db.commit()
     db.refresh(session)
+
+    # 磁盘物化 + 种子轮都放在主提交之后（best-effort）：即便失败，会话已存在、
+    # 首轮照常可跑，只是没有预置产物与 7/8/9 的进度痕迹。
+    if request.template_id:
+        if not materialize(Path(session.run_dir), request.template_id):
+            logger.warning(
+                f"template {request.template_id} not materialized for session {session.id}"
+            )
+        try:
+            _seed_template_checkpoint(db, session, topic_id=request.template_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.opt(exception=True).warning(
+                f"seed template checkpoint failed session={session.id}"
+            )
+        db.refresh(session)
+
     return ResearchSessionItem.model_validate(session)
 
 
@@ -189,6 +317,11 @@ def update_session(
     if needs_purge:
         purge_stage_artifacts(run_dir_snapshot)
         purge_stage_data(db, session.id)
+        # 模型产物被清后，模板预置的 stage-09 也一并没了。若 run_dir 里还留着题面
+        # （topic_manifest.json，见 templates.rematerialize），就地补回来——否则要拖到
+        # 下一轮 worker bootstrap 才补，期间前端看到的是空 stage-09。
+        if run_dir_snapshot:
+            rematerialize(Path(run_dir_snapshot))
 
     db.refresh(session)
     return ResearchSessionItem.model_validate(session)

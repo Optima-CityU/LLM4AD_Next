@@ -36,6 +36,8 @@ import {
   type ResearchSessionUpdateRequest,
   type ResearchStageGuideRequest,
   type ResearchStateResponse,
+  type ResearchTemplateDetailResponse,
+  type ResearchTemplateListResponse,
   type ResearchTurnItem,
   type ResearchTurnRetryRequest,
   type ResearchTurnStartRequest,
@@ -86,6 +88,12 @@ export const researchKeys = {
     [...researchKeys.all, "generated", sessionId] as const,
   analysis: (sessionId: string) =>
     [...researchKeys.all, "analysis", sessionId] as const,
+  /** ARC-Bench 课题模板列表（域过滤；注册表静态，很少失效）。 */
+  templates: (domain?: string | null) =>
+    [...researchKeys.all, "templates", domain ?? "__all__"] as const,
+  /** 单个课题模板详情（含 briefing / 假设 / 实验设计预览）。 */
+  templateDetail: (topicId: string) =>
+    [...researchKeys.all, "template", topicId] as const,
 }
 
 // ---- 通用 helpers ----
@@ -134,6 +142,51 @@ function useInvalidator() {
 export function useInvalidateSessionLists() {
   const qc = useQueryClient()
   return useCallback(() => invalidateSessionListsOn(qc), [qc])
+}
+
+// ---- 课题模板（ARC-Bench）----
+
+/**
+ * ARC-Bench 课题模板列表。注册表随镜像静态打包，故 staleTime 给到 30 分钟。
+ *
+ * `available === false` 表示后端镜像没装 `arc-templates` extra——调用方据此隐藏
+ * 「从模板创建」入口，而不是把它当错误处理。
+ */
+export function useResearchTemplates(
+  domain?: string | null,
+  opts?: Omit<
+    UseQueryOptions<ResearchTemplateListResponse>,
+    "queryKey" | "queryFn"
+  >,
+) {
+  return useQuery({
+    queryKey: researchKeys.templates(domain),
+    queryFn: () => Llm4AdResearchService.listTemplates({ domain: domain ?? undefined }),
+    staleTime: 30 * 60_000,
+    ...opts,
+  })
+}
+
+/**
+ * 单个课题模板详情（briefing + 假设 + 实验设计）。
+ *
+ * @param topicId 传 null 则不请求（picker 未选中任何课题时）。
+ */
+export function useResearchTemplateDetail(
+  topicId: string | null | undefined,
+  opts?: Omit<
+    UseQueryOptions<ResearchTemplateDetailResponse>,
+    "queryKey" | "queryFn"
+  >,
+) {
+  return useQuery({
+    queryKey: researchKeys.templateDetail(topicId ?? "__none__"),
+    queryFn: () =>
+      Llm4AdResearchService.getTemplate({ topicId: topicId as string }),
+    enabled: Boolean(topicId),
+    staleTime: 30 * 60_000,
+    ...opts,
+  })
 }
 
 // ---- Folders ----

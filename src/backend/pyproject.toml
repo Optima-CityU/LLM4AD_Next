@@ -40,8 +40,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Task-runner image only: the ARC pipeline runs inside the container, so it is the
+# sole consumer of torch.
 # uv sync --extra research --upgrade-package researchclaw; torch pinned to CPU index below.
 research = ["researchclaw", "torch>=2.2"]
+# Backend image only: the ARC-Bench topic registry (researchclaw.arc_bench) is read
+# by the API to list templates and materialize stage-07/08/09 artifacts at session
+# creation. researchclaw's own dependency tree is light (arxiv, numpy, pyyaml, rich),
+# so this extra deliberately excludes torch — it is *not* research, which would pull
+# the whole training stack into the API image for nothing.
+arc-templates = ["researchclaw"]
 
 [tool.uv]
 # Drop xgboost's Linux-only NVIDIA NCCL dependency (~400 MB) from the backend
@@ -53,7 +61,7 @@ override-dependencies = ["nvidia-nccl-cu12; sys_platform == 'never'"]
 [tool.uv.sources]
 llm4ad-next = { path = "../..", editable = true }
 # ── AutoResearch (optional) ─────────────────────────────────────────────────
-researchclaw = { git = "https://github.com/y414987863/AutoResearchClawAD.git", branch = "dev/main.20260821-v0.1.2-tmp3" }
+researchclaw = { git = "https://github.com/y414987863/AutoResearchClawAD.git", branch = "dev/main.20260821-v0.1.2-tmp5" }
 torch = [{ index = "pytorch-cpu" }]
 
 # CPU-only torch wheels; explicit = only torch resolves here, rest stays on PyPI.

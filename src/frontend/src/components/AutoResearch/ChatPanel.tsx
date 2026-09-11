@@ -430,6 +430,25 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     [messages, gateMessage],
   )
 
+  // 模板种子会话：pending 且历史里只有 stage_transition。
+  //
+  // 「从模板创建」会在建会话时预置一枚种子轮 + 7/8/9 各一对 running/done 的
+  // stage_transition 消息（后端 _seed_template_checkpoint），让阶段轨立刻显示
+  // 「已跑到 9」。副作用是消息列表非空：`messages.length === 0` 的启动入口不再
+  // 命中，而 pending 又隐藏了底部操作区，于是两个入口同时消失——用户看不到任何
+  // 运行按钮。这里识别出这种「只有阶段痕迹、没有任何对话」的会话，让它继续走
+  // 空态启动入口（EmptyState），并放行底部操作区。
+  //
+  // 用「全部是 stage_transition」而非「消息数 == 6」：换模板/重物化时条数会变，
+  // 且真实跑过一轮的会话必然含非 stage_transition 消息（user/assistant/log）。
+  const seedOnly = useMemo(
+    () =>
+      session.status === "pending" &&
+      renderedMessages.length > 0 &&
+      renderedMessages.every((m) => m.event_type === "stage_transition"),
+    [session.status, renderedMessages],
+  )
+
   const LOG_CAP = 500
   const [streamLogs, setStreamLogs] = useState<StreamLogEntry[]>([])
   const logSeqRef = useRef(0)
@@ -1016,8 +1035,13 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
                 <Loader2 className="size-4 animate-spin mr-2" />
                 {t("autoResearch.chat.loading")}
               </div>
-            ) : messages.length === 0 ? (
-              <EmptyState session={session} onRun={handleRun} running={busy} />
+            ) : messages.length === 0 || seedOnly ? (
+              <EmptyState
+                session={session}
+                onRun={handleRun}
+                running={busy}
+                seedOnly={seedOnly}
+              />
             ) : (
               <div className={cn(
                 "py-3 space-y-1",
@@ -1110,8 +1134,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         )}
       </div>
 
-      {/* pending 状态不显示底部操作区，由 EmptyState 承载启动入口 */}
-      {session.status !== "pending" && (
+      {/* pending 状态不显示底部操作区，由 EmptyState 承载启动入口。
+          例外：模板种子会话（seedOnly）历史里已有阶段痕迹、阶段轨也有内容，
+          底部会被 EmptyState 顶掉后空出一大片，故照常放行——它已预置 7/8/9，
+          从阶段 10 起步是有效操作。 */}
+      {session.status !== "pending" || seedOnly ? (
         <BottomComposer
           session={session}
           gateMessage={gateMessage}
@@ -1137,7 +1164,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           onRetry={handleRetry}
           onGateSubmit={handleFormSubmit}
         />
-      )}
+      ) : null}
     </div>
   )
 }
@@ -1145,15 +1172,20 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 /**
  * 消息为空时的占位：pending（会话已建、待开跑）与已选会话无消息两种文案，
  * 配图标 + 引导语，避免单薄的一行灰字。pending 状态显示可编辑 topic + 运行按钮。
+ *
+ * ``seedOnly``（模板种子会话）沿用 pending 分支的整套布局，只换文案：产物已预置
+ * 到 stage-09，多一句「从阶段 10 继续」的提示，避免用户以为要从头跑一遍 23 阶段。
  */
 function EmptyState({
   session,
   onRun,
   running,
+  seedOnly = false,
 }: {
   session: ResearchSessionItem
   onRun: (overrides: RunOverrides) => void
   running: boolean
+  seedOnly?: boolean
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -1244,6 +1276,14 @@ function EmptyState({
           <h3 className="text-xl font-bold text-foreground">
             {t("autoResearch.chat.pendingTitle", "准备就绪")}
           </h3>
+          {seedOnly && (
+            <p className="text-sm text-muted-foreground">
+              {t(
+                "autoResearch.chat.templateReadySubtitle",
+                "已从课题模板预置阶段 07–09 的产物，将从阶段 10 继续",
+              )}
+            </p>
+          )}
         </div>
 
         {/* 主题卡片：渐变边框 + 悬浮效果 */}
@@ -1378,7 +1418,11 @@ function EmptyState({
               <div className="flex size-5 items-center justify-center rounded-full bg-muted text-muted-foreground font-semibold">
                 2
               </div>
-              <span>{t("autoResearch.chat.step2", "点击开始研究")}</span>
+              <span>
+                {seedOnly
+                  ? t("autoResearch.chat.startFromStage10", "从阶段 10 开始")
+                  : t("autoResearch.chat.step2", "点击开始研究")}
+              </span>
             </div>
           </div>
         )}
@@ -1410,10 +1454,15 @@ function EmptyState({
         {/* 底部提示文案 */}
         {!editing && (
           <p className="text-xs text-muted-foreground/60 max-w-lg">
-            {t(
-              "autoResearch.chat.pendingHint",
-              "AI 将按照 22 个阶段自动执行研究流程，您可以随时查看进度或介入调整",
-            )}
+            {seedOnly
+              ? t(
+                  "autoResearch.chat.templateReadyHint",
+                  "模板已提供文献综述、假设与实验设计，AI 将从代码生成阶段继续；您可以随时查看进度或介入调整",
+                )
+              : t(
+                  "autoResearch.chat.pendingHint",
+                  "AI 将按照 22 个阶段自动执行研究流程，您可以随时查看进度或介入调整",
+                )}
           </p>
         )}
       </div>

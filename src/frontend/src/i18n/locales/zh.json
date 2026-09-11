@@ -3430,7 +3430,16 @@
       "workspaceTaskIdPlaceholder": "已有任务 ID",
       "create": "创建",
       "createAndStart": "创建并运行",
-      "creating": "创建中..."
+      "creating": "创建中...",
+      "templateLabel": "课题模板（可选）",
+      "templatePlaceholder": "从 ARC-Bench 课题库选择一个起点",
+      "templateClear": "取消选择",
+      "templateSearch": "搜索",
+      "templateAllDomains": "全部",
+      "templateEmpty": "没有匹配的课题",
+      "templateLoadFailed": "课题模板加载失败（后端镜像可能未装 arc-templates）",
+      "templatePreset": "预置 stage 7-9",
+      "templateHypotheses": "{{n}} 条假设"
     },
     "metricDirection": {
       "maximize": "最大化",
@@ -3506,6 +3515,9 @@
       "topicTooLong": "主题最多 {{max}} 个字符",
       "step1": "确认研究主题",
       "step2": "点击开始研究",
+      "startFromStage10": "从阶段 10 开始",
+      "templateReadySubtitle": "已从课题模板预置阶段 07–09 的产物，将从阶段 10 继续",
+      "templateReadyHint": "模板已提供文献综述、假设与实验设计，AI 将从代码生成阶段继续；您可以随时查看进度或介入调整",
       "startResearch": "开始研究",
       "starting": "启动中..."
     },
@@ -3796,6 +3808,13 @@
       "generation": "代数",
       "score": "得分",
       "fullValueHint": "完整值（未四舍五入）"
+    },
+    "templateDomain": {
+      "ml": "机器学习",
+      "physics": "物理",
+      "biology": "生物",
+      "statistics": "统计",
+      "quantum": "量子"
     }
   },
   "liveCode": {

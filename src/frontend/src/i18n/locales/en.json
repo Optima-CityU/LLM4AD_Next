@@ -3560,7 +3560,16 @@
       "workspaceTaskIdPlaceholder": "Existing task ID",
       "create": "Create",
       "createAndStart": "Create & run",
-      "creating": "Creating..."
+      "creating": "Creating...",
+      "templateLabel": "Topic template (optional)",
+      "templatePlaceholder": "Start from an ARC-Bench topic",
+      "templateClear": "Clear",
+      "templateSearch": "Search",
+      "templateAllDomains": "All",
+      "templateEmpty": "No matching topic",
+      "templateLoadFailed": "Failed to load templates (the arc-templates extra may be missing)",
+      "templatePreset": "presets stages 7-9",
+      "templateHypotheses": "{{n}} hypotheses"
     },
     "metricDirection": {
       "maximize": "Maximize",
@@ -3636,6 +3645,9 @@
       "topicTooLong": "Topic must be at most {{max}} characters",
       "step1": "Confirm research topic",
       "step2": "Click to start research",
+      "startFromStage10": "Start from stage 10",
+      "templateReadySubtitle": "Stages 07–09 are pre-filled from the topic template; research continues from stage 10",
+      "templateReadyHint": "The template already provides the literature review, hypotheses and experiment design; the AI continues from code generation. You can monitor progress or intervene at any time",
       "startResearch": "Start Research",
       "starting": "Starting..."
     },
@@ -3926,6 +3938,13 @@
       "generation": "Generation",
       "score": "Score",
       "fullValueHint": "Full value (not rounded)"
+    },
+    "templateDomain": {
+      "ml": "ML",
+      "physics": "Physics",
+      "biology": "Biology",
+      "statistics": "Statistics",
+      "quantum": "Quantum"
     }
   }
 }
