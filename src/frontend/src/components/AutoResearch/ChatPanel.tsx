@@ -57,7 +57,12 @@ import StageTimeline, {
 import type { StreamLogEntry } from "./StreamLogConsole"
 import { ML_VISION_PROFILE } from "./shared"
 import TurnLogPanel from "./TurnLogPanel"
-import { buildStageRoadmap } from "./tech"
+import {
+  buildStageRoadmap,
+  naturalStageFromMessages,
+  stageOf,
+  statusOf,
+} from "./tech"
 
 interface Props {
   session: ResearchSessionItem | null
@@ -94,17 +99,6 @@ function minStreamId(a?: string | null, b?: string | null): string | undefined {
 type RenderItem =
   | { kind: "msg"; message: ResearchMessageItem }
   | { kind: "stage"; entry: StageEntry }
-
-/** 从消息中取阶段号（message.stage 优先，回退 payload.stage）。 */
-function stageOf(m: ResearchMessageItem): number | null {
-  const p = (m.payload ?? {}) as { stage?: number }
-  return m.stage ?? p.stage ?? null
-}
-
-/** 阶段事件的状态串（running/waiting/done/failed）。 */
-function statusOf(m: ResearchMessageItem): string {
-  return String((m.payload as { status?: unknown })?.status ?? "")
-}
 
 /**
  * 折叠某一轮内**同阶段**的 stage_transition 为一个时间轴条目，多个状态
@@ -303,7 +297,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   const displayStages = stateQ.data?.stages ?? []
   // 底部「起始阶段」选择器用的完整 23 阶段清单：已跑到的阶段保留真实态，未跑到
   // 的阶段合成为 pending。这样用户也能从尚未执行过的后续阶段起步（后端按
-  // --from-stage 接受任意合法 stage 号）。默认选中仍在下方重置为最后一个真实阶段。
+  // --from-stage 接受任意合法 stage 号）。默认选中见下方 naturalFromStage。
   const displayStageOptions = useMemo(
     () => buildStageRoadmap(displayStages),
     [displayStages],
@@ -317,30 +311,14 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     (session.mode as ResearchMode) ?? "co-pilot",
   )
   const [runFromStage, setRunFromStage] = useState("")
-  // 切换会话时重置运行配置：默认从最后一个允许的阶段开始。显式带上 session.id，
-  // 即便新旧会话 provider/model/mode 相同也要重置起始阶段（否则会串上一个会话）。
+
+  // 切换会话时重置运行配置（起始阶段不在此处，由下方「天然起点」单独兜管）。
   // biome-ignore lint/correctness/useExhaustiveDependencies: session.id 用于会话切换重置
   useEffect(() => {
     setRunProvider(session.provider_id ?? "")
     setRunModel(session.model_name ?? "")
     setRunMode((session.mode as ResearchMode) ?? "co-pilot")
-    // 起始阶段默认取「最后一个已有产物之后的一步」：普通新会话没有产物，退化成
-    // 空串（不显式传，ARC 自会从头跑）；模板种子会话已有 7/8/9，取值 10，与后端
-    // start_turn 在「run_dir 有模板产物」时的缺省完全一致——显式传 9 会让
-    // profile_switch 从 9 重置，删掉刚物化的 exp_plan。
-    const done = displayStages.filter((s) => s.status === "done")
-    const lastDone =
-      done.length > 0
-        ? done.reduce((max, s) => (s.stage > max ? s.stage : max), 0)
-        : 0
-    setRunFromStage(lastDone > 0 ? String(lastDone + 1) : "")
-  }, [
-    session.id,
-    session.provider_id,
-    session.model_name,
-    session.mode,
-    displayStages,
-  ])
+  }, [session.id, session.provider_id, session.model_name, session.mode])
 
   // 实时消息叠加层：SSE 持久化事件按 event_key upsert，避免等待 API refetch。
   const [liveMessages, setLiveMessages] = useState<ResearchMessageItem[]>([])
@@ -410,6 +388,22 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
     })
   }, [msgQ.data, liveMessages])
+
+  // 起始阶段的天然起点：由「会话历史里最后一条带阶段号的消息」推出（规则见
+  // tech.naturalStageFromMessages）。模板会话不特判——它同样有 stage-07/08/09 的
+  // 阶段消息，算出来就是 10，与后端 start_turn 在「run_dir 有模板产物」时的缺省
+  // 一致；显式传 9 反而会触发 profile_switch 从 9 重置、删掉刚物化的 exp_plan。
+  // 用 messages（升序，REST + SSE 合并）而非 /state 快照：快照按阶段号折叠，看不出
+  // 「最后跑的是哪一步、那一步是成是败」。
+  const naturalFromStage = useMemo(
+    () => naturalStageFromMessages(messages),
+    [messages],
+  )
+  // 默认值跟随天然起点：切换会话、跑完一轮、阶段推进都会重算，重新贴到选择器上。
+  // 用户手动改过之后若天然起点没变（refetch 造出等价新数组）也不会被覆盖。
+  useEffect(() => {
+    setRunFromStage(naturalFromStage ? String(naturalFromStage) : "")
+  }, [naturalFromStage])
 
   // 当前待回复的门控 form 消息：turn 进入 paused_gate 时最后一条未锁定的 form。
   // 移到底部 GatePanel 操作；消息流里不再重复渲染这一条（见 renderedMessages）。

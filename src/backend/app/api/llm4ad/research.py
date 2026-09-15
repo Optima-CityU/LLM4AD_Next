@@ -144,6 +144,38 @@ def delete_folder(
     return ResearchDeleteResponse(id=folder_id)
 
 
+@router.post(
+    "/folders/{folder_id}/pin",
+    response_model=ResearchFolderItem,
+    summary="置顶文件夹（幂等）",
+)
+def pin_folder(
+    folder_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """置顶；已在置顶态时重复调用不报错，返回当前状态。"""
+    return research_service.set_folder_pinned(
+        db, folder_id, current_user, pinned=True
+    )
+
+
+@router.delete(
+    "/folders/{folder_id}/pin",
+    response_model=ResearchFolderItem,
+    summary="取消置顶文件夹（幂等）",
+)
+def unpin_folder(
+    folder_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """取消置顶；原本未置顶时重复调用不报错，返回当前状态。
+
+    用 ``DELETE`` 对齐「pin 是一种附属状态」的资源语义：POST 建立、DELETE
+    撤销，天然幂等，且与置顶只差一个键，前端切换时同一个 key 就能失效缓存。
+    """
+    return research_service.set_folder_pinned(
+        db, folder_id, current_user, pinned=False
+    )
+
+
 # ---- 课题模板（ARC-Bench）----
 
 
@@ -205,11 +237,11 @@ def list_sessions(
     ),
     cursor: str | None = Query(
         default=None,
-        description="上一页最后一条的 updated_time ISO；首次不传",
+        description="上一页最后一条的 created_time ISO；首次不传",
     ),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    """会话游标分页列表，按 updated_time 倒序。"""
+    """会话游标分页列表，按 created_time 倒序。"""
     return research_service.list_sessions(
         db,
         current_user,

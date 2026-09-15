@@ -258,6 +258,34 @@ export function useReorderResearchFolders() {
   })
 }
 
+/**
+ * 置顶 / 取消置顶文件夹。
+ *
+ * 后端两个端点语义对称且幂等（POST 建立 pin、DELETE 撤销），所以这里用一个
+ * hook 按 `pinned` 分派，调用方不必自己选方法。返回的是被改动的那个文件夹，
+ * 但列表顺序同时受影响，故成功后统一失效 folders 缓存重取。
+ *
+ * 只失效 folders、不动会话列表：置顶不影响任何会话的归属或排序。
+ */
+export function usePinResearchFolder() {
+  const inv = useInvalidator()
+  return useMutation({
+    mutationFn: ({
+      folderId,
+      pinned,
+    }: {
+      folderId: string
+      pinned: boolean
+    }) =>
+      pinned
+        ? Llm4AdResearchService.pinFolder({ folderId })
+        : Llm4AdResearchService.unpinFolder({ folderId }),
+    onSuccess: () => {
+      inv.invalidateFolders()
+    },
+  })
+}
+
 // ---- Sessions ----
 
 export function useResearchSessions(

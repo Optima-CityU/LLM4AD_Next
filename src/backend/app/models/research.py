@@ -114,6 +114,14 @@ class ResearchFolder(SQLModel, TimeMixin, table=True):
     __table_args__ = (
         # 用户视角的典型查询：同一用户下按 parent 展开树状结构
         Index("ix_research_folder_user_parent", "user_id", "parent_id"),
+        # 列表排序键：置顶优先 + 手动序号 + 创建时间兜底。与 list_folders 的
+        # order_by 完全对应，避免加了 is_pinned 后排序走全表 sort。
+        Index(
+            "ix_research_folder_user_pinned_order",
+            "user_id",
+            "is_pinned",
+            "sort_order",
+        ),
         # 同一父目录下文件夹名称唯一，便于前端拒绝重名新建
         UniqueConstraint(
             "user_id",
@@ -141,6 +149,16 @@ class ResearchFolder(SQLModel, TimeMixin, table=True):
         ),
         description="同级排序权重，越小越靠前，等于 0 时按创建时间兜底",
     )
+    is_pinned: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean, nullable=False, server_default=text("false")
+        ),
+        description=(
+            "置顶标记。True 的文件夹恒定排在未置顶项之前，与 sort_order 无关；"
+            "置顶组内仍按 sort_order / created_time 排序。"
+        ),
+    )
 
     user: Optional["User"] = Relationship()  # type: ignore[name-defined]  # noqa: F821
 
@@ -160,7 +178,8 @@ class ResearchSession(SQLModel, TimeMixin, table=True):
     __tablename__ = "research_session"
     __table_args__ = (
         Index("ix_research_session_user_folder", "user_id", "folder_id"),
-        Index("ix_research_session_user_updated", "user_id", "updated_time"),
+        # 会话列表排序键：created_time 倒序 + id 次级键（复合游标分页用）
+        Index("ix_research_session_user_created", "user_id", "created_time"),
         # 部分索引：只覆盖非终态会话，供后台监控 orphan 会话
         Index(
             "ix_research_session_alive",

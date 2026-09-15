@@ -8,7 +8,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react"
-import { useEffect, useId, useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ResearchGeneratedItem } from "@/client"
@@ -30,7 +30,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useResearchGenerated } from "@/hooks/useAutoResearch"
+import { algorithmKey, useExperimentAlgorithm } from "./useExperimentAlgorithm"
 
 /**
  * 右侧「实验」区：llm4ad 演化的仿真概览 + 趋势分析，接入真实 generated 数据。
@@ -220,32 +220,32 @@ export function ExperimentTabToggle({
 export default function ExperimentPanel({
   sessionId,
   running,
+  algorithm,
+  onAlgorithmChange,
 }: {
   sessionId: string
   running?: boolean
+  /** 当前选中的算法名（由 ArtifactsPanel 持有，与全屏弹框共享）。 */
+  algorithm?: string | null
+  onAlgorithmChange?: (algo: string) => void
 }) {
   const { t } = useTranslation()
-  const genQ = useResearchGenerated(sessionId, running)
+  const { genQ, groups, selected, onSelect } = useExperimentAlgorithm(
+    sessionId,
+    running,
+  )
   const [tab, setTab] = useState<ExperimentTab>("simulation")
 
-  // 只保留有个体的算法分组。
-  const groups = useMemo(
-    () => (genQ.data?.groups ?? []).filter((g) => (g.items?.length ?? 0) > 0),
-    [genQ.data],
+  // 受控优先：父层给了算法名就用它，否则用 hook 的缺省（最后一个分组）。
+  const stage = algorithm ?? selected
+  const handleSelect = onAlgorithmChange ?? onSelect
+
+  const activeGroup = useMemo(
+    () =>
+      groups.find((g) => algorithmKey(g.stage) === stage) ??
+      groups[groups.length - 1],
+    [groups, stage],
   )
-
-  const [stage, setStage] = useState<string | null>(null)
-  const stageKey = (a: string | null | undefined) => a ?? "?"
-  useEffect(() => {
-    if (groups.length === 0) return
-    const stages = groups.map((g) => stageKey(g.stage))
-    if (stage == null || !stages.includes(stage)) {
-      setStage(stages[stages.length - 1])
-    }
-  }, [groups, stage])
-
-  const activeGroup =
-    groups.find((g) => stageKey(g.stage) === stage) ?? groups[groups.length - 1]
   const data = useMemo(
     () => buildExpData(activeGroup?.items ?? []),
     [activeGroup?.items],
@@ -271,34 +271,30 @@ export default function ExperimentPanel({
   return (
     <div>
       {/* 控制行：左侧算法分组选择、右侧视图切换，两端对齐（中间靠 justify-between
-          撑开）。只有一个分组时 Select 不渲染，此时左侧留一个空占位框保住对齐，
-          切换按钮不会被推到左端。 */}
+          撑开）。只有一个算法分组时同样渲染选择器——它此时是「当前算法名」的展示位
+          （用户要求单个也要看得到算法名），只是没有下拉项可切换。 */}
       <div className="mb-2 flex items-center justify-between gap-2">
-        {groups.length > 1 ? (
-          <Select value={stage ?? ""} onValueChange={setStage}>
-            <SelectTrigger
-              size="sm"
-              aria-label={t("autoResearch.experiment.selectAlgorithm")}
-              className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 shrink-0"
-            >
-              <ListStart className="size-3 shrink-0" />
-              <SelectValue placeholder={t("autoResearch.experiment.selectAlgorithm")} />
-            </SelectTrigger>
-            <SelectContent>
-              {groups.map((g) => (
-                <SelectItem
-                  key={stageKey(g.stage)}
-                  value={stageKey(g.stage)}
-                  className="text-xs"
-                >
-                  {g.stage ?? "?"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <span />
-        )}
+        <Select value={stage ?? ""} onValueChange={handleSelect}>
+          <SelectTrigger
+            size="sm"
+            aria-label={t("autoResearch.experiment.selectAlgorithm")}
+            className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 shrink-0"
+          >
+            <ListStart className="size-3 shrink-0" />
+            <SelectValue placeholder={t("autoResearch.experiment.selectAlgorithm")} />
+          </SelectTrigger>
+          <SelectContent>
+            {groups.map((g) => (
+              <SelectItem
+                key={algorithmKey(g.stage)}
+                value={algorithmKey(g.stage)}
+                className="text-xs"
+              >
+                {g.stage ?? "?"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <ExperimentTabToggle value={tab} onChange={setTab} />
       </div>
 

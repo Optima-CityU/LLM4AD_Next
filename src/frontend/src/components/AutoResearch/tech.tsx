@@ -207,6 +207,55 @@ export function buildStageRoadmap(
   return cells
 }
 
+/** 阶段事件消息可取字段的最小子集（结构化类型，避免依赖生成的 client 类型）。 */
+export interface StageMessageLike {
+  stage?: number | null
+  event_type?: string | null
+  payload?: { [key: string]: unknown } | null
+}
+
+/** 从消息中取阶段号（``stage`` 字段优先，回退 ``payload.stage``）。 */
+export function stageOf(m: StageMessageLike): number | null {
+  const p = (m.payload ?? {}) as { stage?: number }
+  return m.stage ?? p.stage ?? null
+}
+
+/** 从消息中取阶段状态串（``running`` / ``done`` / ``failed`` / ``waiting`` ...）。 */
+export function statusOf(m: StageMessageLike): string {
+  return String((m.payload as { status?: unknown })?.status ?? "")
+}
+
+/**
+ * 底部「起始阶段」选择器与顶部阶段轨共用的**天然起点**：按会话历史里的阶段消息算。
+ *
+ * 规则（只看**最后一条带阶段号的消息**）：
+ * - 没有任何带阶段号的消息（全新会话）→ `null`，即「从头开始」。
+ * - 最后一条是已完成 → 从它的下一步开始；已是最后一阶段（23）则没有下一步，退回 23
+ *   （在最后一步重跑，产物最全、代价最小）。
+ * - 最后一条不是已完成（failed / waiting / running / skipped）→ 从该阶段本身开始。
+ *
+ * 与模板无关：模板种子会话同样有阶段消息（stage-07/08/09 已完成），算出来就是 10，
+ * 与后端 `start_turn` 在「run_dir 有模板产物」时的缺省一致，无需再特判。
+ *
+ * 注意这里**只看最后一条**：若更早的阶段有 failed，规则仍从最后一条往后推，
+ * 中间的空洞由用户在阶段轨上点「从此步运行」手动补齐。
+ *
+ * @param messages 升序排列的消息列表（最旧在前）。
+ */
+export function naturalStageFromMessages(
+  messages: StageMessageLike[],
+): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if ((m.event_type ?? "") !== "stage_transition") continue
+    const stage = stageOf(m)
+    if (stage == null || stage <= 0) continue
+    if (statusOf(m) === "done") return Math.min(stage + 1, TOTAL_STAGES)
+    return Math.min(stage, TOTAL_STAGES)
+  }
+  return null
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 状态配色（固定色，不随主题；与演化页 TASK_STATUS_DOT 一致）
 // ────────────────────────────────────────────────────────────────────────────

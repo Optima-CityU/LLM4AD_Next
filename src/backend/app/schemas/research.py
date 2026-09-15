@@ -75,7 +75,12 @@ class ResearchFolderCreateRequest(BaseModel):
     parent_id: uuid.UUID | None = Field(
         default=None, description="父文件夹 ID，None 表示根"
     )
-    sort_order: int = Field(default=0, description="同级排序权重")
+    sort_order: int | None = Field(
+        default=None,
+        description=(
+            "同级排序权重。不传则置顶（同级最小值 - 1），显式传入则按值插入。"
+        ),
+    )
 
 
 class ResearchFolderUpdateRequest(BaseModel):
@@ -102,6 +107,10 @@ class ResearchFolderItem(BaseModel):
     parent_id: uuid.UUID | None
     name: str
     sort_order: int
+    is_pinned: bool = Field(
+        default=False,
+        description="置顶标记；True 恒定排在未置顶文件夹之前",
+    )
     session_count: int = Field(
         default=0,
         description="该文件夹直接归属的会话数（不含子文件夹内的）",
@@ -117,6 +126,7 @@ class ResearchFolderTreeNode(BaseModel):
     parent_id: uuid.UUID | None
     name: str
     sort_order: int
+    is_pinned: bool = False
     session_count: int = 0
     children: list["ResearchFolderTreeNode"] = Field(default_factory=list)
 
@@ -310,7 +320,7 @@ class ResearchSessionListResponse(BaseModel):
     items: list[ResearchSessionItem] = Field(default_factory=list)
     next_cursor: str | None = Field(
         default=None,
-        description="下一页游标 = 本页最后一条的 updated_time ISO；None 表示无更多",
+        description="下一页游标 = 本页最后一条的 created_time ISO；None 表示无更多",
     )
     has_more: bool = False
 

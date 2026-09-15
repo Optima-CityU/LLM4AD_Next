@@ -44,6 +44,7 @@ import {
   useDeleteResearchSession,
   useResearchFolders,
   useResearchSessionDetail,
+  usePinResearchFolder,
   useUpdateResearchFolder,
   useUpdateResearchSession,
 } from "@/hooks/useAutoResearch"
@@ -95,6 +96,7 @@ function AutoResearchPage() {
   const createFolderMut = useCreateResearchFolder()
   const updateFolderMut = useUpdateResearchFolder()
   const deleteFolderMut = useDeleteResearchFolder()
+  const pinFolderMut = usePinResearchFolder()
   const updateSessionMut = useUpdateResearchSession()
   const deleteSessionMut = useDeleteResearchSession()
   const copySessionMut = useCopyResearchSession()
@@ -165,6 +167,18 @@ function AutoResearchPage() {
   const handleDeleteFolder = async (id: string) => {
     try {
       await deleteFolderMut.mutateAsync(id)
+    } catch (err: unknown) {
+      const detail =
+        (err as { body?: { detail?: string } })?.body?.detail ?? "error"
+      toast.error(detail)
+    }
+  }
+
+  // 置顶 / 取消置顶：后端幂等，成功后 folders 缓存失效，列表顺序由服务端重排。
+  // 失败只弹 toast，不抛——调用方是菜单项，没有对话框需要保持打开。
+  const handleTogglePinFolder = async (id: string, pinned: boolean) => {
+    try {
+      await pinFolderMut.mutateAsync({ folderId: id, pinned })
     } catch (err: unknown) {
       const detail =
         (err as { body?: { detail?: string } })?.body?.detail ?? "error"
@@ -395,6 +409,7 @@ function AutoResearchPage() {
               onCreateFolder={handleCreateFolder}
               onRenameFolder={handleRenameFolder}
               onDeleteFolder={handleDeleteFolder}
+              onTogglePinFolder={handleTogglePinFolder}
               onEditSession={(s) => setEditTarget(s)}
               onMoveSession={handleMoveSession}
               onDeleteSession={handleDeleteSession}

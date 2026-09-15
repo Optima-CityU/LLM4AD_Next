@@ -2520,9 +2520,9 @@ export type ResearchFolderCreateRequest = {
      */
     parent_id?: (string | null);
     /**
-     * 同级排序权重
+     * 同级排序权重。不传则置顶（同级最小值 - 1），显式传入则按值插入。
      */
-    sort_order?: number;
+    sort_order?: (number | null);
 };
 
 /**
@@ -2534,6 +2534,10 @@ export type ResearchFolderItem = {
     parent_id: (string | null);
     name: string;
     sort_order: number;
+    /**
+     * 置顶标记；True 恒定排在未置顶文件夹之前
+     */
+    is_pinned?: boolean;
     /**
      * 该文件夹直接归属的会话数（不含子文件夹内的）
      */
@@ -2580,6 +2584,7 @@ export type ResearchFolderTreeNode = {
     parent_id: (string | null);
     name: string;
     sort_order: number;
+    is_pinned?: boolean;
     session_count?: number;
     children?: Array<ResearchFolderTreeNode>;
 };
@@ -4496,6 +4501,18 @@ export type Llm4AdResearchDeleteFolderData = {
 };
 
 export type Llm4AdResearchDeleteFolderResponse = (ResearchDeleteResponse);
+
+export type Llm4AdResearchPinFolderData = {
+    folderId: string;
+};
+
+export type Llm4AdResearchPinFolderResponse = (ResearchFolderItem);
+
+export type Llm4AdResearchUnpinFolderData = {
+    folderId: string;
+};
+
+export type Llm4AdResearchUnpinFolderResponse = (ResearchFolderItem);
 
 export type Llm4AdResearchListTemplatesData = {
     /**

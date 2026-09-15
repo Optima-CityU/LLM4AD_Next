@@ -7601,10 +7601,16 @@ export const ResearchFolderCreateRequestSchema = {
             description: '父文件夹 ID，None 表示根'
         },
         sort_order: {
-            type: 'integer',
+            anyOf: [
+                {
+                    type: 'integer'
+                },
+                {
+                    type: 'null'
+                }
+            ],
             title: 'Sort Order',
-            description: '同级排序权重',
-            default: 0
+            description: '同级排序权重。不传则置顶（同级最小值 - 1），显式传入则按值插入。'
         }
     },
     type: 'object',
@@ -7644,6 +7650,12 @@ export const ResearchFolderItemSchema = {
         sort_order: {
             type: 'integer',
             title: 'Sort Order'
+        },
+        is_pinned: {
+            type: 'boolean',
+            title: 'Is Pinned',
+            description: '置顶标记；True 恒定排在未置顶文件夹之前',
+            default: false
         },
         session_count: {
             type: 'integer',
@@ -7757,6 +7769,11 @@ export const ResearchFolderTreeNodeSchema = {
         sort_order: {
             type: 'integer',
             title: 'Sort Order'
+        },
+        is_pinned: {
+            type: 'boolean',
+            title: 'Is Pinned',
+            default: false
         },
         session_count: {
             type: 'integer',

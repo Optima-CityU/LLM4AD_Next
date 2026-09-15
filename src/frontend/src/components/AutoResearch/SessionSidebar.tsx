@@ -9,6 +9,8 @@ import {
   Loader2,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   Repeat,
   Search,
@@ -89,6 +91,8 @@ interface Props {
   onCreateFolder: (name: string) => Promise<void> | void
   onRenameFolder: (id: string, name: string) => Promise<void> | void
   onDeleteFolder: (id: string) => Promise<void> | void
+  /** 置顶 / 取消置顶分组（服务端幂等，重复调用同一状态无副作用）。 */
+  onTogglePinFolder: (id: string, pinned: boolean) => Promise<void> | void
   /** 打开编辑弹框（标题 / 主题 / 实验类型 / 指标 / 分组 / 模式 / 供应商）。 */
   onEditSession: (s: ResearchSessionItem) => void
   onMoveSession: (id: string, folderId: string | null) => Promise<void> | void
@@ -109,6 +113,17 @@ const STATUS_FILTERS: ResearchSessionStatus[] = [
   "completed",
   "failed",
 ]
+
+/**
+ * 分组是否已置顶。
+ *
+ * 生成的类型把 ``is_pinned`` 标成可选（后端 Pydantic 有默认值，OpenAPI 就不
+ * 把它列进 required），所以这里显式兜底 false，避免旧缓存 / 手写对象读到
+ * undefined 时把置顶态渲染成未置顶。
+ */
+function isFolderPinned(folder: ResearchFolderItem): boolean {
+  return folder.is_pinned === true
+}
 
 /**
  * 左侧会话侧栏：展示分组 + 未分组会话，支持创建 / 重命名 / 移动 / 删除。
@@ -136,6 +151,7 @@ export default function SessionSidebar({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onTogglePinFolder,
   onEditSession,
   onMoveSession,
   onDeleteSession,
@@ -449,6 +465,7 @@ export default function SessionSidebar({
               label={folder.name}
               totalCount={folder.session_count ?? 0}
               folders={folders}
+              pinned={isFolderPinned(folder)}
               activeSessionId={activeSessionId}
               onSelectSession={onSelectSession}
               onDeleteSession={setDeleteSession}
@@ -496,13 +513,34 @@ export default function SessionSidebar({
                         setRenameFolder(folder)
                       }}
                     >
+                      <Pencil className="size-3.5 text-muted-foreground" />
                       {t("autoResearch.sidebar.renameFolder")}
+                    </DropdownMenuItem>
+                    {/* 置顶项按当前状态二选一：已置顶给「取消置顶」，避免出现
+                        一个点了没反应的重复入口。 */}
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        void onTogglePinFolder(
+                          folder.id,
+                          !isFolderPinned(folder),
+                        )
+                      }
+                    >
+                      {isFolderPinned(folder) ? (
+                        <PinOff className="size-3.5 text-muted-foreground" />
+                      ) : (
+                        <Pin className="size-3.5 text-muted-foreground" />
+                      )}
+                      {isFolderPinned(folder)
+                        ? t("autoResearch.sidebar.unpinFolder")
+                        : t("autoResearch.sidebar.pinFolder")}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       variant="destructive"
                       onSelect={() => setDeleteFolder(folder)}
                     >
+                      <Trash2 className="size-3.5" />
                       {t("autoResearch.sidebar.deleteFolder")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -696,6 +734,8 @@ interface FolderGroupProps {
   /** 是否展开（受控，父层用已展开集判定）。 */
   expanded: boolean
   onToggle: () => void
+  /** 该分组是否已置顶；仅在头部渲染一个常驻小标记。 */
+  pinned?: boolean
   dragSession?: { id: string; folderId: string | null } | null
   dragOverKey?: string | null
   onDragStartSession?: (drag: { id: string; folderId: string | null }) => void
@@ -723,6 +763,7 @@ function FolderSessionGroup({
   headerActions,
   expanded,
   onToggle,
+  pinned,
   dragSession,
   dragOverKey,
   onDragStartSession,
@@ -786,6 +827,14 @@ function FolderSessionGroup({
           <SectionLabel className="truncate flex-1 text-left text-xs normal-case tracking-normal">
             {label}
           </SectionLabel>
+          {/* 置顶标记：常态可见（不跟随 headerActions 的 hover 显隐），否则用户
+              无法一眼看出某个分组为什么排在最前。 */}
+          {pinned && (
+            <Pin
+              className="ml-1 size-2.5 shrink-0 text-primary/70"
+              aria-label={t("autoResearch.sidebar.pinnedBadge")}
+            />
+          )}
           <span className="ml-1 shrink-0 rounded-full bg-muted/50 px-1.5 py-px text-[10px] tabular-nums text-muted-foreground/70">
             {totalCount}
           </span>

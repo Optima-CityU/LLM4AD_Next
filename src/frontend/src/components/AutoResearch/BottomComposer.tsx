@@ -136,27 +136,14 @@ export default function BottomComposer({
     status === "completed" || status === "failed" || status === "cancelled"
   const showRunTools = status === "pending" || terminal
 
-  // 起始阶段：pending 与终态都可用。是否**显式下发**取决于它与「本会话的天然起点」
-  // 是否一致——一致就不传，让后端按自己的规则决定（普通会话从头跑；模板种子会话
-  // 自动取 10，见 turns.start_turn）。这条区别很要紧：模板会话已物化 stage-07/08/09，
-  // 显式传 9 会触发 profile_switch 从 9 重置、删掉刚物化的 exp_plan，显式传 10 才是
-  // 无害的等价续跑。终态没有天然起点（用户就是要从某步重跑），一律显式带上。
-  const lastDoneStage = stages.reduce((max, s) => {
-    if (s.status !== "done") return max
-    return s.stage > max ? s.stage : max
-  }, 0)
-  const pickedStage = fromStage ? Number(fromStage) : null
-  const naturalStage = lastDoneStage > 0 ? lastDoneStage + 1 : null
+  // 起始阶段：pending 与终态都可用。选择器的值就是父层给的 `fromStage`（父层已按
+  // 「会话历史里最后一条阶段消息」推好天然起点，见 tech.naturalStageFromMessages）；
+  // 空串＝从头开始。是否**显式下发**同样看它：pending 下天然起点不传，让后端按自己的
+  // 规则决定（普通会话从头跑；模板种子会话自动取 10，见 turns.start_turn）；终态没有
+  // 天然起点（用户就是要从某步重跑），一律显式带上。
   const showStagePicker =
     (terminal || status === "pending") && stages.length > 0
-  const forwardFromStage =
-    pickedStage === null
-      ? undefined
-      : terminal
-        ? fromStage
-        : pickedStage !== naturalStage
-          ? fromStage
-          : undefined
+  const forwardFromStage = fromStage ? fromStage : undefined
 
   // 统一的「运行中」：协作轮（问 AI）与流水线轮底层都是「正在运行」，底部这块
   // 不再区分二者——都禁用输入、走边框流光、只显示停止。pipelineRunning 仅在需要
@@ -381,9 +368,7 @@ export default function BottomComposer({
           pending 下它就是「这次从第几步起跑」；终态下是「从哪一步重跑」。 */}
       {showStagePicker && !isRunning && (
         <Select
-          value={
-            fromStage || (naturalStage ? String(naturalStage) : "__begin__")
-          }
+          value={fromStage || "__begin__"}
           onValueChange={(v) => onFromStageChange(v === "__begin__" ? "" : v)}
         >
           <Tooltip>

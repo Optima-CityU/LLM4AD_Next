@@ -58,6 +58,7 @@ import ExperimentFullscreenDialog from "./ExperimentFullscreenDialog"
 import ExperimentPanel from "./ExperimentPanel"
 import IdeDialog from "./IdeDialog"
 import ResearchLogDrawer, { type ResearchDrawerTab } from "./ResearchLogDrawer"
+import { useExperimentAlgorithm } from "./useExperimentAlgorithm"
 import { ML_VISION_PROFILE } from "./shared"
 import { SectionLabel, StatusPill } from "./tech"
 
@@ -118,6 +119,14 @@ function PanelInner({
     session.status === "running" || session.status === "paused",
     !hideExperiment,
   )
+  // 实验区「当前算法」的**唯一真源**：右侧面板与全屏弹框（演化仿真 / 趋势分析）都从这里
+  // 取，任一处切换其余跟着切。放在这里是因为这两个组件是同级的兄弟节点。
+  const { selected: expAlgorithm, onSelect: handleExpAlgorithm } =
+    useExperimentAlgorithm(
+      session.id,
+      session.status === "running" || session.status === "paused",
+      !hideExperiment,
+    )
   // 产物预览弹框：只保存目标文件路径，弹框内部据此拉树 + 定位 + 预览。
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   // 右侧面板可编辑产物：与门控编辑同口径——凡产物树里出现的文件名均可就地编辑。
@@ -384,6 +393,8 @@ function PanelInner({
                 running={
                   session.status === "running" || session.status === "paused"
                 }
+                algorithm={expAlgorithm}
+                onAlgorithmChange={handleExpAlgorithm}
               />
             </div>
           }
@@ -393,6 +404,8 @@ function PanelInner({
             running={
               session.status === "running" || session.status === "paused"
             }
+            algorithm={expAlgorithm}
+            onAlgorithmChange={handleExpAlgorithm}
           />
         </CollapsibleSection>
       )}

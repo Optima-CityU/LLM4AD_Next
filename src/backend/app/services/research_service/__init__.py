@@ -27,6 +27,7 @@ from .folders import (
     get_folder_tree,
     list_folders,
     reorder_folders,
+    set_folder_pinned,
     update_folder,
 )
 from .messages import (
@@ -94,6 +95,7 @@ __all__ = [
     "reorder_folders",
     "resolve_artifact_path",
     "retry_turn",
+    "set_folder_pinned",
     "start_collab_turn",
     "start_turn",
     "stop_analysis_report",

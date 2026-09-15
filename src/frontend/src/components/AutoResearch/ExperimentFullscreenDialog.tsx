@@ -17,15 +17,23 @@ import ExperimentTrend from "./ExperimentTrend"
 interface Props {
   sessionId: string
   running?: boolean
+  /** 当前选中的算法名（由 ArtifactsPanel 持有，与右侧面板共享）。 */
+  algorithm?: string | null
+  onAlgorithmChange?: (algo: string) => void
 }
 
 /**
  * 实验区全屏弹框：全屏展示演化仿真和趋势分析的完整版本。
  * 左侧演化仿真，右侧趋势分析，功能和样式完全对齐 evolution 页面。
+ *
+ * 算法选择**不受控于本组件**：`algorithm` / `onAlgorithmChange` 由 ArtifactsPanel 下发，
+ * 于是弹框里的两个视图和右侧面板始终是同一个算法名，任一处切换其余都会跟着切。
  */
 export default function ExperimentFullscreenDialog({
   sessionId,
   running,
+  algorithm,
+  onAlgorithmChange,
 }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -100,9 +108,19 @@ export default function ExperimentFullscreenDialog({
               自适应的，限宽只会让两侧留白）。只留少量内边距分隔顶栏与边框。 */}
           <div className="min-h-0 min-w-0 overflow-hidden p-3">
             {activeTab === "simulation" ? (
-              <ExperimentSimulation sessionId={sessionId} running={running} />
+              <ExperimentSimulation
+                sessionId={sessionId}
+                running={running}
+                algorithm={algorithm}
+                onAlgorithmChange={onAlgorithmChange}
+              />
             ) : (
-              <ExperimentTrend sessionId={sessionId} running={running} />
+              <ExperimentTrend
+                sessionId={sessionId}
+                running={running}
+                algorithm={algorithm}
+                onAlgorithmChange={onAlgorithmChange}
+              />
             )}
           </div>
         </DialogContent>

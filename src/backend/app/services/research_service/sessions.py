@@ -359,10 +359,18 @@ def list_sessions(
     cursor: str | None,
     limit: int,
 ) -> ResearchSessionListResponse:
-    """按分组 / 状态 / 关键词过滤会话，游标分页（updated_time 倒序）。
+    """按分组 / 状态 / 关键词过滤会话，游标分页（created_time 倒序）。
+
+    排序键取 ``created_time`` 而非 ``updated_time``：后者会被一堆与「用户最近
+    在用它」无关的写入顶上来（后台 stage 推进、config 快照、改分组、空 PATCH），
+    列表位置因此不稳定。创建时间不可变，位置稳定可预期；副本会话在
+    :func:`copy_session` 里取当前时间作为新的生命周期起点，故天然排最前。
+
+    代价是「正在跑的会话不会浮到最前」——会话侧没有置顶维度可以兜底；若要
+    找回某个老会话，走 ``q`` 关键词过滤。
 
     - ``q``：对 topic + title 做大小写不敏感模糊匹配（ILIKE）。
-    - cursor = 上一页最后一条的 ``updated_time`` ISO 字符串；首次不传。
+    - cursor = 上一页最后一条的 ``created_time`` ISO 字符串；首次不传。
     """
     query = select(ResearchSession).where(ResearchSession.user_id == user.id)
     if ungrouped_only:
@@ -385,29 +393,29 @@ def list_sessions(
             )
         )
     if cursor:
-        # 复合游标 (updated_time, id)：仅按 updated_time 严格小于时，多条会话同一
-        # updated_time 且恰好跨页边界会被整体跳过而丢失。带 id 次级键给出全序边界。
+        # 复合游标 (created_time, id)：仅按 created_time 严格小于时，多条会话同一
+        # created_time 且恰好跨页边界会被整体跳过而丢失。带 id 次级键给出全序边界。
         cur_ts, cur_id = _parse_reverse_cursor(cursor)
         if cur_id is not None:
             query = query.where(
-                tuple_(ResearchSession.updated_time, ResearchSession.id)
+                tuple_(ResearchSession.created_time, ResearchSession.id)
                 < (cur_ts, cur_id)
             )
         else:
             # 旧版纯 ISO 游标兜底：仅时间戳比较（切换期短暂，可能少量重复不丢数据）。
-            query = query.where(ResearchSession.updated_time < cur_ts)
+            query = query.where(ResearchSession.created_time < cur_ts)
 
     page = max(1, min(limit, 200))
     rows = db.exec(
         query.order_by(
-            ResearchSession.updated_time.desc(),
+            ResearchSession.created_time.desc(),
             ResearchSession.id.desc(),
         ).limit(page + 1)
     ).all()
     has_more = len(rows) > page
     items = rows[:page]
     next_cursor = (
-        _encode_reverse_cursor(items[-1].updated_time, items[-1].id)
+        _encode_reverse_cursor(items[-1].created_time, items[-1].id)
         if has_more and items
         else None
     )
