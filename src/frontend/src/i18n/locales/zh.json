@@ -3558,7 +3558,14 @@
       "terminalHint": "想调整某一步用阶段引导注入；想换研究方向请新建会话。",
       "fromStageLabel": "起始阶段",
       "fromStageBegin": "从头开始",
-      "fromStageHint": "从所选阶段起跑（前面阶段复用已有产物）；配合阶段引导注入可修正某一步。"
+      "fromStageHint": "从所选阶段起跑（前面阶段复用已有产物）；配合阶段引导注入可修正某一步。",
+      "oneStepRun": "仅跑 #{{stage}}",
+      "oneStepRunDesc": "只跑第 {{stage}} 步，跑完自动恢复。",
+      "oneStepMenuLabel": "仅运行一步",
+      "oneStepMenuHint": "只跑第 {{stage}} 步，不影响主按钮的一路到底。",
+      "oneStepExit": "取消单步",
+      "oneStepExitHint": "点主按钮跑第 {{stage}} 步，跑完自动恢复。",
+      "oneStepDone": "23 个阶段已全部跑完，没有下一步了。"
     },
     "form": {
       "submit": "提交",

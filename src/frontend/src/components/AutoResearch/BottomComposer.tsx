@@ -1,12 +1,14 @@
 import {
   ChevronDown,
   Cpu,
+  Footprints,
   Info,
   ListStart,
   Loader2,
   Play,
   Send,
   Square,
+  StepForward,
   X,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -40,7 +42,7 @@ import { cn } from "@/lib/utils"
 import GateHeader, { gateActionClass, getGateActions } from "./GatePanel"
 import ProviderModelPicker from "./ProviderModelPicker"
 import { MODE_OPTIONS } from "./shared"
-import { type StageCell, stageNameByLang } from "./tech"
+import { type StageCell, stageNameByLang, TOTAL_STAGES } from "./tech"
 
 // 门控动作里哪些必须给理由 / 哪些把理由当 guidance 传入。理由取自底部输入框。
 const NEEDS_REASON = new Set(["reject", "inject"])
@@ -55,6 +57,12 @@ export interface RunOverrides {
   model_name?: string | null
   mode?: ResearchMode
   from_stage?: string | null
+  /**
+   * ARC ``--to-stage``：跑到该阶段即停（**闭区间**，见 ARC
+   * ``execute_pipeline`` 的 `if stage == to_stage: break`）。不传 = 一路跑到底。
+   * 「仅运行一步」就是 ``from_stage === to_stage``。
+   */
+  to_stage?: string | null
 }
 
 interface Props {
@@ -81,6 +89,12 @@ interface Props {
   onFromStageChange: (fromStage: string) => void
   onCollabSend: (message: string) => void
   onRun: (overrides: RunOverrides) => void
+  /**
+   * 「仅运行一步」的**落点**：由会话历史算出的下一步阶段号（见
+   * ``tech.oneStepStageFromMessages``）。`null` = 23 步已全部跑完，没有下一步，
+   * 此时开关置灰不可点。
+   */
+  nextStage: number | null
   onStop: () => void
   onRetry: () => void
   onGateSubmit: (messageId: string, submission: Record<string, unknown>) => void
@@ -110,6 +124,7 @@ export default function BottomComposer({
   onFromStageChange,
   onCollabSend,
   onRun,
+  nextStage,
   onStop,
   onGateSubmit,
 }: Props) {
@@ -120,6 +135,13 @@ export default function BottomComposer({
   const [noteError, setNoteError] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 「仅运行一步」的**待发**（armed）态：点右侧小钮进入，点了就跑、跑完自动退出。
+  // 一次性旋钮语义——不做持久模式，所以不存在「忘了关，下次误只跑一步」的坑；
+  // 未跑之前再点一次小钮可以手动静默退出（用户看到药丸变形后改变主意）。
+  const [oneStepArmed, setOneStepArmed] = useState(false)
+  // 药丸本体上的一次性「按下」脉冲：arm 时触发，用最朴素的 class 摘除/重加来重放，
+  // 不走 state（避免多一轮渲染，也避免动画被中途打断）。
+  const pillRef = useRef<HTMLDivElement>(null)
 
   // 输入框随内容自动增高：内容变化时重算高度（上限 max-h-32，超出滚动）。
   // 撑开/收起由 textarea 的 transition-[height] 补间，外框随内容自然增高。
@@ -145,6 +167,19 @@ export default function BottomComposer({
     (terminal || status === "pending") && stages.length > 0
   const forwardFromStage = fromStage ? fromStage : undefined
 
+  // 「仅运行一步」的落点。**只有一个真值来源：起始阶段选择器**——它选中了哪一阶段，
+  // 单步就跑那一阶段（选择器为空＝「从头开始」时，回退到会话历史算出的下一步，
+  // 见 tech.oneStepStageFromMessages）。这样选择器和单步按钮永远显示同一个数字，
+  // 不会出现「上面选了 10、下面按钮还写着 11」。
+  const pickedStageNo = fromStage ? Number(fromStage) : null
+  const oneStepTargetNo =
+    pickedStageNo && pickedStageNo > 0
+      ? Math.min(pickedStageNo, TOTAL_STAGES)
+      : (nextStage ?? 0)
+  // 锁住的唯一情形：选择器为空（从头开始）且会话历史也推不出下一步（全跑完了）。
+  // 「从头跑一步」没有意义（那就是跑全程），所以此时整个单步入口禁用。
+  const stepLocked = oneStepTargetNo <= 0
+
   // 统一的「运行中」：协作轮（问 AI）与流水线轮底层都是「正在运行」，底部这块
   // 不再区分二者——都禁用输入、走边框流光、只显示停止。pipelineRunning 仅在需要
   // 判定「是否流水线态」的极少数处保留（当前已无差异，统一用 isRunning）。
@@ -152,6 +187,16 @@ export default function BottomComposer({
   const isRunning = collabBusy || pipelineRunning
 
   const inputDisabled = isRunning || sending
+
+  // 单步 armed 是一次性的：**只要这一步真的跑出去了就立刻收回**（sending 由父层在
+  // onRun 后置起），所以不存在「开了单步忘了关、下次误只跑一步」的坑。
+  // 另两条兜底：会话开始跑（协作/流水线）时收回，避免药丸停在琥珀态里被隐藏；
+  // 23 步全跑完（stepLocked）时收回，避免留下一个点不动的变形按钮。
+  // 这里不需要 biome-ignore：`setOneStepArmed` 是稳定的 setter，本就不参与依赖推导。
+  useEffect(() => {
+    if (sending || isRunning || stepLocked) setOneStepArmed(false)
+  }, [sending, isRunning, stepLocked])
+
   const sendMsg = () => {
     const v = text.trim()
     if (!v || inputDisabled) return
@@ -179,6 +224,7 @@ export default function BottomComposer({
     setNoteError(false)
   }
 
+  // 运行：一路跑到最后一步。
   const run = () => {
     if (sending) return
     onRun({
@@ -187,6 +233,39 @@ export default function BottomComposer({
       mode,
       from_stage: forwardFromStage,
     })
+  }
+
+  // 「仅运行一步」：落点就是主按钮上写的那个号（`oneStepTargetNo`，与起始阶段选择器
+  // 同源，见下面的派生态）。ARC 的 `--from-stage N --to-stage N` 恰好跑一步
+  // （to_stage 是闭区间，跑到该阶段即 break）。
+  const runOneStep = () => {
+    if (sending || stepLocked) return
+    const target = String(oneStepTargetNo)
+    onRun({
+      provider_id: provider.trim() || undefined,
+      model_name: model.trim() || undefined,
+      mode,
+      from_stage: target,
+      to_stage: target,
+    })
+  }
+
+  // 一次性旋钮：off → armed 时给本体一个轻微脉冲，把「这颗药丸换了身份」说清楚；
+  // armed → off 时不动（恢复是常态，安静地收回去即可）。
+  const armOneStep = () => {
+    if (stepLocked) return
+    if (oneStepArmed) {
+      setOneStepArmed(false)
+      return
+    }
+    setOneStepArmed(true)
+    const el = pillRef.current
+    if (el) {
+      el.classList.remove("bc-pill-bump")
+      // 强制重排，让同名 class 能重新触发同一段动画。
+      void el.offsetWidth
+      el.classList.add("bc-pill-bump")
+    }
   }
 
   const providerList = providersData?.items ?? []
@@ -365,7 +444,9 @@ export default function BottomComposer({
       </Popover>
 
       {/* 起始阶段：pending / 终态都可用，运行中（协作/流水线）隐藏，保持一致。
-          pending 下它就是「这次从第几步起跑」；终态下是「从哪一步重跑」。 */}
+          pending 下它就是「这次从第几步起跑」；终态下是「从哪一步重跑」。
+          它也是「仅运行一步」的**唯一落点来源**：选谁就跑谁那一步，按钮上写的号
+          跟着它走；选「从头开始」时才回退到会话历史推的下一步。 */}
       {showStagePicker && !isRunning && (
         <Select
           value={fromStage || "__begin__"}
@@ -406,8 +487,8 @@ export default function BottomComposer({
   )
 
   // 主操作合并按钮的派生态：外壳恒定，仅主区语义与右侧运行段的展开随输入变化。
-  // - 有文字 → 主区＝发送(协作)；可运行时右侧裂出 ▷ 直跑段。
-  // - 空 + 可运行 → 主区＝运行(协作对空消息无意义，直接当运行主操作)。
+  // - 有文字 → 主区＝发送(协作)；可运行时右侧裂出 ▷ 直跑段 + 单步旋钮。
+  // - 空 + 可运行 → 主区＝运行（协作对空消息无意义，直接当运行主操作）；同样裂出旋钮。
   // - 空 + 不可运行(paused/collaborating) → 主区＝发送但禁用，占位保持槽位恒定。
   const mainSendMode = hasText || !showRunTools
   const runSegVisible = showRunTools && hasText
@@ -431,54 +512,145 @@ export default function BottomComposer({
         </span>
       )}
 
-      {/* ── 主操作：合并的分段按钮（外壳恒定，仅内部随输入态过渡）──
-          方案 A：回车 / 点主区 = 协作（默认，AI 自行判断要不要跑流水线）；
-          点右段 ▷ = 直接运行流水线（更快、不消耗对话 token）。两个意图同一个
-          控件、各自可点。切换时右侧运行段以宽度补间「裂开/收拢」，主区图标做
-          交叉淡入，避免整钮硬替换的突兀。运行中（协作或流水线）整钮隐藏，只留停止。 */}
+      {/* ── 主操作：一副会变形的药丸（外壳恒定，仅内部随状态过渡）──
+          常规态：主区 = 协作（AI 自行判断要不要跑流水线），默认意图；空输入时直接当运行；
+                  右侧 ▷ = 一路跑到最后一步，⏭ = 单步旋钮。
+          单步态（armed）：点 ⏭ 后整颗药丸**变形**成「仅跑 #N」——主色转琥珀、图标换成
+                  脚印、文案换成「仅跑 #N」，再点一下主区就跑这一步，然后自动变回常规态。
+                  一次性，不留任何持久模式。
+          armed 时主区**忽略输入框里有没有字**：它的身份已整体改读作「只跑一步」，语义必须
+          绝对明确，所以不再随输入态在「发送/运行」之间摇摆（这也是 `mainSendMode` 没有出现
+          在上面那个三元里的原因）。
+          两类态用同一套宽度补间与交叉淡入做形变，几个点击区同色同壳、只用半透明细线
+          分隔；运行中（协作或流水线）整钮隐藏，只留停止。 */}
       {!gateMessage && !isRunning && (
-        <div className="bc-send-pill relative inline-flex items-stretch h-8 rounded-lg overflow-hidden">
-          {/* 主区：发送(协作) / 运行，语义随输入切换；文案做交叉淡入。
-              tooltip 也随语义切换：协作＝答疑/改产物/推进，运行＝直接推进流水线。 */}
+        <div
+          ref={pillRef}
+          data-armed={oneStepArmed}
+          className={cn(
+            "bc-send-pill bc-pill-tint relative inline-flex items-stretch h-8 rounded-lg overflow-hidden",
+            oneStepArmed && "bc-send-pill-armed",
+          )}
+        >
+          {/* 主区：常规=发送(协作)/运行，单步态=运行一步。语义随状态切换，文案交叉淡入。 */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={mainSendMode ? sendMsg : run}
-                disabled={mainSendMode ? inputDisabled : sending}
-                title={
-                  mainSendMode
-                    ? t("autoResearch.chat.sendMessage")
-                    : t("autoResearch.chat.startTurn")
+                onClick={
+                  oneStepArmed ? runOneStep : mainSendMode ? sendMsg : run
                 }
-                className="relative inline-flex items-center gap-1.5 px-3.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
-              >
-                {mainSendMode ? (
-                  <Send className="size-4" />
-                ) : sending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Play className="size-4" />
+                // 原写法是「armed → sending / 发送态 → inputDisabled / 运行态 → sending」
+                // 三分支，但三者恒等：inputDisabled === isRunning || sending，而外层是
+                // `!isRunning` 才渲染这颗药丸，故此处 inputDisabled === sending。写成三个
+                // 分支会让它看起来像有三种情况，将来 inputDisabled 的定义一变就会掩盖不一致。
+                disabled={sending || (mainSendMode && inputDisabled)}
+                title={
+                  oneStepArmed
+                    ? t("autoResearch.input.oneStepRun", {
+                        stage: oneStepTargetNo,
+                      })
+                    : mainSendMode
+                      ? t("autoResearch.chat.sendMessage")
+                      : t("autoResearch.chat.startTurn")
+                }
+                className={cn(
+                  "relative inline-flex items-center gap-1.5 pl-2.5 pr-3.5 text-xs font-semibold",
+                  "bg-transparent",
+                  // 文字色也要跟着换：琥珀底上放白字只有 2.15:1，远低于 4.5:1；
+                  // 换成 amber-950 是 6.97:1（hover 到 amber-400 时 8.97:1）。
+                  oneStepArmed
+                    ? "text-amber-950 hover:bg-amber-400/60"
+                    : "text-primary-foreground hover:bg-primary/80",
+                  "transition-colors duration-200 disabled:opacity-40",
                 )}
-                <span
-                  key={mainSendMode ? "send" : "run"}
-                  className="animate-in fade-in duration-200"
-                >
-                  {mainSendMode
-                    ? t("autoResearch.chat.sendMessage")
-                    : t("autoResearch.chat.startTurn")}
+              >
+                {/* 图标形变：三种图标同槽叠放，只靠 opacity + 位移交叉，绝不改变宽度，
+                    所以「换图标」不会连带把文字横推一下。 */}
+                <span className="relative inline-grid size-4 shrink-0 place-items-center">
+                  <Send
+                    className={cn(
+                      "col-start-1 row-start-1 size-4 transition-all duration-200",
+                      !oneStepArmed && mainSendMode
+                        ? "opacity-100 scale-100"
+                        : "opacity-0 scale-75",
+                    )}
+                  />
+                  <Loader2
+                    className={cn(
+                      "col-start-1 row-start-1 size-4 transition-all duration-200",
+                      !oneStepArmed && !mainSendMode && sending
+                        ? "opacity-100 animate-spin"
+                        : "opacity-0",
+                    )}
+                  />
+                  <Play
+                    className={cn(
+                      "col-start-1 row-start-1 size-4 transition-all duration-200",
+                      !oneStepArmed && !mainSendMode && !sending
+                        ? "opacity-100 scale-100"
+                        : "opacity-0 scale-75",
+                    )}
+                  />
+                  <Footprints
+                    className={cn(
+                      "col-start-1 row-start-1 size-4 transition-all duration-200",
+                      oneStepArmed
+                        ? "opacity-100 scale-100"
+                        : "opacity-0 scale-125",
+                    )}
+                  />
+                </span>
+                {/* 文案形变：两套文本叠在同一格，只做 opacity 交叉。宽度取两行文字里
+                    较宽的那条（grid 单元格 = max），所以变形时药丸**不会边变边跳宽**。
+                    两条文案的长度是**配对选过的**：常规态最长是「发送/运行」（4 个汉字
+                    宽），单步态是「仅跑 #22」——`#`、数字和空格都是半宽，合计约等于 4 个
+                    汉字宽。两者齐平，所以蓝态与琥珀态的按钮总长一致；早期单步态是
+                    「仅运行一步 #22」，比蓝态宽出一截，读起来就像「变身会把按钮拉长」。
+                    改文案时两边要一起调，别只动一边。 */}
+                <span className="relative inline-grid text-left">
+                  <span
+                    className={cn(
+                      "col-start-1 row-start-1 whitespace-nowrap transition-opacity duration-200",
+                      oneStepArmed
+                        ? "opacity-0 pointer-events-none"
+                        : "opacity-100 animate-in fade-in",
+                    )}
+                  >
+                    {mainSendMode
+                      ? t("autoResearch.chat.sendMessage")
+                      : t("autoResearch.chat.startTurn")}
+                  </span>
+                  <span
+                    className={cn(
+                      "col-start-1 row-start-1 whitespace-nowrap transition-opacity duration-200",
+                      oneStepArmed
+                        ? "opacity-100 animate-in fade-in duration-200"
+                        : "opacity-0 pointer-events-none",
+                    )}
+                  >
+                    {t("autoResearch.input.oneStepRun", {
+                      stage: oneStepTargetNo,
+                    })}
+                  </span>
                 </span>
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-55">
-              {mainSendMode
-                ? t("autoResearch.chat.collabHint")
-                : t("autoResearch.chat.runHint")}
+              {oneStepArmed
+                ? t("autoResearch.input.oneStepRunDesc", {
+                    stage: oneStepTargetNo,
+                  })
+                : mainSendMode
+                  ? t("autoResearch.chat.collabHint")
+                  : t("autoResearch.chat.runHint")}
             </TooltipContent>
           </Tooltip>
 
-          {/* 运行直跑段：仅「有文字 + 可运行」时裂开。与主区同为实心主色，只用一道
-              半透明细线分隔、hover 微变色——读作「一颗药丸的两个点击区」而非两个按钮。
+          {/* 运行直跑段：仅「有文字 + 可运行」时裂开——主区被发送占用，所以这里补一个
+              「直接跑」的入口。armed 时**不收起，只置暗**：整个药丸的宽度与分区在两种
+              状态间必须一致，否则鼠标底下的按钮会自己变窄，「咔哒」的手感立刻变成
+              「怎么歪了」。收拢只由输入态驱动（有字/无字）。
               宽度补间 + 内容淡入，收拢时归零并裁剪，外壳其余部分不动。 */}
           <div
             className={cn(
@@ -487,17 +659,28 @@ export default function BottomComposer({
             )}
           >
             <div className="overflow-hidden flex items-stretch">
-              <span className="w-px self-stretch bg-primary-foreground/20" />
+              <span
+                className={cn(
+                  "w-px self-stretch transition-colors duration-200",
+                  oneStepArmed ? "bg-amber-950/25" : "bg-primary-foreground/20",
+                )}
+              />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     onClick={run}
-                    disabled={sending}
+                    disabled={sending || oneStepArmed}
                     tabIndex={runSegVisible ? 0 : -1}
                     aria-hidden={!runSegVisible}
                     aria-label={t("autoResearch.chat.startTurn")}
-                    className="inline-flex items-center px-2 bg-primary text-primary-foreground hover:bg-primary/80 disabled:opacity-40 transition-colors"
+                    className={cn(
+                      "inline-flex items-center px-2 transition-colors duration-200",
+                      oneStepArmed
+                        ? "bg-transparent text-amber-950/45"
+                        : "bg-transparent text-primary-foreground hover:bg-primary/80",
+                      "disabled:opacity-100 disabled:cursor-default",
+                    )}
                   >
                     {sending ? (
                       <Loader2 className="size-4 animate-spin" />
@@ -507,11 +690,99 @@ export default function BottomComposer({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-55">
-                  {t("autoResearch.chat.runHint")}
+                  {oneStepArmed
+                    ? t("autoResearch.input.oneStepExitHint", {
+                        stage: oneStepTargetNo,
+                      })
+                    : t("autoResearch.chat.runHint")}
                 </TooltipContent>
               </Tooltip>
             </div>
           </div>
+
+          {/* 单步旋钮：仅「可运行」时存在。点一下把整颗药丸**变形**成「仅跑 #N」
+              （一次性 armed，见 armOneStep）；再点一下取消。
+              三个状态各有明确外观：可点（主色 ⏭）→ 已 armed（琥珀 ✕）
+              → 23 步全跑完（置灰，而不是把第 23 步默默重跑一遍）。
+              图标选型与理由见下面那段注释。 */}
+          {showRunTools && (
+            <>
+              <span
+                className={cn(
+                  "w-px self-stretch transition-colors duration-200",
+                  oneStepArmed
+                    ? "bg-amber-950/25"
+                    : "bg-primary-foreground/20",
+                )}
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={armOneStep}
+                    disabled={inputDisabled || stepLocked}
+                    aria-pressed={oneStepArmed}
+                    aria-label={
+                      oneStepArmed
+                        ? t("autoResearch.input.oneStepExit")
+                        : t("autoResearch.input.oneStepMenuLabel")
+                    }
+                    className={cn(
+                      "inline-flex items-center justify-center px-1.5 transition-colors duration-200 disabled:opacity-40",
+                      // 图标色跟着底色走：琥珀底上是 amber-950（6.97:1），蓝底上是
+                      // primary-foreground（5.17:1）。白字压琥珀只有 2.15:1，不能用。
+                      oneStepArmed
+                        ? "text-amber-950 hover:bg-amber-950/15"
+                        : "text-primary-foreground/85 hover:bg-primary-foreground/20",
+                    )}
+                  >
+                    {/* 图标形变：两个图标同槽叠放（固定 size-3.5 格，宽度不参与计算，
+                        所以切换时按钮不会抽动），只做 opacity + 旋转交叉。
+                        选 `StepForward`（三角 + 一根竖杠）而不是 ▾ / ▸ / ⏭：
+                        - ▾ 读作「展开菜单」，这里没有菜单，是上一版最别扭的地方；
+                        - ▸ 与主区的 Play 撞形，而左侧直跑段本来就是个 ▸，三个三角会打架；
+                        - ⏭（双三角）读作「跳到末尾 / 快进」，语义正好反了——它是只跑一步。
+                        `StepForward` 是单三角 + 终止杠，正好是「走一步、到这为止」，
+                        与「仅跑 #N」同义。
+                        armed 态换成 ✕：此刻这个钮的唯一动作是**取消**，✕ 是唯一无歧义的
+                        答案（曾经试过 ✓，那读作「确认执行」，而执行是左边主区的职责）。
+                        两态一个「进入」一个「退出」，形状差别大反而好认——不靠图标本身猜，
+                        而是：颜色（蓝/琥珀）+ 主区文案（发送 → 仅跑 #N）已经说清当前态，
+                        这里只需要说清「点下去会发生什么」。 */}
+                    <span className="relative inline-grid size-3.5 shrink-0 place-items-center">
+                      <StepForward
+                        className={cn(
+                          "col-start-1 row-start-1 size-3.5 transition-all duration-200",
+                          oneStepArmed
+                            ? "opacity-0 -rotate-90"
+                            : "opacity-85 rotate-0",
+                        )}
+                      />
+                      <X
+                        className={cn(
+                          "col-start-1 row-start-1 size-3.5 transition-all duration-200",
+                          oneStepArmed
+                            ? "opacity-100 rotate-0"
+                            : "opacity-0 rotate-90",
+                        )}
+                      />
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-[240px]">
+                  {stepLocked
+                    ? t("autoResearch.input.oneStepDone")
+                    : oneStepArmed
+                      ? t("autoResearch.input.oneStepExitHint", {
+                          stage: oneStepTargetNo,
+                        })
+                      : t("autoResearch.input.oneStepMenuHint", {
+                          stage: oneStepTargetNo,
+                        })}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </div>
       )}
 

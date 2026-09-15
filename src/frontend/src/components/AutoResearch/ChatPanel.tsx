@@ -60,6 +60,7 @@ import TurnLogPanel from "./TurnLogPanel"
 import {
   buildStageRoadmap,
   naturalStageFromMessages,
+  oneStepStageFromMessages,
   stageOf,
   statusOf,
 } from "./tech"
@@ -397,6 +398,15 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   // 「最后跑的是哪一步、那一步是成是败」。
   const naturalFromStage = useMemo(
     () => naturalStageFromMessages(messages),
+    [messages],
+  )
+  // 「仅运行一步」的落点：`naturalFromStage` 是「起始阶段」选择器要显示的值，全新会话
+  // 时为 null（＝从头跑）；而「一步」必须落在一个具体阶段上，故回退到 1。
+  // 另：末步已完成时 `naturalStageFromMessages` 会把它**夹到 TOTAL_STAGES**，分不出
+  // 「第 23 步待跑」和「23 步全跑完」——后者由 tech 那边返回 null，让入口（▾）置灰，
+  // 而不是把第 23 步默默重跑一遍。规则都在 tech.oneStepStageFromMessages。
+  const nextStage = useMemo(
+    () => oneStepStageFromMessages(messages),
     [messages],
   )
   // 默认值跟随天然起点：切换会话、跑完一轮、阶段推进都会重算，重新贴到选择器上。
@@ -837,6 +847,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           model_name: overrides.model_name ?? null,
           mode: overrides.mode,
           from_stage: overrides.from_stage ?? null,
+          // 「仅运行一步」时 = from_stage（ARC 的 to_stage 闭区间，到该步即 break）；
+          // 否则为 null，交回后端「一路跑到底」。
+          to_stage: overrides.to_stage ?? null,
         } as never,
       },
       {
@@ -1150,6 +1163,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           model={runModel}
           mode={runMode}
           fromStage={runFromStage}
+          nextStage={nextStage}
           onProviderModelChange={(p, m) => {
             setRunProvider(p)
             setRunModel(m)

@@ -9,12 +9,13 @@
  */
 
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ProviderResponse } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import {
   Select,
   SelectContent,
@@ -49,81 +50,94 @@ function ModelInput({
   suggestions,
   disabled,
   placeholder,
+  portalContainer,
 }: {
   value: string
   onChange: (v: string) => void
   suggestions: string[]
   disabled?: boolean
   placeholder?: string
+  portalContainer?: HTMLElement | null
 }) {
   const [open, setOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const onClickOutside = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", onClickOutside)
-    return () => document.removeEventListener("mousedown", onClickOutside)
-  }, [open])
+  // 候选列表必须是**浮层**，不能是就地展开的一层 div：
+  // 1. 新建/编辑弹框的表单区是 overflow-y-auto，就地展开会把下面的字段整体顶下去
+  //    （用户看到的是「下拉占了布局高度」），还会被 DialogContent 的 overflow-hidden 裁掉；
+  // 2. 输入区在页面底部时，向下展开会被视口边缘吃掉大半。
+  // 所以走 Radix Popover：锚在输入框上、向上弹出、带碰撞翻转，并由 PopoverContent
+  // 的 container 决定挂载点（弹框内必须挂 DialogContent，否则滚轮滚不动，见 popover.tsx）。
+  const canOpen = !disabled && suggestions.length > 0
 
   return (
-    <div ref={containerRef} className="relative">
-      <Input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => !disabled && suggestions.length > 0 && setOpen(true)}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={cn("h-8 text-xs pr-8", disabled && "bg-muted/50")}
-      />
-      {suggestions.length > 0 && !disabled && (
-        <button
-          type="button"
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            setOpen((v) => !v)
-            inputRef.current?.focus()
-          }}
-        >
-          <ChevronsUpDown className="size-3.5" />
-        </button>
-      )}
-      {open && suggestions.length > 0 && !disabled && (
-        <div className="absolute z-50 top-full mt-1 left-0 w-full max-h-48 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg p-1">
-          {suggestions.map((model) => (
+    <Popover open={open && canOpen} onOpenChange={(v) => setOpen(v && canOpen)}>
+      <PopoverAnchor asChild>
+        <div className="relative">
+          <Input
+            ref={inputRef}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={() => canOpen && setOpen(true)}
+            placeholder={placeholder}
+            disabled={disabled}
+            className={cn("h-8 text-xs pr-8", disabled && "bg-muted/50")}
+          />
+          {suggestions.length > 0 && !disabled && (
+            /* 普通按钮而非 PopoverTrigger：触发器会与「聚焦即开」的输入框抢
+               开关状态（点一下先 toggle 再 focus，等于连开两次）。 */
             <button
-              key={model}
               type="button"
-              className={cn(
-                "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent cursor-pointer",
-                value === model && "bg-accent",
-              )}
+              aria-label={placeholder}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               onClick={() => {
-                onChange(model)
-                setOpen(false)
+                setOpen((v) => !v)
+                inputRef.current?.focus()
               }}
             >
-              <Check
-                className={cn(
-                  "size-3.5 shrink-0",
-                  value === model ? "opacity-100" : "opacity-0",
-                )}
-              />
-              {model}
+              <ChevronsUpDown className="size-3.5" />
             </button>
-          ))}
+          )}
         </div>
-      )}
-    </div>
+      </PopoverAnchor>
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={4}
+        collisionPadding={12}
+        container={portalContainer ?? undefined}
+        // 输入框在浮层之外，聚焦/失焦都算「外部」；Radix 默认据此直接关闭浮层，
+        // 表现就是刚弹出就消失。这里只挡掉 focus 这一类：面板的存亡由点选候选项、
+        // 按 Esc、点面板外的其他地方决定（pointerdown 那条照常关，与原行为一致）。
+        onFocusOutside={(e) => e.preventDefault()}
+        // 别把焦点从输入框抢走：开着候选还能继续手打、方向键也不该被浮层劫持。
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="w-(--radix-popper-anchor-width) min-w-0 max-h-48 overflow-y-auto p-1"
+      >
+        {suggestions.map((model) => (
+          <button
+            key={model}
+            type="button"
+            className={cn(
+              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent cursor-pointer",
+              value === model && "bg-accent",
+            )}
+            onClick={() => {
+              onChange(model)
+              setOpen(false)
+            }}
+          >
+            <Check
+              className={cn(
+                "size-3.5 shrink-0",
+                value === model ? "opacity-100" : "opacity-0",
+              )}
+            />
+            {model}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -134,6 +148,12 @@ interface Props {
   /** 允许「跟随会话默认」的空值项（输入栏覆盖场景）。 */
   allowInherit?: boolean
   className?: string
+  /**
+   * 模型候选浮层的挂载点。默认挂 body；在 Dialog 内必须传 DialogContent 节点
+   * （或它内部的 overflow-visible 层），否则滚轮事件会被 react-remove-scroll 拦掉，
+   * 浮层超出弹框的部分也会被 overflow-hidden 裁掉。参见 popover.tsx 的 container。
+   */
+  portalContainer?: HTMLElement | null
 }
 
 /**
@@ -146,6 +166,7 @@ export default function ProviderModelPicker({
   onChange,
   allowInherit,
   className,
+  portalContainer,
 }: Props) {
   const { t } = useTranslation()
   const { data, isLoading, isError } = useProviders()
@@ -256,6 +277,7 @@ export default function ProviderModelPicker({
         onChange={(v) => onChange(provider, v)}
         suggestions={availableModels}
         disabled={modelDisabled}
+        portalContainer={portalContainer}
         placeholder={
           modelDisabled
             ? t("autoResearch.provider.noModelNeeded")

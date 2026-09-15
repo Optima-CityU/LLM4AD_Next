@@ -519,6 +519,7 @@ export default function CreateSessionDialog({
                 setProviderId(p)
                 setModelName(m)
               }}
+              portalContainer={contentEl}
             />
           </Field>
 

@@ -694,6 +694,95 @@
   }
 }
 
+/* 单步 armed 态的质感变体：药丸从主色变琥珀（「这一步不是常规跑」），外发光同步换成
+   暖色，并带一圈 1px 琥珀描边把变形后的机体边缘说清楚。悬停时轻微聚光，与常规态一致。 */
+.bc-send-pill-armed {
+  box-shadow:
+    0 1px 2px 0 rgba(245, 158, 11, 0.3),
+    0 0 0 1px rgba(245, 158, 11, 0.35);
+}
+.bc-send-pill-armed:hover {
+  box-shadow:
+    0 2px 12px 0 rgba(245, 158, 11, 0.5),
+    0 0 0 1px rgba(245, 158, 11, 0.5);
+}
+
+/* 变形时的一次性脉冲：只碰 transform，纯合成器动画。
+   0% 轻微下压 → 中段放大一点 + 稍微上浮 → 100% 归位，读起来像「咔哒」一声扣上。 */
+@keyframes bc-pill-bump {
+  0% {
+    transform: scale(0.97);
+  }
+  45% {
+    transform: scale(1.025);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.bc-pill-bump {
+  animation: bc-pill-bump 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 蓝→琥珀的衔接：**双色渐变 + 背景位移**，只碰 background-position（合成器友好，不掉帧），
+   且背景在内容之下，永远遮不住东西。
+
+   为什么不用另外两种做法：
+   - 颜色补间：`#2563eb` → `#f59e0b` 是两条高饱、色相几乎对立的实色，在 sRGB 上插值必然
+     经过一段低饱和的灰蓝，读作「先褪成脏色、再冒出橙」，是两段而不是一次过渡。
+   - 盖一层纯色再淡出：不透明层会连图标和文案一起遮住——曾有一版「橙底停一会儿文字才
+     出来」就是这么来的，文字没迟到，是被盖住了。
+
+   ⚠️ 坐标换算（踩过坑，改色标/落点前先读这段）：
+   `background-position: X%` 的百分比基准是**「背景宽 − 容器宽」**，不是背景宽，也**不等于
+   渐变内部的色标坐标**。设 background-size 为 S（单位：容器宽），背景宽 = S，容器宽 = 1，
+   则位移量 = (S − 1) × X%，窗口（= 容器宽 1）在渐变里的位置是：
+
+       窗口 = 渐变坐标 [ (S−1)·X , (S−1)·X + 1 ]，而坐标 1 = 色标的 100/S %
+
+   S = 2、X = 0%   → 坐标 [0, 1]     = 色标 0%~50%     ← 静止态，须全落在纯主色里
+   S = 2、X = 100% → 坐标 [1, 2]     = 色标 50%~100%    ← armed，须全落在纯琥珀里
+   （取 X = 86% 会得到窗口 43%~68%，让琥珀的起点骑在窗口中间，于是静止好看、armed 却成了
+   半蓝半橙。上面这组 50% / 100% 才是自洽解。）
+
+   色标由此定死，没有自由度可调：主色须铺满 0~50%（静止窗口），琥珀须铺满 50~100%
+   （armed 窗口），两者相接于 50% 一点——那里是硬切换，但静止/armed 两端各自完全落在一侧
+   看不见它，只有推进动画扫过时露一下，读作「蓝被琥珀从右往左推着走」，到位即停。 */
+.bc-pill-tint {
+  background-image: linear-gradient(
+    to right,
+    var(--primary) 0%,
+    var(--primary) 50%,
+    #f59e0b 50%,
+    #f59e0b 100%
+  );
+  background-size: 200% 100%;
+  background-position: 0% 0;
+  transition: background-position 320ms cubic-bezier(0.33, 0, 0.2, 1);
+}
+.bc-pill-tint[data-armed="true"] {
+  background-position: 100% 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bc-pill-bump {
+    animation: none;
+  }
+  .bc-pill-tint {
+    transition: none; /* 不给动效时直接换到位 */
+  }
+}
+
+/* 琥珀态下把药丸顶部高光调淡一点：主色高光偏白，压在琥珀上会发灰。 */
+.bc-send-pill-armed::before {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0.06) 45%,
+    transparent 70%
+  );
+}
+
 /* AutoResearch turn 日志面板：并排展开多个时，常显的滚动条会很杂乱。默认把滑块
    隐藏（轨道宽度恒定，故无布局跳动），hover 整个面板（.arc-log）或聚焦其内时才
    浮现滑块。浅/暗色分别配色，对齐全局滚动条观感。 */

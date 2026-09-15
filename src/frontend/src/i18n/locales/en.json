@@ -3688,7 +3688,14 @@
       "terminalHint": "To tweak a stage, use stage guidance injection; to change research direction, create a new session.",
       "fromStageLabel": "Start stage",
       "fromStageBegin": "From beginning",
-      "fromStageHint": "Re-run from the chosen stage (earlier stages reuse existing artifacts); pair with stage guidance to fix a step."
+      "fromStageHint": "Re-run from the chosen stage (earlier stages reuse existing artifacts); pair with stage guidance to fix a step.",
+      "oneStepRun": "Run #{{stage}}",
+      "oneStepRunDesc": "Run only stage {{stage}}, then revert on its own.",
+      "oneStepMenuLabel": "Run one step",
+      "oneStepMenuHint": "Run only stage {{stage}}. The main button still runs all the way.",
+      "oneStepExit": "Cancel one-step",
+      "oneStepExitHint": "Click the main button to run stage {{stage}}; it reverts on its own.",
+      "oneStepDone": "All 23 stages are done — no next step."
     },
     "form": {
       "submit": "Submit",

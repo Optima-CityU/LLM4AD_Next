@@ -95,6 +95,11 @@ export default function EditSessionDialog({
   const [metricKey, setMetricKey] = useState("")
   const [providerId, setProviderId] = useState("default")
   const [modelName, setModelName] = useState("")
+  /**
+   * 模型候选浮层的挂载节点（DialogContent 内部的绝对定位层）。存 state 而非 ref：
+   * 浮层需要「节点出现后」才渲染，ref 变化不会触发重渲染，挂载点会一直是 null。
+   */
+  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null)
 
   const updateMut = useUpdateResearchSession()
 
@@ -204,6 +209,17 @@ export default function EditSessionDialog({
         className="sm:max-w-[760px] grid-rows-[auto_minmax(0,1fr)_auto] max-h-[85vh] overflow-hidden"
         preventOutsideClose
       >
+        {/* 浮层挂载点：与新建弹框同一套做法——在收口的 DialogContent 里开一个
+            overflow-visible 的绝对定位层。挂在这里的 Popover 仍算落在 DialogContent
+            这个滚动锁 shard 内（react-remove-scroll 只把 DialogContent 登记为 shard，
+            挂到 body 上的浮层滚轮会被 preventDefault），同时又能超出弹框边界显示，
+            不被 DialogContent 的 overflow-hidden 裁掉。pointer-events-none 只是不让
+            这层挡住下面的表单，浮层自身会重新打开指针事件。 */}
+        <div
+          ref={setContentEl}
+          className="pointer-events-none absolute inset-0 overflow-visible"
+          style={{ gridArea: "1 / 1 / -1 / -1" }}
+        />
         <DialogHeader>
           <DialogTitle>{t("autoResearch.edit.title")}</DialogTitle>
           <DialogDescription className="text-xs">
@@ -427,6 +443,7 @@ export default function EditSessionDialog({
                 setProviderId(p)
                 setModelName(m)
               }}
+              portalContainer={contentEl}
             />
           </Field>
         </div>

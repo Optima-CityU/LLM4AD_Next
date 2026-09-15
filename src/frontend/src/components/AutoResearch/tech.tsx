@@ -256,6 +256,39 @@ export function naturalStageFromMessages(
   return null
 }
 
+/**
+ * 「仅运行一步」的落点：由会话历史算出**下一步该跑哪一阶段**。
+ *
+ * 起点（run）与终点（to）取同一阶段号，即 ARC 的 ``--from-stage N --to-stage N``——
+ * ``execute_pipeline`` 的 ``to_stage`` 是**闭区间**（跑到该阶段即 break），所以这样
+ * 恰好只跑一步，不会白跑该阶段之后的内容。
+ *
+ * 与 {@link naturalStageFromMessages} 同口径，只多两处「一步」特有的处理：
+ *
+ * - **空历史回退到 1**：天然起点为 `null` 时（全新会话，没有「上一步」可依据）从第 1
+ *   阶段起——`null` 对「一步」没有意义，它等于全程跑。
+ * - **全跑完给 `null`**：天然起点在末步已完成时会被 `Math.min(stage + 1, TOTAL_STAGES)`
+ *   夹回 23，分不出「第 23 步待跑」和「23 步已全跑完」。这里单独看一眼末条阶段消息，
+ *   后者返回 `null`，让调用方把入口置灰，而不是把第 23 步默默重跑一遍。
+ *
+ * @param messages 升序排列的消息列表（最旧在前）。
+ * @returns 1..TOTAL_STAGES 的阶段号；`null` = 没有下一步（全跑完了）。
+ */
+export function oneStepStageFromMessages(
+  messages: StageMessageLike[],
+): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if ((m.event_type ?? "") !== "stage_transition") continue
+    const stage = stageOf(m)
+    if (stage == null || stage <= 0) continue
+    // 末条已完成且已是最后一阶段 → 没有下一步。
+    if (statusOf(m) === "done" && stage >= TOTAL_STAGES) return null
+    break
+  }
+  return naturalStageFromMessages(messages) ?? 1
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 状态配色（固定色，不随主题；与演化页 TASK_STATUS_DOT 一致）
 // ────────────────────────────────────────────────────────────────────────────
