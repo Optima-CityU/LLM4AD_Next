@@ -3229,8 +3229,8 @@
       "ml_vision": "autoresearch"
     },
     "profileDesc": {
-      "algorithm_evolution": "集成了llm4ad的实验设计部分和实验执行部分",
-      "ml_vision": "原生的AutoResearchClaw"
+      "algorithm_evolution": "实验设计与执行接入 llm4ad 算法演化引擎，边跑边迭代算法",
+      "ml_vision": "未集成 llm4ad 的原生 AutoResearchClaw 流程"
     },
     "provider": {
       "inherit": "跟随会话默认",
@@ -3426,8 +3426,8 @@
       "metricLabel": "指标（可选）",
       "metricDirectionLabel": "指标优化方向",
       "metricKeyLabel": "指标名（可选）",
-      "metricKeyPlaceholder": "留空使用默认值 primary_metric",
-      "metricKeyHint": "实验中用来衡量优劣的那个指标名，如 accuracy、f1、loss；留空由 AutoResearchClaw 按课题默认值决定。",
+      "metricKeyPlaceholder": "默认 primary_metric",
+      "metricKeyHint": "决定实验好坏的指标名：越大越好的填 test_accuracy、roc_auc、f1_score，越小越好的填 rmse、smape、convergence_epochs；留空取默认 primary_metric。",
       "requiredMark": "必填",
       "recommendedMark": "推荐",
       "workspaceLabel": "LLM4AD workspace（可选）",
@@ -3446,7 +3446,7 @@
       "footerHint": "默认创建后立即开跑；只想先建好会话，用右侧箭头。",
       "creating": "创建中...",
       "templateLabel": "课题模板（可选）",
-      "templatePlaceholder": "从 ARC-Bench 课题库选择一个起点",
+      "templatePlaceholder": "从 ARC-Bench 课题库挑一个起点",
       "templateClear": "取消选择",
       "templateSearch": "搜索",
       "templateAllDomains": "全部",
@@ -3454,9 +3454,10 @@
       "templateLoadFailed": "课题模板加载失败（后端镜像可能未装 arc-templates）",
       "templatePreset": "预置 stage 7-9",
       "templateHypotheses": "{{n}} 条假设",
-      "templatePreviewHint": "悬停左侧课题查看完整题面",
+      "templatePreviewHint": "悬停左侧课题，右侧显示完整题面",
       "templateRecommended": "推荐",
-      "templateStageWarning": "模板只预置阶段 7-9 的产物，据此直接从阶段 10 起跑；留空则从阶段 1 完整自跑。"
+      "templateStageWarning": "选用模板会预置阶段 7–9 的产物，本次从阶段 10 起跑；留空或点「取消选择」则从阶段 1 完整自跑。",
+      "providerHint": "推荐选能力强的模型（如 gpt-5.2），成功率与产出质量更高。"
     },
     "edit": {
       "title": "编辑会话",
@@ -3541,7 +3542,7 @@
       "step1": "确认研究主题",
       "step2": "点击开始研究",
       "startFromStage10": "从阶段 10 开始",
-      "templateReadySubtitle": "已从课题模板预置阶段 07–09 的产物，将从阶段 10 继续",
+      "templateReadySubtitle": "已用课题模板预置阶段 07–09 的产物，将从阶段 10 继续",
       "templateReadyHint": "模板已提供文献综述、假设与实验设计，AI 将从代码生成阶段继续；您可以随时查看进度或介入调整",
       "startResearch": "开始研究",
       "starting": "启动中..."
@@ -3608,7 +3609,8 @@
       "placeholderGate": "填写说明 / 理由，再点上方门控按钮（打回、重做需填写）；或问 AI 帮你审阅…",
       "placeholderRunning": "运行期间暂不可输入…",
       "thinking": "AI 助手思考中…",
-      "usingTool": "正在调用 {{tool}}…",
+      "toolInput": "入参",
+      "toolOutput": "结果",
       "hint": "AI 助手：可解释产物、帮你修改文件；流水线运行时不可用。",
       "hintGate": "在此填写的文字会作为门控说明随上方按钮一起提交；或点发送让 AI 协助。",
       "hintPaused": "已在门控暂停：用上方按钮决策，或让 AI 助手协助。"
@@ -3760,6 +3762,36 @@
         "availableCount": "{{available}} / {{total}} 可用",
         "query": "查询",
         "verifiedAt": "校验于"
+      },
+      "verificationFields": {
+        "heroTitle": "引用核验报告",
+        "heroSubtitle": "逐条核对参考文献是否真实存在、是否与本文相关",
+        "verifiedRatio": "{{verified}} / {{total}} 通过",
+        "totalCites": "引用总数",
+        "verified": "已核实",
+        "suspicious": "存疑",
+        "hallucinated": "疑似捏造",
+        "skipped": "未核验",
+        "integrityScore": "完整性得分",
+        "integrityUnavailable": "未评估",
+        "integrityNullNote": "本次没有参考文献，完整性得分无从计算，因此留空——不是满分通过。",
+        "distributionTitle": "核验分布",
+        "citationsTitle": "逐条核验结果",
+        "method": "命中方式",
+        "confidence": "置信度",
+        "relevance": "相关度",
+        "relevanceNotEvaluated": "未评估",
+        "matchedPaper": "匹配到的文献",
+        "skippedNoteTitle": "关于未核验",
+        "skippedNote": "未核验的条目没有找到可用的 DOI 或 arXiv ID，做不了硬匹配；它们不计入完整性得分。",
+        "status_verified": "已核实",
+        "status_suspicious": "存疑",
+        "status_hallucinated": "疑似捏造",
+        "status_skipped": "未核验",
+        "method_doi": "DOI 匹配",
+        "method_arxiv_id": "arXiv ID 匹配",
+        "method_title_search": "标题检索",
+        "method_skipped": "已跳过"
       },
       "webSearchFields": {
         "heroTitle": "网络检索结果",

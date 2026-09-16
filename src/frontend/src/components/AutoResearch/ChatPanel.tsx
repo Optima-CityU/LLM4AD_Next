@@ -48,6 +48,7 @@ import {
 import { cn } from "@/lib/utils"
 
 import BottomComposer, { type RunOverrides } from "./BottomComposer"
+import { CollabToolCard, type CollabToolCall } from "./CollabToolCard"
 import MessageItem from "./MessageItem"
 import { StageProgressBar } from "./StageProgress"
 import StageTimeline, {
@@ -268,7 +269,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   const [collabTurnId, setCollabTurnId] = useState<string | null>(null)
   // collab agent 流式回复的实时拼接文本（本轮内存，done 后由 messages 接管）。
   const [collabStreamText, setCollabStreamText] = useState("")
-  const [collabToolHint, setCollabToolHint] = useState<string | null>(null)
+  // 本轮工具调用的累积列表：start 帧先占位（只带工具名），end 帧按 tool_call_id
+  // 回填入参 / 结果 / 状态。清空时机与 collabStreamText 一致（done / 新轮开始时）。
+  const [collabTools, setCollabTools] = useState<CollabToolCall[]>([])
   // pipeline turn 的显式重连令牌：retry 复用同一 turn_id，需手动 bump 让 SSE 重连。
   const [streamReconnectToken, setStreamReconnectToken] = useState(0)
 
@@ -760,7 +763,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 
         setCollabTurnId(null)
         setCollabStreamText("")
-        setCollabToolHint(null)
+        setCollabTools([])
         qc.invalidateQueries({
           queryKey: researchKeys.sessionMessages(session.id),
         })
@@ -786,7 +789,46 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         if (evt.type === "collab_message" && typeof evt.delta === "string") {
           setCollabStreamText((prev) => prev + evt.delta)
         } else if (evt.type === "collab_tool") {
-          setCollabToolHint((evt.tool as string) || null)
+          // 一次调用两帧：start 只有工具名（先渲染「正在执行」），end 带完整入参 /
+          // 结果 / 状态。按 tool_call_id 归并，end 帧内的 name 可能为空（后端只回传
+          // tool/phase/id/input/output/state），故保留 start 帧的 name。
+          const toolId = (evt.tool_call_id as string) || ""
+          const toolName = (evt.tool as string) || ""
+          const isEnd = evt.phase === "end"
+          setCollabTools((prev) => {
+            // 没有 tool_call_id 时的兜底键（后端应始终回填，这里是防御性处理）。
+            const key = toolId || `#${prev.length}:${toolName}`
+            const idx = prev.findIndex((c) => c.id === key)
+            // end 帧可能在 start 帧丢失（如断线重连）时单独到达，此时补建一条，
+            // 否则这次调用的入参 / 结果就再也看不到了。
+            if (idx < 0) {
+              return [
+                ...prev,
+                {
+                  id: key,
+                  name: toolName,
+                  done: isEnd,
+                  input: evt.input ?? null,
+                  inputRaw: (evt.input_raw as string) || "",
+                  output: (evt.output as string) || "",
+                  state: (evt.state as string) || (isEnd ? "success" : ""),
+                },
+              ]
+            }
+            const next = prev.slice()
+            next[idx] = isEnd
+              ? {
+                  ...next[idx],
+                  name: next[idx].name || toolName,
+                  done: true,
+                  input: evt.input ?? null,
+                  inputRaw: (evt.input_raw as string) || "",
+                  output: (evt.output as string) || "",
+                  state: (evt.state as string) || "success",
+                }
+              : { ...next[idx], name: toolName || next[idx].name }
+            return next
+          })
         }
       },
     },
@@ -873,7 +915,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 
   const handleCollabSend = (message: string) => {
     setCollabStreamText("")
-    setCollabToolHint(null)
+    setCollabTools([])
     collabMut.mutate(
       { sessionId: session.id, body: { message } },
       {
@@ -898,7 +940,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           if (isCollab) {
             setCollabTurnId(null)
             setCollabStreamText("")
-            setCollabToolHint(null)
+            setCollabTools([])
           }
         },
         onError: toastErr,
@@ -1089,15 +1131,25 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
                 ))}
                 {collabBusy && (
                   <div className="flex justify-start px-4 py-1">
-                    <div className="w-full rounded-2xl rounded-tl-sm bg-primary/[0.06] border border-primary/25 px-4 py-2 text-sm whitespace-pre-wrap break-words">
-                      {collabStreamText || (
+                    <div className="w-full rounded-2xl rounded-tl-sm bg-primary/[0.06] border border-primary/25 px-4 py-2 text-sm break-words">
+                      {/* 工具调用卡片放在回复文本上方：agent 一轮里往往先调工具再
+                          写结论，卡片随 SSE 实时出现（start 帧即渲染「执行中」），
+                          用户不必等文字流完才知道它在干什么。 */}
+                      {collabTools.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {collabTools.map((call) => (
+                            <CollabToolCard key={call.id} call={call} />
+                          ))}
+                        </div>
+                      )}
+                      {collabStreamText ? (
+                        <div className="whitespace-pre-wrap">
+                          {collabStreamText}
+                        </div>
+                      ) : (
                         <span className="italic opacity-70 inline-flex items-center gap-1.5">
                           <Loader2 className="size-3 animate-spin" />
-                          {collabToolHint
-                            ? t("autoResearch.collab.usingTool", {
-                                tool: collabToolHint,
-                              })
-                            : t("autoResearch.collab.thinking")}
+                          {t("autoResearch.collab.thinking")}
                         </span>
                       )}
                     </div>

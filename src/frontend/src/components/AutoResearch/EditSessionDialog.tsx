@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react"
+import { HelpCircle, Loader2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -222,7 +222,7 @@ export default function EditSessionDialog({
         />
         <DialogHeader>
           <DialogTitle>{t("autoResearch.edit.title")}</DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription>
             {t("autoResearch.edit.subtitle")}
           </DialogDescription>
         </DialogHeader>
@@ -295,7 +295,7 @@ export default function EditSessionDialog({
                       <div className="flex items-center gap-1.5">
                         <span
                           className={cn(
-                            "text-[13px] font-medium transition-colors",
+                            "text-sm font-medium transition-colors",
                             profile === p
                               ? "text-foreground"
                               : "text-foreground/80 group-hover:text-foreground",
@@ -305,12 +305,12 @@ export default function EditSessionDialog({
                         </span>
                         {/* 与新建弹框一致：llm4ad（sandbox）是主推路径，标一枚推荐。 */}
                         {p === "algorithm_evolution" && (
-                          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-600 dark:text-amber-400">
+                          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
                             {t("autoResearch.create.recommendedMark")}
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] leading-snug text-muted-foreground">
+                      <div className="text-xs leading-snug text-muted-foreground">
                         {t(`autoResearch.profileDesc.${p}`)}
                       </div>
                     </div>
@@ -324,7 +324,7 @@ export default function EditSessionDialog({
               profile !== session.profile &&
               isCrossTypeProfile(session.profile, profile) && (
                 <div className="mt-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5">
-                  <p className="text-[10px] leading-relaxed text-amber-700 dark:text-amber-400">
+                  <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
                     {t("autoResearch.edit.profilePurgeHint")}
                   </p>
                 </div>
@@ -333,7 +333,10 @@ export default function EditSessionDialog({
 
           {/* 指标名与优化方向合成一行，与新建弹框同一套版式：左边填名字，右边用
               分段控件选方向（每项的长说明做成 tooltip，不占行内宽度）。 */}
-          <Field label={t("autoResearch.create.metricLabel")}>
+          <Field
+            label={t("autoResearch.create.metricLabel")}
+            hint={t("autoResearch.create.metricKeyHint")}
+          >
             <div className="grid grid-cols-2 gap-3">
               <Input
                 value={metricKey}
@@ -349,7 +352,7 @@ export default function EditSessionDialog({
                     <TooltipTrigger asChild>
                       <label
                         className={cn(
-                          "flex h-full flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[5px] px-1.5 text-[11px] transition-colors",
+                          "flex h-full flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[5px] px-1.5 text-xs transition-colors",
                           metricDirection === d
                             ? "bg-primary/15 font-medium text-foreground ring-1 ring-primary/50 ring-inset"
                             : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
@@ -380,18 +383,13 @@ export default function EditSessionDialog({
                         {t(`autoResearch.metricDirection.${d}`)}
                       </label>
                     </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-56 text-[11px]">
+                    <TooltipContent side="top" className="max-w-64 text-xs">
                       {t(`autoResearch.metricDirection.${d}Desc`)}
                     </TooltipContent>
                   </Tooltip>
                 ))}
               </div>
             </div>
-            <p className="pt-1 text-[10px] leading-snug text-muted-foreground/70">
-              {metricKey
-                ? t(`autoResearch.metricDirection.${metricDirection}Desc`)
-                : t("autoResearch.create.metricKeyHint")}
-            </p>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
@@ -400,7 +398,7 @@ export default function EditSessionDialog({
                 value={folderId ?? "__none__"}
                 onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
               >
-                <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -421,7 +419,7 @@ export default function EditSessionDialog({
                 value={mode}
                 onValueChange={(v) => setMode(v as ResearchMode)}
               >
-                <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -435,7 +433,10 @@ export default function EditSessionDialog({
             </Field>
           </div>
 
-          <Field label={t("autoResearch.create.providerLabel")}>
+          <Field
+            label={t("autoResearch.create.providerLabel")}
+            hint={t("autoResearch.create.providerHint")}
+          >
             <ProviderModelPicker
               provider={providerId}
               model={modelName}
@@ -450,7 +451,7 @@ export default function EditSessionDialog({
 
         <DialogFooter className="items-center sm:justify-between">
           {/* 左侧常驻一行说明：只提交改动过的字段，与新建弹框的 footer 同款版式。 */}
-          <p className="hidden text-[10px] text-muted-foreground/70 sm:block">
+          <p className="hidden text-[11px] text-muted-foreground/70 sm:block">
             {t("autoResearch.edit.footerHint")}
           </p>
           <div className="flex items-center gap-2">
@@ -492,7 +493,7 @@ function Counter({ current, max }: { current: number; max: number }) {
   return (
     <div
       className={cn(
-        "absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-[10px] font-mono tabular-nums backdrop-blur-sm pointer-events-none",
+        "absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-[11px] font-mono tabular-nums backdrop-blur-sm pointer-events-none",
         current > max
           ? "bg-destructive/90 text-destructive-foreground"
           : current > max * 0.9
@@ -509,24 +510,56 @@ function Field({
   label,
   children,
   required,
+  hint,
 }: {
   label: string
   children: React.ReactNode
   /** 必填项在标签后加一枚小徽章（不用红星，红星在暗色主题下不够显眼也不带语义）。 */
   required?: boolean
+  /** 字段说明：挂在标签旁的问号图标上，悬停/聚焦才展开，不单独占一行。 */
+  hint?: string
 }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-1">
-      <SectionLabel className="flex items-center gap-1.5">
+      {/* SectionLabel 全站基准是 10px；表单标签承担的是「读字段名」而不是装饰，
+          两个弹框里统一抬到 11px（className 会覆盖掉基础字号）。 */}
+      <SectionLabel className="flex items-center gap-1.5 text-[11px]">
         <span className="block">{label}</span>
         {required && (
-          <span className="rounded bg-destructive/10 px-1 py-px text-[9px] font-medium normal-case tracking-normal text-destructive">
+          <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium normal-case tracking-normal text-destructive">
             {t("autoResearch.create.requiredMark")}
           </span>
         )}
+        {hint && <FieldHint text={hint} />}
       </SectionLabel>
       {children}
     </div>
+  )
+}
+
+/**
+ * 字段说明的问号入口。说明文字本身不占版面——不悬停就等于不存在，
+ * 表单因此少掉两行常驻灰字，字段间距也不用再为它们留余量。
+ */
+function FieldHint({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      {/* 用 button 而不是 svg 直接做触发器：键盘 Tab 能落到它上面，
+          图标本身没有可访问名字（button 的 aria-label 补上）。
+          尺寸刻意压到 12px 并与标签基线对齐，避免把小标题行撑高。 */}
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={text}
+          className="inline-flex shrink-0 cursor-help items-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+        >
+          <HelpCircle className="size-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+        {text}
+      </TooltipContent>
+    </Tooltip>
   )
 }

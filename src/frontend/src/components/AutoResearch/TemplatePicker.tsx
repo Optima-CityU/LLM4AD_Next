@@ -128,7 +128,7 @@ export default function TemplatePicker({
           <button
             type="button"
             className={cn(
-              "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors",
+              "flex w-full min-h-9 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors",
               value
                 ? "border-primary/60 bg-primary/5"
                 : "border-border/60 hover:border-primary/50 hover:bg-primary/5",
@@ -137,10 +137,10 @@ export default function TemplatePicker({
             <span className="min-w-0 flex-1 truncate">
               {selected ? (
                 <>
-                  <span className="font-mono text-[10px] text-muted-foreground">
+                  <span className="font-mono text-xs text-muted-foreground">
                     {selected.id}
                   </span>
-                  <span className="ml-1.5 text-[12px] text-foreground">
+                  <span className="ml-1.5 text-foreground">
                     {selected.title}
                   </span>
                 </>
@@ -179,7 +179,7 @@ export default function TemplatePicker({
                 type="button"
                 onClick={() => setDomain(d)}
                 className={cn(
-                  "rounded px-1.5 py-0.5 text-[10px] transition-colors",
+                  "rounded px-1.5 py-0.5 text-[11px] transition-colors",
                   domain === d
                     ? "bg-primary/15 text-primary"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -196,7 +196,7 @@ export default function TemplatePicker({
                 value={keyword}
                 onChange={(e) => setKeyword(e.target.value)}
                 placeholder={t("autoResearch.create.templateSearch")}
-                className="w-full rounded border border-border/60 bg-background/80 py-0.5 pl-5 pr-1 text-[11px] focus:border-primary/50 focus:outline-none"
+                className="w-full rounded border border-border/60 bg-background/80 py-0.5 pl-5 pr-1 text-xs focus:border-primary/50 focus:outline-none"
               />
             </div>
           </div>
@@ -208,18 +208,18 @@ export default function TemplatePicker({
                 宽度跟着面板走（可伸缩，22rem 封顶），面板变宽时右栏才拿到余量。 */}
             <div className="max-h-[18rem] min-h-[18rem] w-[min(22rem,50%)] shrink-0 space-y-0.5 overflow-y-auto pr-0.5">
               {isLoading && (
-                <div className="flex items-center justify-center gap-2 py-4 text-[11px] text-muted-foreground">
+                <div className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground">
                   <Loader2 className="size-3 animate-spin" />
                   {t("common.loading")}
                 </div>
               )}
               {isError && (
-                <div className="py-4 text-center text-[11px] text-destructive">
+                <div className="py-4 text-center text-xs text-destructive">
                   {t("autoResearch.create.templateLoadFailed")}
                 </div>
               )}
               {!isLoading && !isError && items.length === 0 && (
-                <div className="py-4 text-center text-[11px] text-muted-foreground">
+                <div className="py-4 text-center text-xs text-muted-foreground">
                   {t("autoResearch.create.templateEmpty")}
                 </div>
               )}
@@ -240,14 +240,14 @@ export default function TemplatePicker({
                 >
                   {/* 只留 id + title：metric_key 一列在窄行里挤成第二条「小字列」，
                       扫读时反而干扰，指标信息移到右栏预览里看。 */}
-                  <span className="w-11 shrink-0 font-mono text-[10px] text-muted-foreground">
+                  <span className="w-11 shrink-0 font-mono text-[11px] text-muted-foreground">
                     {it.id}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-foreground/90">
+                  <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">
                     {it.title}
                   </span>
                   {RECOMMENDED_IDS.has(it.id) && (
-                    <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-600 dark:text-amber-400">
+                    <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
                       {t("autoResearch.create.templateRecommended")}
                     </span>
                   )}
@@ -261,19 +261,19 @@ export default function TemplatePicker({
               {preview ? (
                 <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-mono text-[10px] text-primary/80">
+                    <span className="font-mono text-[11px] text-primary/80">
                       {preview.id}
                     </span>
-                    <span className="text-[11px] font-medium text-foreground">
+                    <span className="text-xs font-medium text-foreground">
                       {preview.title}
                     </span>
                     {RECOMMENDED_IDS.has(preview.id) && (
-                      <span className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-medium text-amber-600 dark:text-amber-400">
+                      <span className="rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
                         {t("autoResearch.create.templateRecommended")}
                       </span>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     {preview.domain_label && (
                       <span>{preview.domain_label}</span>
                     )}
@@ -293,14 +293,14 @@ export default function TemplatePicker({
                       </span>
                     )}
                   </div>
-                  <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
                     {preview.topic}
                   </p>
                 </div>
               ) : (
-                <div className="flex h-full items-center justify-center px-3 text-center text-[11px] leading-snug text-muted-foreground/50">
+                <div className="flex h-full items-center justify-center px-3 text-center text-xs leading-snug text-muted-foreground/50">
                   {t("autoResearch.create.templatePreviewHint", {
-                    defaultValue: "悬停左侧课题查看完整题面",
+                    defaultValue: "悬停左侧课题，右侧显示完整题面",
                   })}
                 </div>
               )}
@@ -314,10 +314,10 @@ export default function TemplatePicker({
           未选模板时不显示（默认就是从第 1 阶段自跑，没什么可提醒的）。 */}
       {value && (
         <div className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
-          <p className="text-[10px] leading-relaxed text-amber-700 dark:text-amber-400">
+          <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
             {t("autoResearch.create.templateStageWarning")}
           </p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-600 dark:text-emerald-400">
               {t("autoResearch.create.templatePreset", {
                 defaultValue: "预置 stage 7-9",

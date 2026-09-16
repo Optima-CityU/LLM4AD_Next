@@ -246,10 +246,19 @@ def _build_collab_event_handler(sink: ResearchEventSink, stage_num: int):
 
     返回 ``(on_event, on_stdout, result_holder)``。
     - ``__collab_text__`` → ``collab_message`` 事件（agent 流式文本，前端拼接）；
-    - ``__collab_tool__`` → ``collab_tool`` 事件（agent 正在调用哪个工具）；
+    - ``__collab_tool__`` → ``collab_tool`` 事件，一轮调用两帧：
+      ``phase=start`` 只有工具名（前端转圈提示），``phase=end`` 带完整入参 / 出参 /
+      终态。**只有 end 落库**：start 是转瞬即逝的 UI 提示，落库会平白多一条永远
+      停在「调用中」的历史行；end 才是可回放、可展开查看的权威记录。
+      两帧的 ``event_key`` 不同（``tool:start:<id>`` / ``tool:end:<id>``），
+      故不会被 (session, turn, role, event_key) 唯一约束判成同一条互相覆盖。
     - ``__result__`` → 存进 holder（含 agent 最终文本），供任务体落终态消息。
     """
     result_holder: dict[str, Any] = {}
+    # 无 tool_call_id 时的兜底序号：同轮多次调用若都缺 id，共用 "unknown" 会让
+    # event_key 撞车（唯一约束按 key 判重），后到的调用被静默丢弃。递增序号保证
+    # 每条 end 都有独立 key。
+    anon_seq = 0
 
     def on_event(ev: dict[str, Any]) -> None:
         try:
@@ -265,11 +274,32 @@ def _build_collab_event_handler(sink: ResearchEventSink, stage_num: int):
                 }, persist=False)
 
             elif etype == "__collab_tool__":
-                sink.emit({
+                nonlocal anon_seq
+                call_id = str(ev.get("tool_call_id") or "")
+                phase = str(ev.get("phase") or "start")
+                if not call_id:
+                    anon_seq += 1
+                    call_id = f"anon-{anon_seq}"
+                payload: dict[str, Any] = {
                     "type": "collab_tool",
                     "stage": stage_num,
                     "tool": ev.get("name") or "",
-                })
+                    "phase": phase,
+                    "tool_call_id": call_id,
+                }
+                if phase == "end":
+                    payload["input"] = ev.get("input")
+                    payload["input_raw"] = ev.get("input_raw") or ""
+                    payload["output"] = ev.get("output") or ""
+                    payload["state"] = ev.get("state") or "success"
+                # event_key 必须自带 phase：两帧同属一次调用，若共用 key 会被
+                # uq_research_message_turn_role_event 判重（重放幂等），start 先落库后
+                # end 就被判成重复丢弃——前端永远看不到入参出参。
+                sink.emit(
+                    payload,
+                    event_key=f"tool:{phase}:{call_id}",
+                    persist=(phase == "end"),
+                )
             elif etype == "__result__":
                 marker = ev.get("marker")
                 if isinstance(marker, dict):

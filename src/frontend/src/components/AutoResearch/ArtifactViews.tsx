@@ -10,6 +10,7 @@ import {
   ListChecks,
   type LucideIcon,
   Search,
+  ShieldCheck,
   Sparkles,
   XCircle,
 } from "lucide-react"
@@ -1794,6 +1795,371 @@ function ComparisonView({ data }: { data: ComparisonData }) {
   )
 }
 
+// ── verification_report.json ──────────────────────────────────────────────────
+
+/** 单条引用的核验结果。 */
+interface CitationResult {
+  cite_key?: string | null
+  title?: string | null
+  /** verified / suspicious / hallucinated / skipped */
+  status?: string | null
+  /** 0–1，method 为 skipped 时无意义。 */
+  confidence?: number | null
+  /** arxiv_id / doi / title_search / skipped */
+  method?: string | null
+  details?: string | null
+  /** 仅在该条做过 LLM 相关性评估时才有这个键（可能整份报告都缺）。 */
+  relevance_score?: number | null
+  matched_paper?: {
+    title?: string | null
+    authors?: string[] | null
+    year?: number | null
+    source?: string | null
+  } | null
+}
+
+interface VerificationData {
+  summary?: {
+    total?: number | null
+    verified?: number | null
+    suspicious?: number | null
+    hallucinated?: number | null
+    skipped?: number | null
+    /** 无参考文献时为 null（写入方刻意不写 1.0，避免“零引用全过”被读成通过）。 */
+    integrity_score?: number | null
+  } | null
+  results?: CitationResult[] | null
+}
+
+/** 核验状态 → 色调。与 statusTone 的通用词表不同，这里是本文件专属的四个状态。 */
+function citationTone(status: string | null | undefined): Tone {
+  switch ((status ?? "").toLowerCase()) {
+    case "verified":
+      return "positive"
+    case "suspicious":
+      return "warning"
+    case "hallucinated":
+      return "danger"
+    default:
+      return "neutral"
+  }
+}
+
+function citationIcon(status: string | null | undefined): LucideIcon {
+  switch ((status ?? "").toLowerCase()) {
+    case "verified":
+      return CheckCircle2
+    case "suspicious":
+      return AlertTriangle
+    case "hallucinated":
+      return XCircle
+    default:
+      return Circle
+  }
+}
+
+/**
+ * 单条引用的核验卡。
+ *
+ * 卡片要回答的是“这条引用到底算不算数”，所以状态徽章放最显眼处，
+ * 命中方式（DOI / arXiv ID 是硬匹配，标题模糊匹配则弱得多）与相似度
+ * 紧随其后——同样是 verified，靠 DOI 命中和靠标题搜索命中的可信度
+ * 不在一个量级，只给一个状态词是不够的。
+ */
+function CitationCard({
+  item,
+  index,
+}: {
+  item: CitationResult
+  index: number
+}) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.verificationFields.${k}`, opts ?? {})
+
+  const tone = citationTone(item.status)
+  const s = toneOf(tone)
+  const StatusIcon = citationIcon(item.status)
+  const statusKey = (item.status ?? "").toLowerCase()
+  const statusLabel = item.status
+    ? f(`status_${statusKey}`, { defaultValue: item.status })
+    : "—"
+  const methodLabel = item.method
+    ? f(`method_${item.method}`, { defaultValue: item.method })
+    : null
+
+  const relevance = item.relevance_score
+  // 评估过但相似度低于 0.5（与阶段 23 的 RELEVANCE_THRESHOLD 一致）才提示；
+  // 键缺失表示没做这步评估，与“评估过但分数低”是两件事，不能都标黄。
+  const lowRelevance =
+    relevance != null && Number.isFinite(relevance) && relevance < 0.5
+  const relevanceTone: Tone =
+    relevance == null ? "neutral" : lowRelevance ? "warning" : "positive"
+
+  const matched = item.matched_paper
+  const matchedAuthors = matched?.authors?.length
+    ? matched.authors.slice(0, 3).join(", ") +
+      (matched.authors.length > 3 ? " et al." : "")
+    : null
+
+  return (
+    <div className="rounded-xl border border-border/50 bg-background/70 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/60 text-[11px] font-semibold tabular-nums text-muted-foreground">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold leading-snug text-foreground">
+              {item.title || item.cite_key || "—"}
+            </div>
+            {item.cite_key && (
+              <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground/70">
+                {item.cite_key}
+              </div>
+            )}
+          </div>
+        </div>
+        <Pill tone={tone} icon={StatusIcon}>
+          {statusLabel}
+        </Pill>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+        {methodLabel && (
+          <span>
+            <span className="text-muted-foreground/60">{f("method")}: </span>
+            <span className={cn(s.text, "font-medium")}>{methodLabel}</span>
+          </span>
+        )}
+        {item.confidence != null && (
+          <span className="tabular-nums">
+            <span className="text-muted-foreground/60">
+              {f("confidence")}:{" "}
+            </span>
+            {(item.confidence * 100).toFixed(0)}%
+          </span>
+        )}
+        <span className="tabular-nums">
+          <span className="text-muted-foreground/60">{f("relevance")}: </span>
+          {relevance == null ? (
+            <span className="text-muted-foreground/60">
+              {f("relevanceNotEvaluated")}
+            </span>
+          ) : (
+            <span className={cn("font-medium", toneOf(relevanceTone).text)}>
+              {relevance.toFixed(2)}
+            </span>
+          )}
+        </span>
+      </div>
+
+      {matched && (matched.title || matched.year || matchedAuthors) && (
+        <div className="mt-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+            {f("matchedPaper")}
+          </div>
+          {matched.title && (
+            <div className="mt-1 text-xs leading-snug text-foreground/85">
+              {matched.title}
+            </div>
+          )}
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {matchedAuthors && <span>{matchedAuthors}</span>}
+            {matched.year != null && (
+              <span className="tabular-nums">{matched.year}</span>
+            )}
+            {matched.source && (
+              <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                {matched.source}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {item.details && (
+        <div className="mt-2.5 break-words text-[11px] leading-relaxed text-muted-foreground">
+          {item.details}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VerificationView({ data }: { data: VerificationData }) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.verificationFields.${k}`, opts ?? {})
+
+  const summary = data.summary ?? {}
+  const results = data.results ?? []
+  const nVerified = summary.verified ?? 0
+  const nSuspicious = summary.suspicious ?? 0
+  const nHallucinated = summary.hallucinated ?? 0
+  const nSkipped = summary.skipped ?? 0
+  const total = summary.total ?? results.length
+  const integrity = summary.integrity_score
+
+  // 整体色调由最坏情况决定：有捏造的引用就该是红的，而不是被一堆 verified 冲淡。
+  const tone: Tone =
+    nHallucinated > 0
+      ? "danger"
+      : nSuspicious > 0
+        ? "warning"
+        : total > 0
+          ? "positive"
+          : "neutral"
+
+  // 占比条的分母用 total，四种状态按固定顺序拼满整条。
+  const share = (n: number) => (total > 0 ? (n / total) * 100 : 0)
+  const barSegments: { key: string; n: number; cls: string }[] = [
+    { key: "verified", n: nVerified, cls: "bg-emerald-500" },
+    { key: "suspicious", n: nSuspicious, cls: "bg-amber-500" },
+    { key: "hallucinated", n: nHallucinated, cls: "bg-destructive" },
+    { key: "skipped", n: nSkipped, cls: "bg-muted-foreground/40" },
+  ]
+
+  const stats: StatItem[] = [
+    {
+      label: f("totalCites"),
+      value: String(total),
+      mono: true,
+    },
+    {
+      label: f("verified"),
+      value: String(nVerified),
+      mono: true,
+      tone: nVerified > 0 ? "positive" : "neutral",
+    },
+    {
+      label: f("suspicious"),
+      value: String(nSuspicious),
+      mono: true,
+      tone: nSuspicious > 0 ? "warning" : "neutral",
+    },
+    {
+      label: f("hallucinated"),
+      value: String(nHallucinated),
+      mono: true,
+      tone: nHallucinated > 0 ? "danger" : "neutral",
+    },
+    {
+      label: f("skipped"),
+      value: String(nSkipped),
+      mono: true,
+    },
+    {
+      label: f("integrityScore"),
+      value:
+        integrity == null ? (
+          <span className="text-muted-foreground/60">
+            {f("integrityUnavailable")}
+          </span>
+        ) : (
+          <span className="tabular-nums">{integrity.toFixed(2)}</span>
+        ),
+      tone:
+        integrity == null
+          ? "neutral"
+          : integrity >= 0.9
+            ? "positive"
+            : "warning",
+    },
+  ]
+
+  return (
+    <ArtifactCanvas>
+      <Hero
+        icon={ShieldCheck}
+        tone={tone}
+        title={f("heroTitle")}
+        subtitle={f("heroSubtitle")}
+        badge={
+          <Pill
+            tone={tone}
+            icon={
+              nHallucinated > 0
+                ? XCircle
+                : nSuspicious > 0
+                  ? AlertTriangle
+                  : CheckCircle2
+            }
+          >
+            {f("verifiedRatio", { verified: nVerified, total })}
+          </Pill>
+        }
+      />
+
+      <StatGrid items={stats} />
+
+      {total > 0 && (
+        <SectionCard title={f("distributionTitle")} icon={ListChecks}>
+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted/60">
+            {barSegments.map(
+              (seg) =>
+                seg.n > 0 && (
+                  <div
+                    key={seg.key}
+                    className={cn("h-full", seg.cls)}
+                    style={{ width: `${share(seg.n)}%` }}
+                    title={`${f(seg.key)}: ${seg.n}`}
+                  />
+                ),
+            )}
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+            {barSegments.map((seg) => (
+              <span key={seg.key} className="inline-flex items-center gap-1.5">
+                <span className={cn("size-2 rounded-full", seg.cls)} />
+                {f(seg.key)}
+                <span className="tabular-nums text-muted-foreground/60">
+                  {seg.n}
+                </span>
+              </span>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* integrity_score 为 null 不是 0 分：整份报告没有参考文献时写入方特意留空，
+          1.0 会被读成“全部通过”。这种情况必须显式说明，不能画一根空进度条。 */}
+      {integrity == null && (
+        <ProseBlock
+          title={f("integrityUnavailable")}
+          icon={Info}
+          tone="warning"
+          text={f("integrityNullNote")}
+        />
+      )}
+
+      {nSkipped > 0 && (
+        <ProseBlock
+          title={f("skippedNoteTitle")}
+          icon={Info}
+          text={f("skippedNote")}
+        />
+      )}
+
+      {results.length ? (
+        <SectionCard
+          title={f("citationsTitle")}
+          icon={FileText}
+          count={results.length}
+        >
+          <div className="space-y-2.5">
+            {results.map((item, i) => (
+              <CitationCard key={i} item={item} index={i} />
+            ))}
+          </div>
+        </SectionCard>
+      ) : (
+        <EmptyHint />
+      )}
+    </ArtifactCanvas>
+  )
+}
+
 // ── 分发入口 ─────────────────────────────────────────────────────────────────
 
 const NAMED_RENDERERS: Record<
@@ -1809,6 +2175,7 @@ const NAMED_RENDERERS: Record<
   "queries.json": (d) => <QueriesView data={d} />,
   "search_meta.json": (d) => <SearchMetaView data={d} />,
   "sources.json": (d) => <SourcesView data={d} />,
+  "verification_report.json": (d) => <VerificationView data={d} />,
   "web_search_result.json": (d) => <WebSearchView data={d} />,
 }
 

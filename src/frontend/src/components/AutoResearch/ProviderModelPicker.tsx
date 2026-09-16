@@ -81,7 +81,7 @@ function ModelInput({
             onFocus={() => canOpen && setOpen(true)}
             placeholder={placeholder}
             disabled={disabled}
-            className={cn("h-8 text-xs pr-8", disabled && "bg-muted/50")}
+            className={cn("pr-8", disabled && "bg-muted/50")}
           />
           {suggestions.length > 0 && !disabled && (
             /* 普通按钮而非 PopoverTrigger：触发器会与「聚焦即开」的输入框抢
@@ -119,7 +119,7 @@ function ModelInput({
             key={model}
             type="button"
             className={cn(
-              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent cursor-pointer",
+              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent cursor-pointer",
               value === model && "bg-accent",
             )}
             onClick={() => {
@@ -201,7 +201,7 @@ export default function ProviderModelPicker({
         value={provider || undefined}
         onValueChange={handleProvider}
       >
-        <SelectTrigger size="sm" className="w-full text-xs">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder={t("autoResearch.provider.inherit")} />
         </SelectTrigger>
         <SelectContent>
@@ -244,7 +244,7 @@ export default function ProviderModelPicker({
             {/* 用户自定义供应商的加载/失败态：default/mock 始终可用，故这里只在
                 自定义列表区给出轻量反馈，不阻断整个选择器。 */}
             {isLoading && (
-              <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground/60">
+              <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted-foreground/60">
                 <Loader2 className="size-3 animate-spin" />
                 {t("autoResearch.provider.loading", {
                   defaultValue: "加载供应商...",
@@ -252,7 +252,7 @@ export default function ProviderModelPicker({
               </div>
             )}
             {isError && !isLoading && (
-              <div className="px-2 py-1.5 text-[11px] text-destructive/80">
+              <div className="px-2 py-1.5 text-xs text-destructive/80">
                 {t("autoResearch.provider.loadError", {
                   defaultValue: "供应商加载失败",
                 })}

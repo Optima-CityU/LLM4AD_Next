@@ -359,7 +359,6 @@ def main() -> None:
                 "stop_on_gate": False,
                 "skip_noncritical": skip_noncritical,
                 "kb_root": kb_root,
-                "progress_callback": progress_callback,
             }
             if from_stage is not None:
                 kwargs["from_stage"] = from_stage

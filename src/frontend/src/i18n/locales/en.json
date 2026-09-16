@@ -3359,8 +3359,8 @@
       "ml_vision": "autoresearch"
     },
     "profileDesc": {
-      "algorithm_evolution": "Integrates llm4ad's experiment design and execution modules",
-      "ml_vision": "Native AutoResearchClaw"
+      "algorithm_evolution": "Wires llm4ad's algorithm-evolution engine into experiment design and execution, iterating the algorithm as it runs",
+      "ml_vision": "Native AutoResearchClaw pipeline, without llm4ad integration"
     },
     "provider": {
       "inherit": "Session default",
@@ -3556,8 +3556,8 @@
       "metricLabel": "Metric (optional)",
       "metricDirectionLabel": "Metric direction",
       "metricKeyLabel": "Metric key (optional)",
-      "metricKeyPlaceholder": "Leave empty to use default primary_metric",
-      "metricKeyHint": "Name of the metric the run is judged on, e.g. accuracy, f1, loss. Leave empty to let AutoResearchClaw use the topic default.",
+      "metricKeyPlaceholder": "Defaults to primary_metric",
+      "metricKeyHint": "Metric that decides the winner: use test_accuracy, roc_auc or f1_score when higher is better, rmse, smape or convergence_epochs when lower is better; leave empty for the default primary_metric.",
       "requiredMark": "Required",
       "recommendedMark": "Recommended",
       "workspaceLabel": "LLM4AD workspace (optional)",
@@ -3576,7 +3576,7 @@
       "footerHint": "Creates and runs immediately by default; use the arrow to only create the session first.",
       "creating": "Creating...",
       "templateLabel": "Topic template (optional)",
-      "templatePlaceholder": "Start from an ARC-Bench topic",
+      "templatePlaceholder": "Pick a starting point from the ARC-Bench topic library",
       "templateClear": "Clear",
       "templateSearch": "Search",
       "templateAllDomains": "All",
@@ -3584,9 +3584,10 @@
       "templateLoadFailed": "Failed to load templates (the arc-templates extra may be missing)",
       "templatePreset": "presets stages 7-9",
       "templateHypotheses": "{{n}} hypotheses",
-      "templatePreviewHint": "Hover a topic to read its full description",
+      "templatePreviewHint": "Hover a topic on the left to preview it on the right",
       "templateRecommended": "Recommended",
-      "templateStageWarning": "A template ships only the stage 7-9 artifacts, so the run starts at stage 10. Leave it empty for a full run from stage 1."
+      "templateStageWarning": "A template pre-fills the stage 7–9 artifacts and starts the run at stage 10. Leave it empty or hit \"Clear selection\" for a full run from stage 1.",
+      "providerHint": "Pick a strong model (e.g. gpt-5.2) for a higher success rate and better output quality."
     },
     "edit": {
       "title": "Edit session",
@@ -3738,7 +3739,8 @@
       "placeholderGate": "Write a note / reason, then click a gate button above (required for reject/redo); or ask the AI to review…",
       "placeholderRunning": "Input is unavailable while running…",
       "thinking": "AI assistant thinking…",
-      "usingTool": "Calling {{tool}}…",
+      "toolInput": "Input",
+      "toolOutput": "Output",
       "hint": "AI assistant: explains outputs and edits files; unavailable while the pipeline runs.",
       "hintGate": "Text here is submitted as the gate note with the buttons above; or hit send to ask the AI.",
       "hintPaused": "Paused at a gate: decide with the buttons above, or ask the AI assistant."
@@ -3890,6 +3892,36 @@
         "availableCount": "{{available}} / {{total}} available",
         "query": "Query",
         "verifiedAt": "Verified at"
+      },
+      "verificationFields": {
+        "heroTitle": "Citation verification report",
+        "heroSubtitle": "Checks every reference for existence and relevance to this paper",
+        "verifiedRatio": "{{verified}} / {{total}} passed",
+        "totalCites": "Citations",
+        "verified": "Verified",
+        "suspicious": "Suspicious",
+        "hallucinated": "Hallucinated",
+        "skipped": "Skipped",
+        "integrityScore": "Integrity score",
+        "integrityUnavailable": "Not assessed",
+        "integrityNullNote": "This run had no references, so the integrity score cannot be computed and is left empty — this is not a clean pass.",
+        "distributionTitle": "Verification breakdown",
+        "citationsTitle": "Per-citation results",
+        "method": "Matched by",
+        "confidence": "Confidence",
+        "relevance": "Relevance",
+        "relevanceNotEvaluated": "Not assessed",
+        "matchedPaper": "Matched paper",
+        "skippedNoteTitle": "About skipped entries",
+        "skippedNote": "Skipped entries had no usable DOI or arXiv ID, so no exact match was possible; they are excluded from the integrity score.",
+        "status_verified": "Verified",
+        "status_suspicious": "Suspicious",
+        "status_hallucinated": "Hallucinated",
+        "status_skipped": "Skipped",
+        "method_doi": "DOI match",
+        "method_arxiv_id": "arXiv ID match",
+        "method_title_search": "Title search",
+        "method_skipped": "Skipped"
       },
       "webSearchFields": {
         "heroTitle": "Web search results",
