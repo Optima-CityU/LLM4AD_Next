@@ -2,3 +2,6 @@
 	path = third_party/MindMemOS
 	url = git@github.com:dadastory/MindMemOS.git
 	branch = feat/lite-memory
+[submodule "third_party/CloudCLI"]
+	path = third_party/CloudCLI
+	url = git@github.com:dadastory/claudecodeui.git

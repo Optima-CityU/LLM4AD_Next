@@ -3,7 +3,7 @@
 import type { CancelablePromise } from './core/CancelablePromise';
 import { OpenAPI } from './core/OpenAPI';
 import { request as __request } from './core/request';
-import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdKnowledgeGetParserBindingResponse, Llm4AdKnowledgeUpdateParserBindingData, Llm4AdKnowledgeUpdateParserBindingResponse, Llm4AdKnowledgeCreateSourceData, Llm4AdKnowledgeCreateSourceResponse, Llm4AdKnowledgeListSourcesData, Llm4AdKnowledgeListSourcesResponse, Llm4AdKnowledgeAddSourceFilesData, Llm4AdKnowledgeAddSourceFilesResponse, Llm4AdKnowledgeGetSourceData, Llm4AdKnowledgeGetSourceResponse, Llm4AdKnowledgeUpdateSourceData, Llm4AdKnowledgeUpdateSourceResponse, Llm4AdKnowledgeDeleteSourceData, Llm4AdKnowledgeDeleteSourceResponse, Llm4AdKnowledgeGetSourceFileContentData, Llm4AdKnowledgeGetSourceFileContentResponse, Llm4AdKnowledgeUpdateSourceFileData, Llm4AdKnowledgeUpdateSourceFileResponse, Llm4AdKnowledgeDeleteSourceFileData, Llm4AdKnowledgeDeleteSourceFileResponse, Llm4AdKnowledgeGetDocumentContentData, Llm4AdKnowledgeGetDocumentContentResponse, Llm4AdKnowledgeUpdateDocumentData, Llm4AdKnowledgeUpdateDocumentResponse, Llm4AdKnowledgeInsertDocumentBlocksData, Llm4AdKnowledgeInsertDocumentBlocksResponse, Llm4AdKnowledgeStreamInsertDocumentBlocksData, Llm4AdKnowledgeStreamInsertDocumentBlocksResponse, Llm4AdKnowledgeListGeneratedMemoryCardsData, Llm4AdKnowledgeListGeneratedMemoryCardsResponse, Llm4AdKnowledgeStartParseData, Llm4AdKnowledgeStartParseResponse, Llm4AdKnowledgeGetParseRunData, Llm4AdKnowledgeGetParseRunResponse, Llm4AdKnowledgeGetLatestParseRunData, Llm4AdKnowledgeGetLatestParseRunResponse, Llm4AdKnowledgeListParseRunEventsData, Llm4AdKnowledgeListParseRunEventsResponse, Llm4AdKnowledgeStreamParseRunData, Llm4AdKnowledgeStreamParseRunResponse, Llm4AdKnowledgeCancelParseRunData, Llm4AdKnowledgeCancelParseRunResponse, Llm4AdKnowledgeContinueParseRunData, Llm4AdKnowledgeContinueParseRunResponse, Llm4AdKnowledgeRefineParseRunData, Llm4AdKnowledgeRefineParseRunResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdResearchListFoldersResponse, Llm4AdResearchCreateFolderData, Llm4AdResearchCreateFolderResponse, Llm4AdResearchGetFolderTreeResponse, Llm4AdResearchReorderFoldersData, Llm4AdResearchReorderFoldersResponse, Llm4AdResearchUpdateFolderData, Llm4AdResearchUpdateFolderResponse, Llm4AdResearchDeleteFolderData, Llm4AdResearchDeleteFolderResponse, Llm4AdResearchPinFolderData, Llm4AdResearchPinFolderResponse, Llm4AdResearchUnpinFolderData, Llm4AdResearchUnpinFolderResponse, Llm4AdResearchListTemplatesData, Llm4AdResearchListTemplatesResponse, Llm4AdResearchGetTemplateData, Llm4AdResearchGetTemplateResponse, Llm4AdResearchListSessionsData, Llm4AdResearchListSessionsResponse, Llm4AdResearchCreateSessionData, Llm4AdResearchCreateSessionResponse, Llm4AdResearchGetSessionData, Llm4AdResearchGetSessionResponse, Llm4AdResearchUpdateSessionData, Llm4AdResearchUpdateSessionResponse, Llm4AdResearchDeleteSessionData, Llm4AdResearchDeleteSessionResponse, Llm4AdResearchListMessagesData, Llm4AdResearchListMessagesResponse, Llm4AdResearchListLogsData, Llm4AdResearchListLogsResponse, Llm4AdResearchCopySessionData, Llm4AdResearchCopySessionResponse, Llm4AdResearchStartTurnData, Llm4AdResearchStartTurnResponse, Llm4AdResearchListTurnsData, Llm4AdResearchListTurnsResponse, Llm4AdResearchStopTurnData, Llm4AdResearchStopTurnResponse, Llm4AdResearchRetryTurnData, Llm4AdResearchRetryTurnResponse, Llm4AdResearchStartCollabData, Llm4AdResearchStartCollabResponse, Llm4AdResearchGetTurnData, Llm4AdResearchGetTurnResponse, Llm4AdResearchStreamTurnData, Llm4AdResearchStreamTurnResponse, Llm4AdResearchInjectStageGuidanceData, Llm4AdResearchInjectStageGuidanceResponse, Llm4AdResearchListArtifactsData, Llm4AdResearchListArtifactsResponse, Llm4AdResearchArtifactTreeData, Llm4AdResearchArtifactTreeResponse, Llm4AdResearchDownloadArtifactData, Llm4AdResearchDownloadArtifactResponse, Llm4AdResearchTranslateArtifactData, Llm4AdResearchTranslateArtifactResponse, Llm4AdResearchStopTranslateArtifactData, Llm4AdResearchStopTranslateArtifactResponse, Llm4AdResearchStreamTranslateData, Llm4AdResearchStreamTranslateResponse, Llm4AdResearchDownloadArtifactsArchiveData, Llm4AdResearchDownloadArtifactsArchiveResponse, Llm4AdResearchImportArtifactsZipData, Llm4AdResearchImportArtifactsZipResponse, Llm4AdResearchWriteArtifactData, Llm4AdResearchWriteArtifactResponse, Llm4AdResearchListGeneratedData, Llm4AdResearchListGeneratedResponse, Llm4AdResearchGetStateData, Llm4AdResearchGetStateResponse, Llm4AdResearchDownloadArcConfigData, Llm4AdResearchDownloadArcConfigResponse, Llm4AdResearchGetAnalysisData, Llm4AdResearchGetAnalysisResponse, Llm4AdResearchGenerateAnalysisData, Llm4AdResearchGenerateAnalysisResponse, Llm4AdResearchStopAnalysisData, Llm4AdResearchStopAnalysisResponse, Llm4AdResearchStreamAnalysisData, Llm4AdResearchStreamAnalysisResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
+import type { FeedbackCreateFeedbackData, FeedbackCreateFeedbackResponse, FeedbackListFeedbacksData, FeedbackListFeedbacksResponse, FeedbackGetFeedbackStatisticsResponse, FeedbackGetFeedbackData, FeedbackGetFeedbackResponse, FeedbackUpdateFeedbackData, FeedbackUpdateFeedbackResponse, FeedbackDeleteFeedbackData, FeedbackDeleteFeedbackResponse, LiveCodesCreateLiveCodeData, LiveCodesCreateLiveCodeResponse, LiveCodesListLiveCodesData, LiveCodesListLiveCodesResponse, LiveCodesGetLiveCodeData, LiveCodesGetLiveCodeResponse, LiveCodesUpdateLiveCodeData, LiveCodesUpdateLiveCodeResponse, LiveCodesDeleteLiveCodeData, LiveCodesDeleteLiveCodeResponse, LiveCodesAddTargetsData, LiveCodesAddTargetsResponse, LiveCodesUpdateTargetData, LiveCodesUpdateTargetResponse, LiveCodesDeleteTargetData, LiveCodesDeleteTargetResponse, LiveCodesResetTargetScanData, LiveCodesResetTargetScanResponse, LiveQrContactResponse, LiveQrTargetImageData, LiveQrTargetImageResponse, LiveQrLandingData, LiveQrLandingResponse, LiveQrScanImageData, LiveQrScanImageResponse, LiveQrPublicQrcodeData, LiveQrPublicQrcodeResponse, Llm4AdChatTuneGetSessionData, Llm4AdChatTuneGetSessionResponse, Llm4AdChatTuneResetSessionData, Llm4AdChatTuneResetSessionResponse, Llm4AdChatTuneStartTurnData, Llm4AdChatTuneStartTurnResponse, Llm4AdChatTuneStopTurnData, Llm4AdChatTuneStopTurnResponse, Llm4AdChatTuneRetryTurnData, Llm4AdChatTuneRetryTurnResponse, Llm4AdChatTuneChatTuneUploadFileData, Llm4AdChatTuneChatTuneUploadFileResponse, Llm4AdChatTuneChatTuneUploadDataData, Llm4AdChatTuneChatTuneUploadDataResponse, Llm4AdChatTuneStreamTurnData, Llm4AdChatTuneStreamTurnResponse, Llm4AdEmbeddingProvidersTestEmbeddingProviderData, Llm4AdEmbeddingProvidersTestEmbeddingProviderResponse, Llm4AdEmbeddingProvidersCreateEmbeddingProviderData, Llm4AdEmbeddingProvidersCreateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersListEmbeddingProvidersData, Llm4AdEmbeddingProvidersListEmbeddingProvidersResponse, Llm4AdEmbeddingProvidersGetEmbeddingProviderData, Llm4AdEmbeddingProvidersGetEmbeddingProviderResponse, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderData, Llm4AdEmbeddingProvidersUpdateEmbeddingProviderResponse, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderData, Llm4AdEmbeddingProvidersDeleteEmbeddingProviderResponse, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData, Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse, Llm4AdKnowledgeGetParserBindingResponse, Llm4AdKnowledgeUpdateParserBindingData, Llm4AdKnowledgeUpdateParserBindingResponse, Llm4AdKnowledgeCreateSourceData, Llm4AdKnowledgeCreateSourceResponse, Llm4AdKnowledgeListSourcesData, Llm4AdKnowledgeListSourcesResponse, Llm4AdKnowledgeAddSourceFilesData, Llm4AdKnowledgeAddSourceFilesResponse, Llm4AdKnowledgeGetSourceData, Llm4AdKnowledgeGetSourceResponse, Llm4AdKnowledgeUpdateSourceData, Llm4AdKnowledgeUpdateSourceResponse, Llm4AdKnowledgeDeleteSourceData, Llm4AdKnowledgeDeleteSourceResponse, Llm4AdKnowledgeGetSourceFileContentData, Llm4AdKnowledgeGetSourceFileContentResponse, Llm4AdKnowledgeUpdateSourceFileData, Llm4AdKnowledgeUpdateSourceFileResponse, Llm4AdKnowledgeDeleteSourceFileData, Llm4AdKnowledgeDeleteSourceFileResponse, Llm4AdKnowledgeGetDocumentContentData, Llm4AdKnowledgeGetDocumentContentResponse, Llm4AdKnowledgeUpdateDocumentData, Llm4AdKnowledgeUpdateDocumentResponse, Llm4AdKnowledgeInsertDocumentBlocksData, Llm4AdKnowledgeInsertDocumentBlocksResponse, Llm4AdKnowledgeStreamInsertDocumentBlocksData, Llm4AdKnowledgeStreamInsertDocumentBlocksResponse, Llm4AdKnowledgeListGeneratedMemoryCardsData, Llm4AdKnowledgeListGeneratedMemoryCardsResponse, Llm4AdKnowledgeStartParseData, Llm4AdKnowledgeStartParseResponse, Llm4AdKnowledgeGetParseRunData, Llm4AdKnowledgeGetParseRunResponse, Llm4AdKnowledgeGetLatestParseRunData, Llm4AdKnowledgeGetLatestParseRunResponse, Llm4AdKnowledgeListParseRunEventsData, Llm4AdKnowledgeListParseRunEventsResponse, Llm4AdKnowledgeStreamParseRunData, Llm4AdKnowledgeStreamParseRunResponse, Llm4AdKnowledgeCancelParseRunData, Llm4AdKnowledgeCancelParseRunResponse, Llm4AdKnowledgeContinueParseRunData, Llm4AdKnowledgeContinueParseRunResponse, Llm4AdKnowledgeRefineParseRunData, Llm4AdKnowledgeRefineParseRunResponse, Llm4AdMemoryTestMemoryBackendData, Llm4AdMemoryTestMemoryBackendResponse, Llm4AdMemoryGetMemoryHealthResponse, Llm4AdMemoryGetMemoryProviderBindingResponse, Llm4AdMemoryUpsertMemoryProviderBindingData, Llm4AdMemoryUpsertMemoryProviderBindingResponse, Llm4AdMemoryGetUserMemoryConfigResponse, Llm4AdMemoryUpdateUserMemoryConfigData, Llm4AdMemoryUpdateUserMemoryConfigResponse, Llm4AdMemoryGetProjectMemoryConfigData, Llm4AdMemoryGetProjectMemoryConfigResponse, Llm4AdMemoryUpdateProjectMemoryConfigData, Llm4AdMemoryUpdateProjectMemoryConfigResponse, Llm4AdMemoryListMemoryCardsData, Llm4AdMemoryListMemoryCardsResponse, Llm4AdMemoryCreateMemoryCardData, Llm4AdMemoryCreateMemoryCardResponse, Llm4AdMemoryExtractMemoryCardsData, Llm4AdMemoryExtractMemoryCardsResponse, Llm4AdMemoryStreamExtractMemoryCardsData, Llm4AdMemoryStreamExtractMemoryCardsResponse, Llm4AdMemoryStreamPromoteTaskMemoryCardsData, Llm4AdMemoryStreamPromoteTaskMemoryCardsResponse, Llm4AdMemoryUpdateMemoryCardData, Llm4AdMemoryUpdateMemoryCardResponse, Llm4AdMemoryDeleteMemoryCardData, Llm4AdMemoryDeleteMemoryCardResponse, Llm4AdMemoryUpdateMemoryCardStatusData, Llm4AdMemoryUpdateMemoryCardStatusResponse, Llm4AdPapersCreateWorkspaceData, Llm4AdPapersCreateWorkspaceResponse, Llm4AdPapersListWorkspacesData, Llm4AdPapersListWorkspacesResponse, Llm4AdPapersGetWorkspaceData, Llm4AdPapersGetWorkspaceResponse, Llm4AdPapersUpdateWorkspaceData, Llm4AdPapersUpdateWorkspaceResponse, Llm4AdPapersDeleteWorkspaceData, Llm4AdPapersDeleteWorkspaceResponse, Llm4AdPapersUploadSourceData, Llm4AdPapersUploadSourceResponse, Llm4AdPapersUpdateModelBindingData, Llm4AdPapersUpdateModelBindingResponse, Llm4AdPapersAttachReviewerFeedbackData, Llm4AdPapersAttachReviewerFeedbackResponse, Llm4AdPapersGetReviewerFeedbackData, Llm4AdPapersGetReviewerFeedbackResponse, Llm4AdPapersUpdateReviewerFeedbackData, Llm4AdPapersUpdateReviewerFeedbackResponse, Llm4AdPapersDeleteSourcePathData, Llm4AdPapersDeleteSourcePathResponse, Llm4AdPapersGetSourceFileData, Llm4AdPapersGetSourceFileResponse, Llm4AdPapersUpdateSourceFileData, Llm4AdPapersUpdateSourceFileResponse, Llm4AdPapersExportSourceVersionData, Llm4AdPapersExportSourceVersionResponse, Llm4AdPapersDownloadSourceVersionData, Llm4AdPapersDownloadSourceVersionResponse, Llm4AdPapersUpdateJudgeBindingsData, Llm4AdPapersUpdateJudgeBindingsResponse, Llm4AdPapersUpdateOptimizationTargetData, Llm4AdPapersUpdateOptimizationTargetResponse, Llm4AdPapersAddMetricSuggestionsData, Llm4AdPapersAddMetricSuggestionsResponse, Llm4AdPapersSelectMetricsData, Llm4AdPapersSelectMetricsResponse, Llm4AdPapersCreateProposalData, Llm4AdPapersCreateProposalResponse, Llm4AdPapersUpdateProposalData, Llm4AdPapersUpdateProposalResponse, Llm4AdPapersCreateProposalTasksData, Llm4AdPapersCreateProposalTasksResponse, Llm4AdPapersGetRevisionPatchData, Llm4AdPapersGetRevisionPatchResponse, Llm4AdPapersCreateRevisionCandidateData, Llm4AdPapersCreateRevisionCandidateResponse, Llm4AdPapersAcceptRevisionCandidateData, Llm4AdPapersAcceptRevisionCandidateResponse, Llm4AdPapersCreateRuntimeSessionData, Llm4AdPapersCreateRuntimeSessionResponse, Llm4AdProjectsCreateProjectData, Llm4AdProjectsCreateProjectResponse, Llm4AdProjectsListProjectsData, Llm4AdProjectsListProjectsResponse, Llm4AdProjectsGetProjectData, Llm4AdProjectsGetProjectResponse, Llm4AdProjectsUpdateProjectData, Llm4AdProjectsUpdateProjectResponse, Llm4AdProjectsDeleteProjectData, Llm4AdProjectsDeleteProjectResponse, Llm4AdProvidersTestProviderData, Llm4AdProvidersTestProviderResponse, Llm4AdProvidersCreateProviderData, Llm4AdProvidersCreateProviderResponse, Llm4AdProvidersListProvidersData, Llm4AdProvidersListProvidersResponse, Llm4AdProvidersGetProviderData, Llm4AdProvidersGetProviderResponse, Llm4AdProvidersUpdateProviderData, Llm4AdProvidersUpdateProviderResponse, Llm4AdProvidersDeleteProviderData, Llm4AdProvidersDeleteProviderResponse, Llm4AdProvidersTestStoredProviderData, Llm4AdProvidersTestStoredProviderResponse, Llm4AdReportsGetReportTemplatesResponse, Llm4AdReportsGenerateReportData, Llm4AdReportsGenerateReportResponse, Llm4AdReportsGetReportData, Llm4AdReportsGetReportResponse, Llm4AdReportsStopReportData, Llm4AdReportsStopReportResponse, Llm4AdReportsStreamReportData, Llm4AdReportsStreamReportResponse, Llm4AdReportsGenerateAdviseData, Llm4AdReportsGenerateAdviseResponse, Llm4AdReportsGetAdviseData, Llm4AdReportsGetAdviseResponse, Llm4AdReportsGenerateRecommendData, Llm4AdReportsGenerateRecommendResponse, Llm4AdReportsGetRecommendData, Llm4AdReportsGetRecommendResponse, Llm4AdResearchListFoldersResponse, Llm4AdResearchCreateFolderData, Llm4AdResearchCreateFolderResponse, Llm4AdResearchGetFolderTreeResponse, Llm4AdResearchReorderFoldersData, Llm4AdResearchReorderFoldersResponse, Llm4AdResearchUpdateFolderData, Llm4AdResearchUpdateFolderResponse, Llm4AdResearchDeleteFolderData, Llm4AdResearchDeleteFolderResponse, Llm4AdResearchPinFolderData, Llm4AdResearchPinFolderResponse, Llm4AdResearchUnpinFolderData, Llm4AdResearchUnpinFolderResponse, Llm4AdResearchListTemplatesData, Llm4AdResearchListTemplatesResponse, Llm4AdResearchGetTemplateData, Llm4AdResearchGetTemplateResponse, Llm4AdResearchListSessionsData, Llm4AdResearchListSessionsResponse, Llm4AdResearchCreateSessionData, Llm4AdResearchCreateSessionResponse, Llm4AdResearchGetSessionData, Llm4AdResearchGetSessionResponse, Llm4AdResearchUpdateSessionData, Llm4AdResearchUpdateSessionResponse, Llm4AdResearchDeleteSessionData, Llm4AdResearchDeleteSessionResponse, Llm4AdResearchListMessagesData, Llm4AdResearchListMessagesResponse, Llm4AdResearchListLogsData, Llm4AdResearchListLogsResponse, Llm4AdResearchCopySessionData, Llm4AdResearchCopySessionResponse, Llm4AdResearchStartTurnData, Llm4AdResearchStartTurnResponse, Llm4AdResearchListTurnsData, Llm4AdResearchListTurnsResponse, Llm4AdResearchStopTurnData, Llm4AdResearchStopTurnResponse, Llm4AdResearchRetryTurnData, Llm4AdResearchRetryTurnResponse, Llm4AdResearchStartCollabData, Llm4AdResearchStartCollabResponse, Llm4AdResearchGetTurnData, Llm4AdResearchGetTurnResponse, Llm4AdResearchStreamTurnData, Llm4AdResearchStreamTurnResponse, Llm4AdResearchInjectStageGuidanceData, Llm4AdResearchInjectStageGuidanceResponse, Llm4AdResearchListArtifactsData, Llm4AdResearchListArtifactsResponse, Llm4AdResearchArtifactTreeData, Llm4AdResearchArtifactTreeResponse, Llm4AdResearchDownloadArtifactData, Llm4AdResearchDownloadArtifactResponse, Llm4AdResearchTranslateArtifactData, Llm4AdResearchTranslateArtifactResponse, Llm4AdResearchStopTranslateArtifactData, Llm4AdResearchStopTranslateArtifactResponse, Llm4AdResearchStreamTranslateData, Llm4AdResearchStreamTranslateResponse, Llm4AdResearchDownloadArtifactsArchiveData, Llm4AdResearchDownloadArtifactsArchiveResponse, Llm4AdResearchCreateArtifactsArchiveTicketData, Llm4AdResearchCreateArtifactsArchiveTicketResponse, Llm4AdResearchStreamArtifactsArchiveData, Llm4AdResearchStreamArtifactsArchiveResponse, Llm4AdResearchImportArtifactsZipData, Llm4AdResearchImportArtifactsZipResponse, Llm4AdResearchWriteArtifactData, Llm4AdResearchWriteArtifactResponse, Llm4AdResearchListGeneratedData, Llm4AdResearchListGeneratedResponse, Llm4AdResearchGetStateData, Llm4AdResearchGetStateResponse, Llm4AdResearchDownloadArcConfigData, Llm4AdResearchDownloadArcConfigResponse, Llm4AdResearchGetAnalysisData, Llm4AdResearchGetAnalysisResponse, Llm4AdResearchGenerateAnalysisData, Llm4AdResearchGenerateAnalysisResponse, Llm4AdResearchStopAnalysisData, Llm4AdResearchStopAnalysisResponse, Llm4AdResearchStreamAnalysisData, Llm4AdResearchStreamAnalysisResponse, Llm4AdTasksListExampleTemplatesResponse, Llm4AdTasksListTasksData, Llm4AdTasksListTasksResponse, Llm4AdTasksGetTaskData, Llm4AdTasksGetTaskResponse, Llm4AdTasksUpdateTaskData, Llm4AdTasksUpdateTaskResponse, Llm4AdTasksDeleteTaskData, Llm4AdTasksDeleteTaskResponse, Llm4AdTasksCreateTaskData, Llm4AdTasksCreateTaskResponse, Llm4AdTasksUpdateTaskTagData, Llm4AdTasksUpdateTaskTagResponse, Llm4AdTasksSetActiveChildData, Llm4AdTasksSetActiveChildResponse, Llm4AdTasksGetTaskTreeData, Llm4AdTasksGetTaskTreeResponse, Llm4AdTasksCopyTaskData, Llm4AdTasksCopyTaskResponse, Llm4AdTasksListTaskMemoryData, Llm4AdTasksListTaskMemoryResponse, Llm4AdTasksUpsertTaskMemoryData, Llm4AdTasksUpsertTaskMemoryResponse, Llm4AdTasksGetTaskMemoryObservabilityData, Llm4AdTasksGetTaskMemoryObservabilityResponse, Llm4AdTasksGetTaskPinnedMemoryData, Llm4AdTasksGetTaskPinnedMemoryResponse, Llm4AdTasksSetTaskPinnedMemoryData, Llm4AdTasksSetTaskPinnedMemoryResponse, Llm4AdTasksUpdateTaskMemoryData, Llm4AdTasksUpdateTaskMemoryResponse, Llm4AdTasksDeleteTaskMemoryData, Llm4AdTasksDeleteTaskMemoryResponse, Llm4AdTasksRunTaskData, Llm4AdTasksRunTaskResponse, Llm4AdTasksStopTaskData, Llm4AdTasksStopTaskResponse, Llm4AdTasksGetTaskResultData, Llm4AdTasksGetTaskResultResponse, Llm4AdTasksGetTaskStatsData, Llm4AdTasksGetTaskStatsResponse, Llm4AdTasksGenerateResultRenderData, Llm4AdTasksGenerateResultRenderResponse, Llm4AdTasksGetConfigSchemaData, Llm4AdTasksGetConfigSchemaResponse, Llm4AdTasksDownloadTaskWorkspaceData, Llm4AdTasksDownloadTaskWorkspaceResponse, Llm4AdTasksUploadTaskDataData, Llm4AdTasksUploadTaskDataResponse, Llm4AdTasksGetTaskDataTreeData, Llm4AdTasksGetTaskDataTreeResponse, Llm4AdTasksCreateTaskDataFileData, Llm4AdTasksCreateTaskDataFileResponse, Llm4AdTasksGetTaskDataFileData, Llm4AdTasksGetTaskDataFileResponse, Llm4AdTasksUpdateTaskDataFileData, Llm4AdTasksUpdateTaskDataFileResponse, Llm4AdTasksDeleteTaskDataFileData, Llm4AdTasksDeleteTaskDataFileResponse, Llm4AdTasksRenameTaskDataFileData, Llm4AdTasksRenameTaskDataFileResponse, Llm4AdTasksCreateTaskDataFolderData, Llm4AdTasksCreateTaskDataFolderResponse, Llm4AdTasksDeleteTaskDataFolderData, Llm4AdTasksDeleteTaskDataFolderResponse, Llm4AdTasksRenameTaskDataFolderData, Llm4AdTasksRenameTaskDataFolderResponse, Llm4AdTasksGetTaskLogsData, Llm4AdTasksGetTaskLogsResponse, Llm4AdTasksStreamTaskLogsData, Llm4AdTasksStreamTaskLogsResponse, Llm4AdTasksCodeAuthResponse, Llm4AdUserDefaultModelsGetUserDefaultModelResponse, Llm4AdUserDefaultModelsUpdateUserDefaultModelData, Llm4AdUserDefaultModelsUpdateUserDefaultModelResponse, LoginLoginAccessTokenData, LoginLoginAccessTokenResponse, LoginRefreshAccessTokenData, LoginRefreshAccessTokenResponse, LoginRecoverPasswordData, LoginRecoverPasswordResponse, LoginResetPasswordData, LoginResetPasswordResponse, NewsListNewsData, NewsListNewsResponse, PermissionCreateData, PermissionCreateResponse, PermissionGetData, PermissionGetResponse, PermissionPermissionsResponse, PrivacyPolicyGetPrivacyPolicyContentData, PrivacyPolicyGetPrivacyPolicyContentResponse, PrivacyPolicyAcceptPrivacyPolicyAuthenticatedResponse, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginData, PrivacyPolicyAcceptPrivacyPolicyBeforeLoginResponse, PrivacyPolicyCheckPrivacyPolicyStatusResponse, UsersReadUsersData, UsersReadUsersResponse, UsersCreateUserData, UsersCreateUserResponse, UsersReadUserMeResponse, UsersDeleteUserMeResponse, UsersUpdateUserMeData, UsersUpdateUserMeResponse, UsersUpdatePasswordMeData, UsersUpdatePasswordMeResponse, UsersRegisterUserData, UsersRegisterUserResponse, UsersVerifyEmailData, UsersVerifyEmailResponse, UsersResendVerifyCodeData, UsersResendVerifyCodeResponse, UsersReadUserByIdData, UsersReadUserByIdResponse, UsersUpdateUserData, UsersUpdateUserResponse, UsersDeleteUserData, UsersDeleteUserResponse, UtilsTestEmailData, UtilsTestEmailResponse, UtilsHealthCheckResponse, UtilsFeatureFlagsResponse, UtilsCodeServerGetCodeTokenData, UtilsCodeServerGetCodeTokenResponse, UtilsTestingTestS3Response, UtilsTestingTestCurrentUserDpResponse, UtilsTestingTestCurrentUserResponse, UtilsTestingTestSuperuserDpResponse, UtilsTestingTestSuperuserResponse, UtilsTestingTestRequirePermissionDpResponse, UtilsTestingTestGetTaskInfoData, UtilsTestingTestGetTaskInfoResponse } from './types.gen';
 
 export class FeedbackService {
     /**
@@ -1806,6 +1806,611 @@ export class Llm4AdMemoryService {
     }
 }
 
+export class Llm4AdPapersService {
+    /**
+     * Create Workspace
+     * Create an independent research workspace.
+     * @param data The data for the request.
+     * @param data.requestBody
+     * @returns PaperWorkspaceSummary Successful Response
+     * @throws ApiError
+     */
+    public static createWorkspace(data: Llm4AdPapersCreateWorkspaceData): CancelablePromise<Llm4AdPapersCreateWorkspaceResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/workspaces',
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * List Workspaces
+     * List current user's paper workspaces.
+     * @param data The data for the request.
+     * @param data.skip
+     * @param data.limit
+     * @param data.search
+     * @returns PaperWorkspaceList Successful Response
+     * @throws ApiError
+     */
+    public static listWorkspaces(data: Llm4AdPapersListWorkspacesData = {}): CancelablePromise<Llm4AdPapersListWorkspacesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/workspaces',
+            query: {
+                skip: data.skip,
+                limit: data.limit,
+                search: data.search
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Workspace
+     * Return the current paper page snapshot.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @returns PaperWorkspaceDetail Successful Response
+     * @throws ApiError
+     */
+    public static getWorkspace(data: Llm4AdPapersGetWorkspaceData): CancelablePromise<Llm4AdPapersGetWorkspaceResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Workspace
+     * Update paper workspace metadata.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.requestBody
+     * @returns PaperWorkspaceSummary Successful Response
+     * @throws ApiError
+     */
+    public static updateWorkspace(data: Llm4AdPapersUpdateWorkspaceData): CancelablePromise<Llm4AdPapersUpdateWorkspaceResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Workspace
+     * Delete a paper workspace and schedule RustFS cleanup.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @returns void Successful Response
+     * @throws ApiError
+     */
+    public static deleteWorkspace(data: Llm4AdPapersDeleteWorkspaceData): CancelablePromise<Llm4AdPapersDeleteWorkspaceResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Upload Source
+     * Upload an immutable Markdown/LaTeX source tree while preserving paths.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.formData
+     * @returns PaperSourceVersionResponse Successful Response
+     * @throws ApiError
+     */
+    public static uploadSource(data: Llm4AdPapersUploadSourceData): CancelablePromise<Llm4AdPapersUploadSourceResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}/sources',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            formData: data.formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Model Binding
+     * Persist the analysis model for this paper workspace.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.requestBody
+     * @returns PaperModelBindingResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateModelBinding(data: Llm4AdPapersUpdateModelBindingData): CancelablePromise<Llm4AdPapersUpdateModelBindingResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}/model-binding',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Attach Reviewer Feedback
+     * Attach generic reviewer Markdown to an owned source version.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @param data.requestBody
+     * @returns PaperReviewResponse Successful Response
+     * @throws ApiError
+     */
+    public static attachReviewerFeedback(data: Llm4AdPapersAttachReviewerFeedbackData): CancelablePromise<Llm4AdPapersAttachReviewerFeedbackResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/reviews',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Reviewer Feedback
+     * Return owned reviewer Markdown.
+     * @param data The data for the request.
+     * @param data.reviewId
+     * @returns PaperReviewContentResponse Successful Response
+     * @throws ApiError
+     */
+    public static getReviewerFeedback(data: Llm4AdPapersGetReviewerFeedbackData): CancelablePromise<Llm4AdPapersGetReviewerFeedbackResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/reviews/{review_id}',
+            path: {
+                review_id: data.reviewId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Reviewer Feedback
+     * Replace owned reviewer Markdown and refresh its derived baseline.
+     * @param data The data for the request.
+     * @param data.reviewId
+     * @param data.requestBody
+     * @returns PaperReviewResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateReviewerFeedback(data: Llm4AdPapersUpdateReviewerFeedbackData): CancelablePromise<Llm4AdPapersUpdateReviewerFeedbackResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/papers/reviews/{review_id}',
+            path: {
+                review_id: data.reviewId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Delete Source Path
+     * Remove a file or directory prefix from the current paper source.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @param data.requestBody
+     * @returns void Successful Response
+     * @throws ApiError
+     */
+    public static deleteSourcePath(data: Llm4AdPapersDeleteSourcePathData): CancelablePromise<Llm4AdPapersDeleteSourcePathResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/path',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Source File
+     * Return one owned UTF-8 source file.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @param data.path
+     * @returns PaperSourceFileResponse Successful Response
+     * @throws ApiError
+     */
+    public static getSourceFile(data: Llm4AdPapersGetSourceFileData): CancelablePromise<Llm4AdPapersGetSourceFileResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/file',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            query: {
+                path: data.path
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Source File
+     * Save one file in the current paper source.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @param data.requestBody
+     * @returns PaperSourceVersionResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateSourceFile(data: Llm4AdPapersUpdateSourceFileData): CancelablePromise<Llm4AdPapersUpdateSourceFileResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/file',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Export Source Version
+     * Export the complete current paper source.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @returns PaperExportResponse Successful Response
+     * @throws ApiError
+     */
+    public static exportSourceVersion(data: Llm4AdPapersExportSourceVersionData): CancelablePromise<Llm4AdPapersExportSourceVersionResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/export',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Download Source Version
+     * Download the complete source without exposing object-store addresses.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @returns unknown Complete paper source bundle
+     * @throws ApiError
+     */
+    public static downloadSourceVersion(data: Llm4AdPapersDownloadSourceVersionData): CancelablePromise<Llm4AdPapersDownloadSourceVersionResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/download',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Judge Bindings
+     * Persist Reviewer A and Reviewer B model bindings.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.requestBody
+     * @returns PaperJudgeBindingsResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateJudgeBindings(data: Llm4AdPapersUpdateJudgeBindingsData): CancelablePromise<Llm4AdPapersUpdateJudgeBindingsResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}/judge-bindings',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Optimization Target
+     * Edit and select a paper optimization target.
+     * @param data The data for the request.
+     * @param data.targetId
+     * @param data.requestBody
+     * @returns PaperOptimizationTargetResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateOptimizationTarget(data: Llm4AdPapersUpdateOptimizationTargetData): CancelablePromise<Llm4AdPapersUpdateOptimizationTargetResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/papers/optimization-targets/{target_id}',
+            path: {
+                target_id: data.targetId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Add Metric Suggestions
+     * Persist model suggestions after schema validation.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @param data.requestBody
+     * @returns PaperMetricResponse Successful Response
+     * @throws ApiError
+     */
+    public static addMetricSuggestions(data: Llm4AdPapersAddMetricSuggestionsData): CancelablePromise<Llm4AdPapersAddMetricSuggestionsResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/metric-suggestions',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Select Metrics
+     * Save user-selected optional metrics and locked baseline weights.
+     * @param data The data for the request.
+     * @param data.sourceVersionId
+     * @param data.requestBody
+     * @returns PaperMetricResponse Successful Response
+     * @throws ApiError
+     */
+    public static selectMetrics(data: Llm4AdPapersSelectMetricsData): CancelablePromise<Llm4AdPapersSelectMetricsResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/v1/llm4ad/papers/source-versions/{source_version_id}/metrics',
+            path: {
+                source_version_id: data.sourceVersionId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Create Proposal
+     * Store a structured proposal for user review.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.sourceVersionId
+     * @param data.requestBody
+     * @returns PaperAlgorithmProposalResponse Successful Response
+     * @throws ApiError
+     */
+    public static createProposal(data: Llm4AdPapersCreateProposalData): CancelablePromise<Llm4AdPapersCreateProposalResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}/source-versions/{source_version_id}/proposals',
+            path: {
+                workspace_id: data.workspaceId,
+                source_version_id: data.sourceVersionId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Update Proposal
+     * Edit a draft proposal before task creation.
+     * @param data The data for the request.
+     * @param data.proposalId
+     * @param data.requestBody
+     * @returns PaperAlgorithmProposalResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateProposal(data: Llm4AdPapersUpdateProposalData): CancelablePromise<Llm4AdPapersUpdateProposalResponse> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/v1/llm4ad/papers/proposals/{proposal_id}',
+            path: {
+                proposal_id: data.proposalId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Create Proposal Tasks
+     * Confirm proposals and initialize their explicit evolution tasks.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.requestBody
+     * @returns PaperProposalTaskLinkResponse Successful Response
+     * @throws ApiError
+     */
+    public static createProposalTasks(data: Llm4AdPapersCreateProposalTasksData): CancelablePromise<Llm4AdPapersCreateProposalTasksResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}/proposal-tasks',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Get Revision Patch
+     * Return an owned candidate patch for user review.
+     * @param data The data for the request.
+     * @param data.candidateId
+     * @returns PaperRevisionPatchResponse Successful Response
+     * @throws ApiError
+     */
+    public static getRevisionPatch(data: Llm4AdPapersGetRevisionPatchData): CancelablePromise<Llm4AdPapersGetRevisionPatchResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/papers/revision-candidates/{candidate_id}/patch',
+            path: {
+                candidate_id: data.candidateId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Create Revision Candidate
+     * Import an evolved manuscript replacement for review.
+     * @param data The data for the request.
+     * @param data.targetId
+     * @param data.requestBody
+     * @returns PaperRevisionCandidateResponse Successful Response
+     * @throws ApiError
+     */
+    public static createRevisionCandidate(data: Llm4AdPapersCreateRevisionCandidateData): CancelablePromise<Llm4AdPapersCreateRevisionCandidateResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/optimization-targets/{target_id}/revision-candidates',
+            path: {
+                target_id: data.targetId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Accept Revision Candidate
+     * Apply one accepted candidate to the current paper source.
+     * @param data The data for the request.
+     * @param data.candidateId
+     * @returns PaperRevisionApplyResponse Successful Response
+     * @throws ApiError
+     */
+    public static acceptRevisionCandidate(data: Llm4AdPapersAcceptRevisionCandidateData): CancelablePromise<Llm4AdPapersAcceptRevisionCandidateResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/revision-candidates/{candidate_id}/accept',
+            path: {
+                candidate_id: data.candidateId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * Create Runtime Session
+     * Create an opaque browser session for an owned workspace runtime.
+     * @param data The data for the request.
+     * @param data.workspaceId
+     * @param data.requestBody
+     * @returns PaperRuntimeSessionResponse Successful Response
+     * @throws ApiError
+     */
+    public static createRuntimeSession(data: Llm4AdPapersCreateRuntimeSessionData): CancelablePromise<Llm4AdPapersCreateRuntimeSessionResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/papers/workspaces/{workspace_id}/cloudcli-session',
+            path: {
+                workspace_id: data.workspaceId
+            },
+            body: data.requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+}
+
 export class Llm4AdProjectsService {
     /**
      * 创建新项目（属于当前用户）
@@ -2686,13 +3291,13 @@ export class Llm4AdResearchService {
     
     /**
      * 列出会话（可按分组或未分组过滤）
-     * 会话游标分页列表，按 updated_time 倒序。
+     * 会话游标分页列表，按 created_time 倒序。
      * @param data The data for the request.
      * @param data.folderId 按分组过滤；不传且不指定 ungrouped 则返回全部
      * @param data.ungrouped 仅返回未归属分组的会话，忽略 folder_id
      * @param data.statuses 按 session 状态过滤，可传多个；不传 = 全部状态
      * @param data.q 关键词搜索：对 topic + title 做大小写不敏感模糊匹配（ILIKE）
-     * @param data.cursor 上一页最后一条的 updated_time ISO；首次不传
+     * @param data.cursor 上一页最后一条的 created_time ISO；首次不传
      * @param data.limit
      * @returns ResearchSessionListResponse Successful Response
      * @throws ApiError
@@ -3327,6 +3932,73 @@ export class Llm4AdResearchService {
             url: '/api/v1/llm4ad/research/sessions/{session_id}/artifacts/archive',
             path: {
                 session_id: data.sessionId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * 换取打包下载票据（供浏览器原生下载）
+     * 为「让浏览器自己下载产物包」签发一张短时票据。
+     *
+     * 前端拿到票据后拼出 ``.../artifacts/archive/stream?ticket=<票据>``，用
+     * ``window.location`` / ``<a href>`` 直接导航过去 —— 这样走的是浏览器自带的下载
+     * 面板（浏览器自己显示「已下载 xx MB」），前端不必再维护进度 UI。
+     *
+     * 这里顺带把下载文件名返回（前端可用于提示文案）；顺手做一次会话归属与
+     * ``run_dir`` 校验，让「会话不存在 / 越权 / 还没跑起来」在这一步就暴露成正常的
+     * 404，而不是等到浏览器导航过去才拿到一张下不出东西的票据。
+     * @param data The data for the request.
+     * @param data.sessionId
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static createArtifactsArchiveTicket(data: Llm4AdResearchCreateArtifactsArchiveTicketData): CancelablePromise<Llm4AdResearchCreateArtifactsArchiveTicketResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/llm4ad/research/sessions/{session_id}/artifacts/archive/ticket',
+            path: {
+                session_id: data.sessionId
+            },
+            errors: {
+                422: 'Validation Error'
+            }
+        });
+    }
+    
+    /**
+     * 打包下载全部产物（zip，票据鉴权 + 流式）
+     * 凭票据把 run_dir 下全部产物以 zip 流式下载。
+     *
+     * 与 ``GET .../artifacts/archive`` 的区别有两点，都是为了配合浏览器**原生下载**：
+     *
+     * 1. 鉴权走查询串里的短时票据而非 ``Authorization`` 头 —— 原生导航带不了自定义头；
+     * 票据 5 分钟过期、绑定用户，且只能用来下产物包（见
+     * :mod:`app.services.research_service.archive_ticket`）。票据与路径必须指向同一
+     * 会话，否则拿 A 会话的票据就能下载 B 会话的产物。
+     * 2. 边打包边发字节（``ZIP_STORED`` 不压缩），不再先落临时 zip 等全部压完 —— 这是
+     * 原先「点了下载卡很久」的主因：zlib 在 PDF / PNG 这类本就压不动的数据上省不下
+     * 字节，却要吃满单核 CPU。
+     *
+     * 响应不带 ``Content-Length``（zip 总长要打包完才知道），因此浏览器下载面板显示的是
+     * 「未知大小」而非百分比 —— 这是本方案的已知取舍。
+     * @param data The data for the request.
+     * @param data.sessionId
+     * @param data.ticket 由 /artifacts/archive/ticket 换取的短时票据
+     * @returns unknown Successful Response
+     * @throws ApiError
+     */
+    public static streamArtifactsArchive(data: Llm4AdResearchStreamArtifactsArchiveData): CancelablePromise<Llm4AdResearchStreamArtifactsArchiveResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm4ad/research/sessions/{session_id}/artifacts/archive/stream',
+            path: {
+                session_id: data.sessionId
+            },
+            query: {
+                ticket: data.ticket
             },
             errors: {
                 422: 'Validation Error'

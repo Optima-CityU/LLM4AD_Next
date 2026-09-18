@@ -25,6 +25,8 @@ from app.api.llm4ad import embedding_providers as llm4ad_embedding_providers
 from app.api.llm4ad import knowledge as llm4ad_knowledge
 from app.api.llm4ad import llm_proxy as llm4ad_llm_proxy
 from app.api.llm4ad import memory as llm4ad_memory
+from app.api.llm4ad import paper_runtime as llm4ad_paper_runtime
+from app.api.llm4ad import papers as llm4ad_papers
 from app.api.llm4ad import projects as llm4ad_projects
 from app.api.llm4ad import providers as llm4ad_providers
 from app.api.llm4ad import reports as llm4ad_reports
@@ -58,4 +60,6 @@ api_router.include_router(llm4ad_chat_tune.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_llm_proxy.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_knowledge.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_memory.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_papers.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_paper_runtime.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_research.router, prefix="/llm4ad")

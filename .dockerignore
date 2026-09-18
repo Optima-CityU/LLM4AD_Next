@@ -9,6 +9,7 @@
 **/.mypy_cache
 **/node_modules
 **/dist
+**/dist-server
 docker/app-data
 docker/litellm-data
 docker/litellm-db

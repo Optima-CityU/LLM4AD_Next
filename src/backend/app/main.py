@@ -55,6 +55,17 @@ async def lifespan(_app: FastAPI):
         logger.exception("启动时清理孤儿调参容器失败")
 
     try:
+        # Recreate stale workspace containers after an image update so they do
+        # not keep serving CloudCLI assets from an older task-runner image.
+        from app.services.paper_workspace_runtime import (
+            reconcile_paper_workspace_containers,
+        )
+
+        reconcile_paper_workspace_containers()
+    except Exception:
+        logger.exception("启动时对账科研工作区容器失败")
+
+    try:
         from app.services.knowledge_cleanup import recover_pending_cleanup_jobs
 
         recovered = recover_pending_cleanup_jobs()
@@ -67,6 +78,14 @@ async def lifespan(_app: FastAPI):
 
     news_refresh_task = asyncio.create_task(run_news_refresh_loop())
 
+    # Each research workspace owns a container. Stop idle containers and let
+    # the runtime restart them in place when the workspace is opened again.
+    from app.services.paper_workspace_runtime import (
+        run_paper_workspace_idle_cleanup_loop,
+    )
+
+    paper_cleanup_task = asyncio.create_task(run_paper_workspace_idle_cleanup_loop())
+
     try:
         yield
     finally:
@@ -74,6 +93,11 @@ async def lifespan(_app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
         logger.info("code-server 空闲清理循环已停止")
+
+        paper_cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await paper_cleanup_task
+        logger.info("科研工作区空闲清理循环已停止")
 
         news_refresh_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

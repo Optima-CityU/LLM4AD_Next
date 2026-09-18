@@ -10,6 +10,8 @@
 
 # ---------- 知识文档解析协议代理 ----------
 ARG CC_SWITCH_DOWNLOAD_IMAGE=docker.1ms.run/curlimages/curl:8.16.0
+ARG APT_MIRROR=""
+ARG NODE_BASE_IMAGE=docker.1ms.run/library/node:22-bookworm-slim
 ARG PYTHON_BASE_IMAGE=docker.1ms.run/library/python:3.12-bookworm
 # cc-switch 在每个知识解析容器内独立运行，将 Anthropic Messages 转换为平台
 # 已支持的 OpenAI Chat Completions 协议。固定版本并校验归档，避免 latest 漂移。
@@ -54,6 +56,30 @@ RUN case "${TARGETARCH}" in \
     && echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/opencode.tar.gz -C /tmp \
     && install -m 0755 /tmp/opencode /usr/local/bin/opencode
+
+# ---------- CloudCLI research workspace runtime ----------
+FROM ${NODE_BASE_IMAGE} AS cloudcli-builder
+
+ARG APT_MIRROR
+WORKDIR /build/cloudcli
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s@deb.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources && \
+      sed -i "s@security.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    g++ \
+    make \
+    python3 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+COPY ./third_party/CloudCLI/package.json ./third_party/CloudCLI/package-lock.json ./
+RUN npm ci --ignore-scripts \
+    && npm rebuild @vscode/ripgrep bcrypt esbuild node-pty sharp unrs-resolver \
+    && npm_config_build_from_source=true npm rebuild better-sqlite3
+COPY ./third_party/CloudCLI/ ./
+RUN node scripts/fix-node-pty.js \
+    && npm run build \
+    && npm prune --omit=dev
 
 # ---------- 基础镜像 ----------
 FROM ${PYTHON_BASE_IMAGE}
@@ -145,6 +171,15 @@ RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
 COPY --from=cc-switch-runtime /usr/local/bin/cc-switch /usr/local/bin/cc-switch
 # OpenCode CLI：独立二进制，置于 PATH 供 llm4ad.coder.opencode 以 `opencode run ...` 调用。
 COPY --from=opencode-runtime /usr/local/bin/opencode /usr/local/bin/opencode
+# CloudCLI is built in a separate Node stage. Only its runtime files and the
+# matching Node binary are copied into the task image.
+COPY --from=cloudcli-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=cloudcli-builder /build/cloudcli/package.json /app/cloudcli/package.json
+COPY --from=cloudcli-builder /build/cloudcli/dist /app/cloudcli/dist
+COPY --from=cloudcli-builder /build/cloudcli/dist-server /app/cloudcli/dist-server
+COPY --from=cloudcli-builder /build/cloudcli/public /app/cloudcli/public
+COPY --from=cloudcli-builder /build/cloudcli/shared /app/cloudcli/shared
+COPY --from=cloudcli-builder /build/cloudcli/node_modules /app/cloudcli/node_modules
 
 # ---------- 复制容器入口脚本（editable 安装无需其内容，故放最后：改脚本只失效本层，不重跑 uv sync）----------
 COPY ./src/backend/app/tasks/container_runner.py             /app/backend/app/tasks/container_runner.py
@@ -157,6 +192,21 @@ COPY ./docker/knowledge-parser/plan_store.py                  /app/knowledge-par
 COPY ./docker/knowledge-parser/sdk_events.py                  /app/knowledge-parser/sdk_events.py
 COPY ./skills/document-knowledge-organizer                    /app/skills/document-knowledge-organizer
 COPY ./docker/knowledge-parser/CC-SWITCH-LICENSE              /usr/share/licenses/cc-switch/LICENSE
+COPY ./docker/paper-agent/stage_bridge.py                     /app/paper-agent/stage_bridge.py
+COPY ./docker/paper-agent/arxiv_entrypoint.py                 /app/paper-agent/arxiv_entrypoint.py
+COPY ./src/backend/app/services/arxiv_coordination.py         /app/paper-agent/arxiv_coordination.py
+COPY --chmod=0755 ./docker/paper-agent/workspace-entrypoint.sh /app/paper-agent/workspace-entrypoint.sh
+COPY ./skills/llm4ad-task-builder                             /app/skills/llm4ad-task-builder
+COPY ./skills/typst-author                                    /app/skills/typst-author
+COPY ./skills/openair-proposal/ATTRIBUTION.md                 /app/skills/ATTRIBUTION.md
+COPY ./skills/openair-proposal/proposal-foundation-layout     /app/skills/proposal-foundation-layout
+COPY ./skills/openair-proposal/proposal-literature-evidence   /app/skills/proposal-literature-evidence
+COPY ./skills/openair-proposal/proposal-rationale             /app/skills/proposal-rationale
+COPY ./skills/openair-proposal/proposal-objectives            /app/skills/proposal-objectives
+COPY ./skills/openair-proposal/proposal-methods               /app/skills/proposal-methods
+COPY ./skills/openair-proposal/proposal-innovation-plan       /app/skills/proposal-innovation-plan
+COPY ./skills/openair-proposal/proposal-foundation-feasibility /app/skills/proposal-foundation-feasibility
+COPY ./skills/openair-proposal/proposal-final-review          /app/skills/proposal-final-review
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner

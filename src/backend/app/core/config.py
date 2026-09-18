@@ -362,6 +362,13 @@ class Settings(BaseSettings):
     CODE_SERVER_IDLE_TIMEOUT_SECONDS: int = 24 * 60 * 60  # 容器空闲超过该时长则停止
     CODE_SERVER_CLEANUP_INTERVAL_SECONDS: int = 10 * 60  # 后台清理任务执行间隔
 
+    # Research workspace containers are created per workspace because their
+    # source root and stage write boundary are fixed at creation time. Stopping
+    # an idle container is safe because its source tree is bind-mounted and the
+    # same container is restarted when the workspace is opened again.
+    PAPER_WORKSPACE_IDLE_TIMEOUT_SECONDS: int = 2 * 60 * 60
+    PAPER_WORKSPACE_CLEANUP_INTERVAL_SECONDS: int = 10 * 60
+
     # ---- 首页资讯（GitHub Wiki 拉取） ----
     # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。
     NEWS_WIKI_URL_ZH: str = (

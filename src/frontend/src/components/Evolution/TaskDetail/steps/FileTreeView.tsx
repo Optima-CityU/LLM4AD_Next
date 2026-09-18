@@ -56,6 +56,9 @@ interface FileTreeViewProps {
   onRenamingChange?: (path: string | null) => void
   onUpload?: () => void
   badgeCounts?: Record<string, number>
+  protectTopLevelDirectories?: boolean
+  confirmDelete?: boolean
+  canDeletePath?: (path: string, isDirectory: boolean) => boolean
   /** 文件相对路径 -> 字节数，用于在文件节点后显示大小 */
   sizeMap?: Record<string, number>
 }
@@ -72,6 +75,9 @@ export default function FileTreeView({
   onRenamingChange,
   onUpload,
   badgeCounts,
+  protectTopLevelDirectories = true,
+  confirmDelete = true,
+  canDeletePath,
   sizeMap,
 }: FileTreeViewProps) {
   const { t } = useTranslation()
@@ -117,7 +123,14 @@ export default function FileTreeView({
               ? (path, isDir) => {
                   if (isDir && !onDeleteFolder) return
                   if (!isDir && !onDeleteFile) return
-                  setDeleteTarget({ path, isDir })
+                  if (canDeletePath && !canDeletePath(path, isDir)) return
+                  if (confirmDelete) {
+                    setDeleteTarget({ path, isDir })
+                  } else if (isDir) {
+                    onDeleteFolder?.(path)
+                  } else {
+                    onDeleteFile?.(path)
+                  }
                 }
               : undefined
           }
@@ -126,6 +139,8 @@ export default function FileTreeView({
           renamingPath={renamingPath}
           onRenamingChange={onRenamingChange}
           badgeCounts={badgeCounts}
+          protectTopLevelDirectories={protectTopLevelDirectories}
+          canDeletePath={canDeletePath}
           sizeMap={sizeMap}
         />
       ))}
@@ -190,6 +205,8 @@ function TreeNode({
   renamingPath,
   onRenamingChange,
   badgeCounts,
+  protectTopLevelDirectories,
+  canDeletePath,
   sizeMap,
 }: {
   node: FileTreeNode
@@ -202,11 +219,17 @@ function TreeNode({
   renamingPath?: string | null
   onRenamingChange?: (path: string | null) => void
   badgeCounts?: Record<string, number>
+  protectTopLevelDirectories: boolean
+  canDeletePath?: (path: string, isDirectory: boolean) => boolean
   sizeMap?: Record<string, number>
 }) {
   const [expanded, setExpanded] = useState(depth < 2)
   const isDir = node.type === "directory"
   const isTopLevelDir = isDir && !node.path.includes("/")
+  const deletionAllowed =
+    !protectTopLevelDirectories || !isTopLevelDir
+      ? (canDeletePath?.(node.path, isDir) ?? true)
+      : false
   const isSelected =
     node.path === selectedPath || (isDir && selectedPath === `${node.path}/`)
   const isRenaming = node.path === renamingPath
@@ -330,7 +353,7 @@ function TreeNode({
               <Pencil className="size-3" />
             </Button>
           )}
-        {!isRenaming && onRequestDelete && !isTopLevelDir && (
+        {!isRenaming && onRequestDelete && deletionAllowed && (
           <Button
             type="button"
             variant="ghost"
@@ -360,6 +383,8 @@ function TreeNode({
               renamingPath={renamingPath}
               onRenamingChange={onRenamingChange}
               badgeCounts={badgeCounts}
+              protectTopLevelDirectories={protectTopLevelDirectories}
+              canDeletePath={canDeletePath}
               sizeMap={sizeMap}
             />
           ))}

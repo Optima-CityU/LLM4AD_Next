@@ -1744,6 +1744,559 @@ export type PaginatedTaskResponse = {
 };
 
 /**
+ * Durable paper run state for polling and stream recovery.
+ */
+export type PaperAgentRunResponse = {
+    id: string;
+    workspace_id: string;
+    source_version_id: string;
+    run_kind: 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+    status: 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
+    progress: number;
+    stage: string;
+    message: string;
+    provider_id: (string | null);
+    model_name: (string | null);
+    session_id: (string | null);
+    celery_task_id: (string | null);
+    artifact_object_key: (string | null);
+    error_code: (string | null);
+    error: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+export type run_kind = 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+
+export type status2 = 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
+
+/**
+ * Structured algorithm proposal emitted by an exploration agent.
+ */
+export type PaperAlgorithmProposalCreate = {
+    title: string;
+    problem_statement: string;
+    algorithm_design: string;
+    evaluator_requirements?: Array<(string)>;
+    assumptions?: Array<(string)>;
+    provenance?: Array<(string)>;
+    suggested_task_config?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
+ * Persisted proposal and linked task state.
+ */
+export type PaperAlgorithmProposalResponse = {
+    title: string;
+    problem_statement: string;
+    algorithm_design: string;
+    evaluator_requirements?: Array<(string)>;
+    assumptions?: Array<(string)>;
+    provenance?: Array<(string)>;
+    suggested_task_config?: {
+        [key: string]: unknown;
+    };
+    id: string;
+    workspace_id: string;
+    source_version_id: string;
+    run_id: (string | null);
+    target_id: (string | null);
+    target_type?: ('manuscript' | 'algorithm' | null);
+    status: string;
+    task_id?: (string | null);
+    task_project_id?: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * User edits applied before a proposal is confirmed.
+ */
+export type PaperAlgorithmProposalUpdate = {
+    title?: (string | null);
+    problem_statement?: (string | null);
+    algorithm_design?: (string | null);
+    evaluator_requirements?: (Array<(string)> | null);
+    assumptions?: (Array<(string)> | null);
+    provenance?: (Array<(string)> | null);
+    suggested_task_config?: ({
+    [key: string]: unknown;
+} | null);
+};
+
+/**
+ * Persisted paper boundary snapshot.
+ */
+export type PaperBoundaryResponse = {
+    id: string;
+    workspace_id: string;
+    source_version_id: string;
+    run_id: (string | null);
+    status: string;
+    content: {
+        [key: string]: unknown;
+    };
+    user_notes: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * Owned short-lived export URL.
+ */
+export type PaperExportResponse = {
+    url: string;
+    filename: string;
+};
+
+/**
+ * Deterministic aggregate that preserves score namespaces.
+ */
+export type PaperJudgeAggregate = {
+    baseline: {
+        [key: string]: (number);
+    };
+    optional: {
+        [key: string]: (number);
+    };
+    overall: number;
+    disagreement: number;
+};
+
+/**
+ * One anonymous reviewer model binding.
+ */
+export type PaperJudgeBinding = {
+    provider_id: string;
+    model_name: string;
+};
+
+/**
+ * Saved manuscript evaluation bindings.
+ */
+export type PaperJudgeBindingsResponse = {
+    reviewer_a: PaperJudgeBinding;
+    reviewer_b: PaperJudgeBinding;
+    configured?: boolean;
+};
+
+/**
+ * Reviewer A and Reviewer B model bindings.
+ */
+export type PaperJudgeBindingsUpdate = {
+    reviewer_a: PaperJudgeBinding;
+    reviewer_b: PaperJudgeBinding;
+};
+
+/**
+ * One persisted Judge response.
+ */
+export type PaperJudgeResultResponse = {
+    id: string;
+    candidate_id: string;
+    provider_id: (string | null);
+    model_name: string;
+    judge_index: number;
+    baseline_scores: {
+        [key: string]: (number);
+    };
+    optional_scores: {
+        [key: string]: (number);
+    };
+    rationale: string;
+    citations: Array<(string)>;
+    created_time: string;
+};
+
+/**
+ * Editable evaluation dimension suggested from paper context.
+ */
+export type PaperMetricDraft = {
+    key: string;
+    title: string;
+    description: string;
+    source: 'reviewer_baseline' | 'model_suggested' | 'user_defined';
+    selected?: boolean;
+    locked?: boolean;
+    weight?: number;
+    provenance?: Array<(string)>;
+};
+
+export type source = 'reviewer_baseline' | 'model_suggested' | 'user_defined';
+
+/**
+ * Persisted metric.
+ */
+export type PaperMetricResponse = {
+    key: string;
+    title: string;
+    description: string;
+    source: 'reviewer_baseline' | 'model_suggested' | 'user_defined';
+    selected?: boolean;
+    locked?: boolean;
+    weight?: number;
+    provenance?: Array<(string)>;
+    id: string;
+    workspace_id: string;
+    source_version_id: string;
+    review_id: string;
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * User selection for an existing metric key.
+ */
+export type PaperMetricSelection = {
+    key: string;
+    selected: boolean;
+    weight: number;
+};
+
+/**
+ * Replace editable selection while retaining locked baseline metrics.
+ */
+export type PaperMetricSelectionRequest = {
+    metrics: Array<PaperMetricSelection>;
+};
+
+/**
+ * Validated suggestions produced by a model run.
+ */
+export type PaperMetricSuggestionRequest = {
+    metrics: Array<PaperMetricDraft>;
+};
+
+/**
+ * Saved workspace analysis model binding.
+ */
+export type PaperModelBindingResponse = {
+    provider_id: string;
+    model_name: string;
+    context_window_tokens?: number;
+    max_output_tokens?: number;
+    configured?: boolean;
+};
+
+/**
+ * Persist the analysis model used by non-Judge paper runs.
+ */
+export type PaperModelBindingUpdate = {
+    provider_id: string;
+    model_name: string;
+    context_window_tokens?: number;
+    max_output_tokens?: number;
+};
+
+/**
+ * Persisted optimization target and linked task state.
+ */
+export type PaperOptimizationTargetResponse = {
+    target_type: 'manuscript' | 'algorithm';
+    title: string;
+    problem: string;
+    recommendation: string;
+    severity?: 'low' | 'medium' | 'high' | 'critical';
+    source_path: string;
+    section_title?: (string | null);
+    start_line?: (number | null);
+    end_line?: (number | null);
+    source_quote?: string;
+    review_ids?: Array<(string)>;
+    id: string;
+    workspace_id: string;
+    source_version_id: string;
+    boundary_id: string;
+    status: string;
+    task_id?: (string | null);
+    task_project_id?: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+export type target_type = 'manuscript' | 'algorithm';
+
+export type severity = 'low' | 'medium' | 'high' | 'critical';
+
+/**
+ * Editable target fields and confirmation state.
+ */
+export type PaperOptimizationTargetUpdate = {
+    title?: (string | null);
+    problem?: (string | null);
+    recommendation?: (string | null);
+    severity?: ('low' | 'medium' | 'high' | 'critical' | null);
+    selected?: (boolean | null);
+};
+
+/**
+ * Confirm proposals and create one root task per selected proposal.
+ */
+export type PaperProposalTaskCreateRequest = {
+    proposal_ids: Array<(string)>;
+    language?: 'zh' | 'en';
+};
+
+/**
+ * Idempotent link between a proposal and its explicit evolution task.
+ */
+export type PaperProposalTaskLinkResponse = {
+    proposal_id: string;
+    task_id: string;
+    project_id: string;
+};
+
+/**
+ * Owned reviewer Markdown content.
+ */
+export type PaperReviewContentResponse = {
+    review_id: string;
+    content: string;
+};
+
+/**
+ * Attach generic reviewer feedback to one source version.
+ */
+export type PaperReviewCreate = {
+    content: string;
+    source_system?: string;
+    reviewer_label?: string;
+    title?: (string | null);
+};
+
+/**
+ * Stored generic reviewer feedback metadata.
+ */
+export type PaperReviewResponse = {
+    id: string;
+    source_version_id: string;
+    source_system: string;
+    reviewer_label: string;
+    title: (string | null);
+    object_key: string;
+    content_hash: string;
+    baseline_dimensions: Array<{
+        [key: string]: unknown;
+    }>;
+    created_time: string;
+};
+
+/**
+ * Replace editable reviewer feedback and its derived baseline.
+ */
+export type PaperReviewUpdate = {
+    content: string;
+    reviewer_label: string;
+    title?: (string | null);
+};
+
+/**
+ * Accepted candidate and updated working paper source.
+ */
+export type PaperRevisionApplyResponse = {
+    candidate_id: string;
+    source_version: PaperSourceVersionResponse;
+};
+
+/**
+ * Import an evolved manuscript replacement for review and acceptance.
+ */
+export type PaperRevisionCandidateCreate = {
+    title: string;
+    summary?: string;
+    replacement_text: string;
+};
+
+/**
+ * Revision candidate with independent Judge breakdown.
+ */
+export type PaperRevisionCandidateResponse = {
+    id: string;
+    workspace_id: string;
+    source_version_id: string;
+    run_id: (string | null);
+    target_id: (string | null);
+    title: string;
+    summary: string;
+    status: string;
+    accepted_source_version_id: (string | null);
+    judge_results?: Array<PaperJudgeResultResponse>;
+    aggregate?: (PaperJudgeAggregate | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * User-owned revision patch content for review.
+ */
+export type PaperRevisionPatchResponse = {
+    candidate_id: string;
+    content: string;
+};
+
+/**
+ * Select the backend-owned stage profile for a native session.
+ */
+export type PaperRuntimeSessionCreate = {
+    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch';
+};
+
+export type workflow_stage = 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch';
+
+/**
+ * Opaque browser session for an embedded research runtime.
+ */
+export type PaperRuntimeSessionResponse = {
+    runtime_url: string;
+    session_id: string;
+};
+
+export type papers_upload_source = {
+    files: Array<((Blob | File))>;
+    relative_paths?: (Array<(string)> | null);
+};
+
+/**
+ * UTF-8 source file content from an owned immutable version.
+ */
+export type PaperSourceFileResponse = {
+    source_version_id: string;
+    path: string;
+    content: string;
+};
+
+/**
+ * Save one UTF-8 file in the working paper source.
+ */
+export type PaperSourceFileUpdateRequest = {
+    path: string;
+    content: string;
+    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+};
+
+/**
+ * Remove one file or directory prefix through version derivation.
+ */
+export type PaperSourcePathDeleteRequest = {
+    path: string;
+    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+};
+
+/**
+ * Metadata for the stored working paper source.
+ */
+export type PaperSourceVersionResponse = {
+    id: string;
+    workspace_id: string;
+    version: number;
+    source_kind: 'markdown' | 'latex_zip' | 'source_bundle';
+    filename: string;
+    object_key: string;
+    content_hash: string;
+    content_size: number;
+    manifest: Array<(string)>;
+    parent_version_id: (string | null);
+    change_summary: (string | null);
+    created_time: string;
+};
+
+export type source_kind = 'markdown' | 'latex_zip' | 'source_bundle';
+
+/**
+ * Create an independent research workspace.
+ */
+export type PaperWorkspaceCreate = {
+    title: string;
+    description?: (string | null);
+    mode: 'proposal' | 'manuscript' | 'algorithm';
+};
+
+export type mode = 'proposal' | 'manuscript' | 'algorithm';
+
+/**
+ * Paper workspace with source, review, metric, and proposal summaries.
+ */
+export type PaperWorkspaceDetail = {
+    id: string;
+    title: string;
+    mode: 'proposal' | 'manuscript' | 'algorithm';
+    description: (string | null);
+    active_source_version_id: (string | null);
+    proposal_foundation: (ProposalFoundation | null);
+    proposal_entry_path: (string | null);
+    proposal_stage_states?: {
+        [key: string]: ProposalStageState;
+    };
+    analysis_provider_id: (string | null);
+    analysis_model_name: (string | null);
+    analysis_context_window_tokens: number;
+    analysis_max_output_tokens: number;
+    reviewer_a_provider_id: (string | null);
+    reviewer_a_model_name: (string | null);
+    reviewer_b_provider_id: (string | null);
+    reviewer_b_model_name: (string | null);
+    created_time: string;
+    updated_time: string;
+    source_versions?: Array<PaperSourceVersionResponse>;
+    reviews?: Array<PaperReviewResponse>;
+    boundary?: (PaperBoundaryResponse | null);
+    targets?: Array<PaperOptimizationTargetResponse>;
+    metrics?: Array<PaperMetricResponse>;
+    proposals?: Array<PaperAlgorithmProposalResponse>;
+    revision_candidates?: Array<PaperRevisionCandidateResponse>;
+    active_run?: (PaperAgentRunResponse | null);
+    workflow_available: boolean;
+    workflow_stages?: Array<('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
+    available_run_kinds?: Array<('proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
+};
+
+/**
+ * Paginated paper workspace response.
+ */
+export type PaperWorkspaceList = {
+    items: Array<PaperWorkspaceSummary>;
+    total: number;
+    skip: number;
+    limit: number;
+};
+
+/**
+ * Paper workspace list item.
+ */
+export type PaperWorkspaceSummary = {
+    id: string;
+    title: string;
+    mode: 'proposal' | 'manuscript' | 'algorithm';
+    description: (string | null);
+    active_source_version_id: (string | null);
+    proposal_foundation: (ProposalFoundation | null);
+    proposal_entry_path: (string | null);
+    proposal_stage_states?: {
+        [key: string]: ProposalStageState;
+    };
+    analysis_provider_id: (string | null);
+    analysis_model_name: (string | null);
+    analysis_context_window_tokens: number;
+    analysis_max_output_tokens: number;
+    reviewer_a_provider_id: (string | null);
+    reviewer_a_model_name: (string | null);
+    reviewer_b_provider_id: (string | null);
+    reviewer_b_model_name: (string | null);
+    created_time: string;
+    updated_time: string;
+};
+
+/**
+ * Update user-editable paper workspace metadata.
+ */
+export type PaperWorkspaceUpdate = {
+    title?: (string | null);
+    description?: (string | null);
+};
+
+/**
  * 权限基础 Schema，定义权限的公共字段。
  */
 export type PermissionBase = {
@@ -1849,6 +2402,38 @@ export type ProjectUpdate = {
     description?: (string | null);
     icon?: (string | null);
 };
+
+/**
+ * One model-defined block in the durable proposal context.
+ */
+export type ProposalContextBlock = {
+    key: string;
+    title: string;
+    content: string;
+    source_refs?: Array<(string)>;
+};
+
+/**
+ * Ordered model-defined context shared by every proposal stage.
+ */
+export type ProposalFoundation = {
+    blocks?: Array<ProposalContextBlock>;
+};
+
+/**
+ * Latest durable state for one proposal workflow stage.
+ */
+export type ProposalStageState = {
+    status: 'ready' | 'stale' | 'needs_revision';
+    run_id: string;
+    source_version_id: string;
+    updated_time: string;
+    iteration?: number;
+    summary?: (string | null);
+    findings?: Array<(string)>;
+};
+
+export type status3 = 'ready' | 'stale' | 'needs_revision';
 
 /**
  * 供应商创建请求。
@@ -2207,7 +2792,7 @@ export type ResearchAnalysisEntry = {
     language?: (string | null);
 };
 
-export type status2 = 'generating' | 'completed' | 'failed' | 'cancelled';
+export type status4 = 'generating' | 'completed' | 'failed' | 'cancelled';
 
 /**
  * 触发 LLM 生成结果分析报告的请求体。
@@ -2408,7 +2993,7 @@ export type ResearchArtifactTranslateResponse = {
     content?: (string | null);
 };
 
-export type status3 = 'cached' | 'translating';
+export type status5 = 'cached' | 'translating';
 
 /**
  * 翻译停止响应：``stopped`` 已中断在跑任务；``idle`` 无任务可停。
@@ -2423,7 +3008,7 @@ export type ResearchArtifactTranslateStopResponse = {
     status: 'stopped' | 'idle';
 };
 
-export type status4 = 'stopped' | 'idle';
+export type status6 = 'stopped' | 'idle';
 
 /**
  * 产物目录树节点。
@@ -2897,7 +3482,7 @@ export type ResearchSessionItem = {
 export type ResearchSessionListResponse = {
     items?: Array<ResearchSessionItem>;
     /**
-     * 下一页游标 = 本页最后一条的 updated_time ISO；None 表示无更多
+     * 下一页游标 = 本页最后一条的 created_time ISO；None 表示无更多
      */
     next_cursor?: (string | null);
     has_more?: boolean;
@@ -2978,7 +3563,7 @@ export type ResearchStageSnapshot = {
     error?: (string | null);
 };
 
-export type status5 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
+export type status7 = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
 
 /**
  * 会话当前状态的结构化快照。
@@ -4328,6 +4913,182 @@ export type Llm4AdMemoryUpdateMemoryCardStatusData = {
 
 export type Llm4AdMemoryUpdateMemoryCardStatusResponse = (MemoryCardResponse);
 
+export type Llm4AdPapersCreateWorkspaceData = {
+    requestBody: PaperWorkspaceCreate;
+};
+
+export type Llm4AdPapersCreateWorkspaceResponse = (PaperWorkspaceSummary);
+
+export type Llm4AdPapersListWorkspacesData = {
+    limit?: number;
+    search?: (string | null);
+    skip?: number;
+};
+
+export type Llm4AdPapersListWorkspacesResponse = (PaperWorkspaceList);
+
+export type Llm4AdPapersGetWorkspaceData = {
+    workspaceId: string;
+};
+
+export type Llm4AdPapersGetWorkspaceResponse = (PaperWorkspaceDetail);
+
+export type Llm4AdPapersUpdateWorkspaceData = {
+    requestBody: PaperWorkspaceUpdate;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersUpdateWorkspaceResponse = (PaperWorkspaceSummary);
+
+export type Llm4AdPapersDeleteWorkspaceData = {
+    workspaceId: string;
+};
+
+export type Llm4AdPapersDeleteWorkspaceResponse = (void);
+
+export type Llm4AdPapersUploadSourceData = {
+    formData: papers_upload_source;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersUploadSourceResponse = (PaperSourceVersionResponse);
+
+export type Llm4AdPapersUpdateModelBindingData = {
+    requestBody: PaperModelBindingUpdate;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersUpdateModelBindingResponse = (PaperModelBindingResponse);
+
+export type Llm4AdPapersAttachReviewerFeedbackData = {
+    requestBody: PaperReviewCreate;
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersAttachReviewerFeedbackResponse = (PaperReviewResponse);
+
+export type Llm4AdPapersGetReviewerFeedbackData = {
+    reviewId: string;
+};
+
+export type Llm4AdPapersGetReviewerFeedbackResponse = (PaperReviewContentResponse);
+
+export type Llm4AdPapersUpdateReviewerFeedbackData = {
+    requestBody: PaperReviewUpdate;
+    reviewId: string;
+};
+
+export type Llm4AdPapersUpdateReviewerFeedbackResponse = (PaperReviewResponse);
+
+export type Llm4AdPapersDeleteSourcePathData = {
+    requestBody: PaperSourcePathDeleteRequest;
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersDeleteSourcePathResponse = (void);
+
+export type Llm4AdPapersGetSourceFileData = {
+    path: string;
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersGetSourceFileResponse = (PaperSourceFileResponse);
+
+export type Llm4AdPapersUpdateSourceFileData = {
+    requestBody: PaperSourceFileUpdateRequest;
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersUpdateSourceFileResponse = (PaperSourceVersionResponse);
+
+export type Llm4AdPapersExportSourceVersionData = {
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersExportSourceVersionResponse = (PaperExportResponse);
+
+export type Llm4AdPapersDownloadSourceVersionData = {
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersDownloadSourceVersionResponse = (unknown);
+
+export type Llm4AdPapersUpdateJudgeBindingsData = {
+    requestBody: PaperJudgeBindingsUpdate;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersUpdateJudgeBindingsResponse = (PaperJudgeBindingsResponse);
+
+export type Llm4AdPapersUpdateOptimizationTargetData = {
+    requestBody: PaperOptimizationTargetUpdate;
+    targetId: string;
+};
+
+export type Llm4AdPapersUpdateOptimizationTargetResponse = (PaperOptimizationTargetResponse);
+
+export type Llm4AdPapersAddMetricSuggestionsData = {
+    requestBody: PaperMetricSuggestionRequest;
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersAddMetricSuggestionsResponse = (Array<PaperMetricResponse>);
+
+export type Llm4AdPapersSelectMetricsData = {
+    requestBody: PaperMetricSelectionRequest;
+    sourceVersionId: string;
+};
+
+export type Llm4AdPapersSelectMetricsResponse = (Array<PaperMetricResponse>);
+
+export type Llm4AdPapersCreateProposalData = {
+    requestBody: PaperAlgorithmProposalCreate;
+    sourceVersionId: string;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersCreateProposalResponse = (PaperAlgorithmProposalResponse);
+
+export type Llm4AdPapersUpdateProposalData = {
+    proposalId: string;
+    requestBody: PaperAlgorithmProposalUpdate;
+};
+
+export type Llm4AdPapersUpdateProposalResponse = (PaperAlgorithmProposalResponse);
+
+export type Llm4AdPapersCreateProposalTasksData = {
+    requestBody: PaperProposalTaskCreateRequest;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersCreateProposalTasksResponse = (Array<PaperProposalTaskLinkResponse>);
+
+export type Llm4AdPapersGetRevisionPatchData = {
+    candidateId: string;
+};
+
+export type Llm4AdPapersGetRevisionPatchResponse = (PaperRevisionPatchResponse);
+
+export type Llm4AdPapersCreateRevisionCandidateData = {
+    requestBody: PaperRevisionCandidateCreate;
+    targetId: string;
+};
+
+export type Llm4AdPapersCreateRevisionCandidateResponse = (PaperRevisionCandidateResponse);
+
+export type Llm4AdPapersAcceptRevisionCandidateData = {
+    candidateId: string;
+};
+
+export type Llm4AdPapersAcceptRevisionCandidateResponse = (PaperRevisionApplyResponse);
+
+export type Llm4AdPapersCreateRuntimeSessionData = {
+    requestBody: PaperRuntimeSessionCreate;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersCreateRuntimeSessionResponse = (PaperRuntimeSessionResponse);
+
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
@@ -4531,7 +5292,7 @@ export type Llm4AdResearchGetTemplateResponse = (ResearchTemplateDetailResponse)
 
 export type Llm4AdResearchListSessionsData = {
     /**
-     * 上一页最后一条的 updated_time ISO；首次不传
+     * 上一页最后一条的 created_time ISO；首次不传
      */
     cursor?: (string | null);
     /**
@@ -4791,6 +5552,22 @@ export type Llm4AdResearchDownloadArtifactsArchiveData = {
 };
 
 export type Llm4AdResearchDownloadArtifactsArchiveResponse = (unknown);
+
+export type Llm4AdResearchCreateArtifactsArchiveTicketData = {
+    sessionId: string;
+};
+
+export type Llm4AdResearchCreateArtifactsArchiveTicketResponse = (unknown);
+
+export type Llm4AdResearchStreamArtifactsArchiveData = {
+    sessionId: string;
+    /**
+     * 由 /artifacts/archive/ticket 换取的短时票据
+     */
+    ticket: string;
+};
+
+export type Llm4AdResearchStreamArtifactsArchiveResponse = (unknown);
 
 export type Llm4AdResearchImportArtifactsZipData = {
     formData: research_import_artifacts_zip;

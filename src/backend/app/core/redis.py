@@ -604,6 +604,70 @@ def pop_idle_code_users(threshold_ts: float) -> list[str]:
     return list(members)
 
 
+# ---- Research workspace activity tracking ----
+
+PAPER_WORKSPACE_ACTIVE_KEY = "paper_workspace:last_active"
+
+
+def touch_paper_workspace_active(workspace_id: str | uuid.UUID, ts: float | None = None) -> None:
+    """Refresh the last-active timestamp for a research workspace.
+
+    Redis failures are logged rather than raised because activity tracking must
+    not prevent users from opening sessions or publishing stages.
+
+    Args:
+        workspace_id: Research workspace identifier.
+        ts: Unix timestamp in seconds. The current time is used when omitted.
+    """
+    if ts is None:
+        ts = time.time()
+    try:
+        get_sync_redis().zadd(PAPER_WORKSPACE_ACTIVE_KEY, {str(workspace_id): ts})
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to touch paper workspace active for workspace_id=%s",
+            workspace_id,
+            exc_info=True,
+        )
+
+
+def forget_paper_workspace_active(workspace_id: str | uuid.UUID) -> None:
+    """Remove the activity record for a deleted research workspace.
+
+    Args:
+        workspace_id: Research workspace identifier.
+    """
+    try:
+        get_sync_redis().zrem(PAPER_WORKSPACE_ACTIVE_KEY, str(workspace_id))
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to forget paper workspace active for workspace_id=%s",
+            workspace_id,
+            exc_info=True,
+        )
+
+
+def pop_idle_paper_workspaces(threshold_ts: float) -> list[str]:
+    """Atomically pop research workspaces last active before a threshold.
+
+    Args:
+        threshold_ts: Unix timestamp at or before which a workspace is idle.
+
+    Returns:
+        Research workspace identifiers removed from the activity set.
+    """
+    redis_client = get_sync_redis()
+    pipeline = redis_client.pipeline()
+    pipeline.zrangebyscore(PAPER_WORKSPACE_ACTIVE_KEY, "-inf", threshold_ts)
+    pipeline.zremrangebyscore(PAPER_WORKSPACE_ACTIVE_KEY, "-inf", threshold_ts)
+    members, _ = pipeline.execute()
+    return list(members)
+
+
 # ---- 首页资讯缓存 ----
 # wiki 是唯一真源，后台定时拉取并整体覆盖缓存；GET /news?lang=<..> 直接读该缓存。
 # 无 TTL：若拉取长时间失败，宁可返回旧内容也不返回空，由 updated_at 让前端判断新鲜度。

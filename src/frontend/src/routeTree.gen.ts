@@ -14,6 +14,7 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as Layout_paperRouteImport } from './routes/_layout_paper'
 import { Route as Layout_evolutionRouteImport } from './routes/_layout_evolution'
 import { Route as Layout_demoRouteImport } from './routes/_layout_demo'
 import { Route as Layout_autoresearchRouteImport } from './routes/_layout_autoresearch'
@@ -24,6 +25,7 @@ import { Route as Layout_demoDemoRouteImport } from './routes/_layout_demo/demo'
 import { Route as Layout_autoresearchAutoresearchRouteImport } from './routes/_layout_autoresearch/autoresearch'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
+import { Route as LayoutPapersRouteImport } from './routes/_layout/papers'
 import { Route as LayoutMemoryRouteImport } from './routes/_layout/memory'
 import { Route as LayoutLlm_roviderRouteImport } from './routes/_layout/llm_rovider'
 import { Route as LayoutLiveCodesRouteImport } from './routes/_layout/live-codes'
@@ -32,6 +34,7 @@ import { Route as LayoutFeedbackRouteImport } from './routes/_layout/feedback'
 import { Route as LayoutConfig_templateRouteImport } from './routes/_layout/config_template'
 import { Route as LayoutChangelogRouteImport } from './routes/_layout/changelog'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
+import { Route as Layout_paperPapersWorkspaceIdRouteImport } from './routes/_layout_paper/papers.$workspaceId'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
   id: '/verify-email',
@@ -56,6 +59,10 @@ const RecoverPasswordRoute = RecoverPasswordRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const Layout_paperRoute = Layout_paperRouteImport.update({
+  id: '/_layout_paper',
   getParentRoute: () => rootRouteImport,
 } as any)
 const Layout_evolutionRoute = Layout_evolutionRouteImport.update({
@@ -106,6 +113,11 @@ const LayoutProjectsRoute = LayoutProjectsRouteImport.update({
   path: '/projects',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutPapersRoute = LayoutPapersRouteImport.update({
+  id: '/papers',
+  path: '/papers',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutMemoryRoute = LayoutMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
@@ -146,6 +158,12 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => LayoutRoute,
 } as any)
+const Layout_paperPapersWorkspaceIdRoute =
+  Layout_paperPapersWorkspaceIdRouteImport.update({
+    id: '/papers/$workspaceId',
+    path: '/papers/$workspaceId',
+    getParentRoute: () => Layout_paperRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -162,11 +180,13 @@ export interface FileRoutesByFullPath {
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
   '/memory': typeof LayoutMemoryRoute
+  '/papers': typeof LayoutPapersRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/autoresearch': typeof Layout_autoresearchAutoresearchRoute
   '/demo': typeof Layout_demoDemoRoute
   '/evolution': typeof Layout_evolutionEvolutionRoute
+  '/papers/$workspaceId': typeof Layout_paperPapersWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -183,11 +203,13 @@ export interface FileRoutesByTo {
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
   '/memory': typeof LayoutMemoryRoute
+  '/papers': typeof LayoutPapersRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
   '/autoresearch': typeof Layout_autoresearchAutoresearchRoute
   '/demo': typeof Layout_demoDemoRoute
   '/evolution': typeof Layout_evolutionEvolutionRoute
+  '/papers/$workspaceId': typeof Layout_paperPapersWorkspaceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -196,6 +218,7 @@ export interface FileRoutesById {
   '/_layout_autoresearch': typeof Layout_autoresearchRouteWithChildren
   '/_layout_demo': typeof Layout_demoRouteWithChildren
   '/_layout_evolution': typeof Layout_evolutionRouteWithChildren
+  '/_layout_paper': typeof Layout_paperRouteWithChildren
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -209,11 +232,13 @@ export interface FileRoutesById {
   '/_layout/live-codes': typeof LayoutLiveCodesRoute
   '/_layout/llm_rovider': typeof LayoutLlm_roviderRoute
   '/_layout/memory': typeof LayoutMemoryRoute
+  '/_layout/papers': typeof LayoutPapersRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout_autoresearch/autoresearch': typeof Layout_autoresearchAutoresearchRoute
   '/_layout_demo/demo': typeof Layout_demoDemoRoute
   '/_layout_evolution/evolution': typeof Layout_evolutionEvolutionRoute
+  '/_layout_paper/papers/$workspaceId': typeof Layout_paperPapersWorkspaceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -232,11 +257,13 @@ export interface FileRouteTypes {
     | '/live-codes'
     | '/llm_rovider'
     | '/memory'
+    | '/papers'
     | '/projects'
     | '/settings'
     | '/autoresearch'
     | '/demo'
     | '/evolution'
+    | '/papers/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -253,11 +280,13 @@ export interface FileRouteTypes {
     | '/live-codes'
     | '/llm_rovider'
     | '/memory'
+    | '/papers'
     | '/projects'
     | '/settings'
     | '/autoresearch'
     | '/demo'
     | '/evolution'
+    | '/papers/$workspaceId'
   id:
     | '__root__'
     | '/'
@@ -265,6 +294,7 @@ export interface FileRouteTypes {
     | '/_layout_autoresearch'
     | '/_layout_demo'
     | '/_layout_evolution'
+    | '/_layout_paper'
     | '/login'
     | '/recover-password'
     | '/reset-password'
@@ -278,11 +308,13 @@ export interface FileRouteTypes {
     | '/_layout/live-codes'
     | '/_layout/llm_rovider'
     | '/_layout/memory'
+    | '/_layout/papers'
     | '/_layout/projects'
     | '/_layout/settings'
     | '/_layout_autoresearch/autoresearch'
     | '/_layout_demo/demo'
     | '/_layout_evolution/evolution'
+    | '/_layout_paper/papers/$workspaceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -291,6 +323,7 @@ export interface RootRouteChildren {
   Layout_autoresearchRoute: typeof Layout_autoresearchRouteWithChildren
   Layout_demoRoute: typeof Layout_demoRouteWithChildren
   Layout_evolutionRoute: typeof Layout_evolutionRouteWithChildren
+  Layout_paperRoute: typeof Layout_paperRouteWithChildren
   LoginRoute: typeof LoginRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
@@ -333,6 +366,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_layout_paper': {
+      id: '/_layout_paper'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof Layout_paperRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_layout_evolution': {
@@ -405,6 +445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutProjectsRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/papers': {
+      id: '/_layout/papers'
+      path: '/papers'
+      fullPath: '/papers'
+      preLoaderRoute: typeof LayoutPapersRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/memory': {
       id: '/_layout/memory'
       path: '/memory'
@@ -461,6 +508,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAdminRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout_paper/papers/$workspaceId': {
+      id: '/_layout_paper/papers/$workspaceId'
+      path: '/papers/$workspaceId'
+      fullPath: '/papers/$workspaceId'
+      preLoaderRoute: typeof Layout_paperPapersWorkspaceIdRouteImport
+      parentRoute: typeof Layout_paperRoute
+    }
   }
 }
 
@@ -473,6 +527,7 @@ interface LayoutRouteChildren {
   LayoutLiveCodesRoute: typeof LayoutLiveCodesRoute
   LayoutLlm_roviderRoute: typeof LayoutLlm_roviderRoute
   LayoutMemoryRoute: typeof LayoutMemoryRoute
+  LayoutPapersRoute: typeof LayoutPapersRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
 }
@@ -486,6 +541,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutLiveCodesRoute: LayoutLiveCodesRoute,
   LayoutLlm_roviderRoute: LayoutLlm_roviderRoute,
   LayoutMemoryRoute: LayoutMemoryRoute,
+  LayoutPapersRoute: LayoutPapersRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
 }
@@ -527,12 +583,25 @@ const Layout_evolutionRouteChildren: Layout_evolutionRouteChildren = {
 const Layout_evolutionRouteWithChildren =
   Layout_evolutionRoute._addFileChildren(Layout_evolutionRouteChildren)
 
+interface Layout_paperRouteChildren {
+  Layout_paperPapersWorkspaceIdRoute: typeof Layout_paperPapersWorkspaceIdRoute
+}
+
+const Layout_paperRouteChildren: Layout_paperRouteChildren = {
+  Layout_paperPapersWorkspaceIdRoute: Layout_paperPapersWorkspaceIdRoute,
+}
+
+const Layout_paperRouteWithChildren = Layout_paperRoute._addFileChildren(
+  Layout_paperRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LayoutRoute: LayoutRouteWithChildren,
   Layout_autoresearchRoute: Layout_autoresearchRouteWithChildren,
   Layout_demoRoute: Layout_demoRouteWithChildren,
   Layout_evolutionRoute: Layout_evolutionRouteWithChildren,
+  Layout_paperRoute: Layout_paperRouteWithChildren,
   LoginRoute: LoginRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,

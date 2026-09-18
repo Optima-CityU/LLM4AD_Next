@@ -5,6 +5,7 @@ import {
   Database,
   FolderKanban,
   MessageSquareText,
+  Microscope,
   QrCode,
   ScrollText,
   ServerCog,
@@ -94,6 +95,25 @@ function NavItems({ items }: { items: Item[] }) {
   )
 }
 
+function ResearchWorkspaceNav() {
+  const { t } = useTranslation()
+  const researchItems: Item[] = [
+    {
+      icon: Microscope,
+      title: t("sidebar.paperWorkspace"),
+      path: "/papers",
+    },
+  ]
+
+  return (
+    <SidebarGroup>
+      <SidebarGroupContent>
+        <NavItems items={researchItems} />
+      </SidebarGroupContent>
+    </SidebarGroup>
+  )
+}
+
 export function AppSidebar() {
   const { t } = useTranslation()
   const { user: currentUser } = useAuth()
@@ -152,6 +172,8 @@ export function AppSidebar() {
             <NavItems items={projectItems} />
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <ResearchWorkspaceNav />
 
         {/* Global config */}
         <SidebarGroup>
