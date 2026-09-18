@@ -2359,6 +2359,17 @@
         "link": "https://satcompetition.github.io/2026/downloads/satcomp26slides.pdf"
       }
     },
+    "ticker": {
+      "hint": "See all",
+      "collapse": "Collapse",
+      "openLabel": "Expand announcements: all competition results and latest news (click again to collapse)",
+      "panelTitle": "Competition Results & Latest News",
+      "panelSubtitle": "Click any entry to open it",
+      "groupWins": "Competition Results",
+      "groupNews": "Latest News",
+      "badgeNew": "New",
+      "empty": "No announcements yet"
+    },
     "news": {
       "title": "Latest News",
       "subtitle": "Updates, research notes, and tutorials from our WeChat Official Account, refreshed regularly.",
@@ -3577,6 +3588,9 @@
       "creating": "Creating...",
       "templateLabel": "Topic template (optional)",
       "templatePlaceholder": "Pick a starting point from the ARC-Bench topic library",
+      "templateSourceHint": "All templates come from the",
+      "templateSourcePath": "experiments/arc_bench/config",
+      "templateSourceHintTail": "directory of the official AutoResearchClaw repository — click to browse.",
       "templateClear": "Clear",
       "templateSearch": "Search",
       "templateAllDomains": "All",

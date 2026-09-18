@@ -479,11 +479,246 @@
     transparent
   );
 }
-.landing-ticker:hover .landing-ticker-track {
+/* Freeze the marquee while the shell is expanded — it is fading out anyway,
+   but stopping the animation means it resumes at the same offset instead of
+   having scrolled on behind the panel. */
+.landing-morph[data-expanded="true"] .landing-ticker-track {
   animation-play-state: paused;
 }
+
+/* --- Morph shell -----------------------------------------------------------
+   The announcement bar is one element that unrolls from a 56px capsule into a
+   panel. The transitions are split per property on purpose: border-radius and
+   shadow ease over the whole 420ms so the silhouette reads as a single shape
+   changing form, while background/border snap in the first 120ms so the panel
+   doesn't look half-painted mid-morph. */
+.landing-morph {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in oklab, var(--border) 40%, transparent);
+  background: color-mix(in oklab, var(--card) 70%, transparent);
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--primary) 5%, transparent);
+  backdrop-filter: blur(24px);
+  transition:
+    border-color 120ms ease-out,
+    background-color 120ms ease-out,
+    box-shadow 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.landing-morph[data-expanded="true"] {
+  border-color: color-mix(in oklab, var(--primary) 35%, transparent);
+  background: color-mix(in oklab, var(--card) 92%, transparent);
+  box-shadow: 0 12px 40px -12px color-mix(in oklab, var(--primary) 25%, transparent);
+}
+
+/* Light sweep across the capsule on hover — the "there is something behind
+   this" tell. Runs once on enter (a looping sweep would just be noise).
+   Drawn as a band that translates across rather than by animating
+   `background-position`: a background-position animation snaps back to its
+   start value the instant it finishes, and since the sheen is still at
+   opacity 1 at that moment it reads as a flash. A translated band parks
+   entirely outside the trigger's `overflow: hidden` box, which is clipped
+   away, so its reset is invisible.
+
+   The travel is measured against the trigger's own width (% of the containing
+   block), so the band starts and ends fully outside the pill at any size. */
+.landing-morph-trigger::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  pointer-events: none;
+  transform: translateX(-110%);
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in oklab, var(--primary) 12%, transparent) 50%,
+    transparent
+  );
+}
+.landing-morph:hover .landing-morph-trigger::after {
+  animation: landing-morph-sheen 900ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+@keyframes landing-morph-sheen {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(275%);
+  }
+}
+
+/* Header row. Unchanged in both states except for the hairline under it, so
+   the marquee never jumps while the shell grows around it. */
+.landing-morph-trigger {
+  border-bottom: 1px solid transparent;
+  transition:
+    border-color 200ms ease-out,
+    padding 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.landing-morph-trigger-open {
+  border-bottom-color: color-mix(in oklab, var(--border) 40%, transparent);
+}
+
+/* The marquee recedes rather than disappearing: it fades, blurs a touch and
+   sinks half a line, which sells "the capsule is opening, this content is
+   going behind the surface" better than a hard cut. It keeps running (paused
+   by the marquee rule above) so it resumes exactly where it stopped. */
+.landing-morph-marquee {
+  transition:
+    opacity 220ms ease-out,
+    filter 320ms ease-out,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.landing-morph[data-expanded="true"] .landing-morph-marquee {
+  opacity: 0;
+  filter: blur(3px);
+  transform: translateY(-6px);
+  pointer-events: none;
+}
+
+/* Invite label <-> state label crossfade. Both occupy the same grid cell, so
+   the row width is stable through the swap. */
+.landing-morph-label {
+  grid-area: 1 / 1;
+  transition:
+    opacity 200ms ease-out,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.landing-morph-label-out {
+  opacity: 0.7;
+}
+.landing-morph[data-expanded="true"] .landing-morph-label-out {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.landing-morph-label-in {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.landing-morph[data-expanded="true"] .landing-morph-label-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.landing-morph-chevron {
+  transition:
+    transform 420ms cubic-bezier(0.34, 1.4, 0.64, 1),
+    color 200ms ease-out;
+}
+.landing-morph[data-expanded="true"] .landing-morph-chevron {
+  transform: rotate(180deg);
+  color: var(--primary);
+}
+
+/* The unroll: `grid-template-rows: 0fr -> 1fr` animates to the content's real
+   height without guessing a max-height, so the panel can grow with its rows.
+   `overflow: hidden` on this box (and the inner wrapper) is what clips the
+   collapsed state; the panel itself scrolls once it exceeds the viewport. */
+.landing-morph-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease-out;
+}
+.landing-morph-reveal.is-expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 300ms ease-out 80ms;
+}
+.landing-morph-panel {
+  scrollbar-width: thin;
+}
+
+/* Row cascade. Rows drop in reading order on expand and lift out in reverse on
+   collapse — the panel folds bottom-up, like the sheet is rolling back. */
+.landing-morph-row {
+  position: relative;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 240ms ease-out,
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--row-delay, 0ms);
+}
+.landing-morph-reveal.is-expanded .landing-morph-row {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: calc(var(--row-delay, 0ms) + 120ms);
+}
+
+/* The newest article. A tinted row plus a leading edge marker is enough to pull
+   the eye without a second gradient competing with the panel's own background —
+   the accent sits on the row's left edge and fades out before it reaches the
+   headline, so it reads as a marker rather than a stripe. */
+.landing-morph-row-fresh {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--primary) 10%, transparent),
+    transparent 34%
+  );
+}
+.landing-morph-row-fresh::before {
+  content: "";
+  position: absolute;
+  top: 0.375rem;
+  bottom: 0.375rem;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+/* The "new" tag breathes once per cycle — a slow pulse, not a blink: it has to
+   survive being read at a glance next to a moving marquee. */
+.landing-morph-fresh-tag {
+  animation: landing-morph-fresh-pulse 2.4s ease-in-out infinite;
+}
+@keyframes landing-morph-fresh-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 45%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 0%, transparent);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing-ticker-track {
+    animation: none;
+  }
+  /* Keep the unroll (it is the affordance, not decoration) but strip the
+     travel and the cascade so nothing moves more than a state change. */
+  .landing-morph-marquee,
+  .landing-morph-label,
+  .landing-morph-chevron,
+  .landing-morph-row {
+    transition-duration: 1ms;
+  }
+  .landing-morph-marquee {
+    filter: none;
+    transform: none;
+  }
+  .landing-morph-row {
+    transform: none;
+  }
+  .landing-morph-reveal,
+  .landing-morph-reveal.is-expanded {
+    transition: none;
+  }
+  /* The pulse becomes a static ring — the tag still reads as "new" without
+     anything moving. */
+  .landing-morph-fresh-tag {
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
+  }
+  .landing-morph:hover .landing-morph-trigger::after {
     animation: none;
   }
 }

@@ -348,8 +348,8 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.8.0,<3.0.0" },
     { name = "python-multipart", specifier = ">=0.0.7,<1.0.0" },
     { name = "qrcode", extras = ["pil"], specifier = ">=8.0" },
-    { name = "researchclaw", marker = "extra == 'arc-templates'", git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.0-beta.1" },
-    { name = "researchclaw", marker = "extra == 'research'", git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.0-beta.1" },
+    { name = "researchclaw", marker = "extra == 'arc-templates'", git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.2" },
+    { name = "researchclaw", marker = "extra == 'research'", git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.2" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=1.40.6,<2.0.0" },
     { name = "sqlmodel", specifier = ">=0.0.21,<1.0.0" },
     { name = "tenacity", specifier = ">=8.2.3,<9.0.0" },
@@ -4454,7 +4454,7 @@ wheels = [
 [[package]]
 name = "researchclaw"
 version = "0.5.0"
-source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.0-beta.1#7512b9f237d91abb9f84bf2c032685208741539a" }
+source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.2#b495e99461956ccc242c49b3e35bf19527b052da" }
 dependencies = [
     { name = "arxiv" },
     { name = "numpy" },

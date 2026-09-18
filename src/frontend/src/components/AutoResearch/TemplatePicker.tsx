@@ -16,7 +16,7 @@
  * run_dir，不落任何 session 字段。故本组件的职责仅止于「挑一个 id 传上去」。
  */
 
-import { ChevronDown, Loader2, Search, Target } from "lucide-react"
+import { ChevronDown, ExternalLink, Loader2, Search, Target } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -31,6 +31,7 @@ import {
   useResearchTemplates,
 } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
+import { AUTORESEARCHCLAW_TEMPLATE_SOURCE_URL } from "@/lib/siteMetadata"
 
 import { SectionLabel } from "./tech"
 
@@ -305,6 +306,26 @@ export default function TemplatePicker({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* 来源说明压在浮层最底部（筛选条之上、列表之下都不合适）：它是元信息，
+              不该挤占列表的扫视区，放在面板底边就天然被读到且不参与滚动。
+              分隔线把它和列表分开，避免看成最后一行课题。
+              链接新标签页打开——弹框里的表单已填内容不会因为外跳丢掉。 */}
+          <div className="mt-2 border-t border-border/50 pt-1.5">
+            <p className="text-[11px] leading-snug text-muted-foreground/70">
+              {t("autoResearch.create.templateSourceHint")}
+              <a
+                href={AUTORESEARCHCLAW_TEMPLATE_SOURCE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mx-0.5 inline-flex items-center gap-0.5 font-mono text-primary/80 underline decoration-dotted underline-offset-2 transition-colors hover:text-primary"
+              >
+                {t("autoResearch.create.templateSourcePath")}
+                <ExternalLink className="size-2.5 shrink-0" />
+              </a>
+              {t("autoResearch.create.templateSourceHintTail")}
+            </p>
           </div>
         </PopoverContent>
       </Popover>

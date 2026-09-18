@@ -1040,10 +1040,78 @@ export function downloadResearchArtifact(sessionId: string, path: string) {
   return downloadBlob(url, filename)
 }
 
-/** 打包下载会话全部产物（zip；文件名由后端 Content-Disposition 决定，此处兜底）。 */
-export function downloadResearchArtifactsArchive(sessionId: string) {
-  const url = `${API_BASE}/sessions/${sessionId}/artifacts/archive`
-  return downloadBlob(url, `artifacts-${sessionId.slice(0, 8)}.zip`)
+// ---- 打包下载：票据 + 浏览器原生下载 ----
+
+/** 换取票据这一跳的等待上限：不会读包体，正常也就是几十毫秒。 */
+const ARCHIVE_TICKET_TIMEOUT_MS = 10_000
+
+/** 触发浏览器原生下载，不把包体读进内存。 */
+function dispatchBrowserDownload(url: string) {
+  const a = document.createElement("a")
+  // 不加 download 属性：文件名交给后端 Content-Disposition 决定（含 RFC 5987
+  // 的中文名兜底），带上反而会和它打架。
+  a.href = url
+  a.rel = "noopener"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/**
+ * 换取一张打包下载票据（带 Bearer 头的一次 POST）。
+ *
+ * ``authFetch`` 命中 401 会自行刷新令牌并重试一次，这里不再重复处理。拿到票据后
+ * 就不再需要认证头，包体可以交给浏览器自己拉。
+ */
+async function requestArchiveTicket(sessionId: string): Promise<string> {
+  const url = `${API_BASE}/sessions/${sessionId}/artifacts/archive/ticket`
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ARCHIVE_TICKET_TIMEOUT_MS)
+  try {
+    const resp = await authFetch(url, {
+      method: "POST",
+      signal: controller.signal,
+    })
+    if (!resp.ok) {
+      // 404 多为「run_dir 尚未初始化」或会话不属于当前用户。
+      throw new Error(`HTTP ${resp.status}`)
+    }
+    const data = (await resp.json()) as { ticket?: string }
+    if (!data?.ticket) throw new Error("empty ticket")
+    return data.ticket
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * 打包下载会话全部产物（zip）。
+ *
+ * 两步走，刻意和单文件下载的 ``downloadBlob`` 分开：
+ *
+ * 1. ``POST .../artifacts/archive/ticket`` 用 Bearer 头换一张短时票据；
+ * 2. 用 ``<a href>`` 导航到 ``.../artifacts/archive/stream?ticket=...`` ——
+ *    由浏览器自己发起请求、自己写盘、自己显示「已下载 xx MB」进度。
+ *
+ * 这样做的原因是 ``<a href>`` / ``window.location`` 没法带上 ``Authorization``
+ * 头，而 ``await resp.blob()`` 会把整个 zip 先缓存在内存里，界面在包下完之前
+ * 一直没反应。改成浏览器原生下载后，第一字节到达就开始累加，前端也不必再维护
+ * 进度 UI。代价是响应没有 ``Content-Length``（zip 边压边出，压完才知道总大小），
+ * 所以浏览器面板不显示百分比 —— 这正是当前接受的取舍。
+ *
+ * 导航是「点击即返回」，不是「下载完成即返回」：``await`` 到这里只表示请求已发出，
+ * 换票据失败才会 reject，调用方据此关掉 loading 态即可。文件名由后端
+ * ``Content-Disposition`` 决定，前端不再兜底构造。
+ *
+ * Args:
+ *   sessionId: 会话 id。
+ */
+export async function downloadResearchArtifactsArchive(sessionId: string) {
+  const ticket = await requestArchiveTicket(sessionId)
+  const params = new URLSearchParams({ ticket })
+  dispatchBrowserDownload(
+    `${API_BASE}/sessions/${sessionId}/artifacts/archive/stream?${params}`,
+  )
 }
 
 /**

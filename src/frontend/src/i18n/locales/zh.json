@@ -2360,6 +2360,17 @@
         "link": "https://satcompetition.github.io/2026/downloads/satcomp26slides.pdf"
       }
     },
+    "ticker": {
+      "hint": "展开全部",
+      "collapse": "收起",
+      "openLabel": "展开公告：查看全部竞赛成果与最新资讯（再次点击收起）",
+      "panelTitle": "竞赛成果与最新资讯",
+      "panelSubtitle": "点击任意条目可跳转查看详情",
+      "groupWins": "竞赛成果",
+      "groupNews": "最新资讯",
+      "badgeNew": "最新",
+      "empty": "暂无公告"
+    },
     "news": {
       "title": "最新资讯",
       "subtitle": "来自官方微信公众号的产品动态、研究进展与上手教程，持续更新。",
@@ -3447,6 +3458,9 @@
       "creating": "创建中...",
       "templateLabel": "课题模板（可选）",
       "templatePlaceholder": "从 ARC-Bench 课题库挑一个起点",
+      "templateSourceHint": "以上模板均来自 AutoResearchClaw 官方代码仓的",
+      "templateSourcePath": "experiments/arc_bench/config",
+      "templateSourceHintTail": "目录，点击可前往查看。",
       "templateClear": "取消选择",
       "templateSearch": "搜索",
       "templateAllDomains": "全部",

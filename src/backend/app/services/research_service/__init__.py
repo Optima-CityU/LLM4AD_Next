@@ -12,11 +12,19 @@ from .analysis import (
     get_analysis_data,
     stop_analysis_report,
 )
+from .archive_ticket import (
+    archive_disposition,
+    artifact_archive_download_name,
+    issue_archive_ticket,
+    verify_archive_ticket,
+)
 from .artifacts import (
     create_artifacts_archive,
     get_artifact_tree,
+    iter_artifacts_archive,
     list_artifacts,
     list_generated_solutions,
+    open_artifacts_archive,
     resolve_artifact_path,
     write_artifact,
 )
@@ -65,6 +73,8 @@ from .turns import (
 )
 
 __all__ = [
+    "archive_disposition",
+    "artifact_archive_download_name",
     "copy_session",
     "create_artifacts_archive",
     "create_folder",
@@ -84,6 +94,8 @@ __all__ = [
     "get_turn",
     "import_artifacts_zip",
     "inject_stage_guidance",
+    "issue_archive_ticket",
+    "iter_artifacts_archive",
     "list_artifacts",
     "list_folders",
     "list_generated_solutions",
@@ -92,6 +104,7 @@ __all__ = [
     "list_session_turns",
     "list_sessions",
     "list_topics",
+    "open_artifacts_archive",
     "reorder_folders",
     "resolve_artifact_path",
     "retry_turn",
@@ -105,5 +118,6 @@ __all__ = [
     "translate_artifact",
     "update_folder",
     "update_session",
+    "verify_archive_ticket",
     "write_artifact",
 ]

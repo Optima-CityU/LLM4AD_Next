@@ -4,13 +4,16 @@
 - ``list_generated_solutions``：内联 ``**/generated/*.json``、按 stage 分组，大字段
   按演化持久化口径剥离；
 - ``get_artifact_tree``：目录树，供前端文件浏览器；
-- ``resolve_artifact_path``：把相对路径解析成真实文件，并防目录穿越。
+- ``resolve_artifact_path``：把相对路径解析成真实文件，并防目录穿越；
+- ``create_artifacts_archive``：落临时 zip 再交给 ``FileResponse``（旧口径，未变）；
+- ``iter_artifacts_archive``：边打包边出字节，供 ``StreamingResponse`` 使用。
 
 本模块纯读文件系统，不写库、不改状态。
 """
 
 from __future__ import annotations
 
+import io
 import json
 import mimetypes
 import os
@@ -18,6 +21,7 @@ import re
 import tempfile
 import uuid
 import zipfile
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +43,7 @@ from app.schemas.research import (
 from app.utils.log_persist import strip_generated_fields_for_list
 
 from ._common import _get_session
+from .archive_ticket import artifact_archive_download_name
 
 # 只认「llm4ad 演化产物」这一条路径，且**只认 Stage 13**：
 #   stage-13/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/{文件}.json
@@ -362,6 +367,133 @@ def create_artifacts_archive(
     ).strip("_")
     download_name = f"{safe_title or 'artifacts'}-{str(session_id)[:8]}.zip"
     return zip_path, download_name
+
+
+# 流式打包的读块大小：单块 1 MiB，够摊薄 syscall 开销，又不至于长驻内存（产物目录
+# 可能几十 GB，整文件读进内存会 OOM）。
+_ARCHIVE_CHUNK_SIZE = 1024 * 1024
+
+# zip 条目统一使用的固定时间戳（DOS 时间字段，最早可表示值 1980-01-01 00:00:00）：
+# 不取文件 mtime，同一份产物重复下载得到完全一致的字节序列。
+_ARCHIVE_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+
+
+def open_artifacts_archive(
+    db: Session, session_id: uuid.UUID, user: models.User
+) -> tuple[str, Generator[bytes, None, None]]:
+    """备好一次流式打包下载：返回 ``(下载文件名, zip 字节生成器)``。
+
+    单独一个入口，是因为流式响应一旦开始就无法再改状态码 —— 会话归属校验与
+    ``run_dir`` 检查都必须在生成器被消费之前做完，才能保证「会话不存在 / 越权」
+    是一条正常的 404，而不是半截 zip。
+
+    Args:
+        db: 数据库会话。
+        session_id: 会话 id。
+        user: 当前登录用户，用于会话归属校验。
+
+    Returns:
+        ``(下载文件名, 生成器)``；文件名已按会话标题收敛成合法字符。
+
+    Raises:
+        HTTPException: 会话不存在/越权（404），或 run_dir 尚未初始化（404）。
+    """
+    session = _get_session(db, session_id, user)  # 归属校验（跨用户 404）
+    root = Path(session.run_dir) if session.run_dir else None
+    if not root or not root.is_dir():
+        raise HTTPException(status_code=404, detail="run_dir not initialized")
+    return (
+        artifact_archive_download_name(session.title, session_id),
+        iter_artifacts_archive(db, session_id, user),
+    )
+
+
+def iter_artifacts_archive(
+    db: Session, session_id: uuid.UUID, user: models.User
+) -> Generator[bytes, None, None]:
+    """边遍历、边打包、边产出 run_dir 下全部产物的 zip 字节。
+
+    与 :func:`create_artifacts_archive` 收录口径完全一致（同样跳过 ``.`` 开头的内部
+    点文件与 ``__pycache__`` 等缓存，zip 内保留相对 run_dir 的目录结构），区别只在
+    于这里不落临时文件：首个字节在读完第一个条目时就发出，不再有「整包压完才开始
+    下载」的静默期，也没有需要 ``BackgroundTask`` 清理的残留。
+
+    条目一律用 ``ZIP_STORED``（仅存储、不压缩），这是有意为之：run_dir 的大头是
+    PDF / PNG / ``evolution_state.json`` 这类本就压不动的数据，zlib 在上面几乎省不下
+    字节，却要吃满全程单核 CPU —— 那是「点了下载没反应」的主要来源。代价是包会比
+    压缩后大一些。若日后想恢复压缩，应改用 ``zlib.compressobj(level=1)`` 之类的低
+    档位，而不是 ``ZIP_DEFLATED`` 的默认 level。
+
+    客户端中途断开时 Starlette 会停止消费本生成器，剩余文件不会被读，也不遗留半成
+    品需要清理。
+
+    Note:
+        调用方必须在开始消费本生成器之前完成鉴权与 ``run_dir`` 校验：一旦响应头发出，
+        400/404 已无从返回。
+
+    Args:
+        db: 数据库会话。
+        session_id: 会话 id。
+        user: 当前登录用户，用于会话归属校验。
+
+    Yields:
+        zip 字节分块，按序拼接即为完整 zip。
+
+    Raises:
+        HTTPException: 会话不存在/越权（404），或 run_dir 尚未初始化（404）。
+    """
+    session = _get_session(db, session_id, user)
+    root = Path(session.run_dir) if session.run_dir else None
+    if not root or not root.is_dir():
+        raise HTTPException(status_code=404, detail="run_dir not initialized")
+
+    class _ChunkSink(io.RawIOBase):
+        """把 ZipFile 写出的连续字节攒成块，便于按块 yield 给响应。"""
+
+        def __init__(self) -> None:
+            self.chunks: list[bytes] = []
+
+        def writable(self) -> bool:
+            return True
+
+        def write(self, b: bytes | bytearray) -> int:  # type: ignore[override]
+            self.chunks.append(bytes(b))
+            return len(b)
+
+    sink = _ChunkSink()
+    # ZipFile 支持非 seek 流：此时它会为每个条目自动补写 data descriptor（本地头里
+    # CRC / 大小先写 0，真值落在尾部的中央目录），文件列表与大小仍然准确。
+    with zipfile.ZipFile(sink, "w") as zf:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = str(path.relative_to(root)).replace("\\", "/")
+            if any(part.startswith(".") for part in rel.split("/")):
+                continue
+            if _is_useless_cache(rel):
+                continue  # __pycache__/ .pyc 等缓存，不进下载包
+            info = zipfile.ZipInfo(rel, date_time=_ARCHIVE_ZIP_DATE_TIME)
+            info.compress_type = zipfile.ZIP_STORED
+            # external_attr 保住 unix 权限位（0o644 常规文件），否则解压出来可能不可读。
+            info.external_attr = 0o644 << 16
+            try:
+                with zf.open(info, "w") as dst, path.open("rb") as src:
+                    while True:
+                        chunk = src.read(_ARCHIVE_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        if sink.chunks:
+                            yield b"".join(sink.chunks)
+                            sink.chunks.clear()
+            except OSError:
+                # 单个条目读不动（被容器改着写 / 权限变动）不拖垮整包，跳过继续。
+                logger.opt(exception=True).warning(f"skip zip entry: {rel}")
+                sink.chunks.clear()
+    # 退出 with 时 ZipFile 写出中央目录与 EOCD；无产物时整包内容也全在这里。
+    if sink.chunks:
+        yield b"".join(sink.chunks)
+        sink.chunks.clear()
 
 
 def write_artifact(

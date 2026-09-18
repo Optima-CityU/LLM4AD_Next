@@ -8,6 +8,7 @@ import {
   Box,
   Brain,
   CalendarDays,
+  ChevronDown,
   Combine,
   Cpu,
   Crown,
@@ -27,12 +28,13 @@ import {
   Play,
   Sigma,
   Sparkles,
+  TrendingUp,
   Trophy,
   Workflow,
   Wrench,
   X,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { NewsService } from "@/client"
 import { FooterMetadataLinks } from "@/components/Common/Footer"
@@ -566,50 +568,424 @@ const DEMO_VIDEO = {
   },
 } as const
 
-function AnnouncementBanner() {
-  const { t } = useTranslation()
+/**
+ * One entry of the landing announcement ticker.
+ *
+ * The ticker mixes two kinds of content — competition results (`win`) and
+ * WeChat-account articles (`news`) — so both the marquee row and the panel can
+ * render from a single normalized shape. `badge` is the small pill on the left
+ * of a row; `text` is the headline; `href` is where a click lands; `meta` is an
+ * optional second fact (a publish date) shown after the pill; `fresh` marks the
+ * single newest article, which the panel and the marquee both accent so the
+ * freshest item reads first even though it is not at the top of the list.
+ */
+type Announcement = {
+  kind: "win" | "news"
+  badge: string
+  text: string
+  href: string
+  meta?: string
+  fresh?: boolean
+}
 
-  const wins = [
+/** News items pulled into the ticker. Keeps the loop short and readable. */
+const TICKER_NEWS_LIMIT = 3
+
+/**
+ * Approximate marquee duration, in px/s.
+ *
+ * The track is duplicated and animated by `-50%`, so the cycle time has to
+ * scale with the content width — with a fixed duration, appending news items
+ * would speed the marquee up. We can't measure text width without a layout
+ * pass, so estimate: CJK glyphs render at roughly the font size, latin ones at
+ * roughly half. `clamp` keeps a short track from crawling and a long one from
+ * flying.
+ */
+function marqueeDuration(items: Announcement[], speed = 26) {
+  const width = items.reduce((sum, item) => {
+    const cjk = item.text.match(/[㐀-鿿]/g)?.length ?? 0
+    return sum + (item.text.length - cjk) * 7 + cjk * 14
+  }, 0)
+  const seconds = Math.min(90, Math.max(28, Math.round(width / speed)))
+  return `${seconds}s`
+}
+
+/**
+ * Floating announcement bar above the hero.
+ *
+ * The bar is a morph, not a popover: it starts as a 56px capsule and, once
+ * hovered (or clicked / focused — the same gesture covers touch and keyboard),
+ * the shell unrolls downward into a panel while the marquee fades out and the
+ * grouped entries drop in one after another. Everything is one element, so the
+ * pointer can never fall into the gap between a trigger and its floating
+ * content, and there is no portal to chase.
+ *
+ * Hover expands; click pins the panel open (a second click, Escape, or a click
+ * outside releases it) so rows stay readable and clickable without holding the
+ * pointer still. Pointer-leave only collapses the unpinned state.
+ */
+function AnnouncementBanner() {
+  const { t, i18n } = useTranslation()
+  const lang: "zh" | "en" = i18n.language?.startsWith("zh") ? "zh" : "en"
+
+  // Same query key / staleness as `NewsSection`, so the two share one request.
+  const { data } = useQuery({
+    queryKey: ["landing-news", lang],
+    queryFn: () => NewsService.listNews({ lang }),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+
+  const shellRef = useRef<HTMLDivElement | null>(null)
+  const [hovered, setHovered] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const expanded = hovered || pinned
+
+  const wins: Announcement[] = [
     {
-      tag: t("landing.achievements.cvrp.title"),
-      desc: t("landing.achievements.cvrp.description"),
+      kind: "win",
+      badge: t("landing.achievements.cvrp.title"),
+      text: t("landing.achievements.cvrp.description"),
       href: t("landing.achievements.cvrp.link"),
     },
     {
-      tag: t("landing.achievements.sat.title"),
-      desc: t("landing.achievements.sat.description"),
+      kind: "win",
+      badge: t("landing.achievements.sat.title"),
+      text: t("landing.achievements.sat.description"),
       href: t("landing.achievements.sat.link"),
     },
   ]
+
+  // The backend already returns newest-first; just take the top few. `url` is
+  // the article permalink, `title` is the headline. The pill falls back to the
+  // section name only when the wiki block carries no tag of its own — most do,
+  // and a pill that says "news" on every news row carries no information.
+  // Index 0 is the newest article, so it alone gets `fresh`.
+  const news: Announcement[] = (data?.items ?? [])
+    .slice(0, TICKER_NEWS_LIMIT)
+    .map((item, index) => ({
+      kind: "news" as const,
+      badge: item.tag || item.source || t("landing.news.title"),
+      text: item.title,
+      href: item.url,
+      // Pre-formatted here so the row renders a plain string in either locale.
+      meta: formatNewsDate(item.published_at, i18n.language ?? "en"),
+      fresh: index === 0,
+    }))
+
+  // The freshest article leads the marquee even though the panel keeps it under
+  // its own group heading — the ticker is a teaser, and the newest thing is the
+  // thing worth teasing. It is lifted out of the news run rather than added
+  // again, so no entry appears twice in one lap.
+  const items = [...news.filter((item) => item.fresh), ...wins, ...news.filter((item) => !item.fresh)]
   // Duplicate the list so the -50% horizontal translate loops seamlessly.
-  const track = [...wins, ...wins]
+  const track = [...items, ...items]
+  const hasMore = items.length > 0
+
+  const groups = [
+    {
+      key: "win" as const,
+      label: t("landing.ticker.groupWins"),
+      icon: Trophy,
+      rows: wins,
+    },
+    {
+      key: "news" as const,
+      label: t("landing.ticker.groupNews"),
+      icon: TrendingUp,
+      rows: news,
+    },
+  ].filter((group) => group.rows.length > 0)
+
+  // Flattened for the stagger index — rows animate in reading order across
+  // both groups, not per group, so the cascade looks like one list.
+  let rowIndex = -1
+
+  const close = useCallback(() => {
+    setPinned(false)
+    setHovered(false)
+  }, [])
+
+  // Escape releases a pinned panel; a click anywhere outside the shell does the
+  // same. Both listeners are only attached while pinned.
+  useEffect(() => {
+    if (!pinned) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close()
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (!shellRef.current?.contains(event.target as Node)) close()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    document.addEventListener("pointerdown", onPointerDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      document.removeEventListener("pointerdown", onPointerDown)
+    }
+  }, [pinned, close])
 
   return (
-    <div className="absolute left-0 right-0 top-30 z-10 px-4 sm:px-6 lg:px-8">
-      <div className="landing-ticker mx-auto flex h-14 max-w-4xl items-center overflow-hidden rounded-2xl border border-border/40 bg-card/50 shadow-sm shadow-primary/5 backdrop-blur-xl">
-      {/* Scrolling items */}
-      <div className="landing-ticker-mask relative min-w-0 flex-1 overflow-hidden">
-        <div className="landing-ticker-track flex w-max items-center py-1">
-          {track.map((win, i) => (
-            <a
-              key={`${win.href}-${i}`}
-              href={win.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group flex h-full shrink-0 items-center gap-2.5 px-7"
+    <div className="absolute left-0 right-0 top-30 z-20 px-4 sm:px-6 lg:px-8">
+      {/* The shell carries the hover/reveal state. It handles pointer enter and
+          leave so the whole morph (header + panel) reads as one target — the
+          inner button only owns the click, which is why this wrapper is not
+          itself the button. */}
+      <section
+        ref={shellRef}
+        aria-label={t("landing.ticker.panelTitle")}
+        data-expanded={expanded}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className="landing-morph mx-auto w-full max-w-4xl"
+      >
+        {/* Click target + marquee row. Kept as one row in both states so the
+            header never moves while the shell grows — only its content and
+            trailing affordance change. */}
+        <button
+          type="button"
+          onClick={() => setPinned((prev) => !prev)}
+          aria-expanded={expanded}
+          aria-controls="landing-ticker-panel"
+          aria-label={t("landing.ticker.openLabel")}
+          className={`landing-morph-trigger relative flex h-14 w-full cursor-pointer items-center gap-2 overflow-hidden px-1 text-left focus-visible:outline-none ${
+            expanded ? "landing-morph-trigger-open" : ""
+          }`}
+        >
+          {/* Scrolling items. Fades, blurs and sinks as the panel takes over —
+              the marquee keeps its animation (frozen by CSS while expanded)
+              rather than unmounting, so it resumes exactly where it left off. */}
+          <span className="landing-ticker-mask landing-morph-marquee relative min-w-0 flex-1 self-stretch overflow-hidden">
+            <span
+              className="landing-ticker-track flex h-full w-max items-center py-1"
+              style={{ animationDuration: marqueeDuration(items) }}
             >
-              <span className="inline-flex items-center whitespace-nowrap rounded-full border border-primary/25 bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold leading-4 text-primary">
-                {win.tag}
+              {track.map((item, i) => (
+                <span
+                  key={`${item.kind}-${item.href}-${i}`}
+                  // Duplicated half is decorative — hide it from screen readers
+                  // so entries aren't announced twice.
+                  aria-hidden={i >= items.length}
+                  className="flex h-full shrink-0 items-center gap-2.5 px-6"
+                >
+                  <span
+                    className={`inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-semibold leading-4 ${
+                      item.fresh
+                        ? "border-transparent bg-primary text-primary-foreground"
+                        : item.kind === "news"
+                          ? "border-primary/25 bg-primary/5 text-primary/80"
+                          : "border-primary/30 bg-primary/10 text-primary"
+                    }`}
+                  >
+                    {/* Distinguish the two kinds at a glance: results get the
+                        trophy, articles a dot, instead of a wordy label. The
+                        fresh article inverts to a solid pill, which is the one
+                        thing in the row strong enough to read while moving. */}
+                    {item.kind === "win" ? (
+                      <Trophy className="mr-1 size-3 shrink-0" />
+                    ) : (
+                      <span
+                        className={`mr-1 size-1.5 shrink-0 rounded-full ${
+                          item.fresh ? "bg-primary-foreground" : "bg-primary/60"
+                        }`}
+                      />
+                    )}
+                    <span className="max-w-[9rem] truncate">{item.badge}</span>
+                  </span>
+                  <span
+                    className={`max-w-[34rem] truncate text-sm leading-5 ${
+                      item.fresh
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {item.text}
+                  </span>
+                  <ExternalLink
+                    className={`size-3.5 shrink-0 ${
+                      item.fresh ? "text-primary" : "text-muted-foreground/40"
+                    }`}
+                  />
+                </span>
+              ))}
+              {/* Nothing to show (wiki unreachable / not configured): a
+                  placeholder keeps the bar from collapsing under the hero. */}
+              {items.length === 0 && (
+                <span className="px-7 text-sm text-muted-foreground">
+                  {t("landing.ticker.empty")}
+                </span>
+              )}
+            </span>
+          </span>
+
+          {/* Trailing affordance. The label crossfades from the invite
+              ("展开全部") to the state ("收起"), which is what tells the user
+              the click that opened this can also close it. */}
+          {hasMore && (
+            <span className="relative flex h-full shrink-0 items-center gap-2 pl-3 pr-1">
+              <span className="relative grid h-4 w-[4.5rem] place-items-center text-xs font-medium">
+                <span className="landing-morph-label landing-morph-label-out text-primary">
+                  {t("landing.ticker.hint")}
+                </span>
+                <span className="landing-morph-label landing-morph-label-in text-muted-foreground">
+                  {t("landing.ticker.collapse")}
+                </span>
               </span>
-              <span className="whitespace-nowrap text-sm leading-5 text-muted-foreground transition-colors group-hover:text-primary">
-                {win.desc}
-              </span>
-              <ExternalLink className="size-3.5 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-primary" />
-            </a>
-          ))}
+              <ChevronDown className="landing-morph-chevron size-4 shrink-0 text-muted-foreground" />
+            </span>
+          )}
+        </button>
+
+        {/* The unroll itself. `grid-rows-[0fr] -> [1fr]` animates height without
+            hard-coding a max-height, so the panel can grow with its content.
+            `overflow-hidden` + `min-h-0` on the inner wrapper is what makes the
+            trick work; the panel is decorative while collapsed (links are
+            `tabIndex -1` and it is `inert`-like via `aria-hidden`). */}
+        <div
+          className={`landing-morph-reveal ${expanded ? "is-expanded" : ""}`}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <div
+              id="landing-ticker-panel"
+              aria-hidden={!expanded}
+              className="landing-morph-panel max-h-[62vh] overflow-y-auto border-t border-border/40"
+            >
+              <div className="px-5 py-3">
+                <p className="text-sm font-semibold text-foreground">
+                  {t("landing.ticker.panelTitle")}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {t("landing.ticker.panelSubtitle")}
+                </p>
+              </div>
+
+              {/* One column, not two. A two-column layout put the pill widths
+                  of the two groups in different columns, so the headline start
+                  position disagreed across the grid. Full-width rows also give
+                  these long Chinese headlines room to wrap to two lines instead
+                  of four, and each row is a single scannable line-item. */}
+              <div className="flex flex-col gap-0.5 px-2.5 pb-2.5">
+                {groups.map((group) => (
+                  <div key={group.key} className="min-w-0">
+                    <p className="flex items-center gap-1.5 px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                      <group.icon className="size-3.5" />
+                      {group.label}
+                    </p>
+                    <ul>
+                      {group.rows.map((row) => {
+                        rowIndex += 1
+                        return (
+                          <li key={row.href}>
+                            <a
+                              href={row.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              tabIndex={expanded ? undefined : -1}
+                              // Cascade: each row starts a beat after the one
+                              // before it, and reverses on collapse so the
+                              // panel folds from the bottom up. Cast because
+                              // React's CSSProperties has no slot for custom
+                              // properties.
+                              style={
+                                {
+                                  "--row-delay": `${rowIndex * 45}ms`,
+                                } as React.CSSProperties
+                              }
+                              className={`landing-morph-row flex items-center gap-3 rounded-xl px-2.5 py-2 transition-colors focus-visible:outline-none ${
+                                row.fresh
+                                  ? "landing-morph-row-fresh hover:bg-primary/10 focus-visible:bg-primary/10"
+                                  : "hover:bg-primary/5 focus-visible:bg-primary/5"
+                              }`}
+                            >
+                              {/* Fixed label track: every pill occupies the
+                                  same 11rem regardless of its text, so all
+                                  headlines start at the same x. Long labels
+                                  truncate rather than widen the track — with a
+                                  tooltip-free label, `title` is the fallback
+                                  for the truncated text. */}
+                              <span className="flex w-[10rem] shrink-0 items-center">
+                                <span
+                                  title={row.badge}
+                                  className={`inline-flex min-w-0 max-w-full items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold leading-4 ${
+                                    row.fresh
+                                      ? "border-primary/40 bg-primary/15 text-primary"
+                                      : "border-primary/20 bg-primary/10 text-primary"
+                                  }`}
+                                >
+                                  <span className="truncate">{row.badge}</span>
+                                </span>
+                              </span>
+                              <span className="min-w-0 flex-1 text-sm leading-5">
+                                {row.fresh && (
+                                  <span className="landing-morph-fresh-tag mr-1.5 inline-flex translate-y-[-1px] items-center rounded-[4px] bg-primary px-1.5 py-px align-middle text-[10px] font-bold uppercase leading-[14px] tracking-wide text-primary-foreground">
+                                    {t("landing.ticker.badgeNew")}
+                                  </span>
+                                )}
+                                <span
+                                  className={
+                                    row.fresh
+                                      ? "font-medium text-foreground"
+                                      : "text-foreground/90"
+                                  }
+                                >
+                                  {row.text}
+                                </span>
+                              </span>
+                              {/* Publish date, right-aligned so the dates form
+                                  a quiet column of their own instead of
+                                  colliding with the headline's ragged edge. */}
+                              {row.meta && (
+                                <span
+                                  className={`hidden shrink-0 text-xs tabular-nums sm:inline ${
+                                    row.fresh
+                                      ? "font-medium text-primary/80"
+                                      : "text-muted-foreground/70"
+                                  }`}
+                                >
+                                  {row.meta}
+                                </span>
+                              )}
+                              <ArrowUpRight
+                                className={`size-3.5 shrink-0 ${
+                                  row.fresh
+                                    ? "text-primary"
+                                    : "text-muted-foreground/50"
+                                }`}
+                              />
+                            </a>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+
+              {/* Pointer to the wiki archive, which holds every article we've
+                  published — the on-page grid and this panel both only show a
+                  slice of it. */}
+              {news.length > 0 && (
+                <div className="flex justify-end border-t border-border/40 px-5 py-2.5">
+                  <a
+                    href={NEWS_INDEX_URL[lang]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    tabIndex={expanded ? undefined : -1}
+                    style={
+                      {
+                        "--row-delay": `${rowIndex * 45 + 45}ms`,
+                      } as React.CSSProperties
+                    }
+                    className="landing-morph-row inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    {t("landing.news.viewMore")}
+                    <ArrowUpRight className="size-3.5" />
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
-      </div>
+      </section>
     </div>
   )
 }
