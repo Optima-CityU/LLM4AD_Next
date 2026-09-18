@@ -4454,7 +4454,7 @@ wheels = [
 [[package]]
 name = "researchclaw"
 version = "0.5.0"
-source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.2#b495e99461956ccc242c49b3e35bf19527b052da" }
+source = { git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.2#3a91b7aec44df41b92dcdf6548ce38ec4cfc5177" }
 dependencies = [
     { name = "arxiv" },
     { name = "numpy" },
