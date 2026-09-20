@@ -62,8 +62,7 @@ services:
         nofile:
           soft: 65535
           hard: 65535
-    image: llm4ad-mindmemos:latest
-    pull_policy: never
+    image: "${DOCKER_IMAGE_MINDMEMOS:-llm4ad-mindmemos}:${TAG-latest}"
     restart: always
     depends_on:
       mindmemos-qdrant:
