@@ -2,8 +2,12 @@ import { Link as RouterLink, useRouterState } from "@tanstack/react-router"
 import type { LucideIcon } from "lucide-react"
 import {
   BookOpen,
+  ChevronRight,
   Database,
+  FileText,
   FolderKanban,
+  GitBranch,
+  MessageSquareReply,
   MessageSquareText,
   Microscope,
   QrCode,
@@ -13,6 +17,8 @@ import {
   Sparkles,
   Users,
 } from "lucide-react"
+import { Collapsible } from "radix-ui"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import { Logo } from "@/components/Common/Logo"
@@ -26,10 +32,17 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar"
 import useAuth from "@/hooks/useAuth"
+import {
+  parseResearchWorkspaceMode,
+  type ResearchWorkspaceMode,
+} from "@/lib/researchWorkspace"
 import { GITHUB_ISSUES_URL } from "@/lib/siteMetadata"
 
 type Item = {
@@ -39,6 +52,14 @@ type Item = {
   href?: string
   /** Optional badge label shown inline (e.g. "Beta"). */
   badge?: string
+}
+
+/** Entry of the research workspace submenu. `mode` targets a papers tab. */
+type ResearchItem = {
+  icon: LucideIcon
+  title: string
+  path: "/autoresearch" | "/papers"
+  mode?: ResearchWorkspaceMode
 }
 
 function NavItems({ items }: { items: Item[] }) {
@@ -97,18 +118,109 @@ function NavItems({ items }: { items: Item[] }) {
 
 function ResearchWorkspaceNav() {
   const { t } = useTranslation()
-  const researchItems: Item[] = [
+  const router = useRouterState()
+  const currentPath = router.location.pathname
+  const currentMode = parseResearchWorkspaceMode(
+    new URLSearchParams(router.location.searchStr).get("mode"),
+  )
+  const researchActive =
+    currentPath.startsWith("/autoresearch") || currentPath === "/papers"
+  const [open, setOpen] = useState(researchActive)
+
+  useEffect(() => {
+    if (researchActive) {
+      setOpen(true)
+    }
+  }, [researchActive])
+
+  const researchItems: ResearchItem[] = [
     {
-      icon: Microscope,
-      title: t("sidebar.paperWorkspace"),
+      icon: Sparkles,
+      title: t("sidebar.autoResearch"),
+      path: "/autoresearch",
+    },
+    {
+      icon: FileText,
+      title: t("sidebar.autoProposal"),
       path: "/papers",
+      mode: "proposal",
+    },
+    {
+      icon: MessageSquareReply,
+      title: t("sidebar.autoRebuttal"),
+      path: "/papers",
+      mode: "manuscript",
+    },
+    {
+      icon: GitBranch,
+      title: t("sidebar.autoDiscovery"),
+      path: "/papers",
+      mode: "algorithm",
     },
   ]
 
   return (
     <SidebarGroup>
       <SidebarGroupContent>
-        <NavItems items={researchItems} />
+        <SidebarMenu className="gap-1">
+          <Collapsible.Root
+            open={open}
+            onOpenChange={setOpen}
+            className="group/research"
+          >
+            <SidebarMenuItem>
+              <Collapsible.Trigger asChild>
+                <SidebarMenuButton
+                  className="h-10"
+                  tooltip={t("sidebar.paperWorkspace")}
+                  isActive={researchActive}
+                >
+                  <Microscope />
+                  <span className="font-medium">
+                    {t("sidebar.paperWorkspace")}
+                  </span>
+                  <span className="ml-auto rounded-full border border-amber-500/30 bg-amber-500/15 px-1 py-0.5 text-[9px] font-semibold leading-none text-amber-600 dark:text-amber-400">
+                    Beta
+                  </span>
+                  <ChevronRight className="ml-1 transition-transform duration-200 group-data-[state=open]/research:rotate-90" />
+                </SidebarMenuButton>
+              </Collapsible.Trigger>
+              <Collapsible.Content>
+                <SidebarMenuSub>
+                  {researchItems.map((item) => {
+                    const isActive =
+                      item.path === "/autoresearch"
+                        ? currentPath.startsWith("/autoresearch")
+                        : currentPath === "/papers" && currentMode === item.mode
+                    return (
+                      <SidebarMenuSubItem key={item.title}>
+                        <SidebarMenuSubButton isActive={isActive} asChild>
+                          {item.mode ? (
+                            <RouterLink
+                              to="/papers"
+                              search={{
+                                mode: item.mode,
+                                workspaceId: undefined,
+                              }}
+                            >
+                              <item.icon />
+                              <span>{item.title}</span>
+                            </RouterLink>
+                          ) : (
+                            <RouterLink to="/autoresearch">
+                              <item.icon />
+                              <span>{item.title}</span>
+                            </RouterLink>
+                          )}
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    )
+                  })}
+                </SidebarMenuSub>
+              </Collapsible.Content>
+            </SidebarMenuItem>
+          </Collapsible.Root>
+        </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
   )
@@ -123,12 +235,6 @@ export function AppSidebar() {
       icon: FolderKanban,
       title: t("sidebar.projectManagement"),
       path: "/projects",
-    },
-    {
-      icon: Sparkles,
-      title: t("sidebar.autoResearch"),
-      path: "/autoresearch",
-      badge: "Beta",
     },
   ]
 
