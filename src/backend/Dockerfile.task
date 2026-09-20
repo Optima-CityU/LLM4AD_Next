@@ -77,6 +77,8 @@ RUN npm ci --ignore-scripts \
     && npm rebuild @vscode/ripgrep bcrypt esbuild node-pty sharp unrs-resolver \
     && npm_config_build_from_source=true npm rebuild better-sqlite3
 COPY ./third_party/CloudCLI/ ./
+ENV VITE_IS_PLATFORM=true
+ENV VITE_LLM4AD_EMBEDDED=true
 RUN node scripts/fix-node-pty.js \
     && npm run build \
     && npm prune --omit=dev

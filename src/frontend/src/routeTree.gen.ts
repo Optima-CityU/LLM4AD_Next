@@ -29,6 +29,7 @@ import { Route as LayoutPapersRouteImport } from './routes/_layout/papers'
 import { Route as LayoutMemoryRouteImport } from './routes/_layout/memory'
 import { Route as LayoutLlm_roviderRouteImport } from './routes/_layout/llm_rovider'
 import { Route as LayoutLiveCodesRouteImport } from './routes/_layout/live-codes'
+import { Route as LayoutKnowledgeRouteImport } from './routes/_layout/knowledge'
 import { Route as LayoutGuideRouteImport } from './routes/_layout/guide'
 import { Route as LayoutFeedbackRouteImport } from './routes/_layout/feedback'
 import { Route as LayoutConfig_templateRouteImport } from './routes/_layout/config_template'
@@ -133,6 +134,11 @@ const LayoutLiveCodesRoute = LayoutLiveCodesRouteImport.update({
   path: '/live-codes',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutKnowledgeRoute = LayoutKnowledgeRouteImport.update({
+  id: '/knowledge',
+  path: '/knowledge',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutGuideRoute = LayoutGuideRouteImport.update({
   id: '/guide',
   path: '/guide',
@@ -177,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
   '/guide': typeof LayoutGuideRoute
+  '/knowledge': typeof LayoutKnowledgeRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
   '/memory': typeof LayoutMemoryRoute
@@ -200,6 +207,7 @@ export interface FileRoutesByTo {
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
   '/guide': typeof LayoutGuideRoute
+  '/knowledge': typeof LayoutKnowledgeRoute
   '/live-codes': typeof LayoutLiveCodesRoute
   '/llm_rovider': typeof LayoutLlm_roviderRoute
   '/memory': typeof LayoutMemoryRoute
@@ -229,6 +237,7 @@ export interface FileRoutesById {
   '/_layout/config_template': typeof LayoutConfig_templateRoute
   '/_layout/feedback': typeof LayoutFeedbackRoute
   '/_layout/guide': typeof LayoutGuideRoute
+  '/_layout/knowledge': typeof LayoutKnowledgeRoute
   '/_layout/live-codes': typeof LayoutLiveCodesRoute
   '/_layout/llm_rovider': typeof LayoutLlm_roviderRoute
   '/_layout/memory': typeof LayoutMemoryRoute
@@ -254,6 +263,7 @@ export interface FileRouteTypes {
     | '/config_template'
     | '/feedback'
     | '/guide'
+    | '/knowledge'
     | '/live-codes'
     | '/llm_rovider'
     | '/memory'
@@ -277,6 +287,7 @@ export interface FileRouteTypes {
     | '/config_template'
     | '/feedback'
     | '/guide'
+    | '/knowledge'
     | '/live-codes'
     | '/llm_rovider'
     | '/memory'
@@ -305,6 +316,7 @@ export interface FileRouteTypes {
     | '/_layout/config_template'
     | '/_layout/feedback'
     | '/_layout/guide'
+    | '/_layout/knowledge'
     | '/_layout/live-codes'
     | '/_layout/llm_rovider'
     | '/_layout/memory'
@@ -473,6 +485,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutLiveCodesRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/knowledge': {
+      id: '/_layout/knowledge'
+      path: '/knowledge'
+      fullPath: '/knowledge'
+      preLoaderRoute: typeof LayoutKnowledgeRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/guide': {
       id: '/_layout/guide'
       path: '/guide'
@@ -524,6 +543,7 @@ interface LayoutRouteChildren {
   LayoutConfig_templateRoute: typeof LayoutConfig_templateRoute
   LayoutFeedbackRoute: typeof LayoutFeedbackRoute
   LayoutGuideRoute: typeof LayoutGuideRoute
+  LayoutKnowledgeRoute: typeof LayoutKnowledgeRoute
   LayoutLiveCodesRoute: typeof LayoutLiveCodesRoute
   LayoutLlm_roviderRoute: typeof LayoutLlm_roviderRoute
   LayoutMemoryRoute: typeof LayoutMemoryRoute
@@ -538,6 +558,7 @@ const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutConfig_templateRoute: LayoutConfig_templateRoute,
   LayoutFeedbackRoute: LayoutFeedbackRoute,
   LayoutGuideRoute: LayoutGuideRoute,
+  LayoutKnowledgeRoute: LayoutKnowledgeRoute,
   LayoutLiveCodesRoute: LayoutLiveCodesRoute,
   LayoutLlm_roviderRoute: LayoutLlm_roviderRoute,
   LayoutMemoryRoute: LayoutMemoryRoute,

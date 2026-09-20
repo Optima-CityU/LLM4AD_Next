@@ -1009,6 +1009,11 @@
       "directFlow": "一次请求 → 直接生成"
     },
     "plan": {
+      "interactionMode": "选择方案生成方式",
+      "quickMode": "快速规划",
+      "quickDescription": "不暂停提问，直接生成两个候选策略，适合整理要求已经明确的情况。",
+      "collaborativeMode": "协作规划",
+      "collaborativeDescription": "允许规划器先暂停并提出聚焦的澄清问题，再根据回答生成候选策略。",
       "prepareTitle": "先浏览原文并生成解析方案",
       "prepareDescription": "模型会完整阅读当前主题下的全部文档，根据真实组织分歧给出一个或多个候选策略和预计产出数量。此步骤不会生成最终知识文档。",
       "questionTitle": "需要你确认一个关键选择",

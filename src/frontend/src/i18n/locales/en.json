@@ -1009,6 +1009,11 @@
       "directFlow": "One request → Generate directly"
     },
     "plan": {
+      "interactionMode": "Choose how to generate the plan",
+      "quickMode": "Quick Planning",
+      "quickDescription": "Generate two candidate strategies without pausing for clarification. Best when your requirements are already clear.",
+      "collaborativeMode": "Collaborative Planning",
+      "collaborativeDescription": "Allow the planner to pause and ask focused clarification questions before proposing strategies.",
       "prepareTitle": "Read sources and propose an extraction plan",
       "prepareDescription": "The model reads every document in this topic and proposes one or more meaningfully different strategies with expected output counts. No final knowledge documents are generated in this step.",
       "questionTitle": "A key planning choice needs your input",
