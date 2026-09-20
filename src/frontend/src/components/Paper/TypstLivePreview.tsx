@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 
 import { Llm4AdPapersService } from "@/client"
 import { Button } from "@/components/ui/button"
+import { useExportPaperSource } from "@/hooks/usePapers"
 import { authFetch } from "@/utils/auth"
 
 import { TYPST_EXTRA_FONTS, TYPST_FONT_BASE } from "./typstFonts"
@@ -105,6 +106,7 @@ export default function TypstLivePreview({
   downloadEnabled?: boolean
 }) {
   const { t } = useTranslation()
+  const exportPaper = useExportPaperSource()
   const [status, setStatus] = useState<PreviewStatus>("idle")
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [error, setError] = useState("")
@@ -231,6 +233,20 @@ export default function TypstLivePreview({
 
   const busy = status === "loading" || status === "compiling"
 
+  // The preview already downloads the source bundle to compile it. Exposing the
+  // same archive here keeps "download the paper" next to the PDF it renders.
+  const downloadPaper = async () => {
+    const exported = await exportPaper.mutateAsync(sourceVersionId)
+    const response = await authFetch(exported.url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const objectUrl = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement("a")
+    anchor.href = objectUrl
+    anchor.download = exported.filename
+    anchor.click()
+    URL.revokeObjectURL(objectUrl)
+  }
+
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-muted/20">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
@@ -253,6 +269,21 @@ export default function TypstLivePreview({
                     : t("paper.typst.waitingForSource")}
           </p>
         </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-8"
+          title={t("paper.export")}
+          disabled={exportPaper.isPending}
+          onClick={() => void downloadPaper()}
+        >
+          {exportPaper.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <Download className="size-3.5" />
+          )}
+        </Button>
         {downloadEnabled && pdfUrl && status === "ready" && (
           <Button
             type="button"

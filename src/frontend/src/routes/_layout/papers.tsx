@@ -8,7 +8,6 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  Download,
   FileCheck2,
   FilePlus2,
   FileText,
@@ -40,6 +39,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import {
+  type Layout,
   Group as ResizableGroup,
   Panel as ResizablePanel,
   Separator as ResizableSeparator,
@@ -94,7 +94,6 @@ import {
   useCreatePaperWorkspace,
   useDeletePaperSourcePath,
   useDeletePaperWorkspace,
-  useExportPaperSource,
   usePaperSourceFile,
   usePaperWorkspace,
   usePaperWorkspaces,
@@ -109,7 +108,6 @@ import {
   type ResearchWorkspaceMode,
 } from "@/lib/researchWorkspace"
 import { cn, formatDate } from "@/lib/utils"
-import { authFetch } from "@/utils/auth"
 
 export const Route = createFileRoute("/_layout/papers")({
   component: PaperProjectsPage,
@@ -296,8 +294,7 @@ function PaperWorkflowStepper({
           const complete = completedStages.has(key)
           const running = runningStage === key
           const stale = stageStates[key]?.status === "stale"
-          const needsRevision =
-            stageStates[key]?.status === "needs_revision"
+          const needsRevision = stageStates[key]?.status === "needs_revision"
           const statusLabel = needsRevision
             ? t("paper.workflow.needsRevision")
             : stale
@@ -1282,55 +1279,37 @@ function PaperSourceManager({
         </div>
       )}
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="min-w-0 flex-1 cursor-help truncate text-sm font-medium">
-                {selectedPath ?? t("paper.editor.selectFile")}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent
-              side="bottom"
-              sideOffset={6}
-              className="max-w-[min(32rem,80vw)] break-all"
+        <div className="flex min-h-12 shrink-0 items-center justify-end gap-2 border-b px-4">
+          {!continuousEditing && selectedPath && !editing && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={locked || !editable}
+              title={!editable ? t("paper.workflow.readOnlyStage") : undefined}
+              onClick={onEdit}
             >
-              {selectedPath ?? t("paper.editor.selectFile")}
-            </TooltipContent>
-          </Tooltip>
-          <div className="flex shrink-0 items-center gap-2">
-            {!continuousEditing && selectedPath && !editing && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={locked || !editable}
-                title={
-                  !editable ? t("paper.workflow.readOnlyStage") : undefined
-                }
-                onClick={onEdit}
-              >
-                <Pencil className="size-3.5" /> {t("paper.editor.edit")}
-              </Button>
-            )}
-            {editing && !continuousEditing && (
-              <Button size="sm" variant="ghost" onClick={onCancelEdit}>
-                <X className="size-3.5" /> {t("common.cancel")}
-              </Button>
-            )}
-            {editorActive && (
-              <Button
-                size="sm"
-                disabled={!sourceDirty || !sourceDraft || saving || locked}
-                onClick={onSave}
-              >
-                {saving ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Save className="size-3.5" />
-                )}
-                {t("common.save")}
-              </Button>
-            )}
-          </div>
+              <Pencil className="size-3.5" /> {t("paper.editor.edit")}
+            </Button>
+          )}
+          {editing && !continuousEditing && (
+            <Button size="sm" variant="ghost" onClick={onCancelEdit}>
+              <X className="size-3.5" /> {t("common.cancel")}
+            </Button>
+          )}
+          {editorActive && (
+            <Button
+              size="sm"
+              disabled={!sourceDirty || !sourceDraft || saving || locked}
+              onClick={onSave}
+            >
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              {t("common.save")}
+            </Button>
+          )}
         </div>
 
         {!selectedPath ? (
@@ -1345,6 +1324,10 @@ function PaperSourceManager({
             id="proposal-typst-editor-preview"
             orientation="horizontal"
             className="min-h-0 flex-1 overflow-hidden"
+            // Widen the library's own resize target instead of overlaying an
+            // extra hit area: a custom overlay advertises a drag band the
+            // library does not act on, so grabbing there does nothing.
+            resizeTargetMinimumSize={RESIZE_TARGET_MINIMUM_SIZE}
           >
             <ResizablePanel
               id="typst-editor"
@@ -1366,9 +1349,7 @@ function PaperSourceManager({
                 />
               )}
             </ResizablePanel>
-            <ResizableSeparator className="group relative w-px bg-border outline-none transition-colors hover:bg-primary focus-visible:bg-primary">
-              <span className="absolute inset-y-0 -left-1.5 w-4" />
-            </ResizableSeparator>
+            <ResizableSeparator className="group relative w-px bg-border outline-none transition-colors hover:bg-primary focus-visible:bg-primary" />
             <ResizablePanel
               id="typst-preview"
               defaultSize="52%"
@@ -1494,6 +1475,16 @@ function PaperSourceManager({
   )
 }
 
+/** Id of the dock's source panel, which also keys its entry in the layout. */
+const EDITOR_PANEL_ID = "paper-dock-editor"
+
+/**
+ * Grab band around a separator. The library default is only 10px for a mouse —
+ * a few pixels either side of the hairline — which reads as "the handle does
+ * not work" whenever the pointer lands slightly off it.
+ */
+const RESIZE_TARGET_MINIMUM_SIZE = { coarse: 28, fine: 16 }
+
 function PaperDocumentDock({
   manifest,
   sourceVersionId,
@@ -1551,7 +1542,6 @@ function PaperDocumentDock({
   onDraftChange: (value: string) => void
 }) {
   const { t } = useTranslation()
-  const exportSource = useExportPaperSource()
   const suffix = selectedPath?.toLowerCase() ?? ""
   const isMarkdown = suffix.endsWith(".md") || suffix.endsWith(".markdown")
   const isTypst = suffix.endsWith(".typ")
@@ -1594,13 +1584,26 @@ function PaperDocumentDock({
     setEditorCollapsed(panel.isCollapsed())
   }, [editorPanelRef, setEditorCollapsed])
 
-  // Remember the dragged height, but only for an open editor: a collapsed panel
-  // reports its placeholder height, and storing that would reopen it as a sliver.
+  // The panel always lays out at `defaultSize`, so the mirror above can start
+  // out disagreeing with it (the remembered value says "collapsed" while the
+  // panel is open) and nothing would correct it until some resize event
+  // happened to fire. Until then the separator stays disabled and the enlarged
+  // drag target is not even rendered, so the reader's first drag does nothing.
+  useEffect(() => {
+    syncEditorCollapsed()
+  }, [syncEditorCollapsed])
+
+  // Remember the dragged height for an open editor only: a collapsed panel
+  // reports its placeholder height, and storing that would reopen it as a
+  // sliver. This runs after the layout settled rather than on every resize
+  // event, because feeding the live drag position back into `defaultSize` makes
+  // the library re-apply the default layout — the panel then stops following
+  // the pointer and a drag only moves it a few pixels.
   const rememberEditorHeight = useCallback(
-    (size: { asPercentage: number }) => {
+    (layout: Layout) => {
       if (editorPanelRef.current?.isCollapsed()) return
       // Rounded so a sub-pixel drag does not churn localStorage on every frame.
-      const percent = `${Math.round(size.asPercentage * 10) / 10}%`
+      const percent = `${Math.round((layout[EDITOR_PANEL_ID] ?? 0) * 10) / 10}%`
       setEditorHeight((current) => (current === percent ? current : percent))
     },
     [editorPanelRef, setEditorHeight],
@@ -1612,6 +1615,11 @@ function PaperDocumentDock({
         id={`paper-dock-${workspaceKey}`}
         orientation="vertical"
         className="min-h-0 flex-1 overflow-hidden"
+        onLayoutChanged={rememberEditorHeight}
+        // Widen the library's own resize target instead of overlaying an extra
+        // hit area: a custom overlay advertises a drag band the library does not
+        // act on, so grabbing just outside the separator would do nothing.
+        resizeTargetMinimumSize={RESIZE_TARGET_MINIMUM_SIZE}
       >
         <ResizablePanel
           id="paper-dock-preview"
@@ -1619,46 +1627,6 @@ function PaperDocumentDock({
           className="min-h-0 min-w-0 overflow-hidden"
         >
           <section className="flex h-full min-h-0 flex-col overflow-hidden">
-            <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="min-w-0 flex-1 cursor-help truncate text-xs font-semibold">
-                    {selectedPath ?? t("paper.editor.selectFile")}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[min(30rem,80vw)] break-all">
-                  {selectedPath ?? t("paper.editor.selectFile")}
-                </TooltipContent>
-              </Tooltip>
-              <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-7"
-                  disabled={exportSource.isPending}
-                  title={t("paper.export")}
-                  onClick={async () => {
-                    const result =
-                      await exportSource.mutateAsync(sourceVersionId)
-                    const response = await authFetch(result.url)
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-                    const objectUrl = URL.createObjectURL(await response.blob())
-                    const anchor = document.createElement("a")
-                    anchor.href = objectUrl
-                    anchor.download = result.filename
-                    anchor.click()
-                    URL.revokeObjectURL(objectUrl)
-                  }}
-                >
-                  {exportSource.isPending ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Download className="size-3.5" />
-                  )}
-                </Button>
-              </div>
-            </div>
             <div className="min-h-0 flex-1 overflow-hidden bg-muted/10">
               {!selectedPath ? (
                 <div className="grid h-full place-items-center p-6 text-center text-xs text-muted-foreground">
@@ -1748,15 +1716,14 @@ function PaperDocumentDock({
         </ResizableSeparator>
 
         <ResizablePanel
-          id="paper-dock-editor"
+          id={EDITOR_PANEL_ID}
           panelRef={editorPanelRef}
           collapsible
           collapsedSize="2.75rem"
           defaultSize={editorHeight}
           minSize="10rem"
-          onResize={(size) => {
+          onResize={() => {
             syncEditorCollapsed()
-            rememberEditorHeight(size)
           }}
           className="min-h-0 min-w-0 overflow-hidden"
         >
