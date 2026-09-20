@@ -20,6 +20,7 @@ from app.core.constants import DOCKER_NETWORK_NAME
 from app.core.db import get_db_session
 from app.core.docker import get_docker_client
 from app.core.redis import pop_idle_paper_workspaces, touch_paper_workspace_active
+from app.services.container_service import resolve_host_path
 
 _CONTAINER_WORKSPACE = "/workspace"
 _PAPER_WORKSPACE_LABEL = "llm4ad.paper-workspace"
@@ -62,7 +63,13 @@ def paper_workspace_runtime_token(workspace_id: uuid.UUID | str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class PaperWorkspaceExecSpec:
-    """Describe one persistent native research workspace container."""
+    """Describe one persistent native research workspace container.
+
+    `host_workspace` is the workspace directory as seen *inside this backend
+    container* (a `DOCKER_PROJECT_HOME` path). It is translated to the
+    corresponding host path when the bind mount is created, because the daemon
+    resolves mount sources on the host, not in this namespace.
+    """
 
     workspace_id: uuid.UUID
     user_id: uuid.UUID
@@ -70,7 +77,9 @@ class PaperWorkspaceExecSpec:
 
 
 def _container_mount_matches(container, host_workspace: str) -> bool:
-    expected = str(Path(host_workspace).resolve())
+    # The bind source a container records is the host path, so compare against
+    # the host form of the requested workspace — see `_create_workspace_container`.
+    expected = str(Path(resolve_host_path(host_workspace)).resolve())
     for mount in container.attrs.get("Mounts", []):
         if mount.get("Destination") == _CONTAINER_WORKSPACE:
             try:
@@ -85,6 +94,13 @@ def _create_workspace_container(spec: PaperWorkspaceExecSpec, client, image):
         "node -e \"fetch('http://127.0.0.1:3001/health')"
         ".then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""
     )
+    # `spec.host_workspace` is a path in this container's namespace, but the bind
+    # source is resolved by the host daemon, so it has to be translated when
+    # HOST_PROJECT_HOME and DOCKER_PROJECT_HOME differ. Getting this wrong mounts
+    # a directory that only exists as an auto-created empty folder on the host:
+    # the runtime starts as uid 65534 with nowhere to write its home and crash
+    # loops, which surfaces as the session endpoint timing out.
+    host_workspace = str(Path(resolve_host_path(spec.host_workspace)).resolve())
     return client.containers.run(
         image.id,
         name=paper_workspace_container_name(spec.workspace_id),
@@ -119,7 +135,7 @@ def _create_workspace_container(spec: PaperWorkspaceExecSpec, client, image):
             "start_period": 20_000_000_000,
         },
         volumes={
-            str(Path(spec.host_workspace).resolve()): {
+            host_workspace: {
                 "bind": _CONTAINER_WORKSPACE,
                 "mode": "rw",
             }
