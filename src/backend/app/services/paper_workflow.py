@@ -168,7 +168,8 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
                 "foundation as authoritative when it is used. Project documents are optional context whose roles are "
                 "described by the runtime; the agent decides whether and when to inspect them. Edit only the source "
                 "paths explicitly assigned to the current stage. Preserve claims, evidence, citations, equations, and "
-                "author intent."
+                "author intent. After every edit to .typ files, run the check_typst tool and fix all reported errors "
+                "before calling publish_stage_result — publication is rejected while the document does not compile."
             ),
         ),
         "manuscript": ResearchWorkflowDefinition(

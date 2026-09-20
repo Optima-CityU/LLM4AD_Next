@@ -37,6 +37,9 @@ dependencies = [
     "agentscope>=2.0,<3.0",
     # Knowledge parser runs the official Python SDK in the task-runner image.
     "claude-agent-sdk>=0.1.80,<0.2",
+    # Official Typst Python binding: the research runtime's stage bridge uses it
+    # to compile-check proposals before publication (see stage_bridge.py).
+    "typst>=0.13.0,<0.14.0",
 ]
 
 [project.optional-dependencies]

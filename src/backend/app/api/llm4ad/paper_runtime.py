@@ -289,6 +289,7 @@ async def create_runtime_session(
         }
     }
     allowed_tools.append("mcp__llm4ad_stage__publish_stage_result")
+    allowed_tools.append("mcp__llm4ad_stage__check_typst")
     if request.workflow_stage == "literature":
         mcp_servers["arxiv"] = {
             "type": "stdio",
