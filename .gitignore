@@ -247,6 +247,10 @@ refefence_superpowers/
 /openspec/
 /src/frontend/VERSION
 
+# Typst preview fonts are downloaded at build time by
+# src/frontend/scripts/fetch-typst-fonts.sh, not committed
+/src/frontend/public/typst-fonts/
+
 # Generated publication archives and source documents are not repository assets
 *.pdf
 *.zip

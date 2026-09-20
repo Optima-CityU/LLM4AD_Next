@@ -9,6 +9,9 @@
 **/.mypy_cache
 **/node_modules
 **/dist
+# Fetched inside the image at build time; see
+# src/frontend/scripts/fetch-typst-fonts.sh
+src/frontend/public/typst-fonts
 **/dist-server
 docker/app-data
 docker/litellm-data

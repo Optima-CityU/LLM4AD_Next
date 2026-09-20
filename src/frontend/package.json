@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.build.json && vite build",
+    "fonts": "bash scripts/fetch-typst-fonts.sh",
+    "build": "bash scripts/fetch-typst-fonts.sh && tsc -p tsconfig.build.json && vite build",
     "analyze": "ANALYZE=true vite build",
     "lint": "biome check --write --unsafe --no-errors-on-unmatched --files-ignore-unknown=true ./",
     "preview": "vite preview",

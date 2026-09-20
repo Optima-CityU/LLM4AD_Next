@@ -14,7 +14,7 @@ import { Llm4AdPapersService } from "@/client"
 import { Button } from "@/components/ui/button"
 import { authFetch } from "@/utils/auth"
 
-import { TYPST_EXTRA_FONTS } from "./typstFonts"
+import { TYPST_EXTRA_FONTS, TYPST_FONT_BASE } from "./typstFonts"
 
 type PreviewStatus = "idle" | "loading" | "compiling" | "ready" | "error"
 
@@ -59,8 +59,15 @@ function loadTypstRuntime() {
     import("@myriaddreamin/typst.ts/contrib/snippet"),
     import("@myriaddreamin/typst-ts-web-compiler/wasm?url"),
   ]).then(([runtime, snippet, wasm]) => {
+    // The two default groups are pinned to a CDN by `typst.ts`, and the browser
+    // fetches them directly, so they fail outright wherever outbound internet is
+    // unavailable. `assetUrlPrefix` keeps the groups but redirects them to the
+    // copies the frontend serves itself.
     runtime.$typst.use(
-      snippet.TypstSnippet.preloadFontAssets({ assets: ["text", "cjk"] }),
+      snippet.TypstSnippet.preloadFontAssets({
+        assets: ["text", "cjk"],
+        assetUrlPrefix: TYPST_FONT_BASE,
+      }),
     )
     // Added alongside the two default groups, not instead of them: the defaults
     // cover the common case, and these fill the gaps they leave (chiefly bold
