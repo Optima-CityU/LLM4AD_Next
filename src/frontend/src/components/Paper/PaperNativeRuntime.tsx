@@ -10,10 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
-import type {
-  PaperRuntimeSessionCreate,
-  ProposalStageState,
-} from "@/client"
+import type { PaperRuntimeSessionCreate, ProposalStageState } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -21,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { usePaperRuntimeSession } from "@/hooks/usePapers"
+import { useRuntimeEvents } from "@/hooks/useRuntimeEvents"
 import { cssColorToHslChannels } from "@/lib/embeddedAppearance"
 
 type PaperWorkflowStage = PaperRuntimeSessionCreate["workflow_stage"]
@@ -82,6 +80,17 @@ export default function PaperNativeRuntime({
     profileKey,
   )
   const frameReady = session.data?.session_id === loadedSessionId
+  // 模型网关健康流：会话加载后订阅，上游失败时给出可操作提示。
+  const runtimeEvents = useRuntimeEvents(
+    workspaceId,
+    Boolean(session.data && frameReady),
+  )
+  const runtimeFailure = runtimeEvents.failure
+  const gatewayReasonLabel = runtimeFailure
+    ? t(`paper.runtime.gatewayReason.${runtimeFailure.reason}`, {
+        defaultValue: runtimeFailure.reason,
+      })
+    : ""
   const stageTitle = t(`paper.workflow.stage.${stage}`)
   const stageDescription = t(`paper.workflow.stage.${stage}Hint`)
   const stageExamples = useMemo(() => {
@@ -265,6 +274,24 @@ export default function PaperNativeRuntime({
               </ul>
             )}
           </div>
+        </div>
+      )}
+      {runtimeFailure && (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
+        >
+          <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="min-w-0 flex-1 leading-5 text-foreground">
+            {t("paper.runtime.modelGatewayFailing", {
+              count: runtimeFailure.count,
+              reason: gatewayReasonLabel,
+            })}
+          </p>
+          <Button size="sm" variant="outline" onClick={onConfigureModel}>
+            <Settings2 className="size-3.5" />
+            {t("paper.runtime.changeModel")}
+          </Button>
         </div>
       )}
       <div className="relative min-h-0 flex-1 overflow-hidden">

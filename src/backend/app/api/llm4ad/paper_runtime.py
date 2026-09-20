@@ -19,6 +19,7 @@ from sqlmodel import Session
 from websockets.asyncio.client import connect as websocket_connect
 
 from app.api.deps import CurrentUser, SessionDep, TokenDep
+from app.api.llm4ad.sse_utils import redis_sse_stream, sse_response
 from app.core.config import settings
 from app.core.db import engine
 from app.core.redis import get_async_redis, touch_paper_workspace_active
@@ -39,6 +40,7 @@ from app.services.paper_workspace_runtime import (
     handle_host,
     paper_workspace_runtime_token,
 )
+from app.services.runtime_health import runtime_event_key, runtime_snapshot
 
 router = APIRouter(prefix="/papers", tags=["llm4ad.papers"])
 
@@ -267,6 +269,8 @@ async def create_runtime_session(
         auth_token=provider.auth_token or "",
         model=workspace.analysis_model_name,
         timeout=provider.timeout,
+        workspace_id=workspace_id,
+        session_id=session_id,
     )
     allowed_tools = ["Read", "Glob", "Grep", "Write", "Edit", "AskUserQuestion", "Skill"]
     mcp_servers: dict[str, object] = {
@@ -375,6 +379,46 @@ async def create_runtime_session(
     return PaperRuntimeSessionResponse(
         runtime_url=f"{base_path}/session/{session_id}",
         session_id=session_id,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/runtime-events")
+async def workspace_runtime_events(
+    workspace_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    """Stream model-gateway health events for one research workspace.
+
+    Events (``proxy_error`` / ``proxy_recovered``) are pushed by the LLM proxy
+    whenever the workspace runtime's model requests fail or recover upstream.
+    The ``connected`` frame carries the current failure snapshot so a reloaded
+    page can restore its state without waiting for the next retry.
+    """
+    paper_service.get_workspace_detail(db, current_user, workspace_id)
+    snapshot = runtime_snapshot(workspace_id)
+    stream_key = runtime_event_key(workspace_id)
+
+    def entry_handler(_entry_id: str, fields: dict) -> tuple[str, bool] | None:
+        try:
+            event = json.loads(fields.get("data"))
+        except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(event, dict):
+            return None
+        return (
+            f"event: runtime\ndata: {json.dumps(event, ensure_ascii=False)}\n\n",
+            False,
+        )
+
+    return sse_response(
+        redis_sse_stream(
+            stream_key,
+            {"state": snapshot, "workspace_id": str(workspace_id)},
+            entry_handler,
+            max_idle=900,
+            heartbeat_interval=15,
+        )
     )
 
 

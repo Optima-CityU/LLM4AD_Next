@@ -281,7 +281,17 @@
       "stageHint": "查看当前阶段说明",
       "artifactCount": "{{count}} 项产物",
       "artifactPending": "产物待生成",
-      "revisionRequired": "终审发现阻断问题，请按下列意见返回对应阶段修订"
+      "revisionRequired": "终审发现阻断问题，请按下列意见返回对应阶段修订",
+      "modelGatewayFailing": "模型网关请求失败（第 {{count}} 次）：{{reason}}。建议更换模型或稍后重试。",
+      "changeModel": "更换模型",
+      "gatewayReason": {
+        "rate_limited": "上游限流（429）",
+        "auth": "上游凭据失效（401/403）",
+        "upstream_error": "上游服务错误（5xx）",
+        "timeout": "上游无响应（超时）",
+        "disconnected": "上游连接中断",
+        "other": "上游请求失败"
+      }
     },
     "source": {
       "upload": "上传源文件",

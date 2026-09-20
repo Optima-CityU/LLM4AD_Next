@@ -281,7 +281,17 @@
       "stageHint": "View the current stage guidance",
       "artifactCount": "{{count}} artifacts",
       "artifactPending": "Artifacts pending",
-      "revisionRequired": "Final review found blocking issues; return to the named stages to revise them"
+      "revisionRequired": "Final review found blocking issues; return to the named stages to revise them",
+      "modelGatewayFailing": "Model gateway requests are failing ({{count}} consecutive failures): {{reason}}. Switch models or retry later.",
+      "changeModel": "Change model",
+      "gatewayReason": {
+        "rate_limited": "upstream rate limited (429)",
+        "auth": "upstream credentials rejected (401/403)",
+        "upstream_error": "upstream server error (5xx)",
+        "timeout": "upstream not responding (timeout)",
+        "disconnected": "upstream connection dropped",
+        "other": "upstream request failed"
+      }
     },
     "source": {
       "upload": "Upload Source",
