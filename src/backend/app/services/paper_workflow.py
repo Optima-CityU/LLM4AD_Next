@@ -17,6 +17,8 @@ ResearchWorkflowStage = Literal[
     "innovation_plan",
     "foundation_feasibility",
     "final_review",
+    "rebuttal_baseline",
+    "autorebuttal",
     "reviews",
     "boundary",
     "targets",
@@ -174,13 +176,41 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
         ),
         "manuscript": ResearchWorkflowDefinition(
             mode="manuscript",
-            available=False,
-            stages=(),
-            skills_by_run_kind=MappingProxyType({}),
-            run_kind_by_stage=MappingProxyType({}),
-            prerequisites_by_run_kind=MappingProxyType({}),
-            writable_paths_by_run_kind=MappingProxyType({}),
-            prompt_preamble="",
+            available=True,
+            stages=(
+                "rebuttal_baseline",
+                "autorebuttal",
+            ),
+            skills_by_run_kind=MappingProxyType(
+                {
+                    "rebuttal_baseline": ("rebuttal-baseline",),
+                    "autorebuttal": ("autorebuttal",),
+                }
+            ),
+            run_kind_by_stage=MappingProxyType(
+                {
+                    "rebuttal_baseline": "rebuttal_baseline",
+                    "autorebuttal": "autorebuttal",
+                }
+            ),
+            prerequisites_by_run_kind=MappingProxyType(
+                {
+                    "rebuttal_baseline": (),
+                    "autorebuttal": ("rebuttal_baseline",),
+                }
+            ),
+            writable_paths_by_run_kind=MappingProxyType(
+                {
+                    "rebuttal_baseline": (),
+                    "autorebuttal": (),
+                }
+            ),
+            prompt_preamble=(
+                "Work on an author rebuttal as one stage in a backend-governed workflow. The paper source and "
+                "review files are authoritative, read-only evidence. Never invent results, measurements, citations, "
+                "or completed experiments. Mark unsupported claims as explicit author placeholders. Publish only the "
+                "structured stage artifact; do not edit the submitted paper."
+            ),
         ),
         "algorithm": ResearchWorkflowDefinition(
             mode="algorithm",

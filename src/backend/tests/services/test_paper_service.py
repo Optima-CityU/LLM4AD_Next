@@ -1,6 +1,7 @@
 """Paper workspace service contracts."""
 
 import io
+import json
 import uuid
 import zipfile
 
@@ -126,6 +127,44 @@ def test_research_workspace_is_not_a_normal_project(db: Session) -> None:
     assert total == 0
     assert "project_id" not in paper_schemas.PaperWorkspaceCreate.model_fields
     assert "project_id" not in paper_schemas.PaperWorkspaceSummary.model_fields
+
+
+def test_reviewer_reports_are_mirrored_as_read_only_runtime_context(
+    db: Session,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expose owned active-source reviews with stable IDs and paths."""
+    user, workspace, source = _paper_source(db)
+    review_content = b"The runtime comparison needs clarification."
+    review = models.PaperReview(
+        workspace_id=workspace.id,
+        source_version_id=source.id,
+        source_system="manual",
+        reviewer_label="R1",
+        title="Main review",
+        object_key=f"paper/{user.id}/{workspace.id}/reviews/r1/review.md",
+        content_hash="review",
+    )
+    db.add(review)
+    db.commit()
+    storage = _MemoryStorage({review.object_key: review_content})
+    monkeypatch.setattr(paper_service, "_storage", lambda: storage)
+    monkeypatch.setattr(paper_service.settings, "DOCKER_PROJECT_HOME", str(tmp_path))
+
+    reviews_root = paper_service.sync_paper_workspace_reviews(db, workspace, source)
+
+    index = json.loads((reviews_root / "index.json").read_text(encoding="utf-8"))
+    assert index["reviews"] == [
+        {
+            "review_id": str(review.id),
+            "reviewer_id": "R1",
+            "title": "Main review",
+            "source_system": "manual",
+            "path": f"/workspace/.research/reviews/{review.id}.md",
+        }
+    ]
+    assert (reviews_root / f"{review.id}.md").read_bytes() == review_content
 
 
 def test_each_explicit_algorithm_task_has_an_independent_project(
@@ -500,14 +539,17 @@ def test_paper_source_export_uses_an_authenticated_backend_download(
 
 
 def test_research_workflow_definition_is_owned_by_the_backend() -> None:
-    """Expose one backend-owned extension point for future mode workflows."""
+    """Expose the backend-owned AutoRebuttal workflow and shared boundaries."""
     definition = paper_workflow.get_research_workflow("manuscript")
 
     assert definition.mode == "manuscript"
-    assert definition.available is False
-    assert definition.stages == ()
-    assert definition.skills_by_run_kind == {}
-    assert definition.prompt_preamble == ""
+    assert definition.available is True
+    assert definition.stages == ("rebuttal_baseline", "autorebuttal")
+    assert definition.skills_by_run_kind["rebuttal_baseline"] == ("rebuttal-baseline",)
+    assert definition.skills_by_run_kind["autorebuttal"] == ("autorebuttal",)
+    assert definition.prerequisites_by_run_kind["autorebuttal"] == ("rebuttal_baseline",)
+    assert all(not paths for paths in definition.writable_paths_by_run_kind.values())
+    assert "read-only evidence" in definition.prompt_preamble
 
 
 def test_proposal_workflow_defines_eight_isolated_stages() -> None:
@@ -548,7 +590,7 @@ def test_proposal_workflow_defines_eight_isolated_stages() -> None:
     assert "Read other sections" not in definition.prompt_preamble
 
 
-@pytest.mark.parametrize("mode", ["manuscript", "algorithm"])
+@pytest.mark.parametrize("mode", ["algorithm"])
 def test_reserved_research_modes_have_no_invented_agent_pipeline(mode: str) -> None:
     """Reserve new project modes without pretending their future workflows exist."""
     definition = paper_workflow.get_research_workflow(mode)
@@ -902,6 +944,51 @@ def test_editing_reviewer_feedback_replaces_its_locked_baseline(
     assert len(metrics) == 1
     assert metrics[0].description == "The experiments need an additional ablation."
     assert metrics[0].provenance == ["Reviewer B"]
+
+
+def test_deleting_reviewer_feedback_removes_derived_state(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Delete one review, its metrics, and invalidate generated rebuttal state."""
+    user, workspace, source = _paper_source(db)
+    storage = _MemoryStorage({source.object_key: b"draft"})
+    monkeypatch.setattr(paper_service, "_storage", lambda: storage)
+    review = paper_service.attach_reviewer_feedback(
+        db,
+        user,
+        source.id,
+        paper_schemas.PaperReviewCreate(
+            content="The proof is incomplete.",
+            reviewer_label="Reviewer A",
+            title="Initial review",
+        ),
+    )
+    workspace.proposal_stage_states = {
+        "rebuttal_baseline": {"status": "ready"},
+        "autorebuttal": {"status": "ready"},
+    }
+    db.add(workspace)
+    db.commit()
+    object_key = review.object_key
+
+    paper_service.delete_reviewer_feedback(db, user, review.id)
+
+    db.expire_all()
+    refreshed_workspace = db.get(models.PaperWorkspace, workspace.id)
+    assert db.get(models.PaperReview, review.id) is None
+    assert (
+        db.exec(
+            select(models.PaperEvaluationMetric).where(
+                models.PaperEvaluationMetric.review_id == review.id
+            )
+        ).first()
+        is None
+    )
+    assert object_key not in storage.objects
+    assert refreshed_workspace is not None
+    assert refreshed_workspace.proposal_stage_states["rebuttal_baseline"]["status"] == "stale"
+    assert refreshed_workspace.proposal_stage_states["autorebuttal"]["status"] == "stale"
 
 
 def test_judge_payload_rejects_scores_outside_zero_to_one() -> None:

@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test"
 
 import { cssColorToHslChannels } from "../src/lib/embeddedAppearance"
+import { parseFrontendFeatureFlag } from "../src/lib/frontendFeatures"
+import { parseResearchWorkspaceMode } from "../src/lib/researchWorkspace"
 
 const sidebarSource = await Bun.file(
   new URL("../src/components/Sidebar/AppSidebar.tsx", import.meta.url),
@@ -13,6 +15,9 @@ const paperRouteSource = await Bun.file(
 ).text()
 const paperLayoutSource = await Bun.file(
   new URL("../src/routes/_layout_paper.tsx", import.meta.url),
+).text()
+const autoResearchLayoutSource = await Bun.file(
+  new URL("../src/routes/_layout_autoresearch.tsx", import.meta.url),
 ).text()
 const nativeRuntimeSource = await Bun.file(
   new URL("../src/components/Paper/PaperNativeRuntime.tsx", import.meta.url),
@@ -74,6 +79,28 @@ test("research projects remain independent from normal project management", () =
   expect(layoutSource).toContain("<AppSidebar />")
   expect(paperLayoutSource).not.toContain("AppSidebar")
   expect(paperLayoutSource).toContain("h-screen")
+})
+
+test("autoresearch back navigation returns to the session list", () => {
+  expect(autoResearchLayoutSource).toContain('to="/autoresearch"')
+  expect(autoResearchLayoutSource).toContain(
+    'title={t("autoResearch.header.backToWorkspace")}',
+  )
+})
+
+test("autorebuttal stays hidden unless its frontend flag is enabled", () => {
+  expect(parseFrontendFeatureFlag(undefined)).toBeFalse()
+  expect(parseResearchWorkspaceMode("manuscript", false)).toBe("proposal")
+  expect(parseResearchWorkspaceMode("manuscript", true)).toBe("manuscript")
+  expect(sidebarSource).toContain("AUTO_REBUTTAL_ENABLED")
+  expect(paperRouteSource).toContain("AUTO_REBUTTAL_ENABLED")
+})
+
+test("autodiscovery stays hidden unless its frontend flag is enabled", () => {
+  expect(parseResearchWorkspaceMode("algorithm", false, false)).toBe("proposal")
+  expect(parseResearchWorkspaceMode("algorithm", false, true)).toBe("algorithm")
+  expect(sidebarSource).toContain("AUTO_DISCOVERY_ENABLED")
+  expect(paperRouteSource).toContain("AUTO_DISCOVERY_ENABLED")
 })
 
 test("the top workflow navigator hosts one native CloudCLI session", () => {
@@ -187,9 +214,7 @@ test("proposal skills are grouped and retain OpenAIR_proposal attribution", () =
 })
 
 test("blocking final review returns to the owning stage without failing publication", () => {
-  expect(generatedTypesSource).toContain(
-    "'ready' | 'stale' | 'needs_revision'",
-  )
+  expect(generatedTypesSource).toContain("'ready' | 'stale' | 'needs_revision'")
   expect(nativeRuntimeSource).toContain('status === "needs_revision"')
   expect(nativeRuntimeSource).toContain("stageState.findings")
   expect(paperRouteSource).toContain("paper.workflow.needsRevision")
@@ -225,6 +250,9 @@ test("the task image contains only the native runtime bridge", () => {
 const typstFontsSource = await Bun.file(
   new URL("../src/components/Paper/typstFonts.ts", import.meta.url),
 ).text()
+const typstFontFetchScript = await Bun.file(
+  new URL("../scripts/fetch-typst-fonts.sh", import.meta.url),
+).text()
 const typstPreviewSource = await Bun.file(
   new URL("../src/components/Paper/TypstLivePreview.tsx", import.meta.url),
 ).text()
@@ -255,31 +283,22 @@ test("typst preview registers extra fonts with the compiler", () => {
   expect(typstPreviewSource).toContain("preloadFontAssets")
 })
 
-test("typst extra fonts point at the pinned asset tag", () => {
+test("typst extra fonts are self-hosted from pinned upstream assets", () => {
   // The two asset repositories do not hold the same files, and their main branch
   // holds more than the pinned tag does. A face listed from the wrong repo or
   // tag 404s at compile time and never loads, silently reintroducing the
   // warnings this list exists to remove.
-  const urls = [
-    ...typstFontsSource.matchAll(
-      /\$\{(TYPST_ASSETS|TYPST_DEV_ASSETS)\}([^`]+)`/g,
-    ),
-  ]
+  const urls = [...typstFontsSource.matchAll(/\$\{TYPST_FONT_BASE\}([^`]+)`/g)]
   expect(urls.length).toBeGreaterThan(0)
-
-  const bases: Record<string, string> = {
-    TYPST_ASSETS:
-      "https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/",
-    TYPST_DEV_ASSETS:
-      "https://cdn.jsdelivr.net/gh/typst/typst-dev-assets@v0.13.1/files/fonts/",
-  }
+  expect(typstFontsSource).toContain(
+    'export const TYPST_FONT_BASE = "/typst-fonts/"',
+  )
   for (const match of urls) {
-    const base = bases[match[1]]
-    expect(base, `unknown base ${match[1]}`).toBeTruthy()
-    // Every entry must be absolute, version-pinned, and end in a font file.
-    expect(base).toContain("@v")
-    expect(match[2]).toMatch(/\.(otf|ttf)$/)
+    expect(match[1]).toMatch(/\.(otf|ttf)$/)
   }
+  expect(typstFontFetchScript).toContain("typst-assets@v0.13.1")
+  expect(typstFontFetchScript).toContain("typst-dev-assets@v0.13.1")
+  expect(typstFontFetchScript).toContain("sha256sum")
   // Bold CJK is the specific gap in the typst.ts defaults, so its absence would
   // mean Chinese headings fall back again.
   expect(typstFontsSource).toContain("NotoSerifCJKsc-Bold.otf")

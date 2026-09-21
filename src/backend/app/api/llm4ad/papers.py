@@ -147,6 +147,17 @@ def update_reviewer_feedback(
     return paper_service.update_reviewer_feedback(db, current_user, review_id, request)
 
 
+@router.delete("/reviews/{review_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_reviewer_feedback(
+    review_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+) -> Response:
+    """Delete owned reviewer feedback and invalidate dependent stages."""
+    paper_service.delete_reviewer_feedback(db, current_user, review_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.delete(
     "/source-versions/{source_version_id}/path",
     status_code=status.HTTP_204_NO_CONTENT,

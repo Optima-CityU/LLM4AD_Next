@@ -133,6 +133,252 @@ def test_blocked_final_review_requires_an_actionable_finding() -> None:
         )
 
 
+def test_rebuttal_compliance_preserves_placeholders_and_computes_counts() -> None:
+    """Keep unsupported evidence visible and derive counts from final prose."""
+    response = "We will report [AUTHOR: measured latency] after verification."
+    artifact = paper_agent.RebuttalComplianceArtifact.model_validate(
+        {
+            "summary": "One author measurement is still required.",
+            "entries": [
+                {
+                    "id": "r1-q1",
+                    "reviewer_id": "R1",
+                    "label": "Q",
+                    "title": "Runtime measurement",
+                    "response": response,
+                    "concern_ids": ["r1-q1"],
+                    "evidence_status": "placeholder",
+                    "source_refs": ["paper.md#experiments"],
+                    "character_count": 999,
+                }
+            ],
+            "findings": [],
+            "ready_for_submission": False,
+            "open_placeholders": ["Measure and insert inference latency."],
+        }
+    )
+
+    assert artifact.entries[0].character_count == len(response)
+    assert artifact.entries[0].evidence_status == "placeholder"
+
+
+def test_rebuttal_baseline_requires_exact_reviewer_concern_ownership() -> None:
+    """Reject a baseline whose reviewer card claims another reviewer's concern."""
+    with pytest.raises(ValidationError, match="links concerns from another reviewer"):
+        paper_agent.RebuttalBaselineArtifact.model_validate(
+            {
+                "summary": "Two reports were normalized.",
+                "intake": {
+                    "summary": "Inputs ready.",
+                    "paper_summary": "A paper summary.",
+                    "constraints": {},
+                    "reviewer_sources": [
+                        {"review_id": str(uuid.uuid4()), "reviewer_id": "R1"},
+                        {"review_id": str(uuid.uuid4()), "reviewer_id": "R2"},
+                    ],
+                    "open_questions": [],
+                },
+                "analysis": {
+                    "summary": "Concerns mapped.",
+                    "concerns": [
+                        {
+                            "id": "r1-w1",
+                            "reviewer_id": "R1",
+                            "label": "W",
+                            "concern": "Missing comparison.",
+                            "concern_type": "baseline_comparison",
+                            "severity": "high",
+                            "answer_source": "Experiments",
+                            "draft_move": "Point to the existing table.",
+                            "source_refs": ["paper.md#experiments"],
+                        }
+                    ],
+                    "reviewer_cards": [
+                        {
+                            "reviewer_id": "R1",
+                            "sentiment": "mixed",
+                            "movability": "swing",
+                            "attitude": "skeptical",
+                            "primary_concerns": ["baseline_comparison"],
+                            "concern_ids": [],
+                        },
+                        {
+                            "reviewer_id": "R2",
+                            "sentiment": "mixed",
+                            "movability": "swing",
+                            "attitude": "neutral",
+                            "primary_concerns": [],
+                            "concern_ids": ["r1-w1"],
+                        },
+                    ],
+                },
+                "ready_for_generation": True,
+                "findings": [],
+            }
+        )
+
+
+def test_rebuttal_baseline_publication_stales_automatic_result() -> None:
+    """Invalidate the generated rebuttal when its confirmed baseline changes."""
+    source_id = uuid.uuid4()
+    run = SimpleNamespace(
+        id=uuid.uuid4(),
+        run_kind=models.PaperAgentRunKind.REBUTTAL_BASELINE.value,
+    )
+    workspace = SimpleNamespace(
+        mode=models.ResearchWorkspaceMode.MANUSCRIPT.value,
+        proposal_stage_states={
+            "autorebuttal": {"status": "needs_revision"},
+        },
+    )
+
+    paper_agent._update_proposal_stage_state(workspace, run, source_id)
+
+    assert workspace.proposal_stage_states["rebuttal_baseline"]["status"] == "ready"
+    assert workspace.proposal_stage_states["autorebuttal"]["status"] == "stale"
+
+
+def test_rebuttal_draft_is_persisted_as_structured_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Persist generated response blocks without modifying the paper source."""
+    object_storage = _ObjectStorage()
+    monkeypatch.setattr(paper_agent, "storage", object_storage)
+
+    with Session(engine) as db:
+        user = create_random_user(db)
+        workspace = models.PaperWorkspace(
+            user_id=user.id,
+            title="Structured rebuttal",
+            mode=models.ResearchWorkspaceMode.MANUSCRIPT.value,
+            rebuttal_context={
+                "intake": {
+                    "constraints": {
+                        "venue": None,
+                        "venue_year": None,
+                        "response_mode": "per_reviewer",
+                        "output_format": "markdown",
+                        "per_reviewer_limit": None,
+                        "total_limit": None,
+                        "author_notes": [],
+                        "forbidden_claims": [],
+                    },
+                    "reviewer_sources": [
+                        {
+                            "review_id": str(uuid.uuid4()),
+                            "reviewer_id": "R1",
+                            "title": None,
+                        }
+                    ],
+                },
+                "analysis": {
+                    "concerns": [
+                        {
+                            "id": "r1-w1",
+                            "reviewer_id": "R1",
+                        }
+                    ]
+                },
+            },
+        )
+        db.add(workspace)
+        db.flush()
+        source = models.PaperSourceVersion(
+            workspace_id=workspace.id,
+            version=1,
+            source_kind=models.PaperSourceKind.MARKDOWN.value,
+            filename="paper.md",
+            object_key=f"paper/{user.id}/{workspace.id}/sources/current/paper.md",
+            content_hash="source",
+            content_size=8,
+            manifest=["paper.md"],
+        )
+        db.add(source)
+        db.flush()
+        workspace.active_source_version_id = source.id
+        run = models.PaperAgentRun(
+            workspace_id=workspace.id,
+            source_version_id=source.id,
+            run_kind=models.PaperAgentRunKind.AUTOREBUTTAL.value,
+            status=models.PaperAgentRunStatus.RUNNING.value,
+        )
+        db.add(workspace)
+        db.add(run)
+        db.commit()
+        run_id = run.id
+        workspace_id = workspace.id
+        user_id = user.id
+
+    work_dir = tmp_path / "rebuttal-publication"
+    output_dir = work_dir / "output"
+    output_dir.mkdir(parents=True)
+    response = "The requested ablation is already reported in Section 4."
+    entry = {
+        "id": "r1-w1",
+        "reviewer_id": "R1",
+        "label": "W",
+        "title": "Ablation coverage",
+        "response": response,
+        "concern_ids": ["r1-w1"],
+        "evidence_status": "source_grounded",
+        "source_refs": ["paper.md#section-4"],
+    }
+    (output_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "summary": "Generated and checked one source-grounded response.",
+                "strategy": {
+                    "summary": "Answer the central empirical concern directly.",
+                    "shared_issues": [],
+                    "priority_reviewers": ["R1"],
+                    "global_strategy": ["Lead with the existing ablation."],
+                    "format_plan": {
+                        "response_mode": "per_reviewer",
+                        "output_format": "markdown",
+                        "global_summary": False,
+                        "assumptions": [],
+                    },
+                    "budget_plan": {
+                        "unit": "response_characters",
+                        "per_reviewer_limit": None,
+                        "total_limit": None,
+                        "safety_margin": 0,
+                        "reviewer_budgets": [
+                            {
+                                "reviewer_id": "R1",
+                                "target_characters": 500,
+                                "limit": None,
+                            }
+                        ],
+                    },
+                },
+                "draft": {
+                    "summary": "Drafted one response.",
+                    "entries": [entry],
+                },
+                "compliance": {
+                    "summary": "All concerns are covered.",
+                    "entries": [entry],
+                    "findings": [],
+                    "ready_for_submission": True,
+                    "open_placeholders": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert paper_agent._persist_output(run_id, user_id, work_dir) is False
+
+    with Session(engine) as db:
+        persisted = db.get(models.PaperWorkspace, workspace_id)
+        assert persisted is not None
+        assert persisted.rebuttal_entries[0]["response"] == response
+        assert persisted.rebuttal_entries[0]["character_count"] == len(response)
+        assert persisted.proposal_stage_states["autorebuttal"]["status"] == "ready"
+
+
 def test_blocking_final_review_is_persisted_as_needs_revision(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

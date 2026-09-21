@@ -934,6 +934,8 @@ async def upload_source_version(
             merged[path] = data
         if workspace.mode == models.ResearchWorkspaceMode.PROPOSAL.value:
             _stale_proposal_stages(workspace, "formatting")
+        elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
+            _stale_proposal_stages(workspace, "rebuttal_baseline")
         return _persist_source_entries(
             db,
             workspace,
@@ -1005,6 +1007,91 @@ def sync_paper_workspace_source(
         shutil.rmtree(staging, ignore_errors=True)
         raise
     return source_root
+
+
+def sync_paper_workspace_reviews(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    source: models.PaperSourceVersion,
+) -> Path:
+    """Mirror active reviewer feedback into the runtime's read-only context."""
+    research_root = paper_workspace_root(workspace.user_id, workspace.id) / ".research"
+    reviews_root = research_root / "reviews"
+    staging = research_root / f".reviews-{uuid.uuid4().hex}.tmp"
+    staging.mkdir(parents=True, exist_ok=True)
+    reviews = list(
+        db.exec(
+            select(models.PaperReview)
+            .where(
+                models.PaperReview.workspace_id == workspace.id,
+                models.PaperReview.source_version_id == source.id,
+            )
+            .order_by(models.PaperReview.created_time)
+        ).all()
+    )
+    index: list[dict[str, str | None]] = []
+    try:
+        for review in reviews:
+            filename = f"{review.id}.md"
+            (staging / filename).write_bytes(_storage().download(review.object_key))
+            index.append(
+                {
+                    "review_id": str(review.id),
+                    "reviewer_id": review.reviewer_label,
+                    "title": review.title,
+                    "source_system": review.source_system,
+                    "path": f"/workspace/.research/reviews/{filename}",
+                }
+            )
+        (staging / "index.json").write_text(
+            json.dumps({"reviews": index}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        for path in [staging, *staging.rglob("*")]:
+            path.chmod(0o777 if path.is_dir() else 0o444)
+            try:
+                os.chown(path, 65534, 65534)
+            except PermissionError:
+                pass
+        if reviews_root.exists() or reviews_root.is_symlink():
+            if reviews_root.is_symlink():
+                reviews_root.unlink()
+            else:
+                shutil.rmtree(reviews_root)
+        staging.replace(reviews_root)
+        research_root.chmod(0o777)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return reviews_root
+
+
+def sync_paper_workspace_rebuttal_context(workspace: models.PaperWorkspace) -> Path:
+    """Expose persisted rebuttal artifacts to later read-only stages."""
+    rebuttal_root = paper_workspace_root(workspace.user_id, workspace.id) / ".research" / "rebuttal"
+    rebuttal_root.mkdir(parents=True, exist_ok=True)
+    target = rebuttal_root / "context.json"
+    temporary = rebuttal_root / f".context-{uuid.uuid4().hex}.tmp"
+    temporary.write_text(
+        json.dumps(
+            {
+                "context": workspace.rebuttal_context or {},
+                "entries": workspace.rebuttal_entries or [],
+                "stage_states": workspace.proposal_stage_states or {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    temporary.chmod(0o444)
+    try:
+        os.chown(temporary, 65534, 65534)
+    except PermissionError:
+        pass
+    temporary.replace(target)
+    rebuttal_root.chmod(0o777)
+    return target
 
 
 def _sync_paper_workspace_source_best_effort(
@@ -1101,6 +1188,8 @@ def delete_source_path(
             workspace.proposal_foundation = None
             workspace.proposal_entry_path = None
             workspace.proposal_stage_states = {}
+    elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
+        _stale_proposal_stages(workspace, "rebuttal_baseline")
     if not retained:
         object_keys = [source.object_key]
         source_runs = list(
@@ -1125,6 +1214,8 @@ def delete_source_path(
         workspace.proposal_foundation = None
         workspace.proposal_entry_path = None
         workspace.proposal_stage_states = {}
+        workspace.rebuttal_context = {}
+        workspace.rebuttal_entries = []
         db.add(workspace)
         db.delete(source)
         db.commit()
@@ -1223,6 +1314,8 @@ def update_source_file(
             request.workflow_stage,
         )
         _stale_proposal_stages(workspace, affected_stage)
+    elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
+        _stale_proposal_stages(workspace, "rebuttal_baseline")
     return _persist_source_entries(
         db,
         workspace,
@@ -1330,6 +1423,9 @@ def attach_reviewer_feedback(
     try:
         db.add(review)
         db.flush()
+        if workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
+            _stale_proposal_stages(workspace, "rebuttal_baseline")
+            db.add(workspace)
         for draft in drafts:
             db.add(
                 models.PaperEvaluationMetric(
@@ -1382,6 +1478,9 @@ def update_reviewer_feedback(
     ).first()
     if review is None:
         raise HTTPException(status_code=404, detail="Reviewer feedback not found")
+    workspace = db.get(models.PaperWorkspace, review.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Research workspace not found")
     content = request.content.strip()
     content_bytes = content.encode("utf-8")
     storage = _storage()
@@ -1405,6 +1504,9 @@ def update_reviewer_feedback(
         review.content_hash = hashlib.sha256(content_bytes).hexdigest()
         review.baseline_dimensions = [item.model_dump() for item in drafts]
         db.add(review)
+        if workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
+            _stale_proposal_stages(workspace, "rebuttal_baseline")
+            db.add(workspace)
         for draft in drafts:
             db.add(
                 models.PaperEvaluationMetric(
@@ -1425,6 +1527,50 @@ def update_reviewer_feedback(
         )
         raise
     return review
+
+
+def delete_reviewer_feedback(
+    db: Session,
+    current_user: models.User,
+    review_id: uuid.UUID,
+) -> None:
+    """Delete owned reviewer feedback and all of its derived metrics."""
+    review = db.exec(
+        select(models.PaperReview)
+        .join(models.PaperWorkspace, models.PaperWorkspace.id == models.PaperReview.workspace_id)
+        .where(models.PaperReview.id == review_id, models.PaperWorkspace.user_id == current_user.id)
+    ).first()
+    if review is None:
+        raise HTTPException(status_code=404, detail="Reviewer feedback not found")
+    workspace = db.get(models.PaperWorkspace, review.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Research workspace not found")
+    metrics = list(
+        db.exec(
+            select(models.PaperEvaluationMetric).where(
+                models.PaperEvaluationMetric.review_id == review.id
+            )
+        ).all()
+    )
+    storage = _storage()
+    previous_content = storage.download(review.object_key)
+    storage.delete(review.object_key)
+    try:
+        for metric in metrics:
+            db.delete(metric)
+        db.delete(review)
+        if workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
+            _stale_proposal_stages(workspace, "rebuttal_baseline")
+            db.add(workspace)
+        db.commit()
+    except Exception:
+        db.rollback()
+        storage.upload(
+            review.object_key,
+            previous_content,
+            content_type="text/markdown; charset=utf-8",
+        )
+        raise
 
 
 def create_revision_candidate(

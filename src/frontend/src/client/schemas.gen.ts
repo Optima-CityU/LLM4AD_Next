@@ -5518,7 +5518,7 @@ export const PaperAgentRunResponseSchema = {
         },
         run_kind: {
             type: 'string',
-            enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'boundary_analysis', 'issue_extraction', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
+            enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'boundary_analysis', 'issue_extraction', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
             title: 'Run Kind'
         },
         status: {
@@ -7036,7 +7036,7 @@ export const PaperRuntimeSessionCreateSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
-            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'reviews', 'boundary', 'targets', 'branch'],
+            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
         }
     },
@@ -7102,7 +7102,7 @@ export const PaperSourceFileUpdateRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'reviews', 'boundary', 'targets', 'branch']
+                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'reviews', 'boundary', 'targets', 'branch']
                 },
                 {
                     type: 'null'
@@ -7129,7 +7129,7 @@ export const PaperSourcePathDeleteRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'reviews', 'boundary', 'targets', 'branch']
+                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'reviews', 'boundary', 'targets', 'branch']
                 },
                 {
                     type: 'null'
@@ -7322,6 +7322,18 @@ export const PaperWorkspaceDetailSchema = {
             type: 'object',
             title: 'Proposal Stage States'
         },
+        rebuttal_context: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Rebuttal Context'
+        },
+        rebuttal_entries: {
+            items: {
+                '$ref': '#/components/schemas/RebuttalEntry'
+            },
+            type: 'array',
+            title: 'Rebuttal Entries'
+        },
         analysis_provider_id: {
             anyOf: [
                 {
@@ -7478,7 +7490,7 @@ export const PaperWorkspaceDetailSchema = {
         workflow_stages: {
             items: {
                 type: 'string',
-                enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'reviews', 'boundary', 'targets', 'branch']
+                enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'reviews', 'boundary', 'targets', 'branch']
             },
             type: 'array',
             title: 'Workflow Stages'
@@ -7486,7 +7498,7 @@ export const PaperWorkspaceDetailSchema = {
         available_run_kinds: {
             items: {
                 type: 'string',
-                enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'boundary_analysis', 'issue_extraction', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
+                enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'boundary_analysis', 'issue_extraction', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
             },
             type: 'array',
             title: 'Available Run Kinds'
@@ -7592,6 +7604,18 @@ export const PaperWorkspaceSummarySchema = {
             },
             type: 'object',
             title: 'Proposal Stage States'
+        },
+        rebuttal_context: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Rebuttal Context'
+        },
+        rebuttal_entries: {
+            items: {
+                '$ref': '#/components/schemas/RebuttalEntry'
+            },
+            type: 'array',
+            title: 'Rebuttal Entries'
         },
         analysis_provider_id: {
             anyOf: [
@@ -8693,6 +8717,73 @@ export const ProviderUpdateSchema = {
     type: 'object',
     title: 'ProviderUpdate',
     description: '供应商更新请求（所有字段均可选）。'
+} as const;
+
+export const RebuttalEntrySchema = {
+    properties: {
+        id: {
+            type: 'string',
+            maxLength: 128,
+            minLength: 1,
+            pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$',
+            title: 'Id'
+        },
+        reviewer_id: {
+            type: 'string',
+            maxLength: 128,
+            minLength: 1,
+            title: 'Reviewer Id'
+        },
+        label: {
+            type: 'string',
+            enum: ['W', 'Q', 'M'],
+            title: 'Label'
+        },
+        title: {
+            type: 'string',
+            maxLength: 500,
+            minLength: 1,
+            title: 'Title'
+        },
+        response: {
+            type: 'string',
+            maxLength: 100000,
+            minLength: 1,
+            title: 'Response'
+        },
+        concern_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            maxItems: 100,
+            minItems: 1,
+            title: 'Concern Ids'
+        },
+        evidence_status: {
+            type: 'string',
+            enum: ['source_grounded', 'verified', 'placeholder', 'needs_author'],
+            title: 'Evidence Status'
+        },
+        source_refs: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            maxItems: 200,
+            title: 'Source Refs'
+        },
+        character_count: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Character Count',
+            default: 0
+        }
+    },
+    type: 'object',
+    required: ['id', 'reviewer_id', 'label', 'title', 'response', 'concern_ids', 'evidence_status'],
+    title: 'RebuttalEntry',
+    description: 'One source-grounded response block generated for a reviewer concern.'
 } as const;
 
 export const RefreshAccessTokenSchema = {

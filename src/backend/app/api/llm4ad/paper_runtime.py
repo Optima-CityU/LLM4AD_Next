@@ -15,7 +15,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlmodel import Session
+from sqlmodel import Session, select
 from websockets.asyncio.client import connect as websocket_connect
 
 from app.api.deps import CurrentUser, SessionDep, TokenDep
@@ -27,6 +27,7 @@ from app.models import (
     LLMProvider,
     PaperAgentRun,
     PaperAgentRunStatus,
+    PaperReview,
     PaperSourceVersion,
     PaperWorkspace,
 )
@@ -150,6 +151,14 @@ def _runtime_run_payload(
     }
 
 
+def _runtime_allowed_tools(workspace_mode: str) -> list[str]:
+    """Return the file and interaction tools allowed for one workflow mode."""
+    tools = ["Read", "Glob", "Grep", "AskUserQuestion", "Skill"]
+    if workspace_mode == "proposal":
+        tools.extend(["Write", "Edit"])
+    return tools
+
+
 async def _wait_until_ready(workspace_id: uuid.UUID) -> None:
     deadline = asyncio.get_running_loop().time() + 30
     health_url = _runtime_upstream_url(workspace_id, "health")
@@ -214,7 +223,24 @@ async def create_runtime_session(
     source = db.get(PaperSourceVersion, workspace.active_source_version_id)
     if source is None or source.workspace_id != workspace.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research source is unavailable")
+    if workspace.mode == "manuscript":
+        reviews = list(
+            db.exec(
+                select(PaperReview).where(
+                    PaperReview.workspace_id == workspace.id,
+                    PaperReview.source_version_id == source.id,
+                )
+            ).all()
+        )
+        if not reviews:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Attach at least one reviewer report before starting the rebuttal workflow",
+            )
     paper_service.sync_paper_workspace_source(workspace, source)
+    if workspace.mode == "manuscript":
+        paper_service.sync_paper_workspace_reviews(db, workspace, source)
+        paper_service.sync_paper_workspace_rebuttal_context(workspace)
 
     session_id = f"{workspace_id.hex}-{request.workflow_stage}"
     run_id = _native_run_id(workspace_id, request.workflow_stage)
@@ -272,7 +298,7 @@ async def create_runtime_session(
         workspace_id=workspace_id,
         session_id=session_id,
     )
-    allowed_tools = ["Read", "Glob", "Grep", "Write", "Edit", "AskUserQuestion", "Skill"]
+    allowed_tools = _runtime_allowed_tools(workspace.mode)
     mcp_servers: dict[str, object] = {
         "llm4ad_stage": {
             "type": "stdio",
@@ -285,11 +311,13 @@ async def create_runtime_session(
                 "LLM4AD_STAGE_RUNTIME_TOKEN": paper_workspace_runtime_token(workspace_id),
                 "LLM4AD_STAGE_WORKSPACE_ID": str(workspace_id),
                 "LLM4AD_STAGE_RUN_ID": str(run_id),
+                "LLM4AD_STAGE_REQUIRES_TYPST": "true" if workspace.mode == "proposal" else "false",
             },
         }
     }
     allowed_tools.append("mcp__llm4ad_stage__publish_stage_result")
-    allowed_tools.append("mcp__llm4ad_stage__check_typst")
+    if workspace.mode == "proposal":
+        allowed_tools.append("mcp__llm4ad_stage__check_typst")
     if request.workflow_stage == "literature":
         mcp_servers["arxiv"] = {
             "type": "stdio",

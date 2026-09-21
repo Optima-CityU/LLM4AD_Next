@@ -10,8 +10,8 @@ import {
   type PaperProposalTaskCreateRequest,
   type PaperReviewCreate,
   type PaperReviewUpdate,
-  type PaperRuntimeSessionCreate,
   type PaperRevisionCandidateCreate,
+  type PaperRuntimeSessionCreate,
   type PaperSourceFileUpdateRequest,
   type PaperSourcePathDeleteRequest,
   type PaperWorkspaceCreate,
@@ -54,12 +54,7 @@ export function usePaperRuntimeSession(
   profileKey: string,
 ) {
   return useQuery({
-    queryKey: [
-      "paper-runtime-session",
-      workspaceId,
-      workflowStage,
-      profileKey,
-    ],
+    queryKey: ["paper-runtime-session", workspaceId, workflowStage, profileKey],
     queryFn: () =>
       Llm4AdPapersService.createRuntimeSession({
         workspaceId,
@@ -224,6 +219,21 @@ export function useUpdateReviewerFeedback(workspaceId: string | null) {
     onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({
         queryKey: ["paper-review-content", variables.reviewId],
+      })
+      await refresh()
+    },
+  })
+}
+
+export function useDeleteReviewerFeedback(workspaceId: string | null) {
+  const refresh = useRefreshPapers(workspaceId)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (reviewId: string) =>
+      Llm4AdPapersService.deleteReviewerFeedback({ reviewId }),
+    onSuccess: async (_data, reviewId) => {
+      queryClient.removeQueries({
+        queryKey: ["paper-review-content", reviewId],
       })
       await refresh()
     },

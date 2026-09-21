@@ -57,6 +57,28 @@ def test_runtime_cookie_name_is_workspace_specific() -> None:
     assert paper_runtime._runtime_cookie_name(first) != paper_runtime._runtime_cookie_name(second)
 
 
+def test_rebuttal_runtime_is_read_only() -> None:
+    """Prevent the rebuttal agent from changing the submitted paper source."""
+    tools = paper_runtime._runtime_allowed_tools("manuscript")
+
+    assert "Read" in tools
+    assert "Write" not in tools
+    assert "Edit" not in tools
+
+
+def test_manuscript_workflow_uses_staged_autorebuttal_skills() -> None:
+    """Keep the ordered workflow and skill injection backend-owned."""
+    from app.services import paper_workflow
+
+    workflow = paper_workflow.get_research_workflow("manuscript")
+
+    assert workflow.available is True
+    assert workflow.stages == ("rebuttal_baseline", "autorebuttal")
+    assert workflow.skills_by_run_kind["rebuttal_baseline"] == ("rebuttal-baseline",)
+    assert workflow.skills_by_run_kind["autorebuttal"] == ("autorebuttal",)
+    assert workflow.writable_paths_by_run_kind["autorebuttal"] == ()
+
+
 def test_runtime_html_anchors_relative_assets_to_owned_proxy() -> None:
     """Resolve a nested native session's relative assets through the backend."""
     workspace_id = uuid.UUID("3d56ad31-2ae1-4ca5-9a24-7090dcc916dd")

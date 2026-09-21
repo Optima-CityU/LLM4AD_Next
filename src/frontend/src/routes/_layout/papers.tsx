@@ -60,6 +60,7 @@ import {
   makeMarkdownComponents,
 } from "@/components/markdown/markdownComponents"
 import PaperNativeRuntime from "@/components/Paper/PaperNativeRuntime"
+import RebuttalEntriesPanel from "@/components/Paper/RebuttalEntriesPanel"
 import TypstLivePreview from "@/components/Paper/TypstLivePreview"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -103,6 +104,10 @@ import {
 } from "@/hooks/usePapers"
 import { usePersistentState } from "@/hooks/usePersistentState"
 import { useProviders } from "@/hooks/useProviders"
+import {
+  AUTO_DISCOVERY_ENABLED,
+  AUTO_REBUTTAL_ENABLED,
+} from "@/lib/frontendFeatures"
 import {
   parseResearchWorkspaceMode,
   type ResearchWorkspaceMode,
@@ -162,6 +167,8 @@ type PaperTool =
   | "innovation_plan"
   | "foundation_feasibility"
   | "final_review"
+  | "rebuttal_baseline"
+  | "autorebuttal"
   | "reviews"
   | "boundary"
   | "targets"
@@ -177,6 +184,7 @@ type ProposalStage = Extract<
   | "foundation_feasibility"
   | "final_review"
 >
+type RebuttalStage = Extract<PaperTool, "rebuttal_baseline" | "autorebuttal">
 const RESEARCH_WORKSPACE_MODE_ICONS: Record<
   ResearchWorkspaceMode,
   typeof Sparkles
@@ -195,6 +203,8 @@ const PAPER_WORKFLOW_STEPS = [
   { key: "innovation_plan", icon: CalendarClock },
   { key: "foundation_feasibility", icon: Microscope },
   { key: "final_review", icon: FileCheck2 },
+  { key: "rebuttal_baseline", icon: ScanSearch },
+  { key: "autorebuttal", icon: MessagesSquare },
   { key: "reviews", icon: MessagesSquare },
   { key: "boundary", icon: ScanSearch },
   { key: "targets", icon: ListChecks },
@@ -231,6 +241,10 @@ const PROPOSAL_STAGE_PREREQUISITES: Record<ProposalStage, ProposalStage[]> = {
   innovation_plan: ["methods"],
   foundation_feasibility: ["methods"],
   final_review: ["innovation_plan", "foundation_feasibility"],
+}
+const REBUTTAL_STAGE_PREREQUISITES: Record<RebuttalStage, RebuttalStage[]> = {
+  rebuttal_baseline: [],
+  autorebuttal: ["rebuttal_baseline"],
 }
 const PAPER_DIRECTORY_MARKER = ".llm4ad-directory"
 const CREATABLE_PAPER_FILE_SUFFIXES = [
@@ -1499,6 +1513,7 @@ function PaperDocumentDock({
   sourceSaving,
   typstEntryPath,
   typstDownloadEnabled,
+  typstPreview = true,
   editable,
   locked,
   highlightStartLine,
@@ -1512,6 +1527,7 @@ function PaperDocumentDock({
   uploading,
   canDeletePath,
   onDraftChange,
+  embedded = false,
 }: {
   manifest: string[]
   sourceVersionId: string
@@ -1526,6 +1542,7 @@ function PaperDocumentDock({
   sourceSaving: boolean
   typstEntryPath: string | null
   typstDownloadEnabled: boolean
+  typstPreview?: boolean
   editable: boolean
   locked: boolean
   highlightStartLine?: number | null
@@ -1540,11 +1557,13 @@ function PaperDocumentDock({
   uploading: boolean
   canDeletePath?: (path: string, isDirectory: boolean) => boolean
   onDraftChange: (value: string) => void
+  embedded?: boolean
 }) {
   const { t } = useTranslation()
   const suffix = selectedPath?.toLowerCase() ?? ""
   const isMarkdown = suffix.endsWith(".md") || suffix.endsWith(".markdown")
   const isTypst = suffix.endsWith(".typ")
+  const showTypstPreview = typstPreview && isTypst
   const previewComponents = useMemo(
     () =>
       makeMarkdownComponents(
@@ -1610,7 +1629,12 @@ function PaperDocumentDock({
   )
 
   return (
-    <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background lg:flex">
+    <aside
+      className={cn(
+        "hidden h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background lg:flex",
+        !embedded && "border-l",
+      )}
+    >
       <ResizableGroup
         id={`paper-dock-${workspaceKey}`}
         orientation="vertical"
@@ -1635,11 +1659,11 @@ function PaperDocumentDock({
                     {t("paper.editor.selectFile")}
                   </div>
                 </div>
-              ) : sourceLoading && !isTypst ? (
+              ) : sourceLoading && !showTypstPreview ? (
                 <div className="grid h-full place-items-center">
                   <Loader2 className="size-5 animate-spin text-primary" />
                 </div>
-              ) : isTypst ? (
+              ) : showTypstPreview ? (
                 <TypstLivePreview
                   sourceVersionId={sourceVersionId}
                   sourceHash={sourceHash}
@@ -2000,6 +2024,10 @@ export function PaperWorkbench({
 
   const workspaceQuery = usePaperWorkspace(activeId)
   const workspace = workspaceQuery.data
+  const workspaceFeatureDisabled = Boolean(
+    (workspace?.mode === "manuscript" && !AUTO_REBUTTAL_ENABLED) ||
+      (workspace?.mode === "algorithm" && !AUTO_DISCOVERY_ENABLED),
+  )
   const workflowStages = useMemo(
     () =>
       (workspace?.workflow_stages ?? []).filter((stage): stage is PaperTool =>
@@ -2043,10 +2071,10 @@ export function PaperWorkbench({
     Object.entries(workspace?.proposal_stage_states ?? {}).forEach(
       ([stage, state]) => {
         if (
-          PROPOSAL_STAGES.includes(stage as ProposalStage) &&
+          workflowStages.includes(stage as PaperTool) &&
           state.status === "ready"
         )
-          completed.add(stage as ProposalStage)
+          completed.add(stage as PaperTool)
       },
     )
     if ((workspace?.reviews?.length ?? 0) > 0) completed.add("reviews")
@@ -2060,7 +2088,7 @@ export function PaperWorkbench({
     )
       completed.add("branch")
     return completed
-  }, [workspace])
+  }, [workspace, workflowStages])
   const proposalEntryPath =
     workspace?.proposal_entry_path ??
     (selectedPath?.toLowerCase().endsWith(".typ") ? selectedPath : null) ??
@@ -2102,6 +2130,10 @@ export function PaperWorkbench({
     )
   }
   const proposalActiveStage = isProposalStage(activeStage) ? activeStage : null
+  const rebuttalActiveStage =
+    activeStage in REBUTTAL_STAGE_PREREQUISITES
+      ? (activeStage as RebuttalStage)
+      : null
   const selectedPathEditable = Boolean(
     selectedPath &&
       EDITABLE_SUFFIXES.some((suffix) =>
@@ -2112,11 +2144,19 @@ export function PaperWorkbench({
     Boolean(selectedPath) &&
     selectedPathEditable &&
     sourceDraft !== (sourceFile.data?.content ?? "")
-  const proposalPrerequisitesReady =
-    !proposalActiveStage ||
-    PROPOSAL_STAGE_PREREQUISITES[proposalActiveStage].every(
-      (stage) => workspace?.proposal_stage_states?.[stage]?.status === "ready",
-    )
+  const workflowPrerequisitesReady =
+    (workspace?.mode !== "manuscript" ||
+      (workspace.reviews?.length ?? 0) > 0) &&
+    (!proposalActiveStage ||
+      PROPOSAL_STAGE_PREREQUISITES[proposalActiveStage].every(
+        (stage) =>
+          workspace?.proposal_stage_states?.[stage]?.status === "ready",
+      )) &&
+    (!rebuttalActiveStage ||
+      REBUTTAL_STAGE_PREREQUISITES[rebuttalActiveStage].every(
+        (stage) =>
+          workspace?.proposal_stage_states?.[stage]?.status === "ready",
+      ))
   const modelReady = Boolean(
     workspace?.analysis_provider_id &&
       workspace.analysis_model_name &&
@@ -2126,6 +2166,15 @@ export function PaperWorkbench({
   const deletePath = useDeletePaperSourcePath(activeId)
   const updateModel = useUpdatePaperModelBinding(activeId)
   const updateSourceFile = useUpdatePaperSourceFile(activeId)
+
+  useEffect(() => {
+    if (!workspaceFeatureDisabled) return
+    void navigate({
+      to: "/papers",
+      search: { mode: "proposal", workspaceId: undefined },
+      replace: true,
+    })
+  }, [navigate, workspaceFeatureDisabled])
 
   useEffect(() => {
     if (
@@ -2332,7 +2381,7 @@ export function PaperWorkbench({
     toast.success(t("paper.editor.saved"))
   }
 
-  if (!workspace) {
+  if (!workspace || workspaceFeatureDisabled) {
     if (workspaceQuery.isError) {
       return (
         <div className="grid h-full min-h-0 place-items-center p-6">
@@ -2405,13 +2454,9 @@ export function PaperWorkbench({
                   workspaceId={workspace.id}
                   stage={nativeStage}
                   modelReady={modelReady}
-                  prerequisiteReady={proposalPrerequisitesReady}
+                  prerequisiteReady={workflowPrerequisitesReady}
                   artifactPaths={nativeArtifactPaths}
-                  stageState={
-                    isProposalStage(nativeStage)
-                      ? workspace.proposal_stage_states?.[nativeStage]
-                      : undefined
-                  }
+                  stageState={workspace.proposal_stage_states?.[nativeStage]}
                   modelName={workspace.analysis_model_name}
                   onConfigureModel={openModelSettings}
                   onOpenArtifact={setSelectedPath}
@@ -2436,40 +2481,117 @@ export function PaperWorkbench({
                 </div>
               )}
             </section>
-            <PaperDocumentDock
-              manifest={activeSource.manifest}
-              sourceVersionId={activeSource.id}
-              sourceHash={activeSource.content_hash}
-              selectedPath={selectedPath}
-              sourceContent={sourceFile.data?.content ?? ""}
-              sourceContext={selectedSourceContext}
-              sourceLoading={sourceFile.isLoading}
-              sourceDraft={sourceDraft}
-              sourceDirty={sourceDirty}
-              sourceSaveError={sourceAutoSaveError === sourceDraft}
-              sourceSaving={updateSourceFile.isPending}
-              typstEntryPath={workspace.proposal_entry_path}
-              typstDownloadEnabled={
-                workspace.proposal_stage_states?.final_review?.status ===
-                "ready"
-              }
-              editable={selectedPathEditable}
-              locked={false}
-              highlightStartLine={null}
-              highlightEndLine={null}
-              workspaceKey={workspace.id}
-              onSelect={setSelectedPath}
-              onDelete={(path) => void removeSourcePath(path)}
-              onCreateFile={createSourceFile}
-              onCreateFolder={createSourceFolder}
-              onUpload={() => setUploadOpen(true)}
-              uploading={uploadSource.isPending}
-              canDeletePath={canDeleteProposalPath}
-              onDraftChange={(value) => {
-                setSourceAutoSaveError(null)
-                setSourceDraft(value)
-              }}
-            />
+            {workspace.mode === "manuscript" ? (
+              <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background lg:flex">
+                <Tabs
+                  defaultValue="rebuttal"
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <div className="shrink-0 border-b px-3 py-2">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="rebuttal">
+                        {t("paper.rebuttal.tabs.entries")}
+                      </TabsTrigger>
+                      <TabsTrigger value="source">
+                        {t("paper.rebuttal.tabs.source")}
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+                  <TabsContent
+                    value="rebuttal"
+                    className="mt-0 min-h-0 flex-1 overflow-hidden"
+                  >
+                    <RebuttalEntriesPanel
+                      workspaceId={workspace.id}
+                      sourceVersionId={activeSource.id}
+                      reviews={workspace.reviews ?? []}
+                      entries={workspace.rebuttal_entries ?? []}
+                      readyForSubmission={
+                        workspace.proposal_stage_states?.autorebuttal
+                          ?.status === "ready"
+                      }
+                      stale={
+                        workspace.proposal_stage_states?.autorebuttal
+                          ?.status === "stale"
+                      }
+                    />
+                  </TabsContent>
+                  <TabsContent
+                    value="source"
+                    className="mt-0 min-h-0 flex-1 overflow-hidden"
+                  >
+                    <PaperDocumentDock
+                      embedded
+                      manifest={activeSource.manifest}
+                      sourceVersionId={activeSource.id}
+                      sourceHash={activeSource.content_hash}
+                      selectedPath={selectedPath}
+                      sourceContent={sourceFile.data?.content ?? ""}
+                      sourceContext={selectedSourceContext}
+                      sourceLoading={sourceFile.isLoading}
+                      sourceDraft={sourceDraft}
+                      sourceDirty={sourceDirty}
+                      sourceSaveError={sourceAutoSaveError === sourceDraft}
+                      sourceSaving={updateSourceFile.isPending}
+                      typstEntryPath={null}
+                      typstDownloadEnabled={false}
+                      typstPreview={false}
+                      editable={selectedPathEditable}
+                      locked={false}
+                      highlightStartLine={null}
+                      highlightEndLine={null}
+                      workspaceKey={workspace.id}
+                      onSelect={setSelectedPath}
+                      onDelete={(path) => void removeSourcePath(path)}
+                      onCreateFile={createSourceFile}
+                      onCreateFolder={createSourceFolder}
+                      onUpload={() => setUploadOpen(true)}
+                      uploading={uploadSource.isPending}
+                      canDeletePath={canDeleteProposalPath}
+                      onDraftChange={(value) => {
+                        setSourceAutoSaveError(null)
+                        setSourceDraft(value)
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
+              </aside>
+            ) : (
+              <PaperDocumentDock
+                manifest={activeSource.manifest}
+                sourceVersionId={activeSource.id}
+                sourceHash={activeSource.content_hash}
+                selectedPath={selectedPath}
+                sourceContent={sourceFile.data?.content ?? ""}
+                sourceContext={selectedSourceContext}
+                sourceLoading={sourceFile.isLoading}
+                sourceDraft={sourceDraft}
+                sourceDirty={sourceDirty}
+                sourceSaveError={sourceAutoSaveError === sourceDraft}
+                sourceSaving={updateSourceFile.isPending}
+                typstEntryPath={workspace.proposal_entry_path}
+                typstDownloadEnabled={
+                  workspace.proposal_stage_states?.final_review?.status ===
+                  "ready"
+                }
+                editable={selectedPathEditable}
+                locked={false}
+                highlightStartLine={null}
+                highlightEndLine={null}
+                workspaceKey={workspace.id}
+                onSelect={setSelectedPath}
+                onDelete={(path) => void removeSourcePath(path)}
+                onCreateFile={createSourceFile}
+                onCreateFolder={createSourceFolder}
+                onUpload={() => setUploadOpen(true)}
+                uploading={uploadSource.isPending}
+                canDeletePath={canDeleteProposalPath}
+                onDraftChange={(value) => {
+                  setSourceAutoSaveError(null)
+                  setSourceDraft(value)
+                }}
+              />
+            )}
           </div>
         )}
       </main>
@@ -2660,7 +2782,7 @@ function SourceUploadDialog({
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="min-w-0 max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("paper.source.dialogTitle")}</DialogTitle>
           <DialogDescription>
@@ -2697,23 +2819,23 @@ function SourceUploadDialog({
             <Folder className="size-4" /> {t("paper.source.selectFolder")}
           </Button>
         </div>
-        <ScrollArea className="h-56 rounded-lg border">
-          <div className="space-y-1 p-2">
+        <ScrollArea className="h-56 min-w-0 rounded-lg border [&>[data-radix-scroll-area-viewport]]:overflow-x-hidden [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full">
+          <div className="min-w-0 space-y-1 p-2">
             {files.map((file) => {
               const path = file.webkitRelativePath || file.name
               return (
                 <div
                   key={path}
-                  className="flex items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted"
+                  className="flex min-w-0 items-center gap-2 overflow-hidden rounded px-2 py-1.5 text-xs hover:bg-muted"
                 >
-                  <FileText className="size-3.5" />
-                  <span className="min-w-0 flex-1 truncate" title={path}>
+                  <FileText className="size-3.5 shrink-0" />
+                  <span className="block min-w-0 flex-1 truncate" title={path}>
                     {path}
                   </span>
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="size-7"
+                    className="size-7 shrink-0"
                     onClick={() =>
                       setFiles(
                         files.filter(

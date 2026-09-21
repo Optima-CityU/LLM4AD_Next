@@ -8,9 +8,8 @@ import {
 import { ArrowLeft, LogOut, Settings } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
-
-import { ScanlineOverlay, TechBackground } from "@/components/AutoResearch/tech"
 import { AutoResearchHelpMenu } from "@/components/AutoResearch/HelpMenu"
+import { ScanlineOverlay, TechBackground } from "@/components/AutoResearch/tech"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -66,9 +65,9 @@ function AutoResearchLayout() {
         <header className="relative z-10 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:gap-4 px-3 sm:px-6 h-14 shrink-0 bg-muted/50 dark:bg-background/95 backdrop-blur border-b border-border shadow-[0_2px_8px_-4px] shadow-black/10 dark:shadow-sm">
           <div className="flex items-center gap-3 min-w-0">
             <Link
-              to="/"
+              to="/autoresearch"
               className="flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors"
-              title={t("autoResearch.header.backToHome")}
+              title={t("autoResearch.header.backToWorkspace")}
             >
               <ArrowLeft className="size-4" />
             </Link>

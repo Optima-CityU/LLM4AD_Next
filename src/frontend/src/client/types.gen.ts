@@ -1750,7 +1750,7 @@ export type PaperAgentRunResponse = {
     id: string;
     workspace_id: string;
     source_version_id: string;
-    run_kind: 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+    run_kind: 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
     status: 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
     progress: number;
     stage: string;
@@ -1766,7 +1766,7 @@ export type PaperAgentRunResponse = {
     updated_time: string;
 };
 
-export type run_kind = 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+export type run_kind = 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
 
 export type status2 = 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
 
@@ -2140,10 +2140,10 @@ export type PaperRevisionPatchResponse = {
  * Select the backend-owned stage profile for a native session.
  */
 export type PaperRuntimeSessionCreate = {
-    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'reviews' | 'boundary' | 'targets' | 'branch';
 };
 
-export type workflow_stage = 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch';
+export type workflow_stage = 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'reviews' | 'boundary' | 'targets' | 'branch';
 
 /**
  * Opaque browser session for an embedded research runtime.
@@ -2173,7 +2173,7 @@ export type PaperSourceFileResponse = {
 export type PaperSourceFileUpdateRequest = {
     path: string;
     content: string;
-    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
 };
 
 /**
@@ -2181,7 +2181,7 @@ export type PaperSourceFileUpdateRequest = {
  */
 export type PaperSourcePathDeleteRequest = {
     path: string;
-    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
 };
 
 /**
@@ -2229,6 +2229,10 @@ export type PaperWorkspaceDetail = {
     proposal_stage_states?: {
         [key: string]: ProposalStageState;
     };
+    rebuttal_context?: {
+        [key: string]: unknown;
+    };
+    rebuttal_entries?: Array<RebuttalEntry>;
     analysis_provider_id: (string | null);
     analysis_model_name: (string | null);
     analysis_context_window_tokens: number;
@@ -2248,8 +2252,8 @@ export type PaperWorkspaceDetail = {
     revision_candidates?: Array<PaperRevisionCandidateResponse>;
     active_run?: (PaperAgentRunResponse | null);
     workflow_available: boolean;
-    workflow_stages?: Array<('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
-    available_run_kinds?: Array<('proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
+    workflow_stages?: Array<('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
+    available_run_kinds?: Array<('proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
 };
 
 /**
@@ -2276,6 +2280,10 @@ export type PaperWorkspaceSummary = {
     proposal_stage_states?: {
         [key: string]: ProposalStageState;
     };
+    rebuttal_context?: {
+        [key: string]: unknown;
+    };
+    rebuttal_entries?: Array<RebuttalEntry>;
     analysis_provider_id: (string | null);
     analysis_model_name: (string | null);
     analysis_context_window_tokens: number;
@@ -2570,6 +2578,25 @@ export type ProviderUpdate = {
     timeout?: (number | null);
     max_retries?: (number | null);
 };
+
+/**
+ * One source-grounded response block generated for a reviewer concern.
+ */
+export type RebuttalEntry = {
+    id: string;
+    reviewer_id: string;
+    label: 'W' | 'Q' | 'M';
+    title: string;
+    response: string;
+    concern_ids: Array<(string)>;
+    evidence_status: 'source_grounded' | 'verified' | 'placeholder' | 'needs_author';
+    source_refs?: Array<(string)>;
+    character_count?: number;
+};
+
+export type label = 'W' | 'Q' | 'M';
+
+export type evidence_status = 'source_grounded' | 'verified' | 'placeholder' | 'needs_author';
 
 /**
  * 刷新令牌请求体。
@@ -4980,6 +5007,12 @@ export type Llm4AdPapersUpdateReviewerFeedbackData = {
 
 export type Llm4AdPapersUpdateReviewerFeedbackResponse = (PaperReviewResponse);
 
+export type Llm4AdPapersDeleteReviewerFeedbackData = {
+    reviewId: string;
+};
+
+export type Llm4AdPapersDeleteReviewerFeedbackResponse = (void);
+
 export type Llm4AdPapersDeleteSourcePathData = {
     requestBody: PaperSourcePathDeleteRequest;
     sourceVersionId: string;
@@ -5088,6 +5121,12 @@ export type Llm4AdPapersCreateRuntimeSessionData = {
 };
 
 export type Llm4AdPapersCreateRuntimeSessionResponse = (PaperRuntimeSessionResponse);
+
+export type Llm4AdPapersWorkspaceRuntimeEventsData = {
+    workspaceId: string;
+};
+
+export type Llm4AdPapersWorkspaceRuntimeEventsResponse = (unknown);
 
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;

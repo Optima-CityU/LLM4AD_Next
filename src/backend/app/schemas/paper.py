@@ -18,6 +18,8 @@ PaperRunKind = Literal[
     "proposal_innovation_plan",
     "proposal_foundation_feasibility",
     "proposal_final_review",
+    "rebuttal_baseline",
+    "autorebuttal",
     "boundary_analysis",
     "issue_extraction",
     "algorithm_discovery",
@@ -37,6 +39,8 @@ ResearchWorkflowStage = Literal[
     "innovation_plan",
     "foundation_feasibility",
     "final_review",
+    "rebuttal_baseline",
+    "autorebuttal",
     "reviews",
     "boundary",
     "targets",
@@ -115,6 +119,30 @@ class ProposalStageState(BaseModel):
     findings: list[str] = Field(default_factory=list, max_length=200)
 
 
+class RebuttalEntry(BaseModel):
+    """One source-grounded response block generated for a reviewer concern."""
+
+    id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+    reviewer_id: str = Field(min_length=1, max_length=128)
+    label: Literal["W", "Q", "M"]
+    title: str = Field(min_length=1, max_length=500)
+    response: str = Field(min_length=1, max_length=100_000)
+    concern_ids: list[str] = Field(min_length=1, max_length=100)
+    evidence_status: Literal["source_grounded", "verified", "placeholder", "needs_author"]
+    source_refs: list[str] = Field(default_factory=list, max_length=200)
+    character_count: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def set_character_count(self) -> RebuttalEntry:
+        """Compute the displayed count and enforce explicit evidence handling."""
+        if self.evidence_status in {"source_grounded", "verified"} and not self.source_refs:
+            raise ValueError("Grounded or verified rebuttal entries must include source references")
+        if self.evidence_status == "placeholder" and "[AUTHOR:" not in self.response:
+            raise ValueError("Placeholder rebuttal entries must contain an explicit [AUTHOR: ...] marker")
+        self.character_count = len(self.response)
+        return self
+
+
 class PaperWorkspaceSummary(BaseModel):
     """Paper workspace list item."""
 
@@ -128,6 +156,8 @@ class PaperWorkspaceSummary(BaseModel):
     proposal_foundation: ProposalFoundation | None
     proposal_entry_path: str | None
     proposal_stage_states: dict[str, ProposalStageState] = Field(default_factory=dict)
+    rebuttal_context: dict[str, Any] = Field(default_factory=dict)
+    rebuttal_entries: list[RebuttalEntry] = Field(default_factory=list)
     analysis_provider_id: uuid.UUID | None
     analysis_model_name: str | None
     analysis_context_window_tokens: int

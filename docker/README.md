@@ -61,7 +61,7 @@ Copy-Item .env.develop.local.example .env
 
 其余变量（端口、镜像名、SMTP、APT/PyPI 镜像源等）可沿用示例文件中的默认值，完整说明见 `.env.develop.local.example`。
 
-页脚备案信息可通过 `VITE_FOOTER_BEIAN` 配置；留空时不会显示。前端镜像的页脚版本在构建时固定读取仓库根目录的 `VERSION` 文件。
+页脚备案信息可通过 `VITE_FOOTER_BEIAN` 配置；留空时不会显示。前端镜像的页脚版本在构建时固定读取仓库根目录的 `VERSION` 文件。AutoRebuttal 与 AutoDiscovery 前端入口默认隐藏，分别在构建前设置 `VITE_AUTOREBUTTAL_ENABLED=true`、`VITE_AUTODISCOVERY_ENABLED=true` 才会启用；修改后需要重新构建前端镜像。
 
 ## 本地开发
 

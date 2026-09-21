@@ -216,7 +216,7 @@
       "modeLabel": "研究模式",
       "mode": {
         "proposal": "研究提案",
-        "manuscript": "论文优化",
+        "manuscript": "审稿回复",
         "algorithm": "算法发现"
       },
       "navigation": {
@@ -226,7 +226,7 @@
       },
       "modeDescription": {
         "proposal": "根据项目描述直接开始 Typst 研究提案，无需预先上传；参考资料或已有草稿均为可选补充",
-        "manuscript": "结合原文与审稿意见定位并优化论文内容",
+        "manuscript": "上传 Markdown 或 LaTeX 论文，逐位录入审稿意见，分阶段生成有据可查的 Rebuttal 回复",
         "algorithm": "从研究材料中发现可评估、可演化的算法任务"
       },
       "workflowReserved": "该模式的专属阶段与 Skill 正在重构中。你可以先建立项目并管理研究材料，后续功能会由后台工作流统一接入。"
@@ -652,6 +652,20 @@
           "请列出所有阻断提交的问题，并标明应返回哪个阶段修订；不要直接改写其他阶段负责的文件。",
           "在内容不变的前提下优化最终版式，重点检查目录、图表、公式、参考文献和分页。"
         ],
+        "rebuttal_baseline": "问题基准",
+        "rebuttal_baselineHint": "一次完成材料归一化与审稿意见分析，确认后续生成不可随意改变的问题和证据基线。",
+        "rebuttal_baselineExamples": [
+          "这是 ICLR 回复，总字符上限为……；请读取全部论文和评审，并建立 W（弱点）/Q（问题）/M（次要意见）清单。",
+          "标明每个 concern 的论文证据位置、严重程度和建议回复动作；只询问会阻断生成的作者决策。",
+          "先展示问题基准供我确认，不要在这个阶段撰写最终回复，也不要声称新增实验已经完成。"
+        ],
+        "autorebuttal": "AutoRebuttal",
+        "autorebuttalHint": "根据已确认基准自动完成回复策略、字符预算、逐条撰写和合规终审。",
+        "autorebuttalExamples": [
+          "直接完成策略、撰写和终审，不要要求我在内部步骤之间反复输入“继续”。",
+          "按审稿人分配字符预算并保留安全余量；已有证据引用准确章节，缺少数据时保留醒目的作者占位符。",
+          "自动修复非阻断性的表达和长度问题；只有必须由作者提供事实或结果时才暂停并列出待办。"
+        ],
         "source": "论文材料",
         "sourceHint": "上传、浏览并维护本项目的 Markdown 或 LaTeX 源文件。",
         "reviews": "审稿人意见",
@@ -662,6 +676,59 @@
         "targetsHint": "定位审稿意见对应的章节、片段或算法。",
         "branch": "目标处理",
         "branchHint": "仅对选中的一个目标执行论文改写或算法发现。"
+      }
+    },
+    "rebuttal": {
+      "title": "Rebuttal 回复条目",
+      "ready": "可提交",
+      "stale": "这些回复生成后，论文或审稿意见发生了变化。使用前请重新执行标记为“需要更新”的阶段。",
+      "reviewCount": "已录入 {{count}} 份审稿意见",
+      "attachedReviews": "已录入的审稿意见",
+      "addReview": "录入审稿意见",
+      "addFirstReview": "录入第一份意见",
+      "addReviewTitle": "录入审稿人意见",
+      "addReviewDescription": "请逐位粘贴完整审稿意见，以便问题和回复保持可追溯。",
+      "reviewerLabel": "审稿人标识",
+      "reviewerPlaceholder": "例如 Reviewer 1 或 R2",
+      "reviewTitle": "意见标题（可选）",
+      "reviewContent": "审稿意见",
+      "reviewContentPlaceholder": "粘贴完整的 Markdown 或纯文本审稿意见……",
+      "saveReview": "保存意见",
+      "reviewAdded": "审稿意见已录入",
+      "reviewAddFailed": "录入审稿意见失败",
+      "reviewListHint": "点击卡片查看完整意见或进行管理。",
+      "reviewActions": "审稿意见操作",
+      "viewReview": "查看完整意见",
+      "untitledReview": "未命名审稿意见",
+      "baselineCount": "{{count}} 条基准问题",
+      "editReviewTitle": "编辑审稿人意见",
+      "editReviewDescription": "修改后会重新建立该审稿人的问题基准，并将已有回复标记为需要更新。",
+      "saveChanges": "保存修改",
+      "reviewUpdated": "审稿意见已更新",
+      "reviewUpdateFailed": "更新审稿意见失败",
+      "reviewLoadFailed": "无法加载完整审稿意见。",
+      "deleteReviewTitle": "删除这份审稿意见？",
+      "deleteReviewDescription": "这会永久删除 {{reviewer}} 及其派生的问题基准，已有 Rebuttal 结果将标记为需要更新。",
+      "deleteReviewConfirm": "删除意见",
+      "reviewDeleted": "审稿意见已删除",
+      "reviewDeleteFailed": "删除审稿意见失败",
+      "noReviewsTitle": "请先录入审稿意见",
+      "noReviewsDescription": "论文材料已就绪；至少录入一位审稿人的意见后，才能开始第一阶段。",
+      "noEntriesTitle": "尚未生成回复条目",
+      "noEntriesDescription": "依次完成材料确认、意见分析和回复策略后，生成的逐条回复会显示在这里。",
+      "entryCount": "{{count}} 条回复",
+      "characters": "{{count}} 字符",
+      "copy": "复制回复",
+      "copied": "回复已复制",
+      "tabs": {
+        "entries": "回复条目",
+        "source": "论文源码"
+      },
+      "evidence": {
+        "source_grounded": "论文有据",
+        "verified": "已核验",
+        "placeholder": "待填占位",
+        "needs_author": "需作者处理"
       }
     },
     "boundary": {
@@ -3700,7 +3767,7 @@
       "brand": "AutoResearchClaw",
       "brandTooltip": "基于 AutoResearchClaw（开源）· 点击查看源项目",
       "brandSource": "AutoResearchClaw · 查看源项目",
-      "backToHome": "返回首页",
+      "backToWorkspace": "返回自动科研列表",
       "newSession": "新建会话"
     },
     "sidebar": {

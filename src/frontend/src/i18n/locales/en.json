@@ -216,7 +216,7 @@
       "modeLabel": "Research mode",
       "mode": {
         "proposal": "Research Proposal",
-        "manuscript": "Manuscript Refinement",
+        "manuscript": "Author Rebuttal",
         "algorithm": "Algorithm Discovery"
       },
       "navigation": {
@@ -226,7 +226,7 @@
       },
       "modeDescription": {
         "proposal": "Start a Typst research proposal from your project brief without an upload; adding references or an existing draft remains optional",
-        "manuscript": "Locate and improve manuscript content using the source and reviewer feedback",
+        "manuscript": "Upload a Markdown or LaTeX paper, add reviewer reports, and build source-grounded rebuttal responses step by step",
         "algorithm": "Discover evaluable, evolvable algorithm tasks from research material"
       },
       "workflowReserved": "The dedicated stages and skills for this mode are being redesigned. You can create the project and manage its research materials now; the backend workflow will connect the remaining capabilities later."
@@ -652,6 +652,20 @@
           "List every submission-blocking issue and name the stage that must revise it; do not rewrite files owned by another stage.",
           "Improve the final layout without changing content, checking the contents, figures, equations, bibliography, and page breaks."
         ],
+        "rebuttal_baseline": "Concern Baseline",
+        "rebuttal_baselineHint": "Normalize all inputs and analyze every review in one phase, then confirm the concern and evidence baseline used for generation.",
+        "rebuttal_baselineExamples": [
+          "This is an ICLR response with a shared character limit of …. Read every paper and review source and build the W (weakness), Q (question), and M (minor point) inventory.",
+          "For every concern, identify the paper evidence, severity, and response move; ask only for author decisions that block generation.",
+          "Show me the compact baseline for confirmation before drafting, and never claim that a new experiment has already run."
+        ],
+        "autorebuttal": "AutoRebuttal",
+        "autorebuttalHint": "Automatically complete response strategy, character budgeting, drafting, and compliance review from the confirmed baseline.",
+        "autorebuttalExamples": [
+          "Complete strategy, drafting, and final review without asking me to type ‘continue’ between internal steps.",
+          "Allocate a safe reviewer budget, cite exact source locations for grounded claims, and keep visible author placeholders for missing evidence.",
+          "Fix non-blocking wording and length issues automatically; pause only for facts or results that require author input."
+        ],
         "source": "Paper Source",
         "sourceHint": "Upload, browse, and maintain this project's Markdown or LaTeX source files.",
         "reviews": "Reviewer Feedback",
@@ -662,6 +676,59 @@
         "targetsHint": "Locate the exact section, passage, or algorithm behind each review concern.",
         "branch": "Target Operation",
         "branchHint": "Run manuscript revision or algorithm discovery for one selected target."
+      }
+    },
+    "rebuttal": {
+      "title": "Rebuttal entries",
+      "ready": "Ready for submission",
+      "stale": "The paper or reviewer feedback changed after these responses were generated. Rerun the stale stages before using them.",
+      "reviewCount": "{{count}} reviewer reports attached",
+      "attachedReviews": "Attached reviewer reports",
+      "addReview": "Add review",
+      "addFirstReview": "Add the first review",
+      "addReviewTitle": "Add reviewer feedback",
+      "addReviewDescription": "Paste one reviewer report at a time so concerns and responses remain attributable.",
+      "reviewerLabel": "Reviewer label",
+      "reviewerPlaceholder": "For example, Reviewer 1 or R2",
+      "reviewTitle": "Review title (optional)",
+      "reviewContent": "Reviewer feedback",
+      "reviewContentPlaceholder": "Paste the complete reviewer report in Markdown or plain text…",
+      "saveReview": "Save review",
+      "reviewAdded": "Reviewer feedback added",
+      "reviewAddFailed": "Failed to add reviewer feedback",
+      "reviewListHint": "Open a report to read the full feedback or manage it.",
+      "reviewActions": "Review actions",
+      "viewReview": "View full report",
+      "untitledReview": "Untitled reviewer report",
+      "baselineCount": "{{count}} baseline concerns",
+      "editReviewTitle": "Edit reviewer feedback",
+      "editReviewDescription": "Changes rebuild this review's concern baseline and mark generated responses as stale.",
+      "saveChanges": "Save changes",
+      "reviewUpdated": "Reviewer feedback updated",
+      "reviewUpdateFailed": "Failed to update reviewer feedback",
+      "reviewLoadFailed": "The full reviewer report could not be loaded.",
+      "deleteReviewTitle": "Delete this reviewer report?",
+      "deleteReviewDescription": "This permanently removes {{reviewer}} and its derived concern baseline. Existing rebuttal results will be marked stale.",
+      "deleteReviewConfirm": "Delete report",
+      "reviewDeleted": "Reviewer feedback deleted",
+      "reviewDeleteFailed": "Failed to delete reviewer feedback",
+      "noReviewsTitle": "Add reviewer feedback to begin",
+      "noReviewsDescription": "The paper is ready. Add at least one reviewer report before opening the first rebuttal stage.",
+      "noEntriesTitle": "Responses have not been drafted yet",
+      "noEntriesDescription": "Complete intake, review analysis, and response strategy; generated response blocks will then appear here.",
+      "entryCount": "{{count}} responses",
+      "characters": "{{count}} characters",
+      "copy": "Copy response",
+      "copied": "Response copied",
+      "tabs": {
+        "entries": "Rebuttal entries",
+        "source": "Paper source"
+      },
+      "evidence": {
+        "source_grounded": "Paper-grounded",
+        "verified": "Verified",
+        "placeholder": "Placeholder",
+        "needs_author": "Author action"
       }
     },
     "boundary": {
@@ -3830,7 +3897,7 @@
       "brand": "AutoResearchClaw",
       "brandTooltip": "Based on AutoResearchClaw (open source) · Click to view source project",
       "brandSource": "AutoResearchClaw · view source project",
-      "backToHome": "Back to home",
+      "backToWorkspace": "Back to AutoResearch sessions",
       "newSession": "New session"
     },
     "sidebar": {

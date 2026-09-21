@@ -38,6 +38,8 @@ class PaperAgentRunKind(StrEnum):
     PROPOSAL_INNOVATION_PLAN = "proposal_innovation_plan"
     PROPOSAL_FOUNDATION_FEASIBILITY = "proposal_foundation_feasibility"
     PROPOSAL_FINAL_REVIEW = "proposal_final_review"
+    REBUTTAL_BASELINE = "rebuttal_baseline"
+    AUTOREBUTTAL = "autorebuttal"
     BOUNDARY_ANALYSIS = "boundary_analysis"
     ISSUE_EXTRACTION = "issue_extraction"
     ALGORITHM_DISCOVERY = "algorithm_discovery"
@@ -73,6 +75,14 @@ class PaperWorkspace(SQLModel, TimeMixin, table=True):
     proposal_entry_path: str | None = Field(default=None, max_length=1_024)
     proposal_stage_states: dict[str, Any] = Field(
         default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
+    rebuttal_context: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
+    rebuttal_entries: list[dict[str, Any]] = Field(
+        default_factory=list,
         sa_column=Column(JSON, nullable=False),
     )
     analysis_provider_id: uuid.UUID | None = Field(

@@ -40,6 +40,10 @@ import {
 } from "@/components/ui/sidebar"
 import useAuth from "@/hooks/useAuth"
 import {
+  AUTO_DISCOVERY_ENABLED,
+  AUTO_REBUTTAL_ENABLED,
+} from "@/lib/frontendFeatures"
+import {
   parseResearchWorkspaceMode,
   type ResearchWorkspaceMode,
 } from "@/lib/researchWorkspace"
@@ -145,18 +149,26 @@ function ResearchWorkspaceNav() {
       path: "/papers",
       mode: "proposal",
     },
-    {
-      icon: MessageSquareReply,
-      title: t("sidebar.autoRebuttal"),
-      path: "/papers",
-      mode: "manuscript",
-    },
-    {
-      icon: GitBranch,
-      title: t("sidebar.autoDiscovery"),
-      path: "/papers",
-      mode: "algorithm",
-    },
+    ...(AUTO_REBUTTAL_ENABLED
+      ? [
+          {
+            icon: MessageSquareReply,
+            title: t("sidebar.autoRebuttal"),
+            path: "/papers" as const,
+            mode: "manuscript" as const,
+          },
+        ]
+      : []),
+    ...(AUTO_DISCOVERY_ENABLED
+      ? [
+          {
+            icon: GitBranch,
+            title: t("sidebar.autoDiscovery"),
+            path: "/papers" as const,
+            mode: "algorithm" as const,
+          },
+        ]
+      : []),
   ]
 
   return (

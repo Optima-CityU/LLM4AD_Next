@@ -107,16 +107,17 @@ async def check_typst() -> dict[str, Any]:
 
 @mcp.tool()
 async def publish_stage_result(artifact: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-    """Publish the completed stage artifact after all project edits are final.
+    """Publish the completed stage artifact after all stage work is final.
 
-    Refuses to publish while the proposal Typst document does not compile; run
-    ``check_typst`` and fix all errors first.
+    Proposal stages refuse publication while Typst does not compile. Read-only
+    workflows publish structured artifacts without a document compile gate.
     """
-    check = await asyncio.to_thread(_compile_check)
-    if not check["ok"]:
-        raise RuntimeError(
-            f"Typst compile check failed before publication: {_format_check(check)}"
-        )
+    if os.environ.get("LLM4AD_STAGE_REQUIRES_TYPST", "true").lower() == "true":
+        check = await asyncio.to_thread(_compile_check)
+        if not check["ok"]:
+            raise RuntimeError(
+                f"Typst compile check failed before publication: {_format_check(check)}"
+            )
     payload = {
         "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
         "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
