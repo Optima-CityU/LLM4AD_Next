@@ -3767,7 +3767,7 @@
       "brand": "AutoResearchClaw",
       "brandTooltip": "基于 AutoResearchClaw（开源）· 点击查看源项目",
       "brandSource": "AutoResearchClaw · 查看源项目",
-      "backToWorkspace": "返回自动科研列表",
+      "backToProjects": "返回项目列表",
       "newSession": "新建会话"
     },
     "sidebar": {

@@ -3897,7 +3897,7 @@
       "brand": "AutoResearchClaw",
       "brandTooltip": "Based on AutoResearchClaw (open source) · Click to view source project",
       "brandSource": "AutoResearchClaw · view source project",
-      "backToWorkspace": "Back to AutoResearch sessions",
+      "backToProjects": "Back to projects",
       "newSession": "New session"
     },
     "sidebar": {

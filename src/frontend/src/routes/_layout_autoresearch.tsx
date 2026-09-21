@@ -65,9 +65,9 @@ function AutoResearchLayout() {
         <header className="relative z-10 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:gap-4 px-3 sm:px-6 h-14 shrink-0 bg-muted/50 dark:bg-background/95 backdrop-blur border-b border-border shadow-[0_2px_8px_-4px] shadow-black/10 dark:shadow-sm">
           <div className="flex items-center gap-3 min-w-0">
             <Link
-              to="/autoresearch"
+              to="/projects"
               className="flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors"
-              title={t("autoResearch.header.backToWorkspace")}
+              title={t("autoResearch.header.backToProjects")}
             >
               <ArrowLeft className="size-4" />
             </Link>

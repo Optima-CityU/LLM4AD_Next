@@ -81,10 +81,10 @@ test("research projects remain independent from normal project management", () =
   expect(paperLayoutSource).toContain("h-screen")
 })
 
-test("autoresearch back navigation returns to the session list", () => {
-  expect(autoResearchLayoutSource).toContain('to="/autoresearch"')
+test("autoresearch back navigation returns to the project list", () => {
+  expect(autoResearchLayoutSource).toContain('to="/projects"')
   expect(autoResearchLayoutSource).toContain(
-    'title={t("autoResearch.header.backToWorkspace")}',
+    'title={t("autoResearch.header.backToProjects")}',
   )
 })
 
