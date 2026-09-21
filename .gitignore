@@ -254,3 +254,7 @@ refefence_superpowers/
 # Generated publication archives and source documents are not repository assets
 *.pdf
 *.zip
+
+# Internal release script for the test servers (192.168.8.181 / 10.121.17.44);
+# contains internal addresses and must not be committed
+/scripts/deploy-test-server.sh
