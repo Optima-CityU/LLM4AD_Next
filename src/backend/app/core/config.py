@@ -243,7 +243,7 @@ class Settings(BaseSettings):
     # time_budget_sec（≈3h）的独立墙钟上限，再加 build/figure/9 段文档 stage，健康长任务
     # 可逼近 5~6h。取 12h 作 backstop——远低于 7 天（卡死容器不再挂一周），又舒适高于任何
     # 现实健康 pipeline 的总预算，不会误杀长任务。超时容器被 stop/kill 收 TIMED_OUT。
-    RESEARCH_CONTAINER_TIMEOUT: int = 12 * 3600  # 研究容器执行硬超时（秒），默认 12 小时
+    RESEARCH_CONTAINER_TIMEOUT: int = 24 * 3600  # 研究容器执行硬超时（秒），默认 24 小时
 
     # ---- 文档知识库 Claude Agent SDK 解析容器 ----
     KNOWLEDGE_PARSER_IMAGE: str = "llm4ad-task-runner:latest"
