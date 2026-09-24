@@ -1,10 +1,12 @@
 """Workspace-local MCP bridge for publishing validated research artifacts.
 
-Exposes two tools to the research runtime's agent:
+Exposes three tools to the research runtime's agent:
 
 - ``check_typst``: compile the proposal Typst document in-process (official
   ``typst`` binding) and return errors/warnings so the agent can fix its own
   syntax before the user ever sees a broken preview.
+- ``build_algorithm_task``: invoke the official LLM4AD builder and validation
+  pipeline for an AutoDiscovery task package.
 - ``publish_stage_result``: publish the finished stage artifact; the same
   compile check gates publication, so a stage result that does not compile can
   never be published.
@@ -13,7 +15,11 @@ Exposes two tools to the research runtime's agent:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +30,10 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("llm4ad-stage")
 
 _WORKSPACE_SOURCE_ROOT = Path(os.environ.get("LLM4AD_WORKSPACE_ROOT", "/workspace/source"))
+_WORKSPACE_ROOT = _WORKSPACE_SOURCE_ROOT.parent
+_AUTODISCOVERY_PACKAGES_ROOT = _WORKSPACE_ROOT / ".research" / "autodiscovery" / "packages"
 _PROPOSAL_ENTRY = "proposal.typ"
+_SAFE_PROJECT_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
 def _required_environment(name: str) -> str:
@@ -94,6 +103,51 @@ def _format_check(check: dict[str, Any]) -> str:
     return "; ".join(part for part in parts if part)
 
 
+def _source_input_path(
+    raw_path: str | None,
+    *,
+    directory: bool,
+    use_parent_for_file: bool = False,
+) -> str | None:
+    """Resolve one optional builder input inside the uploaded source tree."""
+    if not raw_path or not raw_path.strip():
+        return None
+    candidate = Path(raw_path.strip())
+    if not candidate.is_absolute():
+        candidate = _WORKSPACE_SOURCE_ROOT / candidate
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(_WORKSPACE_SOURCE_ROOT.resolve())
+    except ValueError as exc:
+        raise ValueError("Builder inputs must stay inside /workspace/source") from exc
+    if not resolved.exists():
+        raise ValueError(f"Builder input does not exist: {raw_path}")
+    if directory and not resolved.is_dir():
+        raise ValueError(f"Dataset input must be a directory: {raw_path}")
+    if not directory and not resolved.is_file() and not resolved.is_dir():
+        raise ValueError(f"Code input must be a file or directory: {raw_path}")
+    if use_parent_for_file and resolved.is_file():
+        resolved = resolved.parent
+    return str(resolved)
+
+
+def _project_slug(project_name: str) -> str:
+    """Create a safe package directory name without changing project meaning."""
+    slug = _SAFE_PROJECT_NAME.sub("-", project_name.strip()).strip("-_").lower()
+    return slug[:80] or f"algorithm-task-{uuid.uuid4().hex[:8]}"
+
+
+def _package_manifest(package_dir: Path) -> list[str]:
+    """List regular, symlink-free files in one generated task package."""
+    manifest: list[str] = []
+    for path in sorted(package_dir.rglob("*")):
+        if path.is_symlink():
+            raise RuntimeError("Generated task packages cannot contain symbolic links")
+        if path.is_file():
+            manifest.append(path.relative_to(package_dir).as_posix())
+    return manifest
+
+
 @mcp.tool()
 async def check_typst() -> dict[str, Any]:
     """Compile the proposal Typst document and report errors and warnings.
@@ -103,6 +157,92 @@ async def check_typst() -> dict[str, Any]:
     true. ``publish_stage_result`` refuses to publish while errors remain.
     """
     return await asyncio.to_thread(_compile_check)
+
+
+@mcp.tool()
+async def build_algorithm_task(
+    description: str,
+    project_name: str,
+    code_path: str | None = None,
+    data_path: str | None = None,
+) -> dict[str, Any]:
+    """Build and validate a complete runnable LLM4AD task package.
+
+    Use this only after the AutoDiscovery conversation has resolved the
+    algorithm boundary, input/output contract, metrics, validity rules, and
+    evaluator data. Existing code and data paths must refer to uploaded files
+    under ``/workspace/source``. The returned package has already passed the
+    official LLM4AD builder validation pipeline and is ready to publish.
+    """
+    if not description.strip():
+        raise ValueError("A complete task description is required")
+    build_id = uuid.uuid4().hex
+    build_root = _AUTODISCOVERY_PACKAGES_ROOT / build_id
+    build_root.mkdir(parents=True, exist_ok=False)
+    try:
+        from llm4ad.builder import build_task
+
+        package_path = Path(
+            await build_task(
+                description.strip(),
+                output_dir=str(build_root),
+                code_path=_source_input_path(
+                    code_path,
+                    directory=False,
+                    use_parent_for_file=True,
+                ),
+                data_path=_source_input_path(data_path, directory=True),
+                project_name=_project_slug(project_name),
+                api_key=_required_environment("LLM4AD_BUILDER_API_KEY"),
+                model=_required_environment("LLM4AD_BUILDER_MODEL"),
+                base_url=_required_environment("LLM4AD_BUILDER_BASE_URL"),
+                provider_type="anthropic",
+                task_provider_type="anthropic",
+                max_repair_attempts=3,
+            )
+        ).resolve()
+        package_path.relative_to(build_root.resolve())
+        metadata_path = package_path / "blueprint_meta.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("validation_status") != "passed" or metadata.get(
+            "validation_errors"
+        ):
+            raise RuntimeError("The generated task package did not pass validation")
+        manifest = _package_manifest(package_path)
+        required_files = {"config.yaml", "debug_run.py", "test_evaluator.py", "blueprint_meta.json"}
+        evaluator_file = metadata.get("evaluator_file_name")
+        algorithm_dir = metadata.get("algorithm_dir_name")
+        algorithm_file = metadata.get("algorithm_file_name")
+        if not all(isinstance(value, str) and value for value in (evaluator_file, algorithm_dir, algorithm_file)):
+            raise RuntimeError("Validated task package metadata is incomplete")
+        required_files.update({evaluator_file, f"{algorithm_dir}/{algorithm_file}"})
+        missing = sorted(required_files.difference(manifest))
+        if missing:
+            raise RuntimeError(f"Validated task package is incomplete: {', '.join(missing)}")
+        return {
+            "task_package_path": str(package_path),
+            "project_name": metadata.get("project_name") or package_path.name,
+            "manifest": manifest,
+            "validation_report": {
+                "status": "passed",
+                "validator": "llm4ad.builder.TaskValidator",
+                "repair_attempts": int(metadata.get("repair_attempts") or 0),
+                "function_to_evolve": metadata.get("function_to_evolve"),
+                "evaluator_file": metadata.get("evaluator_file_name"),
+                "algorithm_file": "/".join(
+                    part
+                    for part in (
+                        metadata.get("algorithm_dir_name"),
+                        metadata.get("algorithm_file_name"),
+                    )
+                    if part
+                ),
+                "metrics": metadata.get("metrics") or [],
+            },
+        }
+    except Exception:
+        shutil.rmtree(build_root, ignore_errors=True)
+        raise
 
 
 @mcp.tool()

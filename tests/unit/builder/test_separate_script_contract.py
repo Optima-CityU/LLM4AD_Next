@@ -224,6 +224,23 @@ def test_rendered_boilerplate_is_valid_python():
     assert '"primary_score"' in test
 
 
+def test_generated_config_uses_requested_task_provider_protocol():
+    """Keep validation traffic on the runtime's configured provider protocol."""
+    analysis = _make_analysis()
+    class_name = TaskCreator._derive_evaluator_class_name(analysis)
+    config = TaskCreator(  # type: ignore[arg-type]
+        provider=None,
+        task_provider_type="anthropic",
+    )._build_config_yaml(
+        analysis,
+        class_name,
+        "doubler_task_evaluator.py",
+        multimodal=False,
+    )
+
+    assert 'type: "anthropic"' in config
+
+
 def test_full_validation_gate_passes():
     """The hand-authored separate-script package passes every validator stage."""
     blueprint = _make_blueprint()

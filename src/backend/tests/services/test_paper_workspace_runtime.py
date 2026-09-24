@@ -38,8 +38,12 @@ def test_project_container_mounts_one_stable_owned_workspace(tmp_path) -> None:
     )
 
     assert containers.kwargs is not None
-    assert containers.kwargs["name"] == paper_workspace_runtime.paper_workspace_container_name(workspace_id)
-    assert containers.kwargs["volumes"] == {str(tmp_path.resolve()): {"bind": "/workspace", "mode": "rw"}}
+    assert containers.kwargs["name"] == paper_workspace_runtime.paper_workspace_container_name(
+        workspace_id
+    )
+    assert containers.kwargs["volumes"] == {
+        str(tmp_path.resolve()): {"bind": "/workspace", "mode": "rw"}
+    }
     assert containers.kwargs["labels"]["llm4ad.paper-workspace-owner"] == str(user_id)
     assert containers.kwargs["command"] == ["/app/paper-agent/workspace-entrypoint.sh"]
     assert containers.kwargs["environment"] == {
@@ -71,6 +75,50 @@ def test_project_container_name_is_stable_for_the_workspace() -> None:
 
     assert first == second
     assert "-" not in first.removeprefix("llm4ad-paper-workspace-")
+
+
+def test_protocol_adapter_shares_workspace_network_without_exposing_credentials() -> None:
+    """Keep the adapter loopback-only and label it without its scoped token."""
+    workspace_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    containers = _Containers()
+    client = SimpleNamespace(containers=containers)
+    spec = paper_workspace_runtime.PaperProtocolAdapterSpec(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        upstream_base_url="http://backend:8000/api/v1/llm4ad/llm-proxy",
+        upstream_api_key="scoped-gateway-token",
+        upstream_model="gpt-5",
+        upstream_api_format="openai_chat",
+    )
+
+    paper_workspace_runtime._create_protocol_adapter_container(
+        spec,
+        client,
+        SimpleNamespace(id="image-id"),
+        SimpleNamespace(id="workspace-container-id"),
+    )
+
+    assert containers.kwargs is not None
+    assert containers.kwargs["network_mode"] == "container:workspace-container-id"
+    assert containers.kwargs["read_only"] is True
+    assert containers.kwargs["cap_drop"] == ["ALL"]
+    assert containers.kwargs["environment"]["LLM4AD_UPSTREAM_API_FORMAT"] == "openai_chat"
+    assert containers.kwargs["environment"]["LLM4AD_UPSTREAM_API_KEY"] == "scoped-gateway-token"
+    assert "scoped-gateway-token" not in str(containers.kwargs["labels"])
+    assert "127.0.0.1:17821/health" in containers.kwargs["healthcheck"]["test"][1]
+
+
+def test_protocol_adapter_ready_uses_internal_docker_health() -> None:
+    """Do not expose the loopback adapter port merely to probe readiness."""
+
+    class _HealthyAdapter:
+        attrs = {"State": {"Status": "running", "Health": {"Status": "starting"}}}
+
+        def reload(self) -> None:
+            self.attrs = {"State": {"Status": "running", "Health": {"Status": "healthy"}}}
+
+    paper_workspace_runtime.wait_paper_protocol_adapter_ready(_HealthyAdapter(), timeout=0.1)
 
 
 class _Removable:

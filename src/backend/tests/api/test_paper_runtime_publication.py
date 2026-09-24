@@ -54,6 +54,29 @@ class _ObjectStorage:
     def delete(self, key: str, **_kwargs) -> None:
         self.objects.pop(key, None)
 
+    def delete_many(self, keys: list[str], **_kwargs) -> None:
+        for key in keys:
+            self.objects.pop(key, None)
+
+    def list_objects(self, prefix: str, **_kwargs) -> list[str]:
+        return [key for key in self.objects if key.startswith(prefix)]
+
+
+def test_conversation_review_source_preserves_organized_markdown() -> None:
+    """Keep a conversation-supplied report available to the reviewer panel."""
+    review_id = uuid.uuid4()
+    source = paper_agent.RebuttalReviewerSource.model_validate(
+        {
+            "review_id": str(review_id),
+            "reviewer_id": str(review_id),
+            "display_label": "Reviewer A",
+            "source_system": "conversation",
+            "review_markdown": "## Reviewer A\n\n- Missing comparison.",
+        }
+    )
+
+    assert source.model_dump()["review_markdown"] == "## Reviewer A\n\n- Missing comparison."
+
 
 def _publication_request(token: str) -> Request:
     """Build the internal authenticated request used by the MCP bridge."""
@@ -119,6 +142,46 @@ def test_parallel_proposal_stage_only_stales_real_dependents() -> None:
     assert workspace.proposal_stage_states["final_review"]["status"] == "stale"
 
 
+def test_conversation_rewind_stales_only_the_revision_it_replaced() -> None:
+    """Ignore a delayed rewind after a newer stage revision was published."""
+    workspace = SimpleNamespace(
+        mode=models.ResearchWorkspaceMode.MANUSCRIPT.value,
+        proposal_stage_states={
+            "rebuttal_baseline": {
+                "status": "needs_revision",
+                "iteration": 2,
+            },
+            "autorebuttal": {
+                "status": "ready",
+                "iteration": 1,
+            },
+        },
+    )
+
+    changed = paper_service._stale_workflow_revision(
+        workspace,
+        "rebuttal_baseline",
+        expected_iteration=2,
+    )
+
+    assert changed is True
+    assert workspace.proposal_stage_states["rebuttal_baseline"]["status"] == "stale"
+    assert workspace.proposal_stage_states["autorebuttal"]["status"] == "stale"
+
+    workspace.proposal_stage_states["rebuttal_baseline"] = {
+        "status": "ready",
+        "iteration": 3,
+    }
+    changed = paper_service._stale_workflow_revision(
+        workspace,
+        "rebuttal_baseline",
+        expected_iteration=2,
+    )
+
+    assert changed is False
+    assert workspace.proposal_stage_states["rebuttal_baseline"]["status"] == "ready"
+
+
 def test_blocked_final_review_requires_an_actionable_finding() -> None:
     """Reject an unexplained state that would leave the author unable to revise."""
     with pytest.raises(ValidationError, match="must include at least one finding"):
@@ -133,9 +196,10 @@ def test_blocked_final_review_requires_an_actionable_finding() -> None:
         )
 
 
-def test_rebuttal_compliance_preserves_placeholders_and_computes_counts() -> None:
-    """Keep unsupported evidence visible and derive counts from final prose."""
+def test_rebuttal_compliance_preserves_agent_canonical_text() -> None:
+    """Keep unsupported evidence visible in the agent-produced final text."""
     response = "We will report [AUTHOR: measured latency] after verification."
+    rendered_text = f"## Reviewer 1\n\n### Q1: Runtime measurement\n\n{response}"
     artifact = paper_agent.RebuttalComplianceArtifact.model_validate(
         {
             "summary": "One author measurement is still required.",
@@ -149,73 +213,135 @@ def test_rebuttal_compliance_preserves_placeholders_and_computes_counts() -> Non
                     "concern_ids": ["r1-q1"],
                     "evidence_status": "placeholder",
                     "source_refs": ["paper.md#experiments"],
-                    "character_count": 999,
                 }
             ],
+            "rendered_text": rendered_text,
             "findings": [],
             "ready_for_submission": False,
             "open_placeholders": ["Measure and insert inference latency."],
         }
     )
 
-    assert artifact.entries[0].character_count == len(response)
     assert artifact.entries[0].evidence_status == "placeholder"
+    assert artifact.rendered_text == rendered_text
 
 
-def test_rebuttal_baseline_requires_exact_reviewer_concern_ownership() -> None:
-    """Reject a baseline whose reviewer card claims another reviewer's concern."""
-    with pytest.raises(ValidationError, match="links concerns from another reviewer"):
-        paper_agent.RebuttalBaselineArtifact.model_validate(
-            {
-                "summary": "Two reports were normalized.",
-                "intake": {
-                    "summary": "Inputs ready.",
-                    "paper_summary": "A paper summary.",
-                    "constraints": {},
-                    "reviewer_sources": [
-                        {"review_id": str(uuid.uuid4()), "reviewer_id": "R1"},
-                        {"review_id": str(uuid.uuid4()), "reviewer_id": "R2"},
-                    ],
-                    "open_questions": [],
-                },
-                "analysis": {
-                    "summary": "Concerns mapped.",
-                    "concerns": [
-                        {
-                            "id": "r1-w1",
-                            "reviewer_id": "R1",
-                            "label": "W",
-                            "concern": "Missing comparison.",
-                            "concern_type": "baseline_comparison",
-                            "severity": "high",
-                            "answer_source": "Experiments",
-                            "draft_move": "Point to the existing table.",
-                            "source_refs": ["paper.md#experiments"],
-                        }
-                    ],
-                    "reviewer_cards": [
-                        {
-                            "reviewer_id": "R1",
-                            "sentiment": "mixed",
-                            "movability": "swing",
-                            "attitude": "skeptical",
-                            "primary_concerns": ["baseline_comparison"],
-                            "concern_ids": [],
-                        },
-                        {
-                            "reviewer_id": "R2",
-                            "sentiment": "mixed",
-                            "movability": "swing",
-                            "attitude": "neutral",
-                            "primary_concerns": [],
-                            "concern_ids": ["r1-w1"],
-                        },
-                    ],
-                },
-                "ready_for_generation": True,
-                "findings": [],
-            }
-        )
+def test_rebuttal_baseline_leaves_reviewer_ownership_checks_to_skill() -> None:
+    """Keep reviewer-concern ownership at the agent skill boundary."""
+    reviewer_one = str(uuid.uuid4())
+    reviewer_two = str(uuid.uuid4())
+    artifact = paper_agent.RebuttalBaselineArtifact.model_validate(
+        {
+            "summary": "Two reports were normalized.",
+            "intake": {
+                "summary": "Inputs ready.",
+                "paper_summary": "A paper summary.",
+                "constraints": {},
+                "reviewer_sources": [
+                    {
+                        "review_id": reviewer_one,
+                        "reviewer_id": reviewer_one,
+                        "display_label": "Reviewer 1",
+                    },
+                    {
+                        "review_id": reviewer_two,
+                        "reviewer_id": reviewer_two,
+                        "display_label": "Reviewer 2",
+                    },
+                ],
+                "open_questions": [],
+            },
+            "analysis": {
+                "summary": "Concerns mapped.",
+                "concerns": [
+                    {
+                        "id": "r1-w1",
+                        "reviewer_id": reviewer_one,
+                        "label": "W",
+                        "concern": "Missing comparison.",
+                        "concern_type": "baseline_comparison",
+                        "severity": "high",
+                        "answer_source": "Experiments",
+                        "draft_move": "Point to the existing table.",
+                        "source_refs": ["paper.md#experiments"],
+                    }
+                ],
+                "reviewer_cards": [
+                    {
+                        "reviewer_id": reviewer_one,
+                        "sentiment": "mixed",
+                        "movability": "swing",
+                        "attitude": "skeptical",
+                        "primary_concerns": ["baseline_comparison"],
+                        "concern_ids": [],
+                    },
+                    {
+                        "reviewer_id": reviewer_two,
+                        "sentiment": "mixed",
+                        "movability": "swing",
+                        "attitude": "neutral",
+                        "primary_concerns": [],
+                        "concern_ids": ["r1-w1"],
+                    },
+                ],
+            },
+            "ready_for_generation": True,
+            "findings": [],
+        }
+    )
+
+    assert artifact.analysis.reviewer_cards[1].concern_ids == ["r1-w1"]
+
+
+def test_rebuttal_baseline_accepts_conversation_only_review() -> None:
+    """Allow a pasted report without a saved right-panel review record."""
+    reviewer_id = str(uuid.uuid4())
+    artifact = paper_agent.RebuttalBaselineArtifact.model_validate(
+        {
+            "summary": "One pasted reviewer report was analyzed.",
+            "intake": {
+                "summary": "Review text supplied in the conversation.",
+                "paper_summary": "The paper proposes a new algorithm.",
+                "constraints": {},
+                "reviewer_sources": [
+                    {
+                        "review_id": reviewer_id,
+                        "reviewer_id": reviewer_id,
+                        "display_label": "Reviewer A",
+                        "source_system": "conversation",
+                    }
+                ],
+            },
+            "analysis": {
+                "summary": "One concern found.",
+                "concerns": [
+                    {
+                        "id": "reviewer-a-w1",
+                        "reviewer_id": reviewer_id,
+                        "label": "W",
+                        "concern": "The comparison is missing.",
+                        "concern_type": "comparison",
+                        "severity": "medium",
+                        "answer_source": "Experiments section",
+                        "draft_move": "Clarify the existing comparisons.",
+                    }
+                ],
+                "reviewer_cards": [
+                    {
+                        "reviewer_id": reviewer_id,
+                        "sentiment": "mixed",
+                        "movability": "swing",
+                        "attitude": "Requests a clearer comparison.",
+                        "concern_ids": ["reviewer-a-w1"],
+                    }
+                ],
+            },
+            "ready_for_generation": True,
+        }
+    )
+
+    assert artifact.intake.reviewer_sources[0].source_system == "conversation"
+    assert artifact.analysis.concerns[0].reviewer_id == reviewer_id
 
 
 def test_rebuttal_baseline_publication_stales_automatic_result() -> None:
@@ -245,6 +371,7 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
     """Persist generated response blocks without modifying the paper source."""
     object_storage = _ObjectStorage()
     monkeypatch.setattr(paper_agent, "storage", object_storage)
+    reviewer_id = str(uuid.uuid4())
 
     with Session(engine) as db:
         user = create_random_user(db)
@@ -259,15 +386,14 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
                         "venue_year": None,
                         "response_mode": "per_reviewer",
                         "output_format": "markdown",
-                        "per_reviewer_limit": None,
-                        "total_limit": None,
                         "author_notes": [],
                         "forbidden_claims": [],
                     },
                     "reviewer_sources": [
                         {
-                            "review_id": str(uuid.uuid4()),
-                            "reviewer_id": "R1",
+                            "review_id": reviewer_id,
+                            "reviewer_id": reviewer_id,
+                            "display_label": "Reviewer 1",
                             "title": None,
                         }
                     ],
@@ -276,7 +402,7 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
                     "concerns": [
                         {
                             "id": "r1-w1",
-                            "reviewer_id": "R1",
+                            "reviewer_id": reviewer_id,
                         }
                     ]
                 },
@@ -314,9 +440,10 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
     output_dir = work_dir / "output"
     output_dir.mkdir(parents=True)
     response = "The requested ablation is already reported in Section 4."
+    rendered_text = f"## Reviewer 1\n\n### W1: Ablation coverage\n\n{response}"
     entry = {
         "id": "r1-w1",
-        "reviewer_id": "R1",
+        "reviewer_id": reviewer_id,
         "label": "W",
         "title": "Ablation coverage",
         "response": response,
@@ -331,26 +458,13 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
                 "strategy": {
                     "summary": "Answer the central empirical concern directly.",
                     "shared_issues": [],
-                    "priority_reviewers": ["R1"],
+                    "priority_reviewers": [reviewer_id],
                     "global_strategy": ["Lead with the existing ablation."],
                     "format_plan": {
                         "response_mode": "per_reviewer",
                         "output_format": "markdown",
                         "global_summary": False,
                         "assumptions": [],
-                    },
-                    "budget_plan": {
-                        "unit": "response_characters",
-                        "per_reviewer_limit": None,
-                        "total_limit": None,
-                        "safety_margin": 0,
-                        "reviewer_budgets": [
-                            {
-                                "reviewer_id": "R1",
-                                "target_characters": 500,
-                                "limit": None,
-                            }
-                        ],
                     },
                 },
                 "draft": {
@@ -360,6 +474,7 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
                 "compliance": {
                     "summary": "All concerns are covered.",
                     "entries": [entry],
+                    "rendered_text": rendered_text,
                     "findings": [],
                     "ready_for_submission": True,
                     "open_placeholders": [],
@@ -375,8 +490,227 @@ def test_rebuttal_draft_is_persisted_as_structured_entries(
         persisted = db.get(models.PaperWorkspace, workspace_id)
         assert persisted is not None
         assert persisted.rebuttal_entries[0]["response"] == response
-        assert persisted.rebuttal_entries[0]["character_count"] == len(response)
         assert persisted.proposal_stage_states["autorebuttal"]["status"] == "ready"
+        rendered = persisted.rebuttal_output
+        assert rendered is not None
+        assert rendered["text"] == rendered_text
+        assert rendered["ready_for_submission"] is True
+        response_model = paper_schemas.PaperWorkspaceSummary.model_validate(persisted)
+        assert response_model.rebuttal_output is not None
+        assert response_model.rebuttal_output.text == rendered["text"]
+
+
+def test_ac_summary_publishes_separate_author_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Keep the AC message separate from the reviewer rebuttal and paper source."""
+    object_storage = _ObjectStorage()
+    monkeypatch.setattr(paper_agent, "storage", object_storage)
+    with Session(engine) as db:
+        user = create_random_user(db)
+        workspace = models.PaperWorkspace(
+            user_id=user.id,
+            title="AC message",
+            mode="manuscript",
+            rebuttal_context={
+                "rendered": {
+                    "output_format": "markdown",
+                    "text": "Reviewer response text",
+                    "ready_for_submission": False,
+                }
+            },
+        )
+        db.add(workspace)
+        db.flush()
+        source = models.PaperSourceVersion(
+            workspace_id=workspace.id,
+            version=1,
+            source_kind=models.PaperSourceKind.MARKDOWN.value,
+            filename="paper.md",
+            object_key=f"paper/{user.id}/{workspace.id}/sources/current/paper.md",
+            content_hash="source",
+            content_size=8,
+            manifest=["paper.md"],
+        )
+        db.add(source)
+        db.flush()
+        workspace.active_source_version_id = source.id
+        run = models.PaperAgentRun(
+            workspace_id=workspace.id,
+            source_version_id=source.id,
+            run_kind=models.PaperAgentRunKind.AC_SUMMARY.value,
+            status=models.PaperAgentRunStatus.RUNNING.value,
+        )
+        db.add(run)
+        db.flush()
+        workspace.proposal_stage_states = {
+            "autorebuttal": {
+                "status": "needs_revision",
+                "run_id": str(run.id),
+                "source_version_id": str(source.id),
+                "updated_time": "2026-01-01T00:00:00Z",
+            }
+        }
+        db.add(workspace)
+        db.commit()
+        run_id, user_id, workspace_id = run.id, user.id, workspace.id
+
+    output_dir = tmp_path / "ac-summary" / "output"
+    output_dir.mkdir(parents=True)
+    (output_dir / "result.json").write_text(
+        json.dumps({"summary": "Prepared an author message.", "message": "Dear AC, we clarified the shared concern."}),
+        encoding="utf-8",
+    )
+
+    assert paper_agent._persist_output(run_id, user_id, output_dir.parent) is False
+
+    with Session(engine) as db:
+        persisted = db.get(models.PaperWorkspace, workspace_id)
+        assert persisted is not None
+        assert persisted.chair_message == "Dear AC, we clarified the shared concern."
+        assert persisted.rebuttal_context["rendered"]["text"] == "Reviewer response text"
+        assert persisted.proposal_stage_states["ac_summary"]["status"] == "ready"
+        assert paper_schemas.PaperWorkspaceSummary.model_validate(persisted).chair_message == persisted.chair_message
+        paper_service._stale_proposal_stages(persisted, "autorebuttal")
+        assert persisted.proposal_stage_states["ac_summary"]["status"] == "stale"
+
+
+def test_algorithm_discovery_replaces_drafts_and_marks_result_ready(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Persist only an Agent-built and validated task package."""
+    object_storage = _ObjectStorage()
+    monkeypatch.setattr(paper_agent, "storage", object_storage)
+    monkeypatch.setattr(paper_service.settings, "DOCKER_PROJECT_HOME", str(tmp_path))
+
+    with Session(engine) as db:
+        user = create_random_user(db)
+        workspace = models.PaperWorkspace(
+            user_id=user.id,
+            title="Algorithm discovery",
+            mode=models.ResearchWorkspaceMode.ALGORITHM.value,
+        )
+        db.add(workspace)
+        db.flush()
+        source = models.PaperSourceVersion(
+            workspace_id=workspace.id,
+            version=1,
+            source_kind=models.PaperSourceKind.MARKDOWN.value,
+            filename="paper.md",
+            object_key=f"paper/{user.id}/{workspace.id}/sources/current/paper.md",
+            content_hash="source",
+            content_size=8,
+            manifest=["paper.md"],
+        )
+        db.add(source)
+        db.flush()
+        workspace.active_source_version_id = source.id
+        run = models.PaperAgentRun(
+            workspace_id=workspace.id,
+            source_version_id=source.id,
+            run_kind=models.PaperAgentRunKind.ALGORITHM_DISCOVERY.value,
+            status=models.PaperAgentRunStatus.RUNNING.value,
+        )
+        db.add(run)
+        db.flush()
+        db.add(
+            models.PaperAlgorithmProposal(
+                workspace_id=workspace.id,
+                source_version_id=source.id,
+                run_id=run.id,
+                title="Superseded draft",
+                problem_statement="Old problem",
+                algorithm_design="Old design",
+            )
+        )
+        db.add(workspace)
+        db.commit()
+        run_id = run.id
+        workspace_id = workspace.id
+        user_id = user.id
+
+    package_dir = (
+        paper_service.paper_workspace_root(user_id, workspace_id)
+        / ".research"
+        / "autodiscovery"
+        / "packages"
+        / "build-1"
+        / "graph-constructor"
+    )
+    package_dir.mkdir(parents=True)
+    package_files = {
+        "config.yaml": "project_name: graph-constructor\nevaluator:\n  module: evaluator.py:Evaluator\nevolution:\n  type: island_ga\n",
+        "debug_run.py": "print('ok')\n",
+        "test_evaluator.py": "print('ok')\n",
+        "evaluator.py": "class Evaluator:\n    pass\n",
+        "algorithm/solve.py": "# EVOLVE_START\npass\n# EVOLVE_END\n",
+        "blueprint_meta.json": json.dumps(
+            {
+                "project_name": "graph-constructor",
+                "evaluator_file_name": "evaluator.py",
+                "algorithm_dir_name": "algorithm",
+                "algorithm_file_name": "solve.py",
+                "function_to_evolve": "solve",
+                "metrics": [{"name": "quality", "type": "maximize"}],
+                "validation_status": "passed",
+                "validation_errors": [],
+                "repair_attempts": 0,
+            }
+        ),
+    }
+    for relative, content in package_files.items():
+        target = package_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    work_dir = tmp_path / "algorithm-publication"
+    output_dir = work_dir / "output"
+    output_dir.mkdir(parents=True)
+    (output_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "proposals": [
+                    {
+                        "title": "Evolvable graph constructor",
+                        "problem_statement": "Improve graph quality under a fixed budget.",
+                        "algorithm_design": "Evolve the bounded construction function.",
+                        "evaluator_requirements": ["Maximize validated graph quality."],
+                        "assumptions": ["Training instances are available."],
+                        "provenance": ["paper.md — Methods"],
+                        "suggested_task_config": {"language": "python"},
+                        "task_package_path": "/workspace/.research/autodiscovery/packages/build-1/graph-constructor",
+                        "validation_report": {
+                            "status": "passed",
+                            "validator": "llm4ad.builder.TaskValidator",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert paper_agent._persist_output(run_id, user_id, work_dir) is False
+
+    with Session(engine) as db:
+        proposals = list(
+            db.exec(
+                select(models.PaperAlgorithmProposal).where(
+                    models.PaperAlgorithmProposal.workspace_id == workspace_id
+                )
+            ).all()
+        )
+        persisted_workspace = db.get(models.PaperWorkspace, workspace_id)
+        assert [proposal.title for proposal in proposals] == [
+            "Evolvable graph constructor"
+        ]
+        assert proposals[0].validation_report["status"] == "passed"
+        assert "config.yaml" in proposals[0].package_manifest
+        assert proposals[0].package_object_prefix
+        assert persisted_workspace is not None
+        assert persisted_workspace.proposal_stage_states["discovery"]["status"] == "ready"
 
 
 def test_blocking_final_review_is_persisted_as_needs_revision(
@@ -458,10 +792,10 @@ def test_blocking_final_review_is_persisted_as_needs_revision(
 
 
 @pytest.mark.asyncio
-async def test_invalid_publication_can_be_repaired_in_the_same_native_run(
+async def test_native_run_can_publish_revised_artifact_with_same_idempotency_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reject invalid output, then persist its corrected retry without a new run."""
+    """Persist corrected and branch-revised output without creating a new run."""
     redis = _AsyncRedis()
     object_storage = _ObjectStorage()
     workspace_id: uuid.UUID
@@ -569,3 +903,31 @@ async def test_invalid_publication_can_be_repaired_in_the_same_native_run(
         assert boundary.run_id == run_id
         assert boundary.content["sections"][0]["key"] == "research_scope"
         assert ready_run.artifact_object_key in object_storage.objects
+
+    revised = corrected.model_copy(
+        update={
+            "artifact": {
+                "sections": [
+                    {
+                        "key": "research_scope",
+                        "title": "Revised research scope",
+                        "summary": "The edited conversation produced a revised boundary.",
+                        "source_refs": [{"path": "paper.md"}],
+                    }
+                ],
+                "source_map": [],
+                "unknowns": [],
+            }
+        }
+    )
+    revised_result = await paper_runtime.publish_runtime_stage_result(
+        revised,
+        _publication_request(runtime_token),
+    )
+
+    assert revised_result["success"] is True
+    with Session(engine) as db:
+        revised_boundary = db.exec(
+            select(models.PaperBoundarySnapshot).where(models.PaperBoundarySnapshot.workspace_id == workspace_id)
+        ).one()
+        assert revised_boundary.content["sections"][0]["title"] == "Revised research scope"

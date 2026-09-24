@@ -95,7 +95,9 @@ def estimate_knowledge_tokens(content: str) -> int:
     """
     cjk_count = len(_CJK_CHARACTER.findall(content))
     non_cjk_count = sum(
-        1 for character in content if not character.isspace() and not _CJK_CHARACTER.match(character)
+        1
+        for character in content
+        if not character.isspace() and not _CJK_CHARACTER.match(character)
     )
     return max(1, cjk_count + (non_cjk_count + 3) // 4)
 
@@ -109,9 +111,7 @@ def normalize_parse_background(value: str | None) -> str:
 
 def resolve_parse_background(request_value: str | None, topic_value: str | None) -> str:
     """Prefer a compatible per-run override, otherwise use the topic context."""
-    return normalize_parse_background(
-        request_value if request_value is not None else topic_value
-    )
+    return normalize_parse_background(request_value if request_value is not None else topic_value)
 
 
 def _safe_manifest_path(raw: str) -> str:
@@ -165,7 +165,9 @@ def validate_plan_question_answers(
         raise HTTPException(status_code=400, detail="请回答当前方案中的全部问题")
     answers: dict[str, str] = {}
     for question in question_round.questions:
-        answer = _UNSAFE_BACKGROUND_CONTROLS.sub("", request.answers.get(question.question, "")).strip()
+        answer = _UNSAFE_BACKGROUND_CONTROLS.sub(
+            "", request.answers.get(question.question, "")
+        ).strip()
         if not answer:
             raise HTTPException(status_code=400, detail="方案问题的回答不能为空")
         if len(answer) > 1000:
@@ -268,7 +270,9 @@ def _plan_candidate_key(user_id: uuid.UUID, source_id: uuid.UUID, plan_id: uuid.
     return f"knowledge/{user_id}/{source_id}/plans/{plan_id}/candidate.txt"
 
 
-def _get_owned_source(db: Session, user_id: uuid.UUID, source_id: uuid.UUID) -> models.KnowledgeSource:
+def _get_owned_source(
+    db: Session, user_id: uuid.UUID, source_id: uuid.UUID
+) -> models.KnowledgeSource:
     source = db.exec(
         select(models.KnowledgeSource).where(
             models.KnowledgeSource.id == source_id,
@@ -298,7 +302,9 @@ def _get_owned_source_for_update(
     return source
 
 
-def _get_owned_source_file(db: Session, user_id: uuid.UUID, file_id: uuid.UUID) -> models.KnowledgeSourceFile:
+def _get_owned_source_file(
+    db: Session, user_id: uuid.UUID, file_id: uuid.UUID
+) -> models.KnowledgeSourceFile:
     source_file = db.exec(
         select(models.KnowledgeSourceFile)
         .join(
@@ -315,7 +321,9 @@ def _get_owned_source_file(db: Session, user_id: uuid.UUID, file_id: uuid.UUID) 
     return source_file
 
 
-def _get_owned_document(db: Session, user_id: uuid.UUID, document_id: uuid.UUID) -> models.KnowledgeDocument:
+def _get_owned_document(
+    db: Session, user_id: uuid.UUID, document_id: uuid.UUID
+) -> models.KnowledgeDocument:
     document = db.exec(
         select(models.KnowledgeDocument)
         .join(
@@ -408,7 +416,10 @@ async def add_source_files(
     for upload in uploads:
         if upload.filename.casefold() in existing_names:
             raise HTTPException(status_code=400, detail=f"存在同名文档：{upload.filename}")
-    if sum(item.content_size for item in existing) + sum(len(item.data) for item in uploads) > MAX_TOPIC_BYTES:
+    if (
+        sum(item.content_size for item in existing) + sum(len(item.data) for item in uploads)
+        > MAX_TOPIC_BYTES
+    ):
         raise HTTPException(status_code=413, detail="一个知识主题的原始文档总计不能超过 100 MiB")
 
     created: list[models.KnowledgeSourceFile] = []
@@ -453,9 +464,7 @@ def list_sources(
     normalized_search = (search or "").strip()
     if normalized_search:
         filters.append(models.KnowledgeSource.title.ilike(f"%{normalized_search}%"))
-    total = db.exec(
-        select(func.count()).select_from(models.KnowledgeSource).where(*filters)
-    ).one()
+    total = db.exec(select(func.count()).select_from(models.KnowledgeSource).where(*filters)).one()
     sources = list(
         db.exec(
             select(models.KnowledgeSource)
@@ -471,7 +480,9 @@ def list_sources(
     )
 
 
-def get_source_detail(db: Session, user: models.User, source_id: uuid.UUID) -> schemas.KnowledgeSourceDetail:
+def get_source_detail(
+    db: Session, user: models.User, source_id: uuid.UUID
+) -> schemas.KnowledgeSourceDetail:
     source = _get_owned_source(db, user.id, source_id)
     source_files = _list_source_files(db, source.id)
     documents: list[models.KnowledgeDocument] = []
@@ -524,7 +535,9 @@ def delete_source(db: Session, user: models.User, source_id: uuid.UUID) -> None:
     knowledge_cleanup.run_or_schedule_cleanup(cleanup_job.id)
 
 
-def get_source_file_content(db: Session, user: models.User, file_id: uuid.UUID) -> schemas.KnowledgeContentResponse:
+def get_source_file_content(
+    db: Session, user: models.User, file_id: uuid.UUID
+) -> schemas.KnowledgeContentResponse:
     source_file = _get_owned_source_file(db, user.id, file_id)
     return schemas.KnowledgeContentResponse(
         content=_decode_markdown(storage.download(source_file.object_key)),
@@ -627,7 +640,9 @@ def ensure_source_deletable(db: Session, source: models.KnowledgeSource) -> None
         raise HTTPException(status_code=409, detail="知识主题正在生成解析方案，暂时不能删除")
 
 
-def get_document_content(db: Session, user: models.User, document_id: uuid.UUID) -> schemas.KnowledgeContentResponse:
+def get_document_content(
+    db: Session, user: models.User, document_id: uuid.UUID
+) -> schemas.KnowledgeContentResponse:
     document = _get_owned_document(db, user.id, document_id)
     return schemas.KnowledgeContentResponse(
         content=_decode_markdown(storage.download(document.object_key)),
@@ -659,7 +674,9 @@ def update_document(
         _decode_markdown(data)
         if _digest(data) != document.content_hash:
             version = document.content_version + 1
-            uploaded_key = _document_key(user.id, source.id, document.parse_run_id, document.id, version)
+            uploaded_key = _document_key(
+                user.id, source.id, document.parse_run_id, document.id, version
+            )
             storage.upload(uploaded_key, data, content_type="text/markdown; charset=utf-8")
             document.object_key = uploaded_key
             document.content_version = version
@@ -712,7 +729,7 @@ def _get_selected_run_documents(
 
 
 def _memory_events_from_add_response(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    memories = ((payload.get("data") or {}).get("memories") or [])
+    memories = (payload.get("data") or {}).get("memories") or []
     result: list[dict[str, Any]] = []
     for item in memories:
         if not isinstance(item, dict):
@@ -876,10 +893,7 @@ def _complete_document_block_insert(
         value = str(document.id)
         if value not in inserted_ids:
             inserted_ids.append(value)
-    operation_by_id = {
-        str(event["memory_id"]): str(event["operation"])
-        for event in memory_events
-    }
+    operation_by_id = {str(event["memory_id"]): str(event["operation"]) for event in memory_events}
     retired_ids = {
         str(memory_id)
         for event in memory_events
@@ -941,7 +955,9 @@ def insert_document_blocks(
     """Insert selected editable blocks through one structured MindMemOS add."""
     from app.services import memory_service
 
-    run, documents, already_inserted, payload = _prepare_document_block_insert(db, user, run_id, request)
+    run, documents, already_inserted, payload = _prepare_document_block_insert(
+        db, user, run_id, request
+    )
     if payload is None:
         return schemas.KnowledgeDocumentInsertResponse(
             inserted_document_ids=[uuid.UUID(item) for item in already_inserted],
@@ -957,7 +973,9 @@ def insert_document_blocks(
         scopes=["memory:write"],
     )
     memory_events = _memory_events_from_add_response(result)
-    return _complete_document_block_insert(db, user, run, documents, already_inserted, memory_events)
+    return _complete_document_block_insert(
+        db, user, run, documents, already_inserted, memory_events
+    )
 
 
 async def stream_insert_document_blocks(
@@ -970,7 +988,9 @@ async def stream_insert_document_blocks(
 
     from app.services import memory_service
 
-    run, documents, already_inserted, payload = _prepare_document_block_insert(db, user, run_id, request)
+    run, documents, already_inserted, payload = _prepare_document_block_insert(
+        db, user, run_id, request
+    )
     if payload is None:
         result = schemas.KnowledgeDocumentInsertResponse(
             inserted_document_ids=[uuid.UUID(item) for item in already_inserted],
@@ -996,7 +1016,9 @@ async def stream_insert_document_blocks(
             continue
 
         memory_events = _memory_events_from_add_response(event)
-        result = _complete_document_block_insert(db, user, run, documents, already_inserted, memory_events)
+        result = _complete_document_block_insert(
+            db, user, run, documents, already_inserted, memory_events
+        )
         yield {"event": "completed", "data": result.model_dump(mode="json")}
         return
 
@@ -1009,10 +1031,16 @@ def validate_parser_binding(
     """Validate ownership/visibility and require a declared provider model."""
     if provider is None or (
         getattr(provider, "user_id", None) != user_id
-        and not (getattr(provider, "is_builtin", False) and getattr(provider, "visible_to_all", False))
+        and not (
+            getattr(provider, "is_builtin", False) and getattr(provider, "visible_to_all", False)
+        )
     ):
         raise HTTPException(status_code=400, detail="绑定的解析模型供应商不存在或不可用")
-    models_available = {item.strip() for item in str(getattr(provider, "model", "") or "").split(";") if item.strip()}
+    models_available = {
+        item.strip()
+        for item in str(getattr(provider, "model", "") or "").split(";")
+        if item.strip()
+    }
     if model_name.strip() not in models_available:
         raise HTTPException(status_code=400, detail="绑定的解析模型已不在供应商模型列表中")
     return provider
@@ -1020,7 +1048,9 @@ def validate_parser_binding(
 
 def _get_parser_binding(db: Session, user_id: uuid.UUID) -> models.KnowledgeParserBinding | None:
     return db.exec(
-        select(models.KnowledgeParserBinding).where(models.KnowledgeParserBinding.user_id == user_id)
+        select(models.KnowledgeParserBinding).where(
+            models.KnowledgeParserBinding.user_id == user_id
+        )
     ).first()
 
 
@@ -1043,9 +1073,7 @@ def get_parser_binding(db: Session, user: models.User) -> schemas.KnowledgeParse
             provider_type=(
                 provider.type.value
                 if provider is not None and hasattr(provider.type, "value")
-                else str(provider.type)
-                if provider is not None
-                else None
+                else str(provider.type) if provider is not None else None
             ),
             model_name=binding.model_name,
             context_window_tokens=binding.context_window_tokens,
@@ -1057,7 +1085,9 @@ def get_parser_binding(db: Session, user: models.User) -> schemas.KnowledgeParse
         configured=True,
         provider_id=provider.id,
         provider_name=provider.name,
-        provider_type=(provider.type.value if hasattr(provider.type, "value") else str(provider.type)),
+        provider_type=(
+            provider.type.value if hasattr(provider.type, "value") else str(provider.type)
+        ),
         model_name=binding.model_name,
         context_window_tokens=binding.context_window_tokens,
         max_output_tokens=binding.max_output_tokens,
@@ -1161,7 +1191,10 @@ def _plan_response(
     source_revision: int,
 ) -> schemas.KnowledgeParsePlanResponse:
     status = plan.status
-    if status == models.KnowledgeParseStatus.READY.value and plan.source_revision != source_revision:
+    if (
+        status == models.KnowledgeParseStatus.READY.value
+        and plan.source_revision != source_revision
+    ):
         status = models.KnowledgeParseStatus.STALE.value
     payload = (
         _load_plan_payload(plan)
@@ -1202,10 +1235,16 @@ def activate_parse_plan_payload(
 ) -> str:
     """Activate an already validated and stored plan without invoking a model."""
     is_stale = source.source_revision != plan.source_revision
-    plan.status = models.KnowledgeParseStatus.STALE.value if is_stale else models.KnowledgeParseStatus.READY.value
+    plan.status = (
+        models.KnowledgeParseStatus.STALE.value
+        if is_stale
+        else models.KnowledgeParseStatus.READY.value
+    )
     plan.progress = 100
     plan.stage = "stale" if is_stale else "completed"
-    recommended = next(item for item in payload.strategies if item.id == payload.recommended_strategy_id)
+    recommended = next(
+        item for item in payload.strategies if item.id == payload.recommended_strategy_id
+    )
     plan.message = (
         "原文已更新，方案仅供查看"
         if is_stale
@@ -1229,17 +1268,19 @@ def _issue_parser_token(
     access_token: str,
 ) -> tuple[str, str]:
     from app.core.config import settings
-    from app.services import credential_broker
+    from app.services import claude_protocol, credential_broker
 
     base_url = provider.base_url or ""
     if provider.is_builtin and access_token:
         base_url = base_url.replace("{accessToken}", access_token)
-    upstream_api_format = "anthropic" if provider.type == models.ProviderType.ANTHROPIC else "openai_chat"
+    upstream_api_format = claude_protocol.provider_api_format(provider.type)
     proxy_token = credential_broker.issue_token(
         user_id=user.id,
         task_id=task_id,
         ttl=settings.KNOWLEDGE_PARSER_TIMEOUT + 600,
-        provider_type=(provider.type.value if hasattr(provider.type, "value") else str(provider.type)),
+        provider_type=(
+            provider.type.value if hasattr(provider.type, "value") else str(provider.type)
+        ),
         base_url=base_url,
         api_key=provider.api_key or "",
         auth_token=provider.auth_token or "",
@@ -1541,7 +1582,12 @@ def answer_parse_plan_question(
     ):
         raise HTTPException(status_code=409, detail="当前解析方案没有等待回答的问题")
     answers = validate_plan_question_answers(plan.pending_question, request)
-    work_dir = Path(settings.DOCKER_PROJECT_HOME) / f"code_user-{user.id}" / "knowledge_plan" / str(plan.id)
+    work_dir = (
+        Path(settings.DOCKER_PROJECT_HOME)
+        / f"code_user-{user.id}"
+        / "knowledge_plan"
+        / str(plan.id)
+    )
     control_dir = work_dir / "control"
     answer_path = control_dir / "answer.json"
     temporary_path = control_dir / f".answer-{uuid.uuid4().hex}.tmp"
@@ -1667,10 +1713,7 @@ def start_parse_run(
         raise HTTPException(status_code=400, detail="知识主题中没有可解析的原始文档")
 
     from app.core.config import settings
-    from app.core.redis import (
-        delete_knowledge_parse_context,
-        store_knowledge_parse_context,
-    )
+    from app.core.redis import delete_knowledge_parse_context, store_knowledge_parse_context
     from app.services import credential_broker
 
     if not settings.LLM_PROXY_ENABLE or not settings.LLM_PROXY_BASE_URL:
@@ -1806,12 +1849,7 @@ def _run_workspace_path(user_id: uuid.UUID, run: models.KnowledgeParseRun) -> Pa
     owner_id = getattr(run, "session_owner_id", None) or run.id
     owner_kind = getattr(run, "session_owner_kind", None) or "run"
     directory = "knowledge_plan" if owner_kind == "plan" else "knowledge_parse"
-    return (
-        Path(settings.DOCKER_PROJECT_HOME)
-        / f"code_user-{user_id}"
-        / directory
-        / str(owner_id)
-    )
+    return Path(settings.DOCKER_PROJECT_HOME) / f"code_user-{user_id}" / directory / str(owner_id)
 
 
 def _save_memory_draft_manifest(
@@ -1842,8 +1880,7 @@ def _save_memory_draft_manifest(
             json.dumps(
                 {
                     "cards": [
-                        card.model_dump(exclude={"id", "memory_id"})
-                        for card in manifest.cards
+                        card.model_dump(exclude={"id", "memory_id"}) for card in manifest.cards
                     ]
                 },
                 ensure_ascii=False,
@@ -1887,9 +1924,7 @@ def _sync_document_blocks_to_workspace(
         for index, document in enumerate(documents, start=1):
             relative_path = f"documents/block-{index:03d}.md"
             (output_root / relative_path).write_bytes(storage.download(document.object_key))
-            manifest_documents.append(
-                {"title": document.title, "path": relative_path}
-            )
+            manifest_documents.append({"title": document.title, "path": relative_path})
         (output_root / "manifest.json").write_text(
             json.dumps(
                 {"documents": manifest_documents},

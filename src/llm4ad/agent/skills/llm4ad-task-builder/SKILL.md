@@ -19,6 +19,20 @@ trial and error.
 Your job with this skill: turn a user's problem into a **complete, runnable task
 package**, then verify it actually runs before handing it over.
 
+## AutoDiscovery runtime mode
+
+When this Skill is installed together with `algorithm-discovery`, first help that
+Skill resolve the source-grounded function boundary, I/O contract, objective,
+constraints, evaluator data, and reproducibility requirements. Then call the
+runtime's `build_algorithm_task` tool with one complete description. Do not
+hand-write package files and do not leave package construction for project
+management: the tool invokes this project's official builder and validation
+pipeline and returns the exact runnable package to publish.
+
+Only a package whose returned validation status is `passed` may be published.
+Project management imports that same package and starts no second requirements or
+build conversation. Evolution itself still starts only when the user requests it.
+
 ## What a task package is
 
 A task package is a self-contained directory with everything the platform needs to

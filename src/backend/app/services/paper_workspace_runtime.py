@@ -26,7 +26,10 @@ _CONTAINER_WORKSPACE = "/workspace"
 _PAPER_WORKSPACE_LABEL = "llm4ad.paper-workspace"
 _PAPER_WORKSPACE_OWNER_LABEL = "llm4ad.paper-workspace-owner"
 _PAPER_WORKSPACE_NAME_PREFIX = "llm4ad-paper-workspace-"
+_PAPER_PROTOCOL_ADAPTER_LABEL = "llm4ad.paper-protocol-adapter"
+_PAPER_PROTOCOL_ADAPTER_NAME_PREFIX = "llm4ad-paper-protocol-adapter-"
 _CLOUDCLI_PORT = 3001
+PAPER_PROTOCOL_ADAPTER_PORT = 17821
 
 # Container paths that a research stage reads besides its own source tree.
 # Exported because the runtime profile and the container environment both have
@@ -55,6 +58,11 @@ def paper_workspace_container_name(workspace_id: uuid.UUID | str) -> str:
     return f"{_PAPER_WORKSPACE_NAME_PREFIX}{str(workspace_id).replace('-', '')}"
 
 
+def paper_protocol_adapter_container_name(workspace_id: uuid.UUID | str) -> str:
+    """Return the stable protocol-adapter name for one research workspace."""
+    return f"{_PAPER_PROTOCOL_ADAPTER_NAME_PREFIX}{str(workspace_id).replace('-', '')}"
+
+
 def paper_workspace_runtime_token(workspace_id: uuid.UUID | str) -> str:
     """Derive the private service token for one workspace runtime."""
     message = f"paper-runtime:{workspace_id}".encode()
@@ -76,6 +84,18 @@ class PaperWorkspaceExecSpec:
     host_workspace: str
 
 
+@dataclass(frozen=True, slots=True)
+class PaperProtocolAdapterSpec:
+    """Describe one ephemeral cc-switch adapter for a research workspace."""
+
+    workspace_id: uuid.UUID
+    user_id: uuid.UUID
+    upstream_base_url: str
+    upstream_api_key: str
+    upstream_model: str
+    upstream_api_format: str
+
+
 def _container_mount_matches(container, host_workspace: str) -> bool:
     # The bind source a container records is the host path, so compare against
     # the host form of the requested workspace — see `_create_workspace_container`.
@@ -92,7 +112,7 @@ def _container_mount_matches(container, host_workspace: str) -> bool:
 def _create_workspace_container(spec: PaperWorkspaceExecSpec, client, image):
     health_command = (
         "node -e \"fetch('http://127.0.0.1:3001/health')"
-        ".then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""
+        '.then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"'
     )
     # `spec.host_workspace` is a path in this container's namespace, but the bind
     # source is resolved by the host daemon, so it has to be translated when
@@ -147,6 +167,108 @@ def _create_workspace_container(spec: PaperWorkspaceExecSpec, client, image):
     )
 
 
+def _remove_protocol_adapter(client, workspace_id: uuid.UUID | str) -> bool:
+    """Remove a workspace protocol adapter when it exists."""
+    try:
+        adapter = client.containers.get(paper_protocol_adapter_container_name(workspace_id))
+    except NotFound:
+        return False
+    adapter.remove(force=True, v=True)
+    return True
+
+
+def _stop_protocol_adapter(client, workspace_id: uuid.UUID | str) -> bool:
+    """Stop a workspace protocol adapter while retaining no credential state."""
+    try:
+        adapter = client.containers.get(paper_protocol_adapter_container_name(workspace_id))
+    except NotFound:
+        return False
+    if adapter.status == "running":
+        adapter.stop(timeout=5)
+    return True
+
+
+def _create_protocol_adapter_container(
+    spec: PaperProtocolAdapterSpec,
+    client,
+    image,
+    workspace_container,
+):
+    """Create an isolated cc-switch process sharing only workspace networking."""
+    health_command = (
+        'python -c "import urllib.request; '
+        f"urllib.request.urlopen('http://127.0.0.1:{PAPER_PROTOCOL_ADAPTER_PORT}/health', timeout=2)\""
+    )
+    return client.containers.run(
+        image.id,
+        name=paper_protocol_adapter_container_name(spec.workspace_id),
+        command=["python", "/app/paper-agent/protocol_adapter.py"],
+        user="65534:65534",
+        detach=True,
+        network_mode=f"container:{workspace_container.id}",
+        restart_policy={"Name": "no"},
+        read_only=True,
+        tmpfs={"/tmp": "rw,noexec,nosuid,size=64m"},
+        cap_drop=["ALL"],
+        security_opt=["no-new-privileges"],
+        mem_limit="256m",
+        nano_cpus=250_000_000,
+        environment={
+            "CC_SWITCH_CONFIG_DIR": "/tmp/llm4ad-paper-protocol-adapter",
+            "HOME": "/tmp/llm4ad-paper-protocol-adapter/home",
+            "LLM4AD_PROTOCOL_PROXY_PORT": str(PAPER_PROTOCOL_ADAPTER_PORT),
+            "LLM4AD_UPSTREAM_API_FORMAT": spec.upstream_api_format,
+            "LLM4AD_UPSTREAM_API_KEY": spec.upstream_api_key,
+            "LLM4AD_UPSTREAM_BASE_URL": spec.upstream_base_url,
+            "LLM4AD_UPSTREAM_MODEL": spec.upstream_model,
+        },
+        healthcheck={
+            "test": ["CMD-SHELL", health_command],
+            "interval": 2_000_000_000,
+            "timeout": 2_000_000_000,
+            "retries": 15,
+            "start_period": 2_000_000_000,
+        },
+        labels={
+            _PAPER_PROTOCOL_ADAPTER_LABEL: str(spec.workspace_id),
+            _PAPER_WORKSPACE_OWNER_LABEL: str(spec.user_id),
+        },
+    )
+
+
+def ensure_paper_protocol_adapter(
+    spec: PaperProtocolAdapterSpec,
+    workspace_container,
+):
+    """Recreate the short-lived protocol adapter for the current model binding."""
+    if spec.upstream_api_format not in {"anthropic", "openai_chat"}:
+        raise ValueError("Unsupported paper protocol adapter format")
+    client = get_docker_client()
+    try:
+        image = client.images.get(settings.KNOWLEDGE_PARSER_IMAGE)
+    except ImageNotFound as exc:
+        raise ImageNotFound(
+            f"Paper adapter image {settings.KNOWLEDGE_PARSER_IMAGE} is not available"
+        ) from exc
+    _remove_protocol_adapter(client, spec.workspace_id)
+    return _create_protocol_adapter_container(spec, client, image, workspace_container)
+
+
+def wait_paper_protocol_adapter_ready(container, *, timeout: float = 30.0) -> None:
+    """Wait for Docker's internal health probe without exposing the loopback port."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        container.reload()
+        state = container.attrs.get("State", {})
+        health = state.get("Health", {}).get("Status")
+        if health == "healthy":
+            return
+        if state.get("Status") in {"dead", "exited"} or health == "unhealthy":
+            raise RuntimeError("Research protocol adapter failed to start")
+        time.sleep(0.25)
+    raise TimeoutError("Research protocol adapter did not become ready in time")
+
+
 def reconcile_paper_workspace_containers() -> int:
     """Remove workspace containers left running a superseded image.
 
@@ -196,6 +318,11 @@ def reconcile_paper_workspace_containers() -> int:
             if container.attrs.get("Image") == current_image.id:
                 continue
             logger.info("科研工作区容器 {} 运行的是已淘汰的镜像，正在重建", container.name)
+            workspace_id = (
+                container.attrs.get("Config", {}).get("Labels", {}).get(_PAPER_WORKSPACE_LABEL)
+            )
+            if workspace_id:
+                _remove_protocol_adapter(client, workspace_id)
             container.remove(force=True, v=True)
             removed += 1
     except Exception:
@@ -211,22 +338,25 @@ def ensure_paper_workspace_container(spec: PaperWorkspaceExecSpec):
     try:
         image = client.images.get(settings.KNOWLEDGE_PARSER_IMAGE)
     except ImageNotFound as exc:
-        raise ImageNotFound(f"Paper workspace image {settings.KNOWLEDGE_PARSER_IMAGE} is not available") from exc
+        raise ImageNotFound(
+            f"Paper workspace image {settings.KNOWLEDGE_PARSER_IMAGE} is not available"
+        ) from exc
 
     name = paper_workspace_container_name(spec.workspace_id)
     try:
         container = client.containers.get(name)
         container.reload()
         labels = container.attrs.get("Config", {}).get("Labels", {}) or {}
-        valid_identity = labels.get(_PAPER_WORKSPACE_LABEL) == str(spec.workspace_id) and labels.get(
-            _PAPER_WORKSPACE_OWNER_LABEL
-        ) == str(spec.user_id)
+        valid_identity = labels.get(_PAPER_WORKSPACE_LABEL) == str(
+            spec.workspace_id
+        ) and labels.get(_PAPER_WORKSPACE_OWNER_LABEL) == str(spec.user_id)
         current_image_id = container.attrs.get("Image")
         if (
             not valid_identity
             or current_image_id != image.id
             or not _container_mount_matches(container, spec.host_workspace)
         ):
+            _remove_protocol_adapter(client, spec.workspace_id)
             container.remove(force=True, v=True)
             container = _create_workspace_container(spec, client, image)
         elif container.status != "running":
@@ -243,14 +373,19 @@ def stop_paper_workspace_container(
     remove: bool = False,
 ) -> bool:
     """Stop a project container and optionally remove its disposable shell."""
+    client = get_docker_client()
     try:
-        container = get_docker_client().containers.get(paper_workspace_container_name(workspace_id))
+        container = client.containers.get(paper_workspace_container_name(workspace_id))
     except NotFound:
+        if remove:
+            _remove_protocol_adapter(client, workspace_id)
         return False
     try:
         if remove:
+            _remove_protocol_adapter(client, workspace_id)
             container.remove(force=True, v=True)
         elif container.status == "running":
+            _stop_protocol_adapter(client, workspace_id)
             container.stop(timeout=5)
         return True
     except Exception:  # noqa: BLE001
@@ -337,7 +472,9 @@ def stop_idle_paper_workspace_containers() -> int:
         if workspace_id in busy:
             continue
         try:
-            container = get_docker_client().containers.get(paper_workspace_container_name(workspace_id))
+            container = get_docker_client().containers.get(
+                paper_workspace_container_name(workspace_id)
+            )
         except NotFound:
             # Already gone (deleted workspace, or never created). Nothing to stop
             # and nothing to re-track: the next session start recreates it.
@@ -348,6 +485,7 @@ def stop_idle_paper_workspace_containers() -> int:
         if container.status != "running":
             continue
         try:
+            _stop_protocol_adapter(get_docker_client(), workspace_id)
             container.stop(timeout=5)
         except Exception:  # noqa: BLE001
             logger.exception("停止空闲科研工作区容器失败: {}", container.name)

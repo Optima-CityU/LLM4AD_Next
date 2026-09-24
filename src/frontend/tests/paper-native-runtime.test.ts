@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test"
 
 import { cssColorToHslChannels } from "../src/lib/embeddedAppearance"
-import { parseFrontendFeatureFlag } from "../src/lib/frontendFeatures"
 import { parseResearchWorkspaceMode } from "../src/lib/researchWorkspace"
 
 const sidebarSource = await Bun.file(
@@ -24,6 +23,24 @@ const nativeRuntimeSource = await Bun.file(
 ).text()
 const paperHooksSource = await Bun.file(
   new URL("../src/hooks/usePapers.ts", import.meta.url),
+).text()
+const rebuttalPanelSource = await Bun.file(
+  new URL("../src/components/Paper/RebuttalEntriesPanel.tsx", import.meta.url),
+).text()
+const proposalResultsDockSource = await Bun.file(
+  new URL("../src/components/Paper/ProposalResultsDock.tsx", import.meta.url),
+).text()
+const rebuttalBaselinePanelSource = await Bun.file(
+  new URL("../src/components/Paper/RebuttalBaselinePanel.tsx", import.meta.url),
+).text()
+const textareaSource = await Bun.file(
+  new URL("../src/components/ui/textarea.tsx", import.meta.url),
+).text()
+const discoveryPanelSource = await Bun.file(
+  new URL(
+    "../src/components/Paper/AlgorithmDiscoveryPanel.tsx",
+    import.meta.url,
+  ),
 ).text()
 const generatedSdkSource = await Bun.file(
   new URL("../src/client/sdk.gen.ts", import.meta.url),
@@ -55,11 +72,41 @@ const cloudCliHostContextSource = await Bun.file(
     import.meta.url,
   ),
 ).text()
+const cloudCliChatInterfaceSource = await Bun.file(
+  new URL(
+    "../../../third_party/CloudCLI/src/modules/chat/ChatInterface.tsx",
+    import.meta.url,
+  ),
+).text()
+const cloudCliComposerSource = await Bun.file(
+  new URL(
+    "../../../third_party/CloudCLI/src/modules/chat/hooks/useChatComposerState.ts",
+    import.meta.url,
+  ),
+).text()
+const cloudCliToolRendererSource = await Bun.file(
+  new URL(
+    "../../../third_party/CloudCLI/src/modules/chat/tools/ToolRenderer.tsx",
+    import.meta.url,
+  ),
+).text()
+const stagePublicationSkill = await Bun.file(
+  new URL(
+    "../../../skills/research-stage-publication/SKILL.md",
+    import.meta.url,
+  ),
+).text()
 const zh = await Bun.file(
   new URL("../src/i18n/locales/zh.json", import.meta.url),
 ).json()
 const en = await Bun.file(
   new URL("../src/i18n/locales/en.json", import.meta.url),
+).json()
+const cloudCliZh = await Bun.file(
+  new URL(
+    "../../../third_party/CloudCLI/src/modules/i18n/locales/zh-CN/chat.json",
+    import.meta.url,
+  ),
 ).json()
 
 test("host CSS colors are converted to CloudCLI HSL channels", () => {
@@ -88,19 +135,120 @@ test("autoresearch back navigation returns to the project list", () => {
   )
 })
 
-test("autorebuttal stays hidden unless its frontend flag is enabled", () => {
-  expect(parseFrontendFeatureFlag(undefined)).toBeFalse()
-  expect(parseResearchWorkspaceMode("manuscript", false)).toBe("proposal")
-  expect(parseResearchWorkspaceMode("manuscript", true)).toBe("manuscript")
-  expect(sidebarSource).toContain("AUTO_REBUTTAL_ENABLED")
-  expect(paperRouteSource).toContain("AUTO_REBUTTAL_ENABLED")
+test("autorebuttal and autodiscovery are always available", () => {
+  expect(parseResearchWorkspaceMode("manuscript")).toBe("manuscript")
+  expect(parseResearchWorkspaceMode("algorithm")).toBe("algorithm")
+  expect(sidebarSource).toContain('mode: "manuscript"')
+  expect(sidebarSource).toContain('mode: "algorithm"')
+  expect(sidebarSource).not.toContain("AUTO_REBUTTAL_ENABLED")
+  expect(sidebarSource).not.toContain("AUTO_DISCOVERY_ENABLED")
+  expect(paperRouteSource).not.toContain("AUTO_REBUTTAL_ENABLED")
+  expect(paperRouteSource).not.toContain("AUTO_DISCOVERY_ENABLED")
 })
 
-test("autodiscovery stays hidden unless its frontend flag is enabled", () => {
-  expect(parseResearchWorkspaceMode("algorithm", false, false)).toBe("proposal")
-  expect(parseResearchWorkspaceMode("algorithm", false, true)).toBe("algorithm")
-  expect(sidebarSource).toContain("AUTO_DISCOVERY_ENABLED")
-  expect(paperRouteSource).toContain("AUTO_DISCOVERY_ENABLED")
+test("autorebuttal presents reviewer responses and author guidance without duplicate final text", () => {
+  expect(rebuttalPanelSource).toContain("source_refs")
+  expect(rebuttalPanelSource).toContain("concern_ids")
+  expect(rebuttalPanelSource).toContain("rebuttalOutput.global_response")
+  expect(rebuttalPanelSource).toContain("rebuttalOutput?.open_placeholders")
+  expect(rebuttalPanelSource).toContain("rebuttalOutput?.findings")
+  expect(rebuttalPanelSource).not.toContain("rebuttalOutput.text")
+  expect(rebuttalPanelSource).not.toContain("rebuttalOutput.total_limit")
+  expect(rebuttalPanelSource).not.toContain("rebuttalOutput.reviewer_counts")
+  expect(rebuttalPanelSource).not.toContain("URL.createObjectURL")
+  expect(rebuttalPanelSource).not.toContain('value="actions"')
+  expect(paperRouteSource).toContain(
+    "rebuttalOutput={workspace.rebuttal_output}",
+  )
+  expect(rebuttalPanelSource).toContain(
+    'data-testid="rebuttal-guidance-layout"',
+  )
+  expect(rebuttalPanelSource).toContain(
+    'data-testid="rebuttal-author-action-list"',
+  )
+  expect(rebuttalPanelSource).toContain(
+    'data-testid="rebuttal-agent-suggestion-list"',
+  )
+  expect(rebuttalPanelSource).not.toContain("max-w-3xl")
+})
+
+test("rebuttal guidance uses readable full-width rows at every panel width", () => {
+  const guidance = rebuttalPanelSource.slice(
+    rebuttalPanelSource.indexOf('data-testid="rebuttal-guidance-layout"'),
+  )
+  expect(guidance).not.toContain("@min-[40rem]:grid-cols-2")
+  expect(guidance).toContain('data-testid="rebuttal-author-action-list"')
+  expect(guidance).toContain('data-testid="rebuttal-agent-suggestion-list"')
+  expect(rebuttalPanelSource).toContain("text-base leading-7")
+})
+
+test("autorebuttal presents the published concern baseline as a separate readable section", () => {
+  expect(paperRouteSource).toContain(
+    "baselineContext={workspace.rebuttal_context}",
+  )
+  expect(paperRouteSource).toContain("baselineStale={")
+  expect(rebuttalPanelSource).toContain("parseRebuttalBaseline")
+  expect(rebuttalPanelSource).toContain("<RebuttalBaselinePanel")
+  expect(rebuttalPanelSource).toContain('data-testid="review-feedback-groups"')
+  expect(rebuttalPanelSource).toContain('value="reviews"')
+  expect(rebuttalPanelSource).toContain('value="baseline"')
+  expect(rebuttalPanelSource).toContain('value="chair"')
+  expect(rebuttalPanelSource).toContain("viewForStage(activeStage)")
+  expect(rebuttalPanelSource).not.toContain("concernsForReview")
+  expect(rebuttalPanelSource).toContain("reviewerConcerns")
+  expect(rebuttalPanelSource).toContain("baselineSource")
+  expect(rebuttalBaselinePanelSource).toContain(
+    'data-testid="rebuttal-baseline"',
+  )
+  expect(rebuttalBaselinePanelSource).toContain("baseline.concerns")
+  expect(rebuttalBaselinePanelSource).toContain("paper.rebuttal.responsePlan")
+  expect(rebuttalBaselinePanelSource).toContain("aria-pressed={selected}")
+  expect(rebuttalBaselinePanelSource).toContain("selectedGroup.concerns.map")
+  expect(rebuttalBaselinePanelSource).toContain("grid-cols-3")
+  expect(rebuttalBaselinePanelSource).not.toContain("open\n")
+  expect(rebuttalBaselinePanelSource).not.toContain("text-[10px]")
+  expect(rebuttalBaselinePanelSource).not.toContain("text-[11px]")
+})
+
+test("AC message is a separate third stage with a copy-ready result", () => {
+  expect(workflowSource).toContain(
+    '"ac_summary": ("ac-summary", _REVISION_PUBLICATION_SKILL)',
+  )
+  expect(paperRouteSource).toContain("chairMessage={workspace.chair_message}")
+  expect(rebuttalPanelSource).toContain('data-testid="rebuttal-chair-message"')
+  expect(rebuttalPanelSource).toContain("copy(chairMessage)")
+  expect(rebuttalPanelSource).toContain("viewForStage(activeStage)")
+  expect(zh.paper.workflow.stage.ac_summary).toBeTruthy()
+  expect(en.paper.workflow.stage.ac_summary).toBeTruthy()
+})
+
+test("rebuttal copy actions stay inside their response card", () => {
+  expect(rebuttalPanelSource).not.toContain("<CardAction>")
+  expect(rebuttalPanelSource).toContain("absolute top-2 right-2")
+  expect(rebuttalPanelSource).toContain("useCopyToClipboard")
+})
+
+test("reviewer feedback and rebuttals expand together without overflowing", () => {
+  expect(rebuttalPanelSource).toContain("aria-expanded={expanded}")
+  expect(rebuttalPanelSource).toContain("aria-controls={`review-content-")
+  expect(rebuttalPanelSource).toContain(
+    "groupedEntries[reviewerGroup.reviewerId]",
+  )
+  expect(rebuttalPanelSource).toContain("hasAutoExpandedReview")
+  expect(rebuttalPanelSource).toContain(
+    "paper.rebuttal.reviewResponseRelationship",
+  )
+  expect(rebuttalPanelSource).toContain("paper.rebuttal.expandReviewAction")
+  expect(rebuttalPanelSource).toContain("paper.rebuttal.noResponseNeeded")
+  expect(rebuttalPanelSource).toContain("reviewerConcernCounts")
+  expect(rebuttalPanelSource).not.toContain("Object.entries(groupedEntries)")
+  expect(rebuttalPanelSource).not.toContain("lg:grid-cols-[minmax")
+  expect(rebuttalPanelSource).toContain("<ReactMarkdown")
+  expect(rebuttalPanelSource).toContain("remarkPlugins={[remarkGfm]}")
+  expect(rebuttalPanelSource).toContain("overflow-x-hidden")
+  expect(rebuttalPanelSource).toContain("[&_table]:overflow-x-auto")
+  expect(rebuttalPanelSource).toContain("paper.rebuttal.reviewerRebuttal")
+  expect(rebuttalPanelSource).not.toContain("Boolean(detailReviewId)")
 })
 
 test("the top workflow navigator hosts one native CloudCLI session", () => {
@@ -119,6 +267,141 @@ test("the top workflow navigator hosts one native CloudCLI session", () => {
   expect(nativeRuntimeSource).toContain("stageDescription")
   expect(nativeRuntimeSource).toContain("onConfigureModel")
   expect(nativeRuntimeSource).toContain("artifactPaths")
+})
+
+test("proposal stage navigation stays in the left pane and the right panel switches views", () => {
+  const splitLayout = paperRouteSource.indexOf(
+    'className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-',
+  )
+  const leftPane = paperRouteSource.indexOf(
+    '<section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">',
+    splitLayout,
+  )
+  expect(splitLayout).toBeLessThan(leftPane)
+  expect(leftPane).toBeLessThan(
+    paperRouteSource.indexOf("<PaperWorkflowStepper", leftPane),
+  )
+  expect(paperRouteSource).toContain("<ProposalResultsDock")
+  expect(paperRouteSource).toContain("stage={proposalResultStage}")
+  expect(proposalResultsDockSource).not.toContain("stages.map(")
+  expect(proposalResultsDockSource).toContain('<TabsTrigger value="result">')
+  expect(proposalResultsDockSource).toContain('<TabsTrigger value="editor">')
+  expect(paperRouteSource).toContain("proposalEditorOpen")
+  expect(paperRouteSource).toContain("setProposalEditorOpen(true)")
+  expect(paperRouteSource).toMatch(
+    /setProposalEditorState\(\{\s+workspaceId,\s+stage,\s+open: false/,
+  )
+  expect(proposalResultsDockSource).toContain("onEditorOpenChange(true)")
+  expect(proposalResultsDockSource).toContain("stage.summary")
+  expect(proposalResultsDockSource).toContain("stage.files.map")
+})
+
+test("proposal onboarding saves author basics for later stage prompts", () => {
+  expect(paperRouteSource).toContain("paper.source.basicsTitle")
+  expect(paperRouteSource).toContain("serializeProposalBasics(proposalBasics)")
+  expect(paperRouteSource).toContain("updateWorkspace.mutateAsync")
+  expect(paperRouteSource).toContain("void openInitialUpload()")
+  expect(paperRouteSource).toContain("onEditBasics=")
+  expect(paperRouteSource).toMatch(
+    /workspace\.mode === "proposal"\s*\? workspace\.description/,
+  )
+  expect(runtimeApiSource).toContain("Author-supplied proposal brief")
+  expect(runtimeApiSource).toContain("project_context/")
+  expect(paperRouteSource).toContain("projectContextUploads(pendingFiles)")
+  expect(paperRouteSource).toContain(
+    "showProjectContextPrompt={showProjectContextPrompt}",
+  )
+  expect(nativeRuntimeSource).toContain("paper.source.projectContext.title")
+  expect(proposalResultsDockSource).toContain("onUploadProjectContext")
+  expect(proposalResultsDockSource).toContain("{editorOpen &&")
+})
+
+test("stage blockers stay compact and use stage-specific guidance", () => {
+  expect(nativeRuntimeSource).toContain("<PopoverContent")
+  expect(nativeRuntimeSource).toContain("paper.runtime.revisionDetails")
+  expect(nativeRuntimeSource).toContain(
+    "paper.runtime.rebuttalBaselineRevisionRequired",
+  )
+  expect(nativeRuntimeSource).toContain('stage !== "autorebuttal"')
+  expect(nativeRuntimeSource).not.toContain(
+    "paper.runtime.autorebuttalRevisionRequired",
+  )
+  expect(nativeRuntimeSource).not.toContain('className="flex max-h-40 shrink-0')
+  expect(zh.paper.runtime.revisionRequired).not.toContain("终审")
+})
+
+test("editing a prior turn invalidates only the displayed stage revision", () => {
+  expect(cloudCliComposerSource).toContain(
+    "type: 'llm4ad:conversation-rewound'",
+  )
+  expect(nativeRuntimeSource).toContain('"llm4ad:conversation-rewound"')
+  expect(nativeRuntimeSource).toContain("useInvalidatePaperWorkflowStage")
+  expect(nativeRuntimeSource).toContain(
+    "expected_iteration: stageState?.iteration",
+  )
+})
+
+test("embedded research assistants hide unsupported conversation forking", () => {
+  expect(cloudCliChatInterfaceSource).toContain(
+    "!IS_LLM4AD_EMBEDDED && supportsSessionForking",
+  )
+})
+
+test("embedded research tool records cannot navigate the iframe", () => {
+  expect(cloudCliToolRendererSource).toContain(
+    "allowNavigation={!IS_LLM4AD_EMBEDDED}",
+  )
+  expect(cloudCliToolRendererSource).toContain(
+    "interactive={!IS_LLM4AD_EMBEDDED}",
+  )
+})
+
+test("autodiscovery builds validated tasks before project import", () => {
+  expect(workflowSource).toContain('stages=("discovery",)')
+  expect(workflowSource).toContain('"algorithm-discovery"')
+  expect(workflowSource).toContain('"llm4ad-task-builder"')
+  expect(taskDockerfileSource).toContain(
+    "skills/autodiscovery/algorithm-discovery",
+  )
+  expect(paperRouteSource).toContain('workspace.mode !== "algorithm"')
+  expect(paperRouteSource).toContain("<AlgorithmDiscoveryPanel")
+  expect(discoveryPanelSource).toContain("useCreatePaperProposalTasks")
+  expect(discoveryPanelSource).toContain("proposal_ids: [proposal.id]")
+  expect(discoveryPanelSource).toContain(
+    'validation_report?.status === "passed"',
+  )
+  expect(discoveryPanelSource).toContain("proposal.package_manifest")
+  expect(runtimeApiSource).toContain("mcp__llm4ad_stage__build_algorithm_task")
+  expect(workflowSource).toContain("complete runnable task package")
+  expect(discoveryPanelSource).toContain('to: "/evolution"')
+  expect(zh.paper.workflow.stage.discoveryExamples).toHaveLength(3)
+  expect(en.paper.workflow.stage.discoveryExamples).toHaveLength(3)
+})
+
+test("all paper workflows show model settings below the setup guidance", () => {
+  expect(nativeRuntimeSource).toContain(
+    "if (!modelReady || !prerequisiteReady)",
+  )
+  expect(nativeRuntimeSource).toContain("!modelReady &&")
+  expect(nativeRuntimeSource).toContain("onClick={onConfigureModel}")
+  expect(nativeRuntimeSource).toContain('t("paper.model.configure")')
+  expect(paperRouteSource).toContain("modelReady={modelReady}")
+  expect(paperRouteSource).toContain("onConfigureModel={openModelSettings}")
+})
+
+test("proposal and rebuttal expose conversation preferences separately from deliverables", () => {
+  expect(nativeRuntimeSource).toContain("onConfigurePreferences")
+  expect(nativeRuntimeSource).toContain('t("paper.preferences.configure")')
+  expect(paperRouteSource).toContain("conversation_preferences:")
+  expect(paperRouteSource).toContain(
+    "JSON.stringify(workspace.conversation_preferences ?? {})",
+  )
+  expect(paperRouteSource).toContain('workspace.mode !== "algorithm" && (')
+  expect(generatedTypesSource).toContain(
+    "export type PaperConversationPreferences",
+  )
+  expect(zh.paper.preferences.languageChinese).toBeTruthy()
+  expect(en.paper.preferences.languageEnglish).toBeTruthy()
 })
 
 test("every proposal stage offers concrete conversation starters", () => {
@@ -144,14 +427,18 @@ test("every proposal stage offers concrete conversation starters", () => {
   expect(cloudCliEmptyStateSource).toContain("setInput(example)")
 })
 
-test("only native Anthropic providers can be bound to research sessions", () => {
-  expect(paperRouteSource).toContain('provider.type === "anthropic"')
-  expect(zh.paper.model.noProvidersHint).toContain("Anthropic Messages")
-  expect(en.paper.model.noProvidersHint).toContain("Anthropic Messages")
+test("Anthropic and OpenAI providers can be bound through the protocol adapter", () => {
+  expect(paperRouteSource).toContain("CLAUDE_RUNTIME_PROVIDER_TYPES")
+  expect(paperRouteSource).toContain('"anthropic"')
+  expect(paperRouteSource).toContain('"openai"')
+  expect(paperRouteSource).toContain('"openai_compatible"')
+  expect(zh.paper.model.noProvidersHint).toContain("OpenAI")
+  expect(en.paper.model.noProvidersHint).toContain("OpenAI")
 })
 
 test("the generated client exposes CloudCLI bootstrap and no legacy run API", () => {
   expect(generatedSdkSource).toContain("createRuntimeSession")
+  expect(generatedSdkSource).toContain("invalidateWorkflowStage")
   expect(paperHooksSource).toContain("usePaperRuntimeSession")
   expect(paperHooksSource).not.toContain("usePaperAgentRun")
   expect(generatedSdkSource).not.toContain("answerRunInteraction")
@@ -168,6 +455,11 @@ test("stage profiles use official Skills, MCP tools, and native questions", () =
   expect(runtimeApiSource).toContain("contextWindowTokens")
   expect(workflowSource).toContain("skills_by_run_kind")
   expect(workflowSource).toContain('"proposal-literature-evidence"')
+  expect(workflowSource).toContain('"research-stage-publication"')
+  expect(stagePublicationSkill).toContain(
+    "edits and replaces an earlier conversation turn",
+  )
+  expect(stagePublicationSkill).toContain("call `publish_stage_result` once")
 })
 
 test("the formatting stage loads the vendored Typst skill and its doc mirror", () => {
@@ -213,12 +505,33 @@ test("proposal skills are grouped and retain OpenAIR_proposal attribution", () =
   expect(workflowSource).toContain('"proposal_foundation_feasibility"')
 })
 
+test("autorebuttal accepts complete review text without artificial limits", () => {
+  expect(rebuttalBaselineSkill).toContain(
+    "Only set `ready_for_generation` false",
+  )
+  expect(rebuttalInputContract).toContain("Default to `per_reviewer`")
+  expect(rebuttalInputContract).toContain("Default to `markdown`")
+  expect(rebuttalInputContract).toContain("numeric limit")
+  expect(rebuttalBaselineSkill).not.toContain("truncated")
+  expect(rebuttalInputContract).not.toContain("truncated")
+  expect(textareaSource).not.toContain("maxLength = 2000")
+})
+
+test("autorebuttal publishes useful author guidance instead of compliance logs", () => {
+  expect(autoRebuttalSkill).toContain("author-facing guidance")
+  expect(rebuttalDraftingGuide).toContain("internal audit log")
+  expect(rebuttalArtifactContracts).toContain("concrete next step")
+  expect(rebuttalArtifactContracts).toContain("specific author input")
+})
+
 test("blocking final review returns to the owning stage without failing publication", () => {
   expect(generatedTypesSource).toContain("'ready' | 'stale' | 'needs_revision'")
   expect(nativeRuntimeSource).toContain('status === "needs_revision"')
   expect(nativeRuntimeSource).toContain("stageState.findings")
-  expect(paperRouteSource).toContain("paper.workflow.needsRevision")
-  expect(paperRouteSource).toContain("paper.workflow.iteration")
+  expect(paperRouteSource).toContain('"needsRevision"')
+  expect(nativeRuntimeSource).toContain(
+    "expected_iteration: stageState?.iteration",
+  )
   expect(paperRouteSource).toContain("stagePublished")
   expect(openAirProposalAttribution).toContain("review-and-return loop")
 })
@@ -229,12 +542,34 @@ test("the paper runtime websocket is upgraded before the general API proxy", () 
 
   expect(websocketLocation).toBeGreaterThan(-1)
   expect(websocketLocation).toBeLessThan(generalApiLocation)
+  expect(nginxApiProxySource).not.toContain("openreview-browser/cast")
   expect(nginxApiProxySource).toContain(
     "proxy_set_header Upgrade $http_upgrade;",
   )
   expect(nginxApiProxySource).toContain(
     "proxy_set_header Connection $connection_upgrade;",
   )
+})
+
+test("rebuttal intake guides pasted text or saved manual review without a browser", () => {
+  expect(nativeRuntimeSource).not.toContain("useOpenReviewBrowser")
+  expect(paperHooksSource).not.toContain("useOpenReviewBrowser")
+  expect(rebuttalPanelSource).toContain("openCreateEditor")
+  expect(zh.paper.workflow.stage.rebuttal_baselineHint).toContain("粘贴")
+  expect(zh.paper.rebuttal.noReviewsDescription).toContain("右侧")
+  expect(en.paper.workflow.stage.rebuttal_baselineHint).toContain("Paste")
+  expect(en.paper.rebuttal.noReviewsDescription).toContain("panel")
+  expect(rebuttalBaselineSkill).toContain("review text the author pasted")
+  expect(rebuttalBaselineSkill).not.toContain("openreview.get_forum")
+  expect(rebuttalInputContract).toContain('source_system: "conversation"')
+  expect(cloudCliEmptyStateSource).toContain("<textarea")
+  expect(cloudCliEmptyStateSource).toContain("reviewPastePrompt")
+  expect(cloudCliEmptyStateSource).not.toContain('type="url"')
+  expect(cloudCliZh.session.continue.reviewPasteDescription).toContain(
+    "多位审稿人",
+  )
+  expect(cloudCliZh.session.continue).not.toHaveProperty("openReviewPrompt")
+  expect(rebuttalPanelSource).toMatch(/baselineSource\s*\??\.reviewMarkdown/)
 })
 
 test("the task image contains only the native runtime bridge", () => {
@@ -253,6 +588,9 @@ const typstFontsSource = await Bun.file(
 const typstFontFetchScript = await Bun.file(
   new URL("../scripts/fetch-typst-fonts.sh", import.meta.url),
 ).text()
+const frontendDockerfileSource = await Bun.file(
+  new URL("../Dockerfile", import.meta.url),
+).text()
 const typstPreviewSource = await Bun.file(
   new URL("../src/components/Paper/TypstLivePreview.tsx", import.meta.url),
 ).text()
@@ -264,6 +602,36 @@ const vendoredTypstAttribution = await Bun.file(
 ).text()
 const openAirProposalAttribution = await Bun.file(
   new URL("../../../skills/openair-proposal/ATTRIBUTION.md", import.meta.url),
+).text()
+const rebuttalBaselineSkill = await Bun.file(
+  new URL(
+    "../../../skills/autorebuttal/rebuttal-baseline/SKILL.md",
+    import.meta.url,
+  ),
+).text()
+const rebuttalInputContract = await Bun.file(
+  new URL(
+    "../../../skills/autorebuttal/shared/references/input-contract.md",
+    import.meta.url,
+  ),
+).text()
+const autoRebuttalSkill = await Bun.file(
+  new URL(
+    "../../../skills/autorebuttal/autorebuttal/SKILL.md",
+    import.meta.url,
+  ),
+).text()
+const rebuttalDraftingGuide = await Bun.file(
+  new URL(
+    "../../../skills/autorebuttal/shared/references/drafting-and-compliance.md",
+    import.meta.url,
+  ),
+).text()
+const rebuttalArtifactContracts = await Bun.file(
+  new URL(
+    "../../../skills/autorebuttal/shared/references/artifact-contracts.md",
+    import.meta.url,
+  ),
 ).text()
 const vendoredTypstSyntaxDoc = await Bun.file(
   new URL(
@@ -302,6 +670,28 @@ test("typst extra fonts are self-hosted from pinned upstream assets", () => {
   // Bold CJK is the specific gap in the typst.ts defaults, so its absence would
   // mean Chinese headings fall back again.
   expect(typstFontsSource).toContain("NotoSerifCJKsc-Bold.otf")
+})
+
+test("frontend builds reuse the verified Typst font cache", () => {
+  expect(typstFontFetchScript).toContain("TYPST_FONT_CACHE_DIR")
+  expect(frontendDockerfileSource).toContain(
+    "COPY src/frontend/scripts/fetch-typst-fonts.sh /app/scripts/",
+  )
+  expect(frontendDockerfileSource).toContain("id=llm4ad-typst-fonts")
+  expect(frontendDockerfileSource).toContain("sharing=locked")
+  expect(
+    frontendDockerfileSource.indexOf("id=llm4ad-typst-fonts"),
+  ).toBeLessThan(frontendDockerfileSource.indexOf("COPY ./src/frontend /app"))
+})
+
+test("frontend starts nginx directly without the stock entrypoint hooks", () => {
+  expect(frontendDockerfileSource).toContain("ENTRYPOINT []")
+  expect(frontendDockerfileSource).toContain(
+    'CMD ["nginx", "-g", "daemon off;"]',
+  )
+  expect(frontendDockerfileSource).not.toContain(
+    "10-listen-on-ipv6-by-default.sh",
+  )
 })
 
 test("the document dock keeps the editor collapsed until asked for it", () => {

@@ -14,7 +14,10 @@ import {
   type PaperRuntimeSessionCreate,
   type PaperSourceFileUpdateRequest,
   type PaperSourcePathDeleteRequest,
+  type PaperStageInvalidateRequest,
   type PaperWorkspaceCreate,
+  type PaperWorkspaceDetail,
+  type PaperWorkspaceUpdate,
 } from "@/client"
 
 export const paperWorkspaceKeys = {
@@ -61,9 +64,56 @@ export function usePaperRuntimeSession(
         requestBody: { workflow_stage: workflowStage },
       }),
     enabled,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === workspaceId &&
+      previousQuery.queryKey[2] === workflowStage
+        ? previous
+        : undefined,
     retry: 1,
     refetchOnWindowFocus: false,
     staleTime: Number.POSITIVE_INFINITY,
+  })
+}
+
+export function useInvalidatePaperWorkflowStage(workspaceId: string) {
+  const queryClient = useQueryClient()
+  const detailKey = paperWorkspaceKeys.detail(workspaceId)
+  return useMutation({
+    mutationFn: (body: PaperStageInvalidateRequest) =>
+      Llm4AdPapersService.invalidateWorkflowStage({
+        workspaceId,
+        requestBody: body,
+      }),
+    onMutate: async (body) => {
+      await queryClient.cancelQueries({ queryKey: detailKey })
+      const previous = queryClient.getQueryData<PaperWorkspaceDetail>(detailKey)
+      queryClient.setQueryData<PaperWorkspaceDetail>(detailKey, (workspace) => {
+        const current = workspace?.proposal_stage_states?.[body.workflow_stage]
+        if (!workspace || !current) return workspace
+        if (
+          body.expected_iteration !== undefined &&
+          current.iteration !== body.expected_iteration
+        ) {
+          return workspace
+        }
+        return {
+          ...workspace,
+          proposal_stage_states: {
+            ...workspace.proposal_stage_states,
+            [body.workflow_stage]: { ...current, status: "stale" },
+          },
+        }
+      })
+      return { previous }
+    },
+    onError: (_error, _body, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(detailKey, context.previous)
+      }
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: detailKey })
+    },
   })
 }
 
@@ -84,6 +134,15 @@ export function useCreatePaperWorkspace() {
   return useMutation({
     mutationFn: (body: PaperWorkspaceCreate) =>
       Llm4AdPapersService.createWorkspace({ requestBody: body }),
+    onSuccess: refresh,
+  })
+}
+
+export function useUpdatePaperWorkspace(workspaceId: string) {
+  const refresh = useRefreshPapers(workspaceId)
+  return useMutation({
+    mutationFn: (body: PaperWorkspaceUpdate) =>
+      Llm4AdPapersService.updateWorkspace({ workspaceId, requestBody: body }),
     onSuccess: refresh,
   })
 }

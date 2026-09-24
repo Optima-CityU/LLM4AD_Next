@@ -108,6 +108,40 @@ def test_research_workspace_mode_is_persisted_at_creation(db: Session) -> None:
     assert workspace.mode == "algorithm"
 
 
+def test_conversation_preferences_are_saved_without_changing_proposal_brief(db: Session) -> None:
+    """Persist explanatory preferences independently of source context."""
+    user = create_random_user(db)
+    workspace = paper_service.create_workspace(
+        db,
+        user,
+        paper_schemas.PaperWorkspaceCreate(
+            title="Proposal preferences",
+            mode="proposal",
+            description="Existing research brief",
+        ),
+    )
+
+    updated = paper_service.update_workspace(
+        db,
+        user,
+        workspace.id,
+        paper_schemas.PaperWorkspaceUpdate(
+            conversation_preferences=paper_schemas.PaperConversationPreferences(
+                reply_language="zh",
+                additional_guidance="  请简要解释下一步。  ",
+            )
+        ),
+    )
+
+    assert updated.description == "Existing research brief"
+    assert updated.conversation_preferences == {
+        "reply_language": "zh",
+        "additional_guidance": "请简要解释下一步。",
+    }
+    detail = paper_service.get_workspace_detail(db, user, workspace.id)
+    assert detail.conversation_preferences.reply_language == "zh"
+
+
 def test_research_workspace_is_not_a_normal_project(db: Session) -> None:
     """Keep research workspaces out of the independent project manager."""
     user = create_random_user(db)
@@ -146,9 +180,24 @@ def test_reviewer_reports_are_mirrored_as_read_only_runtime_context(
         object_key=f"paper/{user.id}/{workspace.id}/reviews/r1/review.md",
         content_hash="review",
     )
+    second_review = models.PaperReview(
+        workspace_id=workspace.id,
+        source_version_id=source.id,
+        source_system="manual",
+        reviewer_label="R1",
+        title="Second review with the same label",
+        object_key=f"paper/{user.id}/{workspace.id}/reviews/r1-duplicate/review.md",
+        content_hash="second-review",
+    )
     db.add(review)
+    db.add(second_review)
     db.commit()
-    storage = _MemoryStorage({review.object_key: review_content})
+    storage = _MemoryStorage(
+        {
+            review.object_key: review_content,
+            second_review.object_key: b"The notation needs clarification.",
+        }
+    )
     monkeypatch.setattr(paper_service, "_storage", lambda: storage)
     monkeypatch.setattr(paper_service.settings, "DOCKER_PROJECT_HOME", str(tmp_path))
 
@@ -158,13 +207,23 @@ def test_reviewer_reports_are_mirrored_as_read_only_runtime_context(
     assert index["reviews"] == [
         {
             "review_id": str(review.id),
-            "reviewer_id": "R1",
+            "reviewer_id": str(review.id),
+            "display_label": "R1",
             "title": "Main review",
             "source_system": "manual",
             "path": f"/workspace/.research/reviews/{review.id}.md",
-        }
+        },
+        {
+            "review_id": str(second_review.id),
+            "reviewer_id": str(second_review.id),
+            "display_label": "R1",
+            "title": "Second review with the same label",
+            "source_system": "manual",
+            "path": f"/workspace/.research/reviews/{second_review.id}.md",
+        },
     ]
     assert (reviews_root / f"{review.id}.md").read_bytes() == review_content
+    assert index["reviews"][0]["reviewer_id"] != index["reviews"][1]["reviewer_id"]
 
 
 def test_each_explicit_algorithm_task_has_an_independent_project(
@@ -175,20 +234,41 @@ def test_each_explicit_algorithm_task_has_an_independent_project(
     from app.services import task_service
 
     user, workspace, source = _paper_source(db)
-    boundary = models.PaperBoundarySnapshot(
-        workspace_id=workspace.id,
-        source_version_id=source.id,
-        status="confirmed",
-        content={"sections": [{"key": "scope", "content": "Optimize an algorithm."}]},
+    workspace.mode = models.ResearchWorkspaceMode.ALGORITHM.value
+    db.add(workspace)
+    package_prefix = f"paper/{user.id}/{workspace.id}/proposals/package"
+    package_files = {
+        "config.yaml": b"""project_name: exported-algorithm
+evaluator:
+  type: custom
+  module: evaluator.py:Evaluator
+evolution:
+  type: island_ga
+planner:
+  type: llm_evolution
+coder:
+  type: llm
+providers: []
+""",
+        "debug_run.py": b"print('ok')\n",
+        "test_evaluator.py": b"print('ok')\n",
+        "evaluator.py": b"class Evaluator:\n    pass\n",
+        "algorithm/solve.py": b"# EVOLVE_START\npass\n# EVOLVE_END\n",
+        "blueprint_meta.json": b'{"validation_status": "passed"}',
+    }
+    storage = _MemoryStorage(
+        {f"{package_prefix}/{relative}": content for relative, content in package_files.items()}
     )
-    db.add(boundary)
-    db.flush()
+    monkeypatch.setattr(paper_service, "_storage", lambda: storage)
     proposal = models.PaperAlgorithmProposal(
         workspace_id=workspace.id,
         source_version_id=source.id,
         title="Exported algorithm",
         problem_statement="Find a better construction.",
         algorithm_design="Build and evaluate candidate constructions.",
+        package_object_prefix=package_prefix,
+        package_manifest=list(package_files),
+        validation_report={"status": "passed", "project_name": "exported-algorithm"},
     )
     db.add(proposal)
     db.commit()
@@ -201,6 +281,7 @@ def test_each_explicit_algorithm_task_has_an_independent_project(
             input_args=task_in.input_args,
             ai_built=task_in.ai_built,
         )
+        task.input_data_path = f"tasks/{task.id}/imported"
         _db.add(task)
         _db.commit()
         _db.refresh(task)
@@ -224,6 +305,12 @@ def test_each_explicit_algorithm_task_has_an_independent_project(
     project = db.get(models.Project, task.project_id)
     assert project is not None
     assert project.name == proposal.title
+    assert task.input_args["memory"]["enabled"] is False
+    assert task.ai_built is False
+    assert (
+        storage.objects[f"{task.input_data_path}/exported-algorithm/config.yaml"]
+        == package_files["config.yaml"]
+    )
     assert not hasattr(workspace, "project_id")
 
 
@@ -473,6 +560,25 @@ def test_typst_source_is_packaged_as_an_editable_bundle() -> None:
     assert validated.manifest == ["proposal.typ"]
 
 
+def test_proposal_source_bundle_accepts_optional_project_context() -> None:
+    """Keep reference materials beside, but separate from, proposal source files."""
+    validated = paper_service.validate_paper_source_batch(
+        [
+            ("proposal.typ", b"= Proposal\n"),
+            ("project_context/funder-rules.pdf", b"%PDF-1.7"),
+            ("project_context/writing-notes.md", b"# Notes\n"),
+        ]
+    )
+
+    assert validated.manifest == [
+        "project_context/funder-rules.pdf",
+        "project_context/writing-notes.md",
+        "proposal.typ",
+    ]
+    with zipfile.ZipFile(io.BytesIO(validated.data)) as archive:
+        assert archive.read("project_context/writing-notes.md") == b"# Notes\n"
+
+
 def test_source_bundle_preserves_a_managed_empty_directory() -> None:
     """Represent a user-created empty folder without exposing a fake document."""
     validated = paper_service.validate_paper_source_batch(
@@ -544,10 +650,21 @@ def test_research_workflow_definition_is_owned_by_the_backend() -> None:
 
     assert definition.mode == "manuscript"
     assert definition.available is True
-    assert definition.stages == ("rebuttal_baseline", "autorebuttal")
-    assert definition.skills_by_run_kind["rebuttal_baseline"] == ("rebuttal-baseline",)
-    assert definition.skills_by_run_kind["autorebuttal"] == ("autorebuttal",)
+    assert definition.stages == ("rebuttal_baseline", "autorebuttal", "ac_summary")
+    assert definition.skills_by_run_kind["rebuttal_baseline"] == (
+        "rebuttal-baseline",
+        "research-stage-publication",
+    )
+    assert definition.skills_by_run_kind["autorebuttal"] == (
+        "autorebuttal",
+        "research-stage-publication",
+    )
+    assert definition.skills_by_run_kind["ac_summary"] == (
+        "ac-summary",
+        "research-stage-publication",
+    )
     assert definition.prerequisites_by_run_kind["autorebuttal"] == ("rebuttal_baseline",)
+    assert definition.prerequisites_by_run_kind["ac_summary"] == ("autorebuttal",)
     assert all(not paths for paths in definition.writable_paths_by_run_kind.values())
     assert "read-only evidence" in definition.prompt_preamble
 
@@ -570,10 +687,20 @@ def test_proposal_workflow_defines_eight_isolated_stages() -> None:
     assert definition.skills_by_run_kind["proposal_formatting"] == (
         "proposal-foundation-layout",
         "typst-author",
+        "research-stage-publication",
     )
-    assert definition.skills_by_run_kind["proposal_literature"] == ("proposal-literature-evidence",)
-    assert definition.skills_by_run_kind["proposal_innovation_plan"] == ("proposal-innovation-plan",)
-    assert definition.skills_by_run_kind["proposal_foundation_feasibility"] == ("proposal-foundation-feasibility",)
+    assert definition.skills_by_run_kind["proposal_literature"] == (
+        "proposal-literature-evidence",
+        "research-stage-publication",
+    )
+    assert definition.skills_by_run_kind["proposal_innovation_plan"] == (
+        "proposal-innovation-plan",
+        "research-stage-publication",
+    )
+    assert definition.skills_by_run_kind["proposal_foundation_feasibility"] == (
+        "proposal-foundation-feasibility",
+        "research-stage-publication",
+    )
     assert definition.prerequisites_by_run_kind["proposal_final_review"] == (
         "innovation_plan",
         "foundation_feasibility",
@@ -590,15 +717,20 @@ def test_proposal_workflow_defines_eight_isolated_stages() -> None:
     assert "Read other sections" not in definition.prompt_preamble
 
 
-@pytest.mark.parametrize("mode", ["algorithm"])
-def test_reserved_research_modes_have_no_invented_agent_pipeline(mode: str) -> None:
-    """Reserve new project modes without pretending their future workflows exist."""
-    definition = paper_workflow.get_research_workflow(mode)
+def test_algorithm_workflow_is_one_conversational_discovery_stage() -> None:
+    """Inject discovery and project-building guidance without a visible pipeline."""
+    definition = paper_workflow.get_research_workflow("algorithm")
 
-    assert definition.available is False
-    assert definition.stages == ()
-    assert definition.skills_by_run_kind == {}
-    assert definition.prompt_preamble == ""
+    assert definition.available is True
+    assert definition.stages == ("discovery",)
+    assert definition.skills_by_run_kind["algorithm_discovery"] == (
+        "algorithm-discovery",
+        "llm4ad-task-builder",
+        "research-stage-publication",
+    )
+    assert definition.prerequisites_by_run_kind["algorithm_discovery"] == ()
+    assert definition.writable_paths_by_run_kind["algorithm_discovery"] == ()
+    assert "single conversational AutoDiscovery workspace" in definition.prompt_preamble
 
 
 def test_editing_a_paper_file_updates_the_current_source_in_place(
@@ -978,11 +1110,7 @@ def test_deleting_reviewer_feedback_removes_derived_state(
     refreshed_workspace = db.get(models.PaperWorkspace, workspace.id)
     assert db.get(models.PaperReview, review.id) is None
     assert (
-        db.exec(
-            select(models.PaperEvaluationMetric).where(
-                models.PaperEvaluationMetric.review_id == review.id
-            )
-        ).first()
+        db.exec(select(models.PaperEvaluationMetric).where(models.PaperEvaluationMetric.review_id == review.id)).first()
         is None
     )
     assert object_key not in storage.objects

@@ -16,14 +16,16 @@
 # checksum recorded below so a changed or corrupted asset fails the build rather
 # than shipping a preview that renders wrong glyphs.
 #
-# The script is idempotent - files already present with the expected checksum are
-# left alone - so it is cheap to run on every build.
+# The script is idempotent. Files already present with the expected checksum are
+# left alone, and Docker builds can provide TYPST_FONT_CACHE_DIR to reuse verified
+# downloads even when the image layer itself needs to be rebuilt.
 #
 # Usage: bash scripts/fetch-typst-fonts.sh   (also available as `bun run fonts`)
 #
 set -euo pipefail
 
 DEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/public/typst-fonts"
+CACHE_DIR="${TYPST_FONT_CACHE_DIR:-}"
 
 TYPST_ASSETS="https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts"
 TYPST_DEV_ASSETS="https://cdn.jsdelivr.net/gh/typst/typst-dev-assets@v0.13.1/files/fonts"
@@ -64,6 +66,9 @@ FONTS=(
 )
 
 mkdir -p "$DEST"
+if [ -n "$CACHE_DIR" ]; then
+  mkdir -p "$CACHE_DIR"
+fi
 
 # The build image (oven/bun) ships neither curl nor wget, so fall back to bun's
 # own fetch when neither is around. Everything else the script needs -
@@ -103,16 +108,28 @@ for entry in "${FONTS[@]}"; do
     continue
   fi
 
-  echo "fetching $name"
-  download "$base/$name" "$target.partial"
+  artifact="$target"
+  if [ -n "$CACHE_DIR" ]; then
+    artifact="$CACHE_DIR/$name"
+    if [ -f "$artifact" ] && [ "$(sha256sum "$artifact" | cut -d" " -f1)" = "$want" ]; then
+      cp -p "$artifact" "$target"
+      continue
+    fi
+  fi
 
-  got="$(sha256sum "$target.partial" | cut -d" " -f1)"
+  echo "fetching $name"
+  download "$base/$name" "$artifact.partial"
+
+  got="$(sha256sum "$artifact.partial" | cut -d" " -f1)"
   if [ "$got" != "$want" ]; then
-    rm -f "$target.partial"
+    rm -f "$artifact.partial"
     echo "checksum mismatch for $name: expected $want, got $got" >&2
     exit 1
   fi
-  mv "$target.partial" "$target"
+  mv "$artifact.partial" "$artifact"
+  if [ "$artifact" != "$target" ]; then
+    cp -p "$artifact" "$target"
+  fi
 done
 
 echo "typst fonts ready in $DEST"

@@ -1,6 +1,7 @@
 """Contracts for the embedded research runtime proxy."""
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Response
@@ -66,6 +67,48 @@ def test_rebuttal_runtime_is_read_only() -> None:
     assert "Edit" not in tools
 
 
+@pytest.mark.parametrize("stage", ["rebuttal_baseline", "autorebuttal", "ac_summary"])
+def test_rebuttal_runtime_does_not_inject_forum_browser(stage: str) -> None:
+    """Use author-supplied review text without browser-backed tools."""
+    servers, tools = paper_runtime._runtime_stage_mcp_configuration(stage)
+
+    assert servers == {}
+    assert tools == []
+
+
+def test_rebuttal_browser_routes_are_removed() -> None:
+    """Leave only the author-supplied review intake routes available."""
+    assert all("openreview-browser" not in route.path for route in paper_runtime.router.routes)
+
+
+def test_conversation_preferences_only_address_explanatory_text() -> None:
+    """Keep the requested language away from proposal and rebuttal deliverables."""
+    workspace = models.PaperWorkspace(
+        user_id=uuid.uuid4(),
+        title="Preferred explanations",
+        mode="manuscript",
+        conversation_preferences={
+            "reply_language": "zh",
+            "additional_guidance": "先解释证据缺口，再列出需要作者补充的材料。",
+        },
+    )
+
+    prompt = paper_runtime._conversation_preferences_prompt(workspace)
+
+    assert "Use Simplified Chinese" in prompt
+    assert "stage summaries and findings" in prompt
+    assert "open_questions, and open_placeholders may follow" in prompt
+    assert "先解释证据缺口" in prompt
+    assert "Do not apply these preferences to proposal document text" in prompt
+    assert "submitted reviewer rebuttal responses" in prompt
+    assert "author-to-chair message" in prompt
+    workspace.conversation_preferences = {"reply_language": "auto", "additional_guidance": ""}
+    assert paper_runtime._conversation_preferences_prompt(workspace) == ""
+    workspace.mode = "algorithm"
+    workspace.conversation_preferences = {"reply_language": "en"}
+    assert paper_runtime._conversation_preferences_prompt(workspace) == ""
+
+
 def test_manuscript_workflow_uses_staged_autorebuttal_skills() -> None:
     """Keep the ordered workflow and skill injection backend-owned."""
     from app.services import paper_workflow
@@ -73,10 +116,23 @@ def test_manuscript_workflow_uses_staged_autorebuttal_skills() -> None:
     workflow = paper_workflow.get_research_workflow("manuscript")
 
     assert workflow.available is True
-    assert workflow.stages == ("rebuttal_baseline", "autorebuttal")
-    assert workflow.skills_by_run_kind["rebuttal_baseline"] == ("rebuttal-baseline",)
-    assert workflow.skills_by_run_kind["autorebuttal"] == ("autorebuttal",)
+    assert workflow.stages == ("rebuttal_baseline", "autorebuttal", "ac_summary")
+    assert workflow.skills_by_run_kind["rebuttal_baseline"] == (
+        "rebuttal-baseline",
+        "research-stage-publication",
+    )
+    assert workflow.skills_by_run_kind["autorebuttal"] == (
+        "autorebuttal",
+        "research-stage-publication",
+    )
+    assert workflow.skills_by_run_kind["ac_summary"] == (
+        "ac-summary",
+        "research-stage-publication",
+    )
     assert workflow.writable_paths_by_run_kind["autorebuttal"] == ()
+    assert workflow.writable_paths_by_run_kind["ac_summary"] == ()
+    assert workflow.prerequisite_satisfied("ac_summary", "autorebuttal", "needs_revision")
+    assert not workflow.prerequisite_satisfied("ac_summary", "autorebuttal", "stale")
 
 
 def test_runtime_html_anchors_relative_assets_to_owned_proxy() -> None:
@@ -102,18 +158,28 @@ def test_runtime_html_keeps_existing_base_tag() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_session_uses_owned_anthropic_binding_and_scoped_gateway_token(
+@pytest.mark.parametrize(
+    ("provider_type", "expected_api_format"),
+    [
+        (models.ProviderType.ANTHROPIC, "anthropic"),
+        (models.ProviderType.OPENAI, "openai_chat"),
+        (models.ProviderType.OPENAI_COMPATIBLE, "openai_chat"),
+    ],
+)
+async def test_runtime_session_uses_scoped_protocol_adapter(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    provider_type: models.ProviderType,
+    expected_api_format: str,
 ) -> None:
-    """Keep provider credentials server-side and bind the selected model to Claude."""
+    """Keep every provider behind the workspace-local Anthropic endpoint."""
     captured: dict = {}
     with Session(engine) as db:
         user = create_random_user(db)
         provider = models.LLMProvider(
             name="research-anthropic",
             user_id=user.id,
-            type=models.ProviderType.ANTHROPIC,
+            type=provider_type,
             model="claude-sonnet-4-5",
             api_key="upstream-secret",
             base_url="https://anthropic.example",
@@ -122,12 +188,14 @@ async def test_runtime_session_uses_owned_anthropic_binding_and_scoped_gateway_t
         workspace = models.PaperWorkspace(
             user_id=user.id,
             title="Gateway research",
+            description="## Research topic\nAdaptive optimization",
             mode=models.ResearchWorkspaceMode.PROPOSAL.value,
             proposal_entry_path="proposal.typ",
             analysis_provider_id=provider.id,
             analysis_model_name="claude-sonnet-4-5",
             analysis_context_window_tokens=200_000,
             analysis_max_output_tokens=32_000,
+            conversation_preferences={"reply_language": "en", "additional_guidance": "Keep suggestions concise."},
         )
         db.add(provider)
         db.add(workspace)
@@ -158,8 +226,16 @@ async def test_runtime_session_uses_owned_anthropic_binding_and_scoped_gateway_t
         monkeypatch.setattr(
             paper_runtime,
             "ensure_paper_workspace_container",
-            lambda spec: captured.setdefault("container_spec", spec),
+            lambda spec: captured.setdefault("container_spec", spec) and SimpleNamespace(id="workspace-container"),
         )
+
+        def ensure_adapter(spec, workspace_container):
+            captured["adapter_spec"] = spec
+            captured["adapter_workspace"] = workspace_container
+            return SimpleNamespace(id="adapter-container")
+
+        monkeypatch.setattr(paper_runtime, "ensure_paper_protocol_adapter", ensure_adapter)
+        monkeypatch.setattr(paper_runtime, "wait_paper_protocol_adapter_ready", lambda _container: None)
 
         async def runtime_ready(_workspace_id: uuid.UUID) -> None:
             return None
@@ -203,11 +279,20 @@ async def test_runtime_session_uses_owned_anthropic_binding_and_scoped_gateway_t
     issued = captured["credentials"]
     profile = captured["profile"]
     assert issued["user_id"] == user.id
-    assert issued["provider_type"] == models.ProviderType.ANTHROPIC.value
+    assert issued["provider_type"] == provider_type.value
     assert issued["model"] == "claude-sonnet-4-5"
     assert issued["api_key"] == "upstream-secret"
     assert profile["model"] == "claude-sonnet-4-5"
-    assert profile["env"]["ANTHROPIC_AUTH_TOKEN"] == "gateway-token"
+    assert "Adaptive optimization" in profile["systemPromptAppend"]
+    assert "Author-supplied proposal brief" in profile["systemPromptAppend"]
+    assert "/workspace/source/project_context/" in profile["systemPromptAppend"]
+    assert "Use English for those conversational" in profile["systemPromptAppend"]
+    assert "Keep suggestions concise." in profile["systemPromptAppend"]
+    assert captured["adapter_spec"].upstream_api_key == "gateway-token"
+    assert captured["adapter_spec"].upstream_api_format == expected_api_format
+    assert captured["adapter_workspace"].id == "workspace-container"
+    assert profile["env"]["ANTHROPIC_AUTH_TOKEN"] == "llm4ad-local-proxy"
+    assert profile["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:17821"
     assert profile["contextWindowTokens"] == 200_000
     assert profile["toolsSettings"]["disallowedTools"] == ["Bash", "WebFetch", "WebSearch"]
     assert "upstream-secret" not in session.runtime_url

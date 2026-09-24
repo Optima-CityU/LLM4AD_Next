@@ -253,8 +253,6 @@ services:
       args:
         - VITE_API_URL=
         - VITE_CODE_SERVER_URL=${VITE_CODE_SERVER_URL:-/code_ide}
-        - VITE_AUTODISCOVERY_ENABLED=${VITE_AUTODISCOVERY_ENABLED:-false}
-        - VITE_AUTOREBUTTAL_ENABLED=${VITE_AUTOREBUTTAL_ENABLED:-false}
         - VITE_FOOTER_BEIAN=${VITE_FOOTER_BEIAN:-}
         - NODE_ENV=production
     volumes:

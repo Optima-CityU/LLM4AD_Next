@@ -64,6 +64,25 @@ def update_workspace(
     return paper_service.update_workspace(db, current_user, workspace_id, request)
 
 
+@router.post(
+    "/workspaces/{workspace_id}/workflow-stage/invalidate",
+    response_model=schemas.PaperWorkspaceSummary,
+)
+def invalidate_workflow_stage(
+    workspace_id: uuid.UUID,
+    request: schemas.PaperStageInvalidateRequest,
+    db: SessionDep,
+    current_user: CurrentUser,
+):
+    """Mark the stage revision replaced by an edited conversation as stale."""
+    return paper_service.invalidate_workflow_stage(
+        db,
+        current_user,
+        workspace_id,
+        request,
+    )
+
+
 @router.delete("/workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_workspace(
     workspace_id: uuid.UUID,

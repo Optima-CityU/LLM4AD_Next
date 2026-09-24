@@ -2,10 +2,11 @@ import {
   AlertCircle,
   AlertTriangle,
   FileCheck2,
-  Info,
   Loader2,
   RefreshCw,
   Settings2,
+  SlidersHorizontal,
+  Upload,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -13,13 +14,17 @@ import { useTranslation } from "react-i18next"
 import type { PaperRuntimeSessionCreate, ProposalStageState } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
-import { usePaperRuntimeSession } from "@/hooks/usePapers"
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+import {
+  useInvalidatePaperWorkflowStage,
+  usePaperRuntimeSession,
+} from "@/hooks/usePapers"
 import { useRuntimeEvents } from "@/hooks/useRuntimeEvents"
 import { cssColorToHslChannels } from "@/lib/embeddedAppearance"
+import { cn } from "@/lib/utils"
 
 type PaperWorkflowStage = PaperRuntimeSessionCreate["workflow_stage"]
 
@@ -33,7 +38,49 @@ type PaperNativeRuntimeProps = {
   stageState?: ProposalStageState
   modelName: string | null
   onConfigureModel: () => void
+  onConfigurePreferences: () => void
+  showProjectContextPrompt?: boolean
+  onUploadProjectContext?: () => void
+  onSkipProjectContext?: () => void
   onOpenArtifact: (path: string) => void
+}
+
+function ProjectContextPrompt({
+  className,
+  onUpload,
+  onSkip,
+}: {
+  className: string
+  onUpload: () => void
+  onSkip: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-3 sm:flex-row sm:items-center",
+        className,
+      )}
+    >
+      <div className="min-w-0 flex-1 text-left">
+        <p className="text-sm font-semibold text-foreground">
+          {t("paper.source.projectContext.title")}
+        </p>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          {t("paper.source.projectContext.description")}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button size="sm" variant="outline" onClick={onUpload}>
+          <Upload data-icon="inline-start" />
+          {t("paper.source.projectContext.upload")}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onSkip}>
+          {t("paper.source.projectContext.skip")}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 const EMBEDDED_COLOR_TOKENS = [
@@ -68,11 +115,17 @@ export default function PaperNativeRuntime({
   stageState,
   modelName,
   onConfigureModel,
+  onConfigurePreferences,
+  showProjectContextPrompt = false,
+  onUploadProjectContext,
+  onSkipProjectContext,
   onOpenArtifact,
 }: PaperNativeRuntimeProps) {
   const { t, i18n } = useTranslation()
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
+  const { mutate: invalidateStage } =
+    useInvalidatePaperWorkflowStage(workspaceId)
   const session = usePaperRuntimeSession(
     workspaceId,
     stage,
@@ -104,6 +157,13 @@ export default function PaperNativeRuntime({
       : []
   }, [stage, t])
   const needsRevision = stageState?.status === "needs_revision"
+  const showRevisionSummary = needsRevision && stage !== "autorebuttal"
+  const revisionTitle = t(
+    stage === "rebuttal_baseline"
+      ? "paper.runtime.rebuttalBaselineRevisionRequired"
+      : "paper.runtime.revisionRequired",
+  )
+  const revisionFindingCount = stageState?.findings?.length ?? 0
 
   const syncAppearance = useCallback(() => {
     const target = frameRef.current?.contentWindow
@@ -127,6 +187,7 @@ export default function PaperNativeRuntime({
         language: i18n.resolvedLanguage ?? i18n.language,
         fontFamily: window.getComputedStyle(document.body).fontFamily,
         stageTitle,
+        stage,
         stageDescription,
         stageExamples,
         tokens,
@@ -138,6 +199,7 @@ export default function PaperNativeRuntime({
     i18n.resolvedLanguage,
     stageDescription,
     stageExamples,
+    stage,
     stageTitle,
   ])
 
@@ -150,25 +212,64 @@ export default function PaperNativeRuntime({
     return () => observer.disconnect()
   }, [syncAppearance])
 
+  useEffect(() => {
+    const handleConversationRewind = (event: MessageEvent) => {
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== frameRef.current?.contentWindow ||
+        event.data?.type !== "llm4ad:conversation-rewound"
+      ) {
+        return
+      }
+      invalidateStage({
+        workflow_stage: stage,
+        expected_iteration: stageState?.iteration,
+      })
+    }
+    window.addEventListener("message", handleConversationRewind)
+    return () => window.removeEventListener("message", handleConversationRewind)
+  }, [invalidateStage, stage, stageState?.iteration])
+
   if (!modelReady || !prerequisiteReady) {
     return (
-      <div className="grid min-h-0 flex-1 place-items-center p-6">
-        <div className="max-w-md rounded-xl border border-dashed bg-background p-7 text-center">
-          <AlertCircle className="mx-auto size-7 text-muted-foreground" />
-          <h2 className="mt-3 text-sm font-semibold">
+      <div className="grid min-h-0 flex-1 place-items-center p-8">
+        <div className="max-w-lg border-y bg-background/70 px-8 py-10 text-center shadow-sm">
+          <AlertCircle className="mx-auto size-8 text-muted-foreground" />
+          <h2 className="mt-4 font-serif text-xl font-semibold text-pretty">
             {t(
               modelReady
                 ? "paper.runtime.prerequisiteTitle"
                 : "paper.runtime.modelTitle",
             )}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-3 text-[15px] leading-7 text-muted-foreground">
             {t(
               modelReady
                 ? "paper.runtime.prerequisiteDescription"
                 : "paper.runtime.modelDescription",
             )}
           </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {!modelReady && (
+              <Button onClick={onConfigureModel}>
+                <Settings2 className="size-3.5" />
+                {t("paper.model.configure")}
+              </Button>
+            )}
+            <Button variant="outline" onClick={onConfigurePreferences}>
+              <SlidersHorizontal className="size-3.5" />
+              {t("paper.preferences.configure")}
+            </Button>
+          </div>
+          {showProjectContextPrompt &&
+            onUploadProjectContext &&
+            onSkipProjectContext && (
+              <ProjectContextPrompt
+                className="mt-6 border-t pt-5"
+                onUpload={onUploadProjectContext}
+                onSkip={onSkipProjectContext}
+              />
+            )}
         </div>
       </div>
     )
@@ -176,13 +277,13 @@ export default function PaperNativeRuntime({
 
   if (session.isError) {
     return (
-      <div className="grid min-h-0 flex-1 place-items-center p-6">
-        <div className="max-w-md rounded-xl border bg-background p-7 text-center shadow-sm">
-          <AlertCircle className="mx-auto size-7 text-destructive" />
-          <h2 className="mt-3 text-sm font-semibold">
+      <div className="grid min-h-0 flex-1 place-items-center p-8">
+        <div className="max-w-lg border-y bg-background/70 px-8 py-10 text-center shadow-sm">
+          <AlertCircle className="mx-auto size-8 text-destructive" />
+          <h2 className="mt-4 font-serif text-xl font-semibold">
             {t("paper.runtime.unavailableTitle")}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-3 text-[15px] leading-7 text-muted-foreground">
             {t("paper.runtime.unavailableDescription")}
           </p>
           <Button
@@ -205,30 +306,83 @@ export default function PaperNativeRuntime({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/95 px-3 text-xs">
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {stageTitle}
-        </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label={t("paper.runtime.stageHint")}
-            >
-              <Info className="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-sm leading-5">
+      <header className="flex shrink-0 flex-wrap items-start gap-4 border-b bg-card/40 px-5 py-3.5">
+        <div className="min-w-0 flex-1 border-l-2 border-primary/65 pl-3.5">
+          <h2 className="font-serif text-lg font-semibold tracking-tight text-pretty">
+            {stageTitle}
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">
             {stageDescription}
-          </TooltipContent>
-        </Tooltip>
-        <div className="ml-auto flex min-w-0 items-center gap-1.5">
+          </p>
+        </div>
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
+          {showRevisionSummary && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9 max-w-56 gap-2 border-amber-500/40 bg-amber-500/10 px-3 text-sm text-amber-800 hover:bg-amber-500/15 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+                  aria-label={`${revisionTitle}，${t("paper.runtime.revisionDetails")}`}
+                >
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  <span className="truncate">{revisionTitle}</span>
+                  {revisionFindingCount > 0 && (
+                    <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-amber-500/20 px-1.5 text-xs font-semibold tabular-nums">
+                      {revisionFindingCount}
+                    </span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={8}
+                className="max-h-[min(32rem,75vh)] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto p-0"
+              >
+                <div className="sticky top-0 flex items-start gap-2.5 border-b bg-popover/95 px-4 py-3 backdrop-blur">
+                  <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                    <AlertTriangle className="size-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold leading-5">
+                      {revisionTitle}
+                    </p>
+                    <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                      {t("paper.runtime.revisionDetailsDescription")}
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-4 px-4 py-4 text-sm">
+                  {stageState.summary && (
+                    <p className="whitespace-pre-wrap break-words leading-5 text-foreground/90">
+                      {stageState.summary}
+                    </p>
+                  )}
+                  {revisionFindingCount > 0 && (
+                    <ul className="space-y-3 border-t pt-4 text-muted-foreground">
+                      {stageState.findings?.map((finding, index) => (
+                        <li
+                          key={`${index}-${finding}`}
+                          className="flex gap-2.5 leading-6"
+                        >
+                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
+                          <span className="min-w-0 whitespace-pre-wrap break-words">
+                            {finding}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="h-7 max-w-48 gap-1.5 px-2 text-xs"
+            className="h-9 max-w-56 gap-2 px-3 text-sm"
             onClick={onConfigureModel}
             title={modelName ?? t("paper.model.configure")}
           >
@@ -240,8 +394,18 @@ export default function PaperNativeRuntime({
           <Button
             type="button"
             size="sm"
+            variant="outline"
+            className="h-9 gap-2 px-3 text-sm"
+            onClick={onConfigurePreferences}
+          >
+            <SlidersHorizontal className="size-3.5" />
+            {t("paper.preferences.configure")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
             variant="ghost"
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="h-9 gap-2 px-3 text-sm"
             disabled={artifactPaths.length === 0}
             onClick={() => artifactPaths[0] && onOpenArtifact(artifactPaths[0])}
             title={artifactPaths.join("\n") || artifactSummary}
@@ -250,36 +414,20 @@ export default function PaperNativeRuntime({
             {artifactSummary}
           </Button>
         </div>
-      </div>
-      {needsRevision && (
-        <div
-          role="status"
-          className="flex max-h-40 shrink-0 gap-2 overflow-y-auto border-b border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs"
-        >
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <div className="min-w-0">
-            <p className="font-medium text-foreground">
-              {t("paper.runtime.revisionRequired")}
-            </p>
-            {stageState.summary && (
-              <p className="mt-1 leading-5 text-muted-foreground">
-                {stageState.summary}
-              </p>
-            )}
-            {(stageState.findings?.length ?? 0) > 0 && (
-              <ul className="mt-1.5 list-disc space-y-1 pl-4 leading-5 text-muted-foreground">
-                {stageState.findings?.map((finding) => (
-                  <li key={finding}>{finding}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      )}
+      </header>
+      {showProjectContextPrompt &&
+        onUploadProjectContext &&
+        onSkipProjectContext && (
+          <ProjectContextPrompt
+            className="shrink-0 border-b bg-muted/10 px-5 py-3"
+            onUpload={onUploadProjectContext}
+            onSkip={onSkipProjectContext}
+          />
+        )}
       {runtimeFailure && (
         <div
           role="status"
-          className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
+          className="flex shrink-0 items-center gap-3 border-b border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm"
         >
           <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
           <p className="min-w-0 flex-1 leading-5 text-foreground">
@@ -297,7 +445,7 @@ export default function PaperNativeRuntime({
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {(!session.data || !frameReady) && (
           <div className="absolute inset-0 z-10 grid place-items-center bg-background">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-3 font-serif text-base text-muted-foreground">
               <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
               {t("paper.runtime.starting")}
             </div>

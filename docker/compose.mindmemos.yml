@@ -57,7 +57,7 @@ services:
       context: ../
       dockerfile: docker/mindmemos/Dockerfile
       args:
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://mirrors.aliyun.com/pypi/simple}
       ulimits:
         nofile:
           soft: 65535

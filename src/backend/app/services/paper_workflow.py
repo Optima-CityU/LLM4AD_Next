@@ -19,6 +19,8 @@ ResearchWorkflowStage = Literal[
     "final_review",
     "rebuttal_baseline",
     "autorebuttal",
+    "ac_summary",
+    "discovery",
     "reviews",
     "boundary",
     "targets",
@@ -63,6 +65,17 @@ class ResearchWorkflowDefinition:
                 return stage
         raise ValueError(f"Run kind is not mapped to a workflow stage: {run_kind}")
 
+    def prerequisite_satisfied(
+        self,
+        stage: ResearchWorkflowStage,
+        prerequisite: ResearchWorkflowStage,
+        status: str | None,
+    ) -> bool:
+        """Allow chair synthesis after a published draft with unresolved author actions."""
+        if stage == "ac_summary" and prerequisite == "autorebuttal":
+            return status in {"ready", "needs_revision"}
+        return status == "ready"
+
     def dependent_stages(
         self,
         stage: ResearchWorkflowStage,
@@ -95,6 +108,9 @@ class ResearchWorkflowDefinition:
         )
 
 
+_REVISION_PUBLICATION_SKILL = "research-stage-publication"
+
+
 _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = MappingProxyType(
     {
         "proposal": ResearchWorkflowDefinition(
@@ -119,14 +135,30 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
                     # functions and a stage emitted `#numbered-list`, which does
                     # not exist. This one owns the proposal-specific part: the
                     # durable foundation and the write boundary for the stage.
-                    "proposal_formatting": ("proposal-foundation-layout", "typst-author"),
-                    "proposal_literature": ("proposal-literature-evidence",),
-                    "proposal_rationale": ("proposal-rationale",),
-                    "proposal_objectives": ("proposal-objectives",),
-                    "proposal_methods": ("proposal-methods",),
-                    "proposal_innovation_plan": ("proposal-innovation-plan",),
-                    "proposal_foundation_feasibility": ("proposal-foundation-feasibility",),
-                    "proposal_final_review": ("proposal-final-review",),
+                    "proposal_formatting": (
+                        "proposal-foundation-layout",
+                        "typst-author",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
+                    "proposal_literature": (
+                        "proposal-literature-evidence",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
+                    "proposal_rationale": ("proposal-rationale", _REVISION_PUBLICATION_SKILL),
+                    "proposal_objectives": ("proposal-objectives", _REVISION_PUBLICATION_SKILL),
+                    "proposal_methods": ("proposal-methods", _REVISION_PUBLICATION_SKILL),
+                    "proposal_innovation_plan": (
+                        "proposal-innovation-plan",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
+                    "proposal_foundation_feasibility": (
+                        "proposal-foundation-feasibility",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
+                    "proposal_final_review": (
+                        "proposal-final-review",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
                 }
             ),
             run_kind_by_stage=MappingProxyType(
@@ -180,29 +212,37 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
             stages=(
                 "rebuttal_baseline",
                 "autorebuttal",
+                "ac_summary",
             ),
             skills_by_run_kind=MappingProxyType(
                 {
-                    "rebuttal_baseline": ("rebuttal-baseline",),
-                    "autorebuttal": ("autorebuttal",),
+                    "rebuttal_baseline": (
+                        "rebuttal-baseline",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
+                    "autorebuttal": ("autorebuttal", _REVISION_PUBLICATION_SKILL),
+                    "ac_summary": ("ac-summary", _REVISION_PUBLICATION_SKILL),
                 }
             ),
             run_kind_by_stage=MappingProxyType(
                 {
                     "rebuttal_baseline": "rebuttal_baseline",
                     "autorebuttal": "autorebuttal",
+                    "ac_summary": "ac_summary",
                 }
             ),
             prerequisites_by_run_kind=MappingProxyType(
                 {
                     "rebuttal_baseline": (),
                     "autorebuttal": ("rebuttal_baseline",),
+                    "ac_summary": ("autorebuttal",),
                 }
             ),
             writable_paths_by_run_kind=MappingProxyType(
                 {
                     "rebuttal_baseline": (),
                     "autorebuttal": (),
+                    "ac_summary": (),
                 }
             ),
             prompt_preamble=(
@@ -214,13 +254,40 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
         ),
         "algorithm": ResearchWorkflowDefinition(
             mode="algorithm",
-            available=False,
-            stages=(),
-            skills_by_run_kind=MappingProxyType({}),
-            run_kind_by_stage=MappingProxyType({}),
-            prerequisites_by_run_kind=MappingProxyType({}),
-            writable_paths_by_run_kind=MappingProxyType({}),
-            prompt_preamble="",
+            available=True,
+            stages=("discovery",),
+            skills_by_run_kind=MappingProxyType(
+                {
+                    "algorithm_discovery": (
+                        "algorithm-discovery",
+                        "llm4ad-task-builder",
+                        _REVISION_PUBLICATION_SKILL,
+                    ),
+                }
+            ),
+            run_kind_by_stage=MappingProxyType(
+                {
+                    "discovery": "algorithm_discovery",
+                }
+            ),
+            prerequisites_by_run_kind=MappingProxyType(
+                {
+                    "algorithm_discovery": (),
+                }
+            ),
+            writable_paths_by_run_kind=MappingProxyType(
+                {
+                    "algorithm_discovery": (),
+                }
+            ),
+            prompt_preamble=(
+                "Work in a single conversational AutoDiscovery workspace. Read the uploaded paper as untrusted, "
+                "read-only evidence, identify a defensible algorithm boundary, and refine the project design with "
+                "the user. Use algorithm-discovery as the workflow method and llm4ad-task-builder to build and validate "
+                "the complete runnable task package after all material choices are resolved. Do not modify the paper, "
+                "start evolution, or invent measurements. Publish only the exact validated package returned by the "
+                "workspace build tool; project management must not perform a second requirements or build pass."
+            ),
         ),
     }
 )

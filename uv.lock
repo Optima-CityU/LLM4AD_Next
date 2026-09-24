@@ -6,10 +6,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -1510,7 +1510,7 @@ wheels = [
 
 [[package]]
 name = "llm4ad-next"
-version = "1.0.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "agentscope" },
@@ -1562,6 +1562,7 @@ all = [
     { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "psutil" },
     { name = "pymoo" },
+    { name = "pyscipopt" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1630,6 +1631,9 @@ providers = [
     { name = "openai" },
     { name = "tiktoken" },
 ]
+scip = [
+    { name = "pyscipopt" },
+]
 tsp = [
     { name = "numpy" },
 ]
@@ -1649,7 +1653,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'mindmemos'", specifier = ">=0.27.0,<1" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.13.0" },
-    { name = "llm4ad-next", extras = ["infra", "providers", "eval", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
+    { name = "llm4ad-next", extras = ["infra", "providers", "eval", "scip", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
     { name = "llvmlite", marker = "extra == 'eval'", specifier = "==0.44.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "matplotlib", marker = "extra == 'lunarlander'", specifier = ">=3.5.0" },
@@ -1675,6 +1679,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pymoo", marker = "extra == 'meoh'", specifier = ">=0.6.1" },
+    { name = "pyscipopt", marker = "extra == 'scip'", specifier = ">=6.2,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
@@ -1697,7 +1702,7 @@ requires-dist = [
     { name = "umap-learn", marker = "extra == 'eval'", specifier = ">=0.5.12" },
     { name = "xgboost", specifier = ">=3.2.0" },
 ]
-provides-extras = ["infra", "providers", "eval", "tsp", "lunarlander", "dyca", "meoh", "mindmemos", "dev", "docs", "agent", "all"]
+provides-extras = ["infra", "providers", "eval", "scip", "tsp", "lunarlander", "dyca", "meoh", "mindmemos", "dev", "docs", "agent", "all"]
 
 [[package]]
 name = "llvmlite"
@@ -1936,9 +1941,9 @@ name = "mindmemos-sdk"
 version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx", marker = "python_full_version < '3.14'" },
-    { name = "pydantic", marker = "python_full_version < '3.14'" },
-    { name = "pyyaml", marker = "python_full_version < '3.14'" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d8/e5/e882b853fa2c9bbdcebb86bf5526593f25158007cb2d6eea100b5d569660/mindmemos_sdk-0.1.3.tar.gz", hash = "sha256:0681f5ddd85f8f3206675262550894ef2d1545310fd196ba94f88aea420277ce", size = 34273, upload-time = "2026-06-30T12:30:58.201Z" }
 wheels = [
@@ -2516,10 +2521,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version >= '3.14'" },
-    { name = "python-dateutil", marker = "python_full_version >= '3.14'" },
-    { name = "pytz", marker = "python_full_version >= '3.14'" },
-    { name = "tzdata", marker = "python_full_version >= '3.14'" },
+    { name = "numpy" },
+    { name = "python-dateutil" },
+    { name = "pytz" },
+    { name = "tzdata" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/33/01/d40b85317f86cf08d853a4f495195c73815fdf205eef3993821720274518/pandas-2.3.3.tar.gz", hash = "sha256:e05e1af93b977f7eafa636d043f9f94c7ee3ac81af99c13508215942e64c993b", size = 4495223, upload-time = "2025-09-29T23:34:51.853Z" }
 wheels = [
@@ -2564,16 +2569,16 @@ version = "3.0.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version < '3.14'" },
-    { name = "python-dateutil", marker = "python_full_version < '3.14'" },
-    { name = "tzdata", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.14' and sys_platform == 'win32')" },
+    { name = "numpy" },
+    { name = "python-dateutil" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/99/b342345300f13440fe9fe385c3c481e2d9a595ee3bab4d3219247ac94e9a/pandas-3.0.2.tar.gz", hash = "sha256:f4753e73e34c8d83221ba58f232433fca2748be8b18dbca02d242ed153945043", size = 4645855, upload-time = "2026-03-31T06:48:30.816Z" }
 wheels = [
@@ -3091,6 +3096,37 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+]
+
+[[package]]
+name = "pyscipopt"
+version = "6.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/b9/ef40e260c3e722d9d4617dd70548c1e3c51b065decd341cf9b9031957bf1/pyscipopt-6.2.1.tar.gz", hash = "sha256:3da1634ff341c8665fcf100486f7968ddbbf160dc56d83e99338717d2245ef6a", size = 1683168, upload-time = "2026-05-16T15:06:54.486Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/dc/347f5b1a30972fb86759d6975acab3cb0fcbd1df6ea0f26873a8a46ddc32/pyscipopt-6.2.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:fbfbc9fce11f8ee0383e64fcfef4bb1e7b5ae6a1063dd964008cf20f906fdd4d", size = 8411318, upload-time = "2026-05-16T15:05:01.205Z" },
+    { url = "https://files.pythonhosted.org/packages/79/70/319ef747c8b639165e78a5013c65eae9fa265f364abd6d85cb932719aa30/pyscipopt-6.2.1-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:df9581445061a58c8681e884b4f00801f4ee1dc150d9e5d30faa3cd05f6f5c7c", size = 12259796, upload-time = "2026-05-16T15:05:03.887Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/d9/cdecac650bbab6c8d5fcf9577b77bda53d8bbe972b6285e12530b4782d77/pyscipopt-6.2.1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7839074b1dff5cd6e243ea86c0f43cd9f7e9e19257b1fdc5549cf9c9cff0fa6d", size = 16214522, upload-time = "2026-05-16T15:05:07.189Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/5b/3ce96f3ed012d3f17556748b27d49ba42b3662283ecb02ae45c70ed19de1/pyscipopt-6.2.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:faf86357d83772508c5b1925570ee7e08385fa1a736e0ee33bf0e5c421dd845f", size = 17566755, upload-time = "2026-05-16T15:05:11.138Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/50/9fceeb125674c0e955b2175cbba24f2b32ba5f8b635c3484648eb802d090/pyscipopt-6.2.1-cp312-cp312-win_amd64.whl", hash = "sha256:784d8fbee8134c7c1cf590a60972008159033938a5044d9ed28cde9abf4f86be", size = 48216285, upload-time = "2026-05-16T15:05:17.131Z" },
+    { url = "https://files.pythonhosted.org/packages/76/ac/251c595d0eddd4e5480717298118bd252c3d8e5c169d2d95efc862e259ab/pyscipopt-6.2.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:353725a8f65c86299502aadca12c3a1c7622a64746ea12251906ae0165c843ae", size = 8405270, upload-time = "2026-05-16T15:05:20.386Z" },
+    { url = "https://files.pythonhosted.org/packages/95/34/28ae4af84b6d372404da9d5ff636f1341826f80b793d98f86cac03bd0aa4/pyscipopt-6.2.1-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:fdba06632975280df18e684aa4b9867b1167cb3a6aa9a201e7ee3b108985af51", size = 12257430, upload-time = "2026-05-16T15:05:23.673Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/6f/5173067773b5e650566f90c3356bd3a71c02349e6644222a8971c0196687/pyscipopt-6.2.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8860afb9d43c93b653c7295ef674ad1ba156c731591fb7e33b5991c1136b0dc6", size = 16207762, upload-time = "2026-05-16T15:05:26.883Z" },
+    { url = "https://files.pythonhosted.org/packages/57/76/59288c92b7ee914c351c6003b63249e0702d990d1fdd9ff97e65ffc1c57b/pyscipopt-6.2.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:725503ea90fd0962f1111a5b46ee3e271b7375e1b0dfda708ce223dbebaeff5e", size = 17560629, upload-time = "2026-05-16T15:05:30.298Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/42/2b1d48d11311c2fda215c8da83f8f8cabec3b5a82936a7229919ad9141e5/pyscipopt-6.2.1-cp313-cp313-win_amd64.whl", hash = "sha256:a5621ddcb59f7816e87c3deeb1bf52f8693e016a1a29148201b712adb84956e3", size = 48215647, upload-time = "2026-05-16T15:05:36.5Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/af/4ddfd3802ff69ad58f44e6d96878265c4ea55cac2313aae1994611b0d6aa/pyscipopt-6.2.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:299dbff65d60853d545788457d02720e3693df19ade4aaba1bbe8b575239ff4b", size = 8418209, upload-time = "2026-05-16T15:05:40.166Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/53/61ab5575a6e29547b6d13c37d7005b3f348897b48dd6cbcd4261196f2e25/pyscipopt-6.2.1-cp314-cp314-macosx_11_0_x86_64.whl", hash = "sha256:8bd6fb0f2a6c8bf4ef49e524d4c022b7b539098193ce312e94d29c6254658ff6", size = 12267358, upload-time = "2026-05-16T15:05:43.17Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/fd/851dedcabdb6d6168eae0e2c31008d02f20cf018b05d091a5bda6f5da6a1/pyscipopt-6.2.1-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:bb7858ceececa09658c3bfa58476862255353fea52d4f512ff97160f138f92cd", size = 16171696, upload-time = "2026-05-16T15:05:46.851Z" },
+    { url = "https://files.pythonhosted.org/packages/86/7e/ac663246709e6ab94b225c40e9dac863a91b1b86e12c2ea65c951f944bea/pyscipopt-6.2.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9cdf0e460b834f06ea68a13e59f581f7ecbec5a466a76bbf1267ac5b4573bb52", size = 17430536, upload-time = "2026-05-16T15:05:50.267Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/ca/05d80040767d1d2443ea6cd6cc42985cdd532feeaecfcc19f103c8b45a1b/pyscipopt-6.2.1-cp314-cp314-win_amd64.whl", hash = "sha256:6aed03b621decb09b38f399773bf8cf2c707e965990b778a24d28c8cc90a0756", size = 49375214, upload-time = "2026-05-16T15:05:56.493Z" },
+    { url = "https://files.pythonhosted.org/packages/05/d4/caa18165a2faf876d8d482b0b92bd75abf284af2b51b64ebee62c1b47065/pyscipopt-6.2.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:18c6283b8fc47929787a043204e7bb26f41e414d1e8597d394057bcc60fc3ee0", size = 8528074, upload-time = "2026-05-16T15:05:59.776Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/3c/f6593bf4459e788f2302878369c5eb65ec5b04fd6e18524296fe05365c6b/pyscipopt-6.2.1-cp314-cp314t-macosx_11_0_x86_64.whl", hash = "sha256:622e9640cdfc22632079ed4f73d88653d6170ee89ca6bdb6459d0db334fa7a87", size = 12341833, upload-time = "2026-05-16T15:06:02.402Z" },
+    { url = "https://files.pythonhosted.org/packages/49/db/bc80dfa03ef13701b818aca26428fe05c389a71a8ec5654e1e4ea60ef3a4/pyscipopt-6.2.1-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a85fb7f73fd06fad9a0358b2eb47d94dbe94ee52baf85e045beb5e216022b6c7", size = 16735540, upload-time = "2026-05-16T15:06:05.522Z" },
+    { url = "https://files.pythonhosted.org/packages/58/ee/97cd080513efdedea2fcd1f9b71d02e775f5e445ab39f8f012c14e4b4c5e/pyscipopt-6.2.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d323fa83b855308587794cd0ab04ae6dd341c227202d0ddaec2761917034e972", size = 17628571, upload-time = "2026-05-16T15:06:09.608Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/75/e280c162ae55a5db7f9031c4b92774964a8eebef94d2d463a389c9f6294b/pyscipopt-6.2.1-cp314-cp314t-win_amd64.whl", hash = "sha256:138e312cd692b7c853e7eab572986bc6d2dd28acd6e16347d73c96c225613056", size = 49551043, upload-time = "2026-05-16T15:06:15.368Z" },
 ]
 
 [[package]]
@@ -4023,8 +4059,8 @@ name = "uvicorn"
 version = "0.42.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click", marker = "sys_platform != 'emscripten'" },
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "click" },
+    { name = "h11" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e3/ad/4a96c425be6fb67e0621e62d86c402b4a17ab2be7f7c055d9bd2f638b9e2/uvicorn-0.42.0.tar.gz", hash = "sha256:9b1f190ce15a2dd22e7758651d9b6d12df09a13d51ba5bf4fc33c383a48e1775", size = 85393, upload-time = "2026-03-16T06:19:50.077Z" }
 wheels = [

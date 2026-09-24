@@ -40,6 +40,7 @@ class PaperAgentRunKind(StrEnum):
     PROPOSAL_FINAL_REVIEW = "proposal_final_review"
     REBUTTAL_BASELINE = "rebuttal_baseline"
     AUTOREBUTTAL = "autorebuttal"
+    AC_SUMMARY = "ac_summary"
     BOUNDARY_ANALYSIS = "boundary_analysis"
     ISSUE_EXTRACTION = "issue_extraction"
     ALGORITHM_DISCOVERY = "algorithm_discovery"
@@ -67,6 +68,10 @@ class PaperWorkspace(SQLModel, TimeMixin, table=True):
     title: str = Field(max_length=255)
     mode: str = Field(max_length=24)
     description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    conversation_preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False),
+    )
     active_source_version_id: uuid.UUID | None = Field(default=None, index=True)
     proposal_foundation: dict[str, Any] | None = Field(
         default=None,
@@ -98,6 +103,23 @@ class PaperWorkspace(SQLModel, TimeMixin, table=True):
     reviewer_a_model_name: str | None = Field(default=None, max_length=255)
     reviewer_b_provider_id: uuid.UUID | None = Field(default=None, foreign_key="llmprovider.id", ondelete="SET NULL")
     reviewer_b_model_name: str | None = Field(default=None, max_length=255)
+
+    @property
+    def rebuttal_output(self) -> dict[str, Any] | None:
+        """Expose canonical output with readiness derived from current state."""
+        rendered = (self.rebuttal_context or {}).get("rendered")
+        if not isinstance(rendered, dict):
+            return None
+        stage = (self.proposal_stage_states or {}).get("autorebuttal")
+        if not isinstance(stage, dict) or stage.get("status") != "ready":
+            return {**rendered, "ready_for_submission": False}
+        return rendered
+
+    @property
+    def chair_message(self) -> str | None:
+        """Expose the published author-to-chair message, when available."""
+        message = (self.rebuttal_context or {}).get("chair_message")
+        return message if isinstance(message, str) and message.strip() else None
 
 
 class PaperSourceVersion(SQLModel, TimeMixin, table=True):
@@ -278,6 +300,9 @@ class PaperAlgorithmProposal(SQLModel, TimeMixin, table=True):
     assumptions: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     provenance: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     suggested_task_config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    package_object_prefix: str | None = Field(default=None, max_length=1024)
+    package_manifest: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    validation_report: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
     status: str = Field(default="draft", max_length=16)
 
 

@@ -61,7 +61,11 @@ Copy-Item .env.develop.local.example .env
 
 其余变量（端口、镜像名、SMTP、APT/PyPI 镜像源等）可沿用示例文件中的默认值，完整说明见 `.env.develop.local.example`。
 
-页脚备案信息可通过 `VITE_FOOTER_BEIAN` 配置；留空时不会显示。前端镜像的页脚版本在构建时固定读取仓库根目录的 `VERSION` 文件。AutoRebuttal 与 AutoDiscovery 前端入口默认隐藏，分别在构建前设置 `VITE_AUTOREBUTTAL_ENABLED=true`、`VITE_AUTODISCOVERY_ENABLED=true` 才会启用；修改后需要重新构建前端镜像。
+知识库解析、AutoProposal 和 AutoRebuttal 共用任务镜像内固定版本的 `cc-switch-cli`：Claude Code 与 Skill 始终使用 Anthropic Messages 协议；选择 OpenAI/OpenAI-compatible 供应商时，由每个任务或工作区独立的本地适配器转换为 OpenAI Chat Completions。适配器只接收短期网关令牌，不会把供应商真实密钥写入任务工作区，并统一禁用 Claude 的全局 `WebSearch` / `WebFetch` 工具。
+
+AutoRebuttal 的审稿意见可直接粘贴到左侧对话，由 Agent 整理问题基准；也可在右侧按审稿人手工录入 Markdown 或纯文本。OpenReview 页面不会由系统自动抓取，请粘贴其中的评审原文，而非仅提供链接。
+
+页脚备案信息可通过 `VITE_FOOTER_BEIAN` 配置；留空时不会显示。前端镜像的页脚版本在构建时固定读取仓库根目录的 `VERSION` 文件。
 
 ## 本地开发
 

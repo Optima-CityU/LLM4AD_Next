@@ -13,8 +13,9 @@ ARG CC_SWITCH_DOWNLOAD_IMAGE=docker.1ms.run/curlimages/curl:8.16.0
 ARG APT_MIRROR=""
 ARG NODE_BASE_IMAGE=docker.1ms.run/library/node:22-bookworm-slim
 ARG PYTHON_BASE_IMAGE=docker.1ms.run/library/python:3.12-bookworm
-# cc-switch 在每个知识解析容器内独立运行，将 Anthropic Messages 转换为平台
-# 已支持的 OpenAI Chat Completions 协议。固定版本并校验归档，避免 latest 漂移。
+# cc-switch runs per Claude-driven job or workspace. Claude always speaks
+# Anthropic Messages locally; the adapter converts to OpenAI Chat Completions
+# only when the selected upstream requires it. Pin and verify the release.
 FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS cc-switch-runtime
 
 USER root
@@ -196,9 +197,12 @@ COPY ./skills/document-knowledge-organizer                    /app/skills/docume
 COPY ./docker/knowledge-parser/CC-SWITCH-LICENSE              /usr/share/licenses/cc-switch/LICENSE
 COPY ./docker/paper-agent/stage_bridge.py                     /app/paper-agent/stage_bridge.py
 COPY ./docker/paper-agent/arxiv_entrypoint.py                 /app/paper-agent/arxiv_entrypoint.py
+COPY ./docker/paper-agent/protocol_adapter.py                 /app/paper-agent/protocol_adapter.py
 COPY ./src/backend/app/services/arxiv_coordination.py         /app/paper-agent/arxiv_coordination.py
 COPY --chmod=0755 ./docker/paper-agent/workspace-entrypoint.sh /app/paper-agent/workspace-entrypoint.sh
 COPY ./skills/llm4ad-task-builder                             /app/skills/llm4ad-task-builder
+COPY ./skills/research-stage-publication                      /app/skills/research-stage-publication
+COPY ./skills/autodiscovery/algorithm-discovery               /app/skills/algorithm-discovery
 COPY ./skills/typst-author                                    /app/skills/typst-author
 COPY ./skills/openair-proposal/ATTRIBUTION.md                 /app/skills/ATTRIBUTION.md
 COPY ./skills/openair-proposal/proposal-foundation-layout     /app/skills/proposal-foundation-layout
@@ -214,6 +218,7 @@ COPY ./skills/autorebuttal/LICENSE.AutoRebuttal               /app/skills/autore
 COPY ./skills/autorebuttal/shared                             /app/skills/autorebuttal-shared
 COPY ./skills/autorebuttal/rebuttal-baseline                  /app/skills/rebuttal-baseline
 COPY ./skills/autorebuttal/autorebuttal                       /app/skills/autorebuttal
+COPY ./skills/autorebuttal/ac-summary                         /app/skills/ac-summary
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner

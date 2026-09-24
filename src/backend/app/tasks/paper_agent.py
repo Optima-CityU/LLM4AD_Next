@@ -18,10 +18,17 @@ from app.schemas import paper as paper_schemas
 from app.services import paper_service, paper_workflow
 
 
+class DiscoveryProposalArtifact(paper_schemas.PaperAlgorithmProposalCreate):
+    """One proposal paired with its validated, runnable task package."""
+
+    task_package_path: str = Field(min_length=1, max_length=1_024)
+    validation_report: dict[str, object] = Field(default_factory=dict)
+
+
 class DiscoveryArtifact(BaseModel):
     """Validated output from an algorithm discovery run."""
 
-    proposals: list[paper_schemas.PaperAlgorithmProposalCreate] = Field(min_length=1, max_length=20)
+    proposals: list[DiscoveryProposalArtifact] = Field(min_length=1, max_length=20)
 
 
 class ProposalFormattingArtifact(BaseModel):
@@ -59,14 +66,12 @@ class ProposalFinalReviewArtifact(BaseModel):
 
 
 class RebuttalConstraintSummary(BaseModel):
-    """Submission constraints that govern response structure and budget."""
+    """Submission context that governs response structure."""
 
     venue: str | None = Field(default=None, max_length=255)
     venue_year: int | None = Field(default=None, ge=2000, le=2200)
     response_mode: str = Field(default="per_reviewer", pattern=r"^(per_reviewer|shared_global)$")
     output_format: str = Field(default="markdown", pattern=r"^(markdown|text)$")
-    per_reviewer_limit: int | None = Field(default=None, ge=1, le=1_000_000)
-    total_limit: int | None = Field(default=None, ge=1, le=5_000_000)
     author_notes: list[str] = Field(default_factory=list, max_length=100)
     forbidden_claims: list[str] = Field(default_factory=list, max_length=100)
 
@@ -76,7 +81,12 @@ class RebuttalReviewerSource(BaseModel):
 
     review_id: uuid.UUID
     reviewer_id: str = Field(min_length=1, max_length=128)
+    display_label: str = Field(min_length=1, max_length=128)
     title: str | None = Field(default=None, max_length=255)
+    source_system: str = Field(default="manual", min_length=1, max_length=64)
+    external_id: str | None = Field(default=None, max_length=255)
+    source_url: str | None = Field(default=None, max_length=2_048)
+    review_markdown: str | None = None
 
 
 class RebuttalIntakeArtifact(BaseModel):
@@ -87,17 +97,6 @@ class RebuttalIntakeArtifact(BaseModel):
     constraints: RebuttalConstraintSummary
     reviewer_sources: list[RebuttalReviewerSource] = Field(min_length=1, max_length=100)
     open_questions: list[str] = Field(default_factory=list, max_length=100)
-
-    @model_validator(mode="after")
-    def validate_unique_reviewers(self) -> RebuttalIntakeArtifact:
-        """Reject duplicate review documents and reviewer identifiers."""
-        review_ids = [item.review_id for item in self.reviewer_sources]
-        reviewer_ids = [item.reviewer_id for item in self.reviewer_sources]
-        if len(review_ids) != len(set(review_ids)):
-            raise ValueError("Rebuttal intake contains duplicate review IDs")
-        if len(reviewer_ids) != len(set(reviewer_ids)):
-            raise ValueError("Rebuttal intake contains duplicate reviewer IDs")
-        return self
 
 
 class RebuttalConcern(BaseModel):
@@ -132,18 +131,6 @@ class RebuttalAnalysisArtifact(BaseModel):
     concerns: list[RebuttalConcern] = Field(min_length=1, max_length=500)
     reviewer_cards: list[RebuttalReviewerCard] = Field(min_length=1, max_length=100)
 
-    @model_validator(mode="after")
-    def validate_concern_links(self) -> RebuttalAnalysisArtifact:
-        """Ensure concern IDs are unique and reviewer cards only reference them."""
-        concern_ids = [item.id for item in self.concerns]
-        if len(concern_ids) != len(set(concern_ids)):
-            raise ValueError("Rebuttal analysis contains duplicate concern IDs")
-        known = set(concern_ids)
-        linked = {item for card in self.reviewer_cards for item in card.concern_ids}
-        if not linked.issubset(known):
-            raise ValueError("Reviewer cards reference unknown concerns")
-        return self
-
 
 class RebuttalBaselineArtifact(BaseModel):
     """Author-confirmed paper, review, and concern baseline."""
@@ -153,31 +140,6 @@ class RebuttalBaselineArtifact(BaseModel):
     analysis: RebuttalAnalysisArtifact
     ready_for_generation: bool
     findings: list[str] = Field(default_factory=list, max_length=200)
-
-    @model_validator(mode="after")
-    def validate_reviewer_coverage(self) -> RebuttalBaselineArtifact:
-        """Require cards and concerns to stay aligned with every input review."""
-        expected_reviewers = {item.reviewer_id for item in self.intake.reviewer_sources}
-        cards_by_reviewer = {item.reviewer_id: item for item in self.analysis.reviewer_cards}
-        if len(cards_by_reviewer) != len(self.analysis.reviewer_cards):
-            raise ValueError("Rebuttal baseline contains duplicate reviewer cards")
-        if set(cards_by_reviewer) != expected_reviewers:
-            raise ValueError("Rebuttal baseline must contain one card for every reviewer")
-
-        concerns_by_id = {item.id: item for item in self.analysis.concerns}
-        linked_ids: list[str] = []
-        for reviewer_id, card in cards_by_reviewer.items():
-            linked_ids.extend(card.concern_ids)
-            mismatched = [
-                concern_id for concern_id in card.concern_ids if concerns_by_id[concern_id].reviewer_id != reviewer_id
-            ]
-            if mismatched:
-                raise ValueError(f"Reviewer card {reviewer_id} links concerns from another reviewer")
-        if len(linked_ids) != len(set(linked_ids)) or set(linked_ids) != set(concerns_by_id):
-            raise ValueError("Every baseline concern must belong to exactly one reviewer card")
-        if not self.ready_for_generation and not (self.findings or self.intake.open_questions):
-            raise ValueError("A blocked rebuttal baseline must describe an author action")
-        return self
 
 
 class RebuttalFormatPlan(BaseModel):
@@ -189,67 +151,22 @@ class RebuttalFormatPlan(BaseModel):
     assumptions: list[str] = Field(default_factory=list, max_length=100)
 
 
-class RebuttalReviewerBudget(BaseModel):
-    """Planned response-character allocation for one reviewer."""
-
-    reviewer_id: str = Field(min_length=1, max_length=128)
-    target_characters: int = Field(ge=1, le=1_000_000)
-    limit: int | None = Field(default=None, ge=1, le=1_000_000)
-
-    @model_validator(mode="after")
-    def keep_target_within_limit(self) -> RebuttalReviewerBudget:
-        """Reject a plan that knowingly exceeds its reviewer limit."""
-        if self.limit is not None and self.target_characters > self.limit:
-            raise ValueError("Reviewer target characters exceed the declared limit")
-        return self
-
-
-class RebuttalBudgetPlan(BaseModel):
-    """Deterministic character budget used for generation and compliance."""
-
-    unit: str = Field(default="response_characters", pattern=r"^response_characters$")
-    per_reviewer_limit: int | None = Field(default=None, ge=1, le=1_000_000)
-    total_limit: int | None = Field(default=None, ge=1, le=5_000_000)
-    safety_margin: int = Field(default=0, ge=0, le=1_000_000)
-    reviewer_budgets: list[RebuttalReviewerBudget] = Field(min_length=1, max_length=100)
-
-    @model_validator(mode="after")
-    def validate_unique_reviewers(self) -> RebuttalBudgetPlan:
-        """Require exactly one allocation per listed reviewer."""
-        reviewer_ids = [item.reviewer_id for item in self.reviewer_budgets]
-        if len(reviewer_ids) != len(set(reviewer_ids)):
-            raise ValueError("Rebuttal budget contains duplicate reviewer allocations")
-        if self.total_limit is not None:
-            planned = sum(item.target_characters for item in self.reviewer_budgets)
-            if planned + self.safety_margin > self.total_limit:
-                raise ValueError("Planned rebuttal characters exceed the total limit")
-        return self
-
-
 class RebuttalStrategyArtifact(BaseModel):
-    """Cross-reviewer response strategy, format, and character budget."""
+    """Cross-reviewer response strategy and output format."""
 
     summary: str = Field(min_length=1, max_length=20_000)
     shared_issues: list[str] = Field(default_factory=list, max_length=100)
     priority_reviewers: list[str] = Field(default_factory=list, max_length=100)
     global_strategy: list[str] = Field(min_length=1, max_length=100)
     format_plan: RebuttalFormatPlan
-    budget_plan: RebuttalBudgetPlan
 
 
 class RebuttalDraftArtifact(BaseModel):
     """Reviewer-addressed rebuttal entries ready for author inspection."""
 
     summary: str = Field(min_length=1, max_length=20_000)
-    entries: list[paper_schemas.RebuttalEntry] = Field(min_length=1, max_length=500)
-
-    @model_validator(mode="after")
-    def validate_unique_entries(self) -> RebuttalDraftArtifact:
-        """Require stable unique entry identifiers."""
-        entry_ids = [entry.id for entry in self.entries]
-        if len(entry_ids) != len(set(entry_ids)):
-            raise ValueError("Rebuttal draft contains duplicate entry IDs")
-        return self
+    global_response: paper_schemas.RebuttalGlobalResponse | None = None
+    entries: list[paper_schemas.RebuttalEntry] = Field(default_factory=list, max_length=500)
 
 
 class RebuttalComplianceArtifact(RebuttalDraftArtifact):
@@ -258,16 +175,7 @@ class RebuttalComplianceArtifact(RebuttalDraftArtifact):
     findings: list[str] = Field(default_factory=list, max_length=200)
     ready_for_submission: bool
     open_placeholders: list[str] = Field(default_factory=list, max_length=200)
-
-    @model_validator(mode="after")
-    def require_blocking_findings(self) -> RebuttalComplianceArtifact:
-        """Explain why a final response remains unready."""
-        if not self.ready_for_submission and not (self.findings or self.open_placeholders):
-            raise ValueError("An unready rebuttal must describe a finding or placeholder")
-        unresolved = [entry.id for entry in self.entries if entry.evidence_status in {"placeholder", "needs_author"}]
-        if self.ready_for_submission and (self.open_placeholders or unresolved):
-            raise ValueError("A submission-ready rebuttal cannot contain unresolved author evidence")
-        return self
+    rendered_text: str = Field(min_length=1, max_length=1_000_000)
 
 
 class AutoRebuttalArtifact(BaseModel):
@@ -278,14 +186,12 @@ class AutoRebuttalArtifact(BaseModel):
     draft: RebuttalDraftArtifact
     compliance: RebuttalComplianceArtifact
 
-    @model_validator(mode="after")
-    def preserve_draft_coverage(self) -> AutoRebuttalArtifact:
-        """Allow polishing while preserving the concerns covered by the draft."""
-        draft_concerns = {item for entry in self.draft.entries for item in entry.concern_ids}
-        final_concerns = {item for entry in self.compliance.entries for item in entry.concern_ids}
-        if draft_concerns != final_concerns:
-            raise ValueError("Compliance review must preserve the draft concern coverage")
-        return self
+
+class ACChairSummaryArtifact(BaseModel):
+    """Author-facing summary and copy-ready message for the AC or chair."""
+
+    summary: str = Field(min_length=1)
+    message: str = Field(min_length=1)
 
 
 class MetricArtifact(BaseModel):
@@ -484,76 +390,83 @@ def _workspace_source_entries(source_root: Path) -> list[tuple[str, bytes]]:
     return entries
 
 
-def _validate_rebuttal_entry_coverage(
-    workspace: models.PaperWorkspace,
-    entries: list[paper_schemas.RebuttalEntry],
-) -> None:
-    """Require draft entries to cover exactly the analyzed reviewer concerns."""
-    analysis = (workspace.rebuttal_context or {}).get("analysis")
-    concerns = analysis.get("concerns") if isinstance(analysis, dict) else None
-    if not isinstance(concerns, list) or not concerns:
-        raise ValueError("Rebuttal review analysis is missing")
-    reviewer_by_concern = {
-        str(item.get("id")): str(item.get("reviewer_id"))
-        for item in concerns
-        if isinstance(item, dict) and item.get("id") and item.get("reviewer_id")
-    }
-    covered = {concern_id for entry in entries for concern_id in entry.concern_ids}
-    expected = set(reviewer_by_concern)
-    if covered != expected:
-        missing = sorted(expected - covered)
-        unknown = sorted(covered - expected)
-        raise ValueError(f"Rebuttal entries do not match analyzed concerns; missing={missing}, unknown={unknown}")
-    for entry in entries:
-        mismatched = [
-            concern_id for concern_id in entry.concern_ids if reviewer_by_concern.get(concern_id) != entry.reviewer_id
-        ]
-        if mismatched:
-            raise ValueError(f"Rebuttal entry {entry.id} mixes concerns from another reviewer")
+def _persist_discovery_package(
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    package_path: str,
+    reported_validation: dict[str, object],
+) -> tuple[str, list[str], dict[str, object]]:
+    """Persist one Agent-built package after checking its builder metadata."""
+    workspace_root = paper_service.paper_workspace_root(user_id, workspace_id).resolve()
+    raw_path = Path(package_path)
+    if raw_path.is_absolute() and raw_path.parts[:2] == ("/", "workspace"):
+        raw_path = workspace_root.joinpath(*raw_path.parts[2:])
+    elif not raw_path.is_absolute():
+        raw_path = workspace_root / raw_path
+    resolved = raw_path.resolve()
+    allowed_root = (workspace_root / ".research" / "autodiscovery" / "packages").resolve()
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError as exc:
+        raise ValueError("AutoDiscovery package is outside the workspace package directory") from exc
+    if not resolved.is_dir():
+        raise ValueError("AutoDiscovery task package was not found")
 
+    entries: list[tuple[str, bytes]] = []
+    for path in sorted(resolved.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("AutoDiscovery task packages cannot contain symbolic links")
+        if not path.is_file():
+            continue
+        relative = paper_service._validate_zip_path(path.relative_to(resolved).as_posix()).as_posix()
+        entries.append((relative, path.read_bytes()))
+    manifest = [path for path, _content in entries]
+    required = {"config.yaml", "debug_run.py", "test_evaluator.py", "blueprint_meta.json"}
+    missing = sorted(required.difference(manifest))
+    if missing:
+        raise ValueError(f"AutoDiscovery task package is incomplete: {', '.join(missing)}")
 
-def _validate_autorebuttal_constraints(
-    workspace: models.PaperWorkspace,
-    artifact: AutoRebuttalArtifact,
-) -> None:
-    """Validate strategy identity and final character limits against the baseline."""
-    intake = (workspace.rebuttal_context or {}).get("intake")
-    if not isinstance(intake, dict):
-        raise ValueError("Rebuttal intake baseline is missing")
-    constraints = RebuttalConstraintSummary.model_validate(intake.get("constraints"))
-    reviewer_sources = [RebuttalReviewerSource.model_validate(item) for item in intake.get("reviewer_sources", [])]
-    expected_reviewers = {item.reviewer_id for item in reviewer_sources}
-    format_plan = artifact.strategy.format_plan
-    budget_plan = artifact.strategy.budget_plan
-    if format_plan.response_mode != constraints.response_mode:
-        raise ValueError("AutoRebuttal response mode does not match the confirmed baseline")
-    if format_plan.output_format != constraints.output_format:
-        raise ValueError("AutoRebuttal output format does not match the confirmed baseline")
-    if budget_plan.per_reviewer_limit != constraints.per_reviewer_limit:
-        raise ValueError("AutoRebuttal per-reviewer limit does not match the confirmed baseline")
-    if budget_plan.total_limit != constraints.total_limit:
-        raise ValueError("AutoRebuttal total limit does not match the confirmed baseline")
-    budgets_by_reviewer = {item.reviewer_id: item for item in budget_plan.reviewer_budgets}
-    if set(budgets_by_reviewer) != expected_reviewers:
-        raise ValueError("AutoRebuttal budget must allocate every confirmed reviewer exactly once")
-    if constraints.per_reviewer_limit is not None and any(
-        item.limit != constraints.per_reviewer_limit for item in budget_plan.reviewer_budgets
+    metadata = json.loads(dict(entries)["blueprint_meta.json"].decode("utf-8"))
+    if metadata.get("validation_status") != "passed" or metadata.get("validation_errors"):
+        raise ValueError("AutoDiscovery task package has not passed Agent validation")
+    evaluator_file = metadata.get("evaluator_file_name")
+    algorithm_dir = metadata.get("algorithm_dir_name")
+    algorithm_file = metadata.get("algorithm_file_name")
+    if not all(
+        isinstance(value, str) and value
+        for value in (evaluator_file, algorithm_dir, algorithm_file)
     ):
-        raise ValueError("Reviewer budget limits do not match the confirmed per-reviewer limit")
-
-    if not artifact.compliance.ready_for_submission:
-        return
-    counts_by_reviewer = dict.fromkeys(expected_reviewers, 0)
-    for entry in artifact.compliance.entries:
-        counts_by_reviewer[entry.reviewer_id] = counts_by_reviewer.get(entry.reviewer_id, 0) + entry.character_count
-    if constraints.per_reviewer_limit is not None:
-        exceeded = sorted(
-            reviewer_id for reviewer_id, count in counts_by_reviewer.items() if count > constraints.per_reviewer_limit
+        raise ValueError("AutoDiscovery task package metadata is incomplete")
+    dynamic_missing = sorted({evaluator_file, f"{algorithm_dir}/{algorithm_file}"}.difference(manifest))
+    if dynamic_missing:
+        raise ValueError(
+            f"AutoDiscovery task package is incomplete: {', '.join(dynamic_missing)}"
         )
-        if exceeded:
-            raise ValueError(f"Submission-ready rebuttal exceeds reviewer limits: {exceeded}")
-    if constraints.total_limit is not None and sum(counts_by_reviewer.values()) > constraints.total_limit:
-        raise ValueError("Submission-ready rebuttal exceeds the confirmed total limit")
+    validation_report = dict(reported_validation)
+    validation_report.update(
+        {
+            "status": "passed",
+            "validator": "llm4ad.builder.TaskValidator",
+            "project_name": metadata.get("project_name") or resolved.name,
+            "repair_attempts": int(metadata.get("repair_attempts") or 0),
+            "function_to_evolve": metadata.get("function_to_evolve"),
+            "evaluator_file": metadata.get("evaluator_file_name"),
+            "algorithm_file": "/".join(
+                part
+                for part in (
+                    metadata.get("algorithm_dir_name"),
+                    metadata.get("algorithm_file_name"),
+                )
+                if part
+            ),
+            "metrics": metadata.get("metrics") or [],
+        }
+    )
+    object_prefix = f"paper/{user_id}/{workspace_id}/proposals/{proposal_id}/package"
+    for relative, content in entries:
+        storage.upload(f"{object_prefix}/{relative}", content)
+    return object_prefix, manifest, validation_report
 
 
 def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bool:
@@ -706,18 +619,6 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
             source_committed = True
         elif run.run_kind == models.PaperAgentRunKind.REBUTTAL_BASELINE.value:
             artifact = RebuttalBaselineArtifact.model_validate(payload)
-            available_reviews = {
-                item.id
-                for item in db.exec(
-                    select(models.PaperReview).where(
-                        models.PaperReview.workspace_id == workspace.id,
-                        models.PaperReview.source_version_id == run.source_version_id,
-                    )
-                ).all()
-            }
-            reported_reviews = {item.review_id for item in artifact.intake.reviewer_sources}
-            if reported_reviews != available_reviews:
-                raise ValueError("Rebuttal baseline must cover every review attached to the active paper")
             context = dict(workspace.rebuttal_context or {})
             context["intake"] = artifact.intake.model_dump(mode="json")
             context["analysis"] = artifact.analysis.model_dump(mode="json")
@@ -737,22 +638,38 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
             )
         elif run.run_kind == models.PaperAgentRunKind.AUTOREBUTTAL.value:
             artifact = AutoRebuttalArtifact.model_validate(payload)
-            _validate_rebuttal_entry_coverage(workspace, artifact.draft.entries)
-            _validate_rebuttal_entry_coverage(workspace, artifact.compliance.entries)
-            _validate_autorebuttal_constraints(workspace, artifact)
             workspace.rebuttal_entries = [entry.model_dump(mode="json") for entry in artifact.compliance.entries]
             context = dict(workspace.rebuttal_context or {})
             context["strategy"] = artifact.strategy.model_dump(mode="json")
             context["draft"] = {
                 "summary": artifact.draft.summary,
+                "global_response": (
+                    artifact.draft.global_response.model_dump(mode="json")
+                    if artifact.draft.global_response is not None
+                    else None
+                ),
                 "entries": [entry.model_dump(mode="json") for entry in artifact.draft.entries],
             }
             context["compliance"] = {
                 "summary": artifact.compliance.summary,
+                "global_response": (
+                    artifact.compliance.global_response.model_dump(mode="json")
+                    if artifact.compliance.global_response is not None
+                    else None
+                ),
                 "findings": artifact.compliance.findings,
                 "ready_for_submission": artifact.compliance.ready_for_submission,
                 "open_placeholders": artifact.compliance.open_placeholders,
+                "rendered_text": artifact.compliance.rendered_text,
             }
+            context["rendered"] = paper_schemas.RebuttalOutput(
+                output_format=artifact.strategy.format_plan.output_format,
+                text=artifact.compliance.rendered_text,
+                global_response=artifact.compliance.global_response,
+                findings=artifact.compliance.findings,
+                open_placeholders=artifact.compliance.open_placeholders,
+                ready_for_submission=artifact.compliance.ready_for_submission,
+            ).model_dump(mode="json")
             workspace.rebuttal_context = context
             _update_proposal_stage_state(
                 workspace,
@@ -764,6 +681,17 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
                     *artifact.compliance.findings,
                     *artifact.compliance.open_placeholders,
                 ],
+            )
+        elif run.run_kind == models.PaperAgentRunKind.AC_SUMMARY.value:
+            artifact = ACChairSummaryArtifact.model_validate(payload)
+            context = dict(workspace.rebuttal_context or {})
+            context["chair_message"] = artifact.message
+            workspace.rebuttal_context = context
+            _update_proposal_stage_state(
+                workspace,
+                run,
+                run.source_version_id,
+                summary=artifact.summary,
             )
         elif run.run_kind == models.PaperAgentRunKind.BOUNDARY_ANALYSIS.value:
             artifact = BoundaryArtifact.model_validate(payload)
@@ -847,9 +775,31 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
                 )
         elif run.run_kind == models.PaperAgentRunKind.ALGORITHM_DISCOVERY.value:
             artifact = DiscoveryArtifact.model_validate(payload)
+            existing_drafts = list(
+                db.exec(
+                    select(models.PaperAlgorithmProposal).where(
+                        models.PaperAlgorithmProposal.workspace_id == workspace.id,
+                        models.PaperAlgorithmProposal.source_version_id == run.source_version_id,
+                        models.PaperAlgorithmProposal.status == "draft",
+                    )
+                ).all()
+            )
+            for proposal in existing_drafts:
+                if proposal.package_object_prefix:
+                    storage.delete_many(storage.list_objects(proposal.package_object_prefix))
+                db.delete(proposal)
             for proposal in artifact.proposals:
+                proposal_id = uuid.uuid4()
+                package_prefix, package_manifest, validation_report = _persist_discovery_package(
+                    user_id,
+                    workspace.id,
+                    proposal_id,
+                    proposal.task_package_path,
+                    proposal.validation_report,
+                )
                 db.add(
                     models.PaperAlgorithmProposal(
+                        id=proposal_id,
                         workspace_id=workspace.id,
                         source_version_id=run.source_version_id,
                         run_id=run.id,
@@ -858,9 +808,21 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
                             if (run.request_payload or {}).get("target_id")
                             else None
                         ),
-                        **proposal.model_dump(),
+                        package_object_prefix=package_prefix,
+                        package_manifest=package_manifest,
+                        validation_report=validation_report,
+                        **proposal.model_dump(exclude={"task_package_path", "validation_report"}),
                     )
                 )
+            _update_proposal_stage_state(
+                workspace,
+                run,
+                run.source_version_id,
+                summary=(
+                    f"Prepared and validated {len(artifact.proposals)} runnable algorithm "
+                    f"task package{'s' if len(artifact.proposals) != 1 else ''}."
+                ),
+            )
         elif run.run_kind == models.PaperAgentRunKind.METRIC_SUGGESTION.value:
             artifact = MetricArtifact.model_validate(payload)
             review = db.get(models.PaperReview, run.review_id)

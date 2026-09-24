@@ -11,7 +11,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
 WORKDIR /app/mindmemos
 ENV PATH="/app/mindmemos/.venv/bin:$PATH"
 
-ARG UV_INDEX_URL=https://repo.huaweicloud.com/repository/pypi/simple
+ARG UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple
+ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX}
 
 COPY third_party/MindMemOS/pyproject.toml third_party/MindMemOS/uv.lock ./
 COPY third_party/MindMemOS/README.md ./README.md
@@ -21,6 +22,7 @@ COPY third_party/MindMemOS/scripts ./scripts
 COPY docker/mindmemos/render_config.py ./render_config.py
 
 RUN --mount=type=cache,id=uv-mindmemos,target=/root/.cache/uv \
+    uv lock --python 3.12 && \
     uv sync --frozen --no-dev --package mindmemos
 
 CMD ["sh", "-c", "python /app/mindmemos/render_config.py && MINDMEMOS_CONFIG_PATH=${MINDMEMOS_RENDERED_CONFIG:-/tmp/mindmemos-dev.yaml} python -m uvicorn mindmemos.api.app:app --host 0.0.0.0 --port 8000"]

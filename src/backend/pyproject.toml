@@ -40,6 +40,8 @@ dependencies = [
     # Official Typst Python binding: the research runtime's stage bridge uses it
     # to compile-check proposals before publication (see stage_bridge.py).
     "typst>=0.13.0,<0.14.0",
+    # Kept temporarily for lockfile compatibility; the MCP no longer calls the SDK.
+    "openreview-py>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]

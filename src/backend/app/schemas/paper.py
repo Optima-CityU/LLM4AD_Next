@@ -20,6 +20,7 @@ PaperRunKind = Literal[
     "proposal_final_review",
     "rebuttal_baseline",
     "autorebuttal",
+    "ac_summary",
     "boundary_analysis",
     "issue_extraction",
     "algorithm_discovery",
@@ -41,6 +42,8 @@ ResearchWorkflowStage = Literal[
     "final_review",
     "rebuttal_baseline",
     "autorebuttal",
+    "ac_summary",
+    "discovery",
     "reviews",
     "boundary",
     "targets",
@@ -56,11 +59,23 @@ class PaperWorkspaceCreate(BaseModel):
     mode: Literal["proposal", "manuscript", "algorithm"]
 
 
+class PaperConversationPreferences(BaseModel):
+    """Workspace-specific presentation preferences for agent conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reply_language: Literal["auto", "zh", "en"] = "auto"
+    additional_guidance: str = Field(default="", max_length=4_000)
+
+
 class PaperWorkspaceUpdate(BaseModel):
     """Update user-editable paper workspace metadata."""
 
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=4_000)
+    conversation_preferences: PaperConversationPreferences = Field(
+        default_factory=PaperConversationPreferences,
+    )
 
 
 class ProposalContextBlock(BaseModel):
@@ -130,17 +145,27 @@ class RebuttalEntry(BaseModel):
     concern_ids: list[str] = Field(min_length=1, max_length=100)
     evidence_status: Literal["source_grounded", "verified", "placeholder", "needs_author"]
     source_refs: list[str] = Field(default_factory=list, max_length=200)
-    character_count: int = Field(default=0, ge=0)
 
-    @model_validator(mode="after")
-    def set_character_count(self) -> RebuttalEntry:
-        """Compute the displayed count and enforce explicit evidence handling."""
-        if self.evidence_status in {"source_grounded", "verified"} and not self.source_refs:
-            raise ValueError("Grounded or verified rebuttal entries must include source references")
-        if self.evidence_status == "placeholder" and "[AUTHOR:" not in self.response:
-            raise ValueError("Placeholder rebuttal entries must contain an explicit [AUTHOR: ...] marker")
-        self.character_count = len(self.response)
-        return self
+
+class RebuttalGlobalResponse(BaseModel):
+    """One shared response block rendered before reviewer-specific entries."""
+
+    title: str = Field(min_length=1, max_length=500)
+    response: str = Field(min_length=1, max_length=100_000)
+    concern_ids: list[str] = Field(default_factory=list, max_length=500)
+    evidence_status: Literal["source_grounded", "verified", "placeholder", "needs_author"]
+    source_refs: list[str] = Field(default_factory=list, max_length=200)
+
+
+class RebuttalOutput(BaseModel):
+    """Agent-produced canonical rebuttal persisted for presentation."""
+
+    output_format: Literal["markdown", "text"]
+    text: str
+    global_response: RebuttalGlobalResponse | None = None
+    findings: list[str] = Field(default_factory=list, max_length=200)
+    open_placeholders: list[str] = Field(default_factory=list, max_length=200)
+    ready_for_submission: bool
 
 
 class PaperWorkspaceSummary(BaseModel):
@@ -152,12 +177,17 @@ class PaperWorkspaceSummary(BaseModel):
     title: str
     mode: ResearchWorkspaceMode
     description: str | None
+    conversation_preferences: PaperConversationPreferences = Field(
+        default_factory=PaperConversationPreferences,
+    )
     active_source_version_id: uuid.UUID | None
     proposal_foundation: ProposalFoundation | None
     proposal_entry_path: str | None
     proposal_stage_states: dict[str, ProposalStageState] = Field(default_factory=dict)
     rebuttal_context: dict[str, Any] = Field(default_factory=dict)
     rebuttal_entries: list[RebuttalEntry] = Field(default_factory=list)
+    rebuttal_output: RebuttalOutput | None = None
+    chair_message: str | None = None
     analysis_provider_id: uuid.UUID | None
     analysis_model_name: str | None
     analysis_context_window_tokens: int
@@ -327,6 +357,8 @@ class PaperAlgorithmProposalResponse(PaperAlgorithmProposalCreate):
     run_id: uuid.UUID | None
     target_id: uuid.UUID | None
     target_type: Literal["manuscript", "algorithm"] | None = None
+    package_manifest: list[str] = Field(default_factory=list)
+    validation_report: dict[str, Any] = Field(default_factory=dict)
     status: str
     task_id: uuid.UUID | None = None
     task_project_id: uuid.UUID | None = None
@@ -642,3 +674,10 @@ class PaperRuntimeSessionCreate(BaseModel):
     """Select the backend-owned stage profile for a native session."""
 
     workflow_stage: ResearchWorkflowStage
+
+
+class PaperStageInvalidateRequest(BaseModel):
+    """Invalidate the stage revision replaced by an edited conversation turn."""
+
+    workflow_stage: ResearchWorkflowStage
+    expected_iteration: int | None = Field(default=None, ge=1)

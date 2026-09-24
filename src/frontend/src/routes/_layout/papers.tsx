@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
-  AlertTriangle,
   ArrowRight,
   BookOpen,
   Calendar,
@@ -21,13 +20,14 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  PenLine,
   Plus,
   Rocket,
-  RotateCcw,
   Save,
   ScanSearch,
   Search,
   Settings2,
+  SlidersHorizontal,
   Sparkles,
   Target,
   Trash2,
@@ -49,17 +49,22 @@ import { toast } from "sonner"
 
 import type {
   FileTreeNode,
+  PaperConversationPreferences,
   ProposalStageState,
   ProviderResponse,
 } from "@/client"
 import ArtifactCodeEditor from "@/components/AutoResearch/ArtifactCodeEditor"
+import WorkflowStepper from "@/components/Common/WorkflowStepper"
 import FileTreeView from "@/components/Evolution/TaskDetail/steps/FileTreeView"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
   makeMarkdownComponents,
 } from "@/components/markdown/markdownComponents"
+import AlgorithmDiscoveryPanel from "@/components/Paper/AlgorithmDiscoveryPanel"
 import PaperNativeRuntime from "@/components/Paper/PaperNativeRuntime"
+import type { ProposalResultStage } from "@/components/Paper/ProposalResultsDock"
+import ProposalResultsDock from "@/components/Paper/ProposalResultsDock"
 import RebuttalEntriesPanel from "@/components/Paper/RebuttalEntriesPanel"
 import TypstLivePreview from "@/components/Paper/TypstLivePreview"
 import { Badge } from "@/components/ui/badge"
@@ -100,14 +105,21 @@ import {
   usePaperWorkspaces,
   useUpdatePaperModelBinding,
   useUpdatePaperSourceFile,
+  useUpdatePaperWorkspace,
   useUploadPaperSource,
 } from "@/hooks/usePapers"
 import { usePersistentState } from "@/hooks/usePersistentState"
 import { useProviders } from "@/hooks/useProviders"
 import {
-  AUTO_DISCOVERY_ENABLED,
-  AUTO_REBUTTAL_ENABLED,
-} from "@/lib/frontendFeatures"
+  hasProjectContextFiles,
+  projectContextUploads,
+} from "@/lib/projectContext"
+import {
+  EMPTY_PROPOSAL_BASICS,
+  type ProposalBasics,
+  parseProposalBasics,
+  serializeProposalBasics,
+} from "@/lib/proposalBasics"
 import {
   parseResearchWorkspaceMode,
   type ResearchWorkspaceMode,
@@ -153,6 +165,11 @@ function PaperProjectsPage() {
 }
 
 type ModelBinding = { providerId: string; modelName: string }
+type ConversationPreferencesDraft = Required<PaperConversationPreferences>
+const DEFAULT_CONVERSATION_PREFERENCES: ConversationPreferencesDraft = {
+  reply_language: "auto",
+  additional_guidance: "",
+}
 type PaperSourceContext = {
   path: string
   role: string
@@ -169,6 +186,8 @@ type PaperTool =
   | "final_review"
   | "rebuttal_baseline"
   | "autorebuttal"
+  | "ac_summary"
+  | "discovery"
   | "reviews"
   | "boundary"
   | "targets"
@@ -184,7 +203,10 @@ type ProposalStage = Extract<
   | "foundation_feasibility"
   | "final_review"
 >
-type RebuttalStage = Extract<PaperTool, "rebuttal_baseline" | "autorebuttal">
+type RebuttalStage = Extract<
+  PaperTool,
+  "rebuttal_baseline" | "autorebuttal" | "ac_summary"
+>
 const RESEARCH_WORKSPACE_MODE_ICONS: Record<
   ResearchWorkspaceMode,
   typeof Sparkles
@@ -205,6 +227,8 @@ const PAPER_WORKFLOW_STEPS = [
   { key: "final_review", icon: FileCheck2 },
   { key: "rebuttal_baseline", icon: ScanSearch },
   { key: "autorebuttal", icon: MessagesSquare },
+  { key: "ac_summary", icon: PenLine },
+  { key: "discovery", icon: GitBranch },
   { key: "reviews", icon: MessagesSquare },
   { key: "boundary", icon: ScanSearch },
   { key: "targets", icon: ListChecks },
@@ -245,6 +269,7 @@ const PROPOSAL_STAGE_PREREQUISITES: Record<ProposalStage, ProposalStage[]> = {
 const REBUTTAL_STAGE_PREREQUISITES: Record<RebuttalStage, RebuttalStage[]> = {
   rebuttal_baseline: [],
   autorebuttal: ["rebuttal_baseline"],
+  ac_summary: ["autorebuttal"],
 }
 const PAPER_DIRECTORY_MARKER = ".llm4ad-directory"
 const CREATABLE_PAPER_FILE_SUFFIXES = [
@@ -274,120 +299,99 @@ function isGeneratedProposalPath(
   )
 }
 
+function ProposalBasicsFields({
+  basics,
+  onChange,
+}: {
+  basics: ProposalBasics
+  onChange: (basics: ProposalBasics) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {(["topic", "funding", "question", "foundation"] as const).map(
+        (field) => (
+          <div key={field} className="min-w-0 space-y-1.5">
+            <Label htmlFor={`proposal-basic-${field}`}>
+              {t(`paper.source.basics.${field}`)}
+            </Label>
+            {field === "topic" || field === "funding" ? (
+              <Input
+                id={`proposal-basic-${field}`}
+                value={basics[field]}
+                onChange={(event) =>
+                  onChange({ ...basics, [field]: event.target.value })
+                }
+                placeholder={t(`paper.source.basics.${field}Placeholder`)}
+                maxLength={field === "topic" ? 500 : 200}
+              />
+            ) : (
+              <Textarea
+                id={`proposal-basic-${field}`}
+                value={basics[field]}
+                onChange={(event) =>
+                  onChange({ ...basics, [field]: event.target.value })
+                }
+                placeholder={t(`paper.source.basics.${field}Placeholder`)}
+                className="min-h-24 resize-y"
+                maxLength={field === "question" ? 1000 : 1500}
+              />
+            )}
+          </div>
+        ),
+      )}
+    </div>
+  )
+}
+
 function PaperWorkflowStepper({
   stages,
   activeStage,
-  runningStage,
   completedStages,
   stageStates,
   onSelect,
 }: {
   stages: PaperTool[]
   activeStage: PaperTool
-  runningStage: PaperTool | null
   completedStages: Set<PaperTool>
   stageStates: Partial<Record<PaperTool, ProposalStageState>>
   onSelect: (stage: PaperTool) => void
 }) {
   const { t } = useTranslation()
-  const stepDefinitions = PAPER_WORKFLOW_STEPS.filter(({ key }) =>
-    stages.includes(key),
-  )
-  const activeIndex = Math.max(
-    0,
-    stepDefinitions.findIndex(({ key }) => key === activeStage),
-  )
   return (
-    <nav
-      aria-label={t("paper.workflow.statusTitle")}
-      className="shrink-0 border-b border-border/60 bg-muted/35 px-3 py-2.5 dark:bg-background/50"
-    >
-      <ol className="mx-auto flex w-full min-w-max max-w-4xl items-start overflow-x-auto px-2">
-        {stepDefinitions.map(({ key, icon: Icon }, index) => {
-          const active = key === activeStage
-          const complete = completedStages.has(key)
-          const running = runningStage === key
-          const stale = stageStates[key]?.status === "stale"
-          const needsRevision = stageStates[key]?.status === "needs_revision"
-          const statusLabel = needsRevision
-            ? t("paper.workflow.needsRevision")
-            : stale
-              ? t("paper.workflow.stale")
-              : complete
-                ? t("paper.workflow.ready")
-                : t("paper.workflow.notStarted")
-          const iteration = stageStates[key]?.iteration
-          const iterationLabel = iteration
-            ? ` · ${t("paper.workflow.iteration", { count: iteration })}`
-            : ""
-          return (
-            <li
-              key={key}
-              className="relative flex min-w-24 flex-1 items-start justify-center"
-            >
-              {index < stepDefinitions.length - 1 && (
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "absolute left-[calc(50%+1.25rem)] right-[calc(-50%+1.25rem)] top-4 h-px bg-border",
-                    (complete || index < activeIndex) &&
-                      "bg-emerald-500/45 dark:bg-emerald-400/45",
-                  )}
-                />
-              )}
-              <button
-                type="button"
-                aria-current={active ? "step" : undefined}
-                title={`${t(`paper.workflow.stage.${key}Hint`)} · ${statusLabel}${iterationLabel}`}
-                onClick={() => onSelect(key)}
-                className={cn(
-                  "group relative z-10 flex w-24 flex-col items-center gap-1 rounded-lg px-1 py-0.5 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                  active && "text-primary",
-                )}
-              >
-                <span
-                  className={cn(
-                    "relative z-10 grid size-8 shrink-0 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm transition-all group-hover:border-primary/40 group-hover:text-primary",
-                    complete &&
-                      "border-emerald-500/35 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                    stale &&
-                      "border-slate-400/50 bg-slate-500/10 text-slate-500 dark:text-slate-400",
-                    needsRevision &&
-                      "border-amber-500/45 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-                    active &&
-                      !complete &&
-                      "border-primary/40 bg-primary/10 text-primary",
-                    running && "paper-step-running",
-                  )}
-                >
-                  {needsRevision && !running ? (
-                    <AlertTriangle className="size-3.5" />
-                  ) : stale && !running ? (
-                    <RotateCcw className="size-3.5" />
-                  ) : complete && !running ? (
-                    <Check className="size-3.5" />
-                  ) : running ? (
-                    <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
-                  ) : (
-                    <Icon className="size-3.5" />
-                  )}
-                </span>
-                <span className="min-w-0 max-w-full">
-                  <span
-                    className={cn(
-                      "block max-w-24 truncate text-[10px] font-medium text-muted-foreground",
-                      active && "text-primary",
-                    )}
-                  >
-                    {t(`paper.workflow.stage.${key}`)}
-                  </span>
-                </span>
-              </button>
-            </li>
-          )
-        })}
-      </ol>
-    </nav>
+    <WorkflowStepper
+      label={t("paper.workflow.statusTitle")}
+      previousLabel={t("paper.workflow.previousStage")}
+      nextLabel={t("paper.workflow.nextStage")}
+      value={activeStage}
+      onValueChange={onSelect}
+      steps={stages.map((key) => {
+        const state = stageStates[key]
+        const status =
+          state?.status === "needs_revision"
+            ? "revision"
+            : state?.status === "stale"
+              ? "stale"
+              : completedStages.has(key)
+                ? "complete"
+                : "pending"
+        const statusLabel = t(
+          `paper.workflow.${status === "revision" ? "needsRevision" : status === "complete" ? "ready" : status === "stale" ? "stale" : "notStarted"}`,
+        )
+        return {
+          id: key,
+          label: t(`paper.workflow.stage.${key}`),
+          shortLabel: t(`paper.workflow.stageNav.${key}`, {
+            defaultValue: t(`paper.workflow.stage.${key}`),
+          }),
+          description: t(`paper.workflow.stage.${key}Hint`),
+          status,
+          statusLabel: state?.iteration
+            ? `${statusLabel} · ${t("paper.workflow.iteration", { count: state.iteration })}`
+            : statusLabel,
+        }
+      })}
+    />
   )
 }
 
@@ -410,6 +414,11 @@ const EDITABLE_SUFFIXES = [
 ]
 const PAPER_MARKDOWN_THEME =
   "dark:prose-invert prose-headings:text-foreground prose-p:text-foreground/90 prose-strong:text-foreground prose-li:text-foreground/90 prose-a:text-primary prose-blockquote:border-border prose-blockquote:text-muted-foreground prose-code:text-primary prose-pre:border prose-pre:border-border/50 prose-pre:bg-code-block-bg prose-pre:text-foreground prose-th:text-foreground prose-td:text-foreground prose-hr:border-border/50"
+const CLAUDE_RUNTIME_PROVIDER_TYPES = new Set([
+  "anthropic",
+  "openai",
+  "openai_compatible",
+])
 
 function providerModels(provider: ProviderResponse | undefined) {
   return (provider?.model ?? "")
@@ -432,8 +441,8 @@ function ModelPicker({
 }) {
   const { t } = useTranslation()
   const providersQuery = useProviders()
-  const providers = (providersQuery.data?.items ?? []).filter(
-    (provider) => provider.type === "anthropic",
+  const providers = (providersQuery.data?.items ?? []).filter((provider) =>
+    CLAUDE_RUNTIME_PROVIDER_TYPES.has(provider.type),
   )
   const provider = providers.find((item) => item.id === value.providerId)
   const models = providerModels(provider)
@@ -1916,9 +1925,13 @@ function stringList(value: unknown): string[] {
 function PaperWorkbenchHeader({
   title,
   onConfigureModel,
+  onConfigurePreferences,
+  onEditBasics,
 }: {
   title: string
-  onConfigureModel: () => void
+  onConfigureModel?: () => void
+  onConfigurePreferences?: () => void
+  onEditBasics?: () => void
 }) {
   const { t } = useTranslation()
   const { setHeaderCenter, setHeaderRight } = usePaperHeader()
@@ -1945,13 +1958,34 @@ function PaperWorkbenchHeader({
     [title],
   )
   const right = useMemo(
-    () => (
-      <Button size="sm" variant="outline" onClick={onConfigureModel}>
-        <Settings2 className="size-3.5" />
-        {t("paper.model.configure")}
-      </Button>
-    ),
-    [onConfigureModel, t],
+    () =>
+      onConfigureModel || onConfigurePreferences || onEditBasics ? (
+        <div className="flex items-center gap-2">
+          {onEditBasics && (
+            <Button size="sm" variant="ghost" onClick={onEditBasics}>
+              <FileText className="size-3.5" />
+              {t("paper.source.basicsTitle")}
+            </Button>
+          )}
+          {onConfigureModel && (
+            <Button size="sm" variant="outline" onClick={onConfigureModel}>
+              <Settings2 className="size-3.5" />
+              {t("paper.model.configure")}
+            </Button>
+          )}
+          {onConfigurePreferences && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onConfigurePreferences}
+            >
+              <SlidersHorizontal className="size-3.5" />
+              {t("paper.preferences.configure")}
+            </Button>
+          )}
+        </div>
+      ) : null,
+    [onConfigureModel, onConfigurePreferences, onEditBasics, t],
   )
 
   useEffect(() => {
@@ -1976,11 +2010,13 @@ export function PaperWorkbench({
   const { t } = useTranslation()
   useHljsTheme()
   const providerItems = useProviders().data?.items
-  const anthropicProviderIds = useMemo(
+  const runtimeProviderIds = useMemo(
     () =>
       new Set(
         (providerItems ?? [])
-          .filter((provider) => provider.type === "anthropic")
+          .filter((provider) =>
+            CLAUDE_RUNTIME_PROVIDER_TYPES.has(provider.type),
+          )
           .map((provider) => provider.id),
       ),
     [providerItems],
@@ -1996,9 +2032,40 @@ export function PaperWorkbench({
     null,
   )
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadPurpose, setUploadPurpose] = useState<
+    "source" | "project_context"
+  >("source")
+  const [projectContextSkipped, setProjectContextSkipped] = usePersistentState(
+    `paper:${workspaceId}:project-context-skipped`,
+    false,
+  )
+  const [proposalEditorState, setProposalEditorState] = useState({
+    workspaceId,
+    stage: null as PaperTool | null,
+    open: false,
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const openModelSettings = useCallback(() => setSettingsOpen(true), [])
+  const [preferencesOpen, setPreferencesOpen] = useState(false)
+  const [preferencesDraft, setPreferencesDraft] =
+    useState<ConversationPreferencesDraft>(DEFAULT_CONVERSATION_PREFERENCES)
+  const [basicsOpen, setBasicsOpen] = useState(false)
+  const openBasics = useCallback(() => setBasicsOpen(true), [])
+  const [proposalBasics, setProposalBasics] = useState<ProposalBasics>({
+    ...EMPTY_PROPOSAL_BASICS,
+  })
+  const updateWorkspace = useUpdatePaperWorkspace(workspaceId)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const openSourceUpload = () => {
+    setUploadPurpose("source")
+    setPendingFiles([])
+    setUploadOpen(true)
+  }
+  const openProjectContextUpload = () => {
+    setUploadPurpose("project_context")
+    setPendingFiles([])
+    setUploadOpen(true)
+  }
   const [binding, setBinding] = useState<ModelBinding>({
     providerId: "",
     modelName: "",
@@ -2024,10 +2091,41 @@ export function PaperWorkbench({
 
   const workspaceQuery = usePaperWorkspace(activeId)
   const workspace = workspaceQuery.data
-  const workspaceFeatureDisabled = Boolean(
-    (workspace?.mode === "manuscript" && !AUTO_REBUTTAL_ENABLED) ||
-      (workspace?.mode === "algorithm" && !AUTO_DISCOVERY_ENABLED),
+  const openPreferences = useCallback(() => {
+    setPreferencesDraft({
+      reply_language:
+        workspace?.conversation_preferences?.reply_language ?? "auto",
+      additional_guidance:
+        workspace?.conversation_preferences?.additional_guidance ?? "",
+    })
+    setPreferencesOpen(true)
+  }, [
+    workspace?.conversation_preferences?.reply_language,
+    workspace?.conversation_preferences?.additional_guidance,
+  ])
+  const preferencesConfigured = Boolean(
+    (workspace?.conversation_preferences?.reply_language ?? "auto") !==
+      "auto" ||
+      workspace?.conversation_preferences?.additional_guidance?.trim(),
   )
+  useEffect(() => {
+    if (!workspace?.id) return
+    setProposalBasics(parseProposalBasics(workspace?.description))
+  }, [workspace?.id, workspace?.description])
+  const openInitialUpload = async () => {
+    if (workspace?.mode === "proposal") {
+      const description = serializeProposalBasics(proposalBasics)
+      if (description !== (workspace.description ?? "")) {
+        try {
+          await updateWorkspace.mutateAsync({ description })
+        } catch {
+          toast.error(t("paper.source.basicsSaveFailed"))
+          return
+        }
+      }
+    }
+    openSourceUpload()
+  }
   const workflowStages = useMemo(
     () =>
       (workspace?.workflow_stages ?? []).filter((stage): stage is PaperTool =>
@@ -2038,6 +2136,12 @@ export function PaperWorkbench({
   const nativeStage = workflowStages.includes(activeStage)
     ? activeStage
     : (workflowStages[0] ?? "formatting")
+  const proposalEditorOpen =
+    proposalEditorState.workspaceId === workspaceId &&
+    proposalEditorState.stage === nativeStage &&
+    proposalEditorState.open
+  const setProposalEditorOpen = (open: boolean) =>
+    setProposalEditorState({ workspaceId, stage: nativeStage, open })
   const activeSource = useMemo(
     () =>
       workspace?.active_source_version_id
@@ -2047,6 +2151,15 @@ export function PaperWorkbench({
         : undefined,
     [workspace],
   )
+  const projectContextAvailable = hasProjectContextFiles(
+    activeSource?.manifest ?? [],
+  )
+  const showProjectContextPrompt =
+    workspace?.mode === "proposal" &&
+    nativeStage === "formatting" &&
+    !workspace.proposal_stage_states?.formatting &&
+    !projectContextAvailable &&
+    !projectContextSkipped
   const sourceContexts = useMemo(
     () => paperSourceContexts(workspace?.boundary?.content.source_map),
     [workspace?.boundary?.content],
@@ -2096,6 +2209,35 @@ export function PaperWorkbench({
       path.toLowerCase().endsWith(".typ"),
     ) ??
     "proposal.typ"
+  const proposalResultStage = useMemo<ProposalResultStage>(() => {
+    const stage = isProposalStage(nativeStage) ? nativeStage : "formatting"
+    const state = workspace?.proposal_stage_states?.[stage]
+    const candidateFiles =
+      stage === "formatting" || stage === "final_review"
+        ? [proposalEntryPath]
+        : PROPOSAL_STAGE_FILES[stage]
+    return {
+      key: stage,
+      title: t(`paper.workflow.stage.${stage}`),
+      hint: t(`paper.workflow.stage.${stage}Hint`),
+      status: state
+        ? t(
+            `paper.workflow.${state.status === "ready" ? "ready" : state.status === "stale" ? "stale" : "needsRevision"}`,
+          )
+        : t("paper.workflow.notStarted"),
+      summary: state?.summary ?? null,
+      findings: state?.findings ?? [],
+      files: state
+        ? candidateFiles.filter((path) => activeSource?.manifest.includes(path))
+        : [],
+    }
+  }, [
+    activeSource?.manifest,
+    nativeStage,
+    proposalEntryPath,
+    t,
+    workspace?.proposal_stage_states,
+  ])
   const nativeArtifactPaths = useMemo(() => {
     const stagePublished =
       completedStages.has(nativeStage) ||
@@ -2145,36 +2287,27 @@ export function PaperWorkbench({
     selectedPathEditable &&
     sourceDraft !== (sourceFile.data?.content ?? "")
   const workflowPrerequisitesReady =
-    (workspace?.mode !== "manuscript" ||
-      (workspace.reviews?.length ?? 0) > 0) &&
     (!proposalActiveStage ||
       PROPOSAL_STAGE_PREREQUISITES[proposalActiveStage].every(
         (stage) =>
           workspace?.proposal_stage_states?.[stage]?.status === "ready",
       )) &&
     (!rebuttalActiveStage ||
-      REBUTTAL_STAGE_PREREQUISITES[rebuttalActiveStage].every(
-        (stage) =>
-          workspace?.proposal_stage_states?.[stage]?.status === "ready",
-      ))
+      REBUTTAL_STAGE_PREREQUISITES[rebuttalActiveStage].every((stage) => {
+        const status = workspace?.proposal_stage_states?.[stage]?.status
+        return rebuttalActiveStage === "ac_summary" && stage === "autorebuttal"
+          ? status === "ready" || status === "needs_revision"
+          : status === "ready"
+      }))
   const modelReady = Boolean(
     workspace?.analysis_provider_id &&
       workspace.analysis_model_name &&
-      anthropicProviderIds.has(workspace.analysis_provider_id),
+      runtimeProviderIds.has(workspace.analysis_provider_id),
   )
   const uploadSource = useUploadPaperSource(activeId)
   const deletePath = useDeletePaperSourcePath(activeId)
   const updateModel = useUpdatePaperModelBinding(activeId)
   const updateSourceFile = useUpdatePaperSourceFile(activeId)
-
-  useEffect(() => {
-    if (!workspaceFeatureDisabled) return
-    void navigate({
-      to: "/papers",
-      search: { mode: "proposal", workspaceId: undefined },
-      replace: true,
-    })
-  }, [navigate, workspaceFeatureDisabled])
 
   useEffect(() => {
     if (
@@ -2236,7 +2369,7 @@ export function PaperWorkbench({
     if (!workspace) return
     const analysisSupported = Boolean(
       workspace.analysis_provider_id &&
-        anthropicProviderIds.has(workspace.analysis_provider_id),
+        runtimeProviderIds.has(workspace.analysis_provider_id),
     )
     setBinding({
       providerId: analysisSupported ? workspace.analysis_provider_id || "" : "",
@@ -2244,7 +2377,7 @@ export function PaperWorkbench({
     })
     setContextTokens(workspace.analysis_context_window_tokens)
     setOutputTokens(workspace.analysis_max_output_tokens)
-  }, [anthropicProviderIds, workspace])
+  }, [runtimeProviderIds, workspace])
 
   useEffect(() => {
     if (!selectedPath || !sourceFile.data) return
@@ -2381,7 +2514,7 @@ export function PaperWorkbench({
     toast.success(t("paper.editor.saved"))
   }
 
-  if (!workspace || workspaceFeatureDisabled) {
+  if (!workspace) {
     if (workspaceQuery.isError) {
       return (
         <div className="grid h-full min-h-0 place-items-center p-6">
@@ -2420,35 +2553,215 @@ export function PaperWorkbench({
     <div className="flex h-full min-h-0 overflow-hidden bg-background">
       <PaperWorkbenchHeader
         title={workspace.title}
-        onConfigureModel={openModelSettings}
+        onConfigurePreferences={
+          !activeSource && workspace.mode !== "algorithm"
+            ? openPreferences
+            : undefined
+        }
+        onConfigureModel={
+          activeSource && workspace.mode !== "algorithm"
+            ? openModelSettings
+            : undefined
+        }
+        onEditBasics={
+          activeSource && workspace.mode === "proposal" ? openBasics : undefined
+        }
       />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {!activeSource ? (
-          <div className="grid min-h-0 flex-1 place-items-center p-6">
-            <div className="max-w-lg rounded-xl border border-dashed p-10 text-center">
-              <Upload className="mx-auto mb-4 size-10 text-muted-foreground" />
-              <h2 className="font-semibold">{t("paper.source.dropTitle")}</h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {t("paper.source.dropDescription")}
-              </p>
-              <Button className="mt-5" onClick={() => setUploadOpen(true)}>
-                {t("paper.source.upload")}
-              </Button>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 sm:py-12">
+            <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center">
+              <div className="mb-5">
+                <h2 className="font-serif text-2xl font-semibold tracking-tight sm:text-3xl">
+                  {t("paper.source.prepareTitle")}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  {t(
+                    workspace.mode === "proposal"
+                      ? "paper.source.prepareProposalDescription"
+                      : "paper.source.prepareDescription",
+                  )}
+                </p>
+              </div>
+
+              <div className="overflow-hidden border bg-card/70 shadow-sm">
+                <section className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+                  <span
+                    aria-hidden="true"
+                    className="grid size-10 shrink-0 place-items-center border border-primary/25 bg-primary/5 font-serif text-lg text-primary"
+                  >
+                    01
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-serif text-lg font-semibold">
+                        {t("paper.source.modelStepTitle")}
+                      </h3>
+                      {modelReady && (
+                        <span className="inline-flex min-w-0 items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                          <Check
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0"
+                          />
+                          <span className="truncate">
+                            {t("paper.source.modelConfigured", {
+                              model: workspace.analysis_model_name,
+                            })}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {t("paper.source.modelStepDescription")}
+                    </p>
+                  </div>
+                  <Button
+                    variant={modelReady ? "outline" : "default"}
+                    className="w-full shrink-0 sm:w-auto"
+                    onClick={openModelSettings}
+                  >
+                    <Settings2 data-icon="inline-start" />
+                    {t("paper.model.configure")}
+                  </Button>
+                </section>
+
+                {workspace.mode === "proposal" && (
+                  <section className="border-t p-4 sm:p-5">
+                    <div className="flex items-start gap-4">
+                      <span
+                        aria-hidden="true"
+                        className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
+                      >
+                        02
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="font-serif text-lg font-semibold">
+                          {t("paper.source.basicsTitle")}
+                        </h3>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {t("paper.source.basicsDescription")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <ProposalBasicsFields
+                        basics={proposalBasics}
+                        onChange={setProposalBasics}
+                      />
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          updateWorkspace.isPending ||
+                          serializeProposalBasics(proposalBasics) ===
+                            (workspace.description ?? "")
+                        }
+                        onClick={async () => {
+                          try {
+                            await updateWorkspace.mutateAsync({
+                              description:
+                                serializeProposalBasics(proposalBasics),
+                            })
+                            toast.success(t("paper.source.basicsSaved"))
+                          } catch {
+                            toast.error(t("paper.source.basicsSaveFailed"))
+                          }
+                        }}
+                      >
+                        {updateWorkspace.isPending && (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        )}
+                        {t("paper.source.basicsSave")}
+                      </Button>
+                    </div>
+                  </section>
+                )}
+
+                {workspace.mode !== "algorithm" && (
+                  <section className="flex flex-col gap-4 border-t p-4 sm:flex-row sm:items-center sm:p-5">
+                    <span
+                      aria-hidden="true"
+                      className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
+                    >
+                      {workspace.mode === "proposal" ? "03" : "02"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-serif text-lg font-semibold">
+                          {t("paper.preferences.stepTitle")}
+                        </h3>
+                        {preferencesConfigured && (
+                          <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                            {t("paper.preferences.configured")}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {t("paper.preferences.stepDescription")}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="w-full shrink-0 sm:w-auto"
+                      onClick={openPreferences}
+                    >
+                      <SlidersHorizontal data-icon="inline-start" />
+                      {t("paper.preferences.configure")}
+                    </Button>
+                  </section>
+                )}
+
+                <section className="flex flex-col gap-4 border-t p-4 sm:flex-row sm:items-center sm:p-5">
+                  <span
+                    aria-hidden="true"
+                    className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
+                  >
+                    {workspace.mode === "proposal" ? "04" : "03"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-serif text-lg font-semibold">
+                      {t("paper.source.dropTitle")}
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {t("paper.source.dropDescription")}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full shrink-0 sm:w-auto"
+                    disabled={updateWorkspace.isPending}
+                    onClick={() => void openInitialUpload()}
+                  >
+                    <Upload data-icon="inline-start" />
+                    {t("paper.source.upload")}
+                  </Button>
+                </section>
+              </div>
             </div>
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(26rem,42vw)] xl:grid-cols-[minmax(0,5fr)_minmax(34rem,6fr)]">
-            <section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/10">
-              {workspace.workflow_available && (
-                <PaperWorkflowStepper
-                  stages={workflowStages}
-                  activeStage={nativeStage}
-                  runningStage={null}
-                  completedStages={completedStages}
-                  stageStates={workspace.proposal_stage_states ?? {}}
-                  onSelect={setActiveStage}
-                />
-              )}
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]">
+            <section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">
+              {workspace.workflow_available &&
+                workspace.mode !== "algorithm" && (
+                  <PaperWorkflowStepper
+                    stages={workflowStages}
+                    activeStage={nativeStage}
+                    completedStages={completedStages}
+                    stageStates={workspace.proposal_stage_states ?? {}}
+                    onSelect={(stage) => {
+                      setActiveStage(stage)
+                      if (workspace.mode === "proposal")
+                        setProposalEditorState({
+                          workspaceId,
+                          stage,
+                          open: false,
+                        })
+                    }}
+                  />
+                )}
               {workspace.workflow_available ? (
                 <PaperNativeRuntime
                   workspaceId={workspace.id}
@@ -2459,12 +2772,22 @@ export function PaperWorkbench({
                   stageState={workspace.proposal_stage_states?.[nativeStage]}
                   modelName={workspace.analysis_model_name}
                   onConfigureModel={openModelSettings}
-                  onOpenArtifact={setSelectedPath}
+                  onConfigurePreferences={openPreferences}
+                  showProjectContextPrompt={showProjectContextPrompt}
+                  onUploadProjectContext={openProjectContextUpload}
+                  onSkipProjectContext={() => setProjectContextSkipped(true)}
+                  onOpenArtifact={(path) => {
+                    setSelectedPath(path)
+                    if (workspace.mode === "proposal")
+                      setProposalEditorOpen(true)
+                  }}
                   profileKey={[
                     workspace.analysis_provider_id,
                     workspace.analysis_model_name,
                     workspace.analysis_context_window_tokens,
                     workspace.analysis_max_output_tokens,
+                    workspace.mode === "proposal" ? workspace.description : "",
+                    JSON.stringify(workspace.conversation_preferences ?? {}),
                   ].join(":")}
                 />
               ) : (
@@ -2482,17 +2805,25 @@ export function PaperWorkbench({
               )}
             </section>
             {workspace.mode === "manuscript" ? (
-              <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background lg:flex">
+              <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-card/30 lg:flex">
                 <Tabs
                   defaultValue="rebuttal"
                   className="flex min-h-0 flex-1 flex-col"
                 >
-                  <div className="shrink-0 border-b px-3 py-2">
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="rebuttal">
+                  <div className="shrink-0 border-b bg-background/65 px-5 pt-2">
+                    <TabsList className="grid h-11 w-full grid-cols-2 rounded-none bg-transparent p-0">
+                      <TabsTrigger
+                        value="rebuttal"
+                        className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 font-serif text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent"
+                      >
+                        <MessagesSquare aria-hidden="true" />
                         {t("paper.rebuttal.tabs.entries")}
                       </TabsTrigger>
-                      <TabsTrigger value="source">
+                      <TabsTrigger
+                        value="source"
+                        className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 font-serif text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent"
+                      >
+                        <FileText aria-hidden="true" />
                         {t("paper.rebuttal.tabs.source")}
                       </TabsTrigger>
                     </TabsList>
@@ -2504,8 +2835,20 @@ export function PaperWorkbench({
                     <RebuttalEntriesPanel
                       workspaceId={workspace.id}
                       sourceVersionId={activeSource.id}
+                      activeStage={nativeStage as RebuttalStage}
                       reviews={workspace.reviews ?? []}
                       entries={workspace.rebuttal_entries ?? []}
+                      rebuttalOutput={workspace.rebuttal_output}
+                      chairMessage={workspace.chair_message}
+                      chairStale={
+                        workspace.proposal_stage_states?.ac_summary?.status ===
+                        "stale"
+                      }
+                      baselineContext={workspace.rebuttal_context}
+                      baselineStale={
+                        workspace.proposal_stage_states?.rebuttal_baseline
+                          ?.status === "stale"
+                      }
                       readyForSubmission={
                         workspace.proposal_stage_states?.autorebuttal
                           ?.status === "ready"
@@ -2545,7 +2888,78 @@ export function PaperWorkbench({
                       onDelete={(path) => void removeSourcePath(path)}
                       onCreateFile={createSourceFile}
                       onCreateFolder={createSourceFolder}
-                      onUpload={() => setUploadOpen(true)}
+                      onUpload={openSourceUpload}
+                      uploading={uploadSource.isPending}
+                      canDeletePath={canDeleteProposalPath}
+                      onDraftChange={(value) => {
+                        setSourceAutoSaveError(null)
+                        setSourceDraft(value)
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
+              </aside>
+            ) : workspace.mode === "algorithm" ? (
+              <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background lg:flex">
+                <Tabs
+                  defaultValue="algorithms"
+                  className="flex min-h-0 flex-1 flex-col"
+                >
+                  <div className="shrink-0 border-b px-3 py-2">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="algorithms">
+                        {t("paper.discovery.tabs.algorithms")}
+                      </TabsTrigger>
+                      <TabsTrigger value="source">
+                        {t("paper.discovery.tabs.source")}
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+                  <TabsContent
+                    value="algorithms"
+                    className="mt-0 min-h-0 flex-1 overflow-hidden"
+                  >
+                    <AlgorithmDiscoveryPanel
+                      workspaceId={workspace.id}
+                      sourceVersionId={activeSource.id}
+                      proposals={
+                        workspace.proposal_stage_states?.discovery?.status ===
+                        "ready"
+                          ? (workspace.proposals ?? [])
+                          : []
+                      }
+                    />
+                  </TabsContent>
+                  <TabsContent
+                    value="source"
+                    className="mt-0 min-h-0 flex-1 overflow-hidden"
+                  >
+                    <PaperDocumentDock
+                      embedded
+                      manifest={activeSource.manifest}
+                      sourceVersionId={activeSource.id}
+                      sourceHash={activeSource.content_hash}
+                      selectedPath={selectedPath}
+                      sourceContent={sourceFile.data?.content ?? ""}
+                      sourceContext={selectedSourceContext}
+                      sourceLoading={sourceFile.isLoading}
+                      sourceDraft={sourceDraft}
+                      sourceDirty={sourceDirty}
+                      sourceSaveError={sourceAutoSaveError === sourceDraft}
+                      sourceSaving={updateSourceFile.isPending}
+                      typstEntryPath={null}
+                      typstDownloadEnabled={false}
+                      typstPreview={false}
+                      editable={selectedPathEditable}
+                      locked={false}
+                      highlightStartLine={null}
+                      highlightEndLine={null}
+                      workspaceKey={workspace.id}
+                      onSelect={setSelectedPath}
+                      onDelete={(path) => void removeSourcePath(path)}
+                      onCreateFile={createSourceFile}
+                      onCreateFolder={createSourceFolder}
+                      onUpload={openSourceUpload}
                       uploading={uploadSource.isPending}
                       canDeletePath={canDeleteProposalPath}
                       onDraftChange={(value) => {
@@ -2557,44 +2971,102 @@ export function PaperWorkbench({
                 </Tabs>
               </aside>
             ) : (
-              <PaperDocumentDock
-                manifest={activeSource.manifest}
-                sourceVersionId={activeSource.id}
-                sourceHash={activeSource.content_hash}
-                selectedPath={selectedPath}
-                sourceContent={sourceFile.data?.content ?? ""}
-                sourceContext={selectedSourceContext}
-                sourceLoading={sourceFile.isLoading}
-                sourceDraft={sourceDraft}
-                sourceDirty={sourceDirty}
-                sourceSaveError={sourceAutoSaveError === sourceDraft}
-                sourceSaving={updateSourceFile.isPending}
-                typstEntryPath={workspace.proposal_entry_path}
-                typstDownloadEnabled={
-                  workspace.proposal_stage_states?.final_review?.status ===
-                  "ready"
-                }
-                editable={selectedPathEditable}
-                locked={false}
-                highlightStartLine={null}
-                highlightEndLine={null}
-                workspaceKey={workspace.id}
-                onSelect={setSelectedPath}
-                onDelete={(path) => void removeSourcePath(path)}
-                onCreateFile={createSourceFile}
-                onCreateFolder={createSourceFolder}
-                onUpload={() => setUploadOpen(true)}
-                uploading={uploadSource.isPending}
-                canDeletePath={canDeleteProposalPath}
-                onDraftChange={(value) => {
-                  setSourceAutoSaveError(null)
-                  setSourceDraft(value)
-                }}
-              />
+              <ProposalResultsDock
+                stage={proposalResultStage}
+                editorOpen={proposalEditorOpen}
+                onEditorOpenChange={setProposalEditorOpen}
+                onOpenFile={setSelectedPath}
+                onUploadProjectContext={openProjectContextUpload}
+              >
+                <PaperDocumentDock
+                  embedded
+                  manifest={activeSource.manifest}
+                  sourceVersionId={activeSource.id}
+                  sourceHash={activeSource.content_hash}
+                  selectedPath={selectedPath}
+                  sourceContent={sourceFile.data?.content ?? ""}
+                  sourceContext={selectedSourceContext}
+                  sourceLoading={sourceFile.isLoading}
+                  sourceDraft={sourceDraft}
+                  sourceDirty={sourceDirty}
+                  sourceSaveError={sourceAutoSaveError === sourceDraft}
+                  sourceSaving={updateSourceFile.isPending}
+                  typstEntryPath={workspace.proposal_entry_path}
+                  typstDownloadEnabled={
+                    workspace.proposal_stage_states?.final_review?.status ===
+                    "ready"
+                  }
+                  editable={selectedPathEditable}
+                  locked={false}
+                  highlightStartLine={null}
+                  highlightEndLine={null}
+                  workspaceKey={workspace.id}
+                  onSelect={setSelectedPath}
+                  onDelete={(path) => void removeSourcePath(path)}
+                  onCreateFile={createSourceFile}
+                  onCreateFolder={createSourceFolder}
+                  onUpload={openSourceUpload}
+                  uploading={uploadSource.isPending}
+                  canDeletePath={canDeleteProposalPath}
+                  onDraftChange={(value) => {
+                    setSourceAutoSaveError(null)
+                    setSourceDraft(value)
+                  }}
+                />
+              </ProposalResultsDock>
             )}
           </div>
         )}
       </main>
+
+      {workspace.mode === "proposal" && (
+        <Dialog
+          open={basicsOpen}
+          onOpenChange={(open) => {
+            setBasicsOpen(open)
+            if (!open)
+              setProposalBasics(parseProposalBasics(workspace.description))
+          }}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{t("paper.source.basicsTitle")}</DialogTitle>
+              <DialogDescription>
+                {t("paper.source.basicsDescription")}
+              </DialogDescription>
+            </DialogHeader>
+            <ProposalBasicsFields
+              basics={proposalBasics}
+              onChange={setProposalBasics}
+            />
+            <DialogFooter>
+              <Button
+                disabled={
+                  updateWorkspace.isPending ||
+                  serializeProposalBasics(proposalBasics) ===
+                    (workspace.description ?? "")
+                }
+                onClick={async () => {
+                  try {
+                    await updateWorkspace.mutateAsync({
+                      description: serializeProposalBasics(proposalBasics),
+                    })
+                    setBasicsOpen(false)
+                    toast.success(t("paper.source.basicsSaved"))
+                  } catch {
+                    toast.error(t("paper.source.basicsSaveFailed"))
+                  }
+                }}
+              >
+                {updateWorkspace.isPending && (
+                  <Loader2 className="size-3.5 animate-spin" />
+                )}
+                {t("paper.source.basicsSave")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {activeSource && (
         <Dialog
@@ -2643,7 +3115,7 @@ export function PaperWorkbench({
                 onDelete={(path) => void removeSourcePath(path)}
                 onCreateFile={createSourceFile}
                 onCreateFolder={createSourceFolder}
-                onUpload={() => setUploadOpen(true)}
+                onUpload={openSourceUpload}
                 uploading={uploadSource.isPending}
                 locked={false}
                 canDeletePath={canDeleteProposalPath}
@@ -2665,16 +3137,45 @@ export function PaperWorkbench({
       <SourceUploadDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
+        purpose={uploadPurpose}
         files={pendingFiles}
         setFiles={setPendingFiles}
         fileInput={fileInput}
         folderInput={folderInput}
         pending={uploadSource.isPending}
         onUpload={async () => {
-          await uploadSource.mutateAsync(pendingFiles)
-          setPendingFiles([])
-          setUploadOpen(false)
-          toast.success(t("paper.source.uploaded"))
+          if (
+            uploadPurpose === "project_context" &&
+            pendingFiles.some((file) =>
+              file.name.toLowerCase().endsWith(".zip"),
+            )
+          ) {
+            toast.error(t("paper.source.projectContext.archiveUnsupported"))
+            return
+          }
+          try {
+            await uploadSource.mutateAsync(
+              uploadPurpose === "project_context"
+                ? projectContextUploads(pendingFiles)
+                : pendingFiles,
+            )
+            setPendingFiles([])
+            setUploadOpen(false)
+            toast.success(
+              t(
+                uploadPurpose === "project_context"
+                  ? "paper.source.projectContext.uploaded"
+                  : "paper.source.uploaded",
+              ),
+            )
+          } catch (error) {
+            toast.error(
+              errorMessage(
+                error,
+                t("paper.source.projectContext.uploadFailed"),
+              ),
+            )
+          }
         }}
       />
 
@@ -2747,6 +3248,104 @@ export function PaperWorkbench({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {workspace.mode !== "algorithm" && (
+        <Dialog open={preferencesOpen} onOpenChange={setPreferencesOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{t("paper.preferences.dialogTitle")}</DialogTitle>
+              <DialogDescription>
+                {t("paper.preferences.dialogDescription")}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-5 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="paper-reply-language">
+                  {t("paper.preferences.language")}
+                </Label>
+                <Select
+                  value={preferencesDraft.reply_language}
+                  onValueChange={(
+                    value: ConversationPreferencesDraft["reply_language"],
+                  ) =>
+                    setPreferencesDraft((current) => ({
+                      ...current,
+                      reply_language: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger id="paper-reply-language" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">
+                      {t("paper.preferences.languageAuto")}
+                    </SelectItem>
+                    <SelectItem value="zh">
+                      {t("paper.preferences.languageChinese")}
+                    </SelectItem>
+                    <SelectItem value="en">
+                      {t("paper.preferences.languageEnglish")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="paper-additional-guidance">
+                  {t("paper.preferences.additionalGuidance")}
+                </Label>
+                <Textarea
+                  id="paper-additional-guidance"
+                  value={preferencesDraft.additional_guidance}
+                  onChange={(event) =>
+                    setPreferencesDraft((current) => ({
+                      ...current,
+                      additional_guidance: event.target.value,
+                    }))
+                  }
+                  placeholder={t("paper.preferences.guidancePlaceholder")}
+                  maxLength={4000}
+                  className="min-h-28 resize-y"
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {t("paper.preferences.scopeHint")}
+                </p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setPreferencesOpen(false)}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                disabled={updateWorkspace.isPending}
+                onClick={async () => {
+                  try {
+                    await updateWorkspace.mutateAsync({
+                      conversation_preferences: {
+                        reply_language: preferencesDraft.reply_language,
+                        additional_guidance:
+                          preferencesDraft.additional_guidance.trim(),
+                      },
+                    })
+                    setPreferencesOpen(false)
+                    toast.success(t("paper.preferences.saved"))
+                  } catch {
+                    toast.error(t("paper.preferences.saveFailed"))
+                  }
+                }}
+              >
+                {updateWorkspace.isPending && (
+                  <Loader2 className="size-3.5 animate-spin" />
+                )}
+                {t("common.save")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }
@@ -2754,6 +3353,7 @@ export function PaperWorkbench({
 function SourceUploadDialog({
   open,
   onOpenChange,
+  purpose,
   files,
   setFiles,
   fileInput,
@@ -2763,6 +3363,7 @@ function SourceUploadDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  purpose: "source" | "project_context"
   files: File[]
   setFiles: (files: File[]) => void
   fileInput: React.RefObject<HTMLInputElement | null>
@@ -2784,9 +3385,19 @@ function SourceUploadDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="min-w-0 max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t("paper.source.dialogTitle")}</DialogTitle>
+          <DialogTitle>
+            {t(
+              purpose === "project_context"
+                ? "paper.source.projectContext.dialogTitle"
+                : "paper.source.dialogTitle",
+            )}
+          </DialogTitle>
           <DialogDescription>
-            {t("paper.source.dialogDescription")}
+            {t(
+              purpose === "project_context"
+                ? "paper.source.projectContext.dialogDescription"
+                : "paper.source.dialogDescription",
+            )}
           </DialogDescription>
         </DialogHeader>
         <input
@@ -2794,8 +3405,15 @@ function SourceUploadDialog({
           type="file"
           multiple
           className="hidden"
-          accept=".typ,.md,.markdown,.tex,.bib,.bst,.cls,.sty,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.pdf,.eps,.svg,.zip"
-          onChange={(event) => append(event.target.files)}
+          accept={
+            purpose === "project_context"
+              ? ".typ,.md,.markdown,.tex,.bib,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.pdf,.svg"
+              : ".typ,.md,.markdown,.tex,.bib,.bst,.cls,.sty,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.pdf,.eps,.svg,.zip"
+          }
+          onChange={(event) => {
+            append(event.target.files)
+            event.currentTarget.value = ""
+          }}
         />
         <input
           ref={folderInput}
@@ -2806,18 +3424,28 @@ function SourceUploadDialog({
             string,
             string
           >)}
-          onChange={(event) => append(event.target.files)}
+          onChange={(event) => {
+            append(event.target.files)
+            event.currentTarget.value = ""
+          }}
         />
-        <div className="grid grid-cols-2 gap-3">
+        <div
+          className={cn(
+            "grid gap-3",
+            purpose === "project_context" ? "grid-cols-1" : "grid-cols-2",
+          )}
+        >
           <Button variant="outline" onClick={() => fileInput.current?.click()}>
             <FileText className="size-4" /> {t("paper.source.selectFiles")}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => folderInput.current?.click()}
-          >
-            <Folder className="size-4" /> {t("paper.source.selectFolder")}
-          </Button>
+          {purpose === "source" && (
+            <Button
+              variant="outline"
+              onClick={() => folderInput.current?.click()}
+            >
+              <Folder className="size-4" /> {t("paper.source.selectFolder")}
+            </Button>
+          )}
         </div>
         <ScrollArea className="h-56 min-w-0 rounded-lg border [&>[data-radix-scroll-area-viewport]]:overflow-x-hidden [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full">
           <div className="min-w-0 space-y-1 p-2">
