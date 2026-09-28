@@ -42,6 +42,7 @@
 
 ## 🔥 News
 
+- 🔬 [2026.09][AutoResearch]: **[LLM4AD_Next × AutoResearchClaw](https://github.com/Optima-CityU/LLM4AD_Next/wiki/News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en)** adds algorithm evolution before code is finalized in stage 13 of the 23-stage research workflow. Candidates are checked with the original evaluator; only better algorithms replace the baseline, while unsuccessful attempts leave the original code intact. [Try AutoResearch](https://llm4ad-next.cn/autoresearch) with the `llm4ad` experiment mode.
 - 🧮 [2026.09][New Dataset]: The **[AlphaEvolve Mathematics Benchmark Suite](examples/applications/alphaevolve_math_benchmark/README.md)** adds 11 independently runnable mathematical optimization cases, case-local evaluators, evolved implementations, and reusable experience artifacts.
 - 🏝️ [2026.09][New Search Method]: **Diverse Island GA** is now available, assigning a continuous spectrum of exploitation, correction, and independent-exploration behaviors across any number of islands while coordinating migration and memory use.
 - 🎯 [2026.08][New Feature]: **Algorithm Design Skills** — Modular skill definitions (EoH, FunSearch, ReEvo, MEoH, MOEA/D) that enable coding agents to autonomously design algorithms. See [Algorithm Design Skills](skills/algo-design/).
@@ -73,6 +74,7 @@ Our built-in AI-powered consultant will interview you, instantly understand your
 * 🧠 **LLM-Powered Design** & 🧬 **Evolutionary Optimization** combined to automatically evolve top-performing code.
 * 💬 **Interactive Configuration (`llm4ad chat`)** — Your conversational AI consultant that generates the entire runnable app framework.
 * 🔍 **Evolve-Block Advisor & Recommender** — Point LLM4AD_Next at any repository, and it will scan, score, and recommend exactly *which* blocks of code are most promising to evolve to hit your goals.
+* 🔬 **[AutoResearch](https://llm4ad-next.cn/autoresearch)** — Run an [AutoResearchClaw](https://arxiv.org/abs/2605.20025) research workflow; choose `llm4ad` experiment mode to evolve algorithms and retain the original code when candidates do not improve their evaluation scores.
 
 ## Search Methods (Automatic Heuristic Design)
 
@@ -266,22 +268,47 @@ mkdocs build
 ## Project Structure
 
 ```
-LLM4AD/
-├── src/llm4ad/          # Main source code
-│   ├── config/           # Configuration schemas and global settings
-│   ├── consultant/       # Interactive configuration wizard
-│   ├── builder/          # Task builder (analyzer, creator, validator, writer)
-│   ├── advisor/          # Evolve-block advisor and recommender
-│   ├── provider/         # LLM provider implementations
-│   ├── planner/          # Algorithm planning layer
-│   ├── coder/            # Code generation layer
-│   ├── evaluator/        # Evaluation layer
-│   ├── orchestrator/     # Workflow orchestration
-│   ├── infra/            # Infrastructure (Ray, monitoring)
-│   └── utils/            # Utilities
-├── examples/             # Example configurations and applications
-├── tests/                # Test suite
-└── docs/                 # Documentation
+LLM4AD_Next/
+├── src/
+│   ├── llm4ad/           # Core Python package and CLI
+│   │   ├── agent/        # Conversational task-building agent
+│   │   ├── advisor/      # Evolve-block advisor and recommender
+│   │   ├── builder/      # Runnable task-package builder
+│   │   ├── config/       # Configuration schemas and settings
+│   │   ├── planner/      # Algorithm planning
+│   │   ├── coder/        # Code generation
+│   │   ├── evaluator/    # Candidate evaluation
+│   │   ├── orchestrator/ # Evolution workflows
+│   │   ├── memory/       # Memory integration
+│   │   └── infra/        # Providers and shared infrastructure
+│   ├── backend/          # FastAPI, workers, migrations, and API tests
+│   └── frontend/         # React/Vite web app and UI tests
+├── skills/               # Agent skills
+│   ├── algo-design/      # Algorithm design methods
+│   ├── autodiscovery/    # Paper-to-evolvable-task workflow
+│   ├── autorebuttal/     # Reviewer response and AC summary workflow
+│   ├── document-knowledge-organizer/ # Markdown knowledge organization
+│   ├── llm4ad-task-builder/ # Runnable task-package creation
+│   ├── openair-proposal/ # Staged research proposal writing
+│   ├── research-stage-publication/ # Stage result publication
+│   └── typst-author/    # Typst document authoring
+├── docker/               # Compose stacks and runtime support
+├── third_party/          # Integrated upstream submodules
+│   ├── CloudCLI/         # Cloud development workspace
+│   └── MindMemOS/        # Memory service and SDK
+├── examples/             # Example tasks and benchmarks
+│   ├── applications/    # Runnable tasks and benchmarks (examples below)
+│   │   ├── alphaevolve_math_benchmark/ # Mathematical optimization cases
+│   │   ├── lunarlander_python/ # Reinforcement learning example
+│   │   ├── sorting_benchmark/ # Sorting algorithm benchmark
+│   │   └── tsp_benchmark_python/ # Traveling-salesperson benchmark
+│   ├── auto_applications/ # Automatic task-building examples
+│   │   ├── from_code/   # Build tasks from existing code
+│   │   └── from_description/ # Build tasks from a description
+│   └── config/          # Sample configuration files
+├── tests/                # Core Python test suite
+├── docs/                 # English and Chinese documentation
+└── scripts/              # Repository utilities
 ```
 
 ## Contributing
