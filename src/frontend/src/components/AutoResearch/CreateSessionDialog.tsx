@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react"
+import { ChevronDown, FilePlus2, HelpCircle, Loader2, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
@@ -8,6 +8,7 @@ import type {
   ResearchMode,
   ResearchSessionCreateRequest,
   ResearchSessionItem,
+  ResearchTemplateItem,
 } from "@/client"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +19,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -27,13 +34,25 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   useCreateResearchSession,
   useStartResearchTurn,
 } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
-
 import ProviderModelPicker from "./ProviderModelPicker"
-import { MODE_OPTIONS, PROFILE_OPTIONS, type ResearchProfile } from "./shared"
+import {
+  METRIC_DIRECTION_OPTIONS,
+  type MetricDirection,
+  MODE_OPTIONS,
+  metricDirectionToApi,
+  PROFILE_OPTIONS,
+  type ResearchProfile,
+} from "./shared"
+import TemplatePicker from "./TemplatePicker"
 import { SectionLabel } from "./tech"
 
 interface Props {
@@ -57,17 +76,25 @@ export default function CreateSessionDialog({
   const { t } = useTranslation()
   const [topic, setTopic] = useState("")
   const [title, setTitle] = useState("")
+  const [templateId, setTemplateId] = useState("")
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const [providerId, setProviderId] = useState("default")
   const [modelName, setModelName] = useState("")
   const [mode, setMode] = useState<ResearchMode>("co-pilot")
   const [profile, setProfile] = useState<ResearchProfile>("algorithm_evolution")
-  const [autoStart, setAutoStart] = useState(false)
+  const [metricDirection, setMetricDirection] =
+    useState<MetricDirection>("auto")
+  const [metricKey, setMetricKey] = useState("")
   const [topicError, setTopicError] = useState("")
   const [titleError, setTitleError] = useState("")
+  /**
+   * 课题模板浮层的挂载节点（DialogContent 内部的绝对定位层）。存 state 而非 ref：
+   * 浮层需要「节点出现后」才渲染，ref 变化不会触发重渲染，挂载点会一直是 null。
+   */
+  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null)
 
   const TOPIC_MIN = 1
-  const TOPIC_MAX = 500
+  const TOPIC_MAX = 1000
   const TITLE_MAX = 255
 
   const createMut = useCreateResearchSession()
@@ -85,20 +112,46 @@ export default function CreateSessionDialog({
   const reset = () => {
     setTopic("")
     setTitle("")
+    setTemplateId("")
     setFolderId(initialFolderId)
     setProviderId("default")
     setModelName("")
     setMode("co-pilot")
     setProfile("algorithm_evolution")
-    setAutoStart(false)
+    setMetricDirection("auto")
+    setMetricKey("")
     setTopicError("")
     setTitleError("")
     createdRef.current = null
   }
 
-  const handleSubmit = async () => {
+  /**
+   * 选中/清空课题模板。模板只是建会话时的一次性输入，选中即把它的题面 / 标题 /
+   * 指标预填进表单（仍可手改）；清空时题面留空，由后端在无 template_id 时报 400。
+   */
+  const handleTemplateChange = (
+    topicId: string,
+    item: ResearchTemplateItem | null,
+  ) => {
+    setTemplateId(topicId)
+    if (!item) return
+    setTopic(item.topic || "")
+    setTopicError("")
+    setTitle(item.title || "")
+    setTitleError("")
+    if (item.metric_key) setMetricKey(item.metric_key)
+    if (
+      item.metric_direction === "maximize" ||
+      item.metric_direction === "minimize"
+    ) {
+      setMetricDirection(item.metric_direction)
+    }
+  }
+
+  const handleSubmit = async (startAfter: boolean) => {
     const trimmed = topic.trim()
-    if (trimmed.length < TOPIC_MIN) {
+    // 选了模板时空题面是合法的：后端会用 manifest 派生 topic。
+    if (!templateId && trimmed.length < TOPIC_MIN) {
       setTopicError(
         t("autoResearch.chat.topicTooShort", {
           defaultValue: "主题至少需要 {{min}} 个字符",
@@ -133,18 +186,22 @@ export default function CreateSessionDialog({
       const created =
         createdRef.current ??
         (await createMut.mutateAsync({
-          topic: topic.trim(),
-          title: title.trim() || undefined,
+          topic: trimmed,
+          title: trimmedTitle || undefined,
           folder_id: folderId,
           provider_id: providerId.trim() || null,
           model_name: modelName.trim() || null,
           mode,
           profile,
+          metric_direction: metricDirectionToApi(metricDirection),
+          metric_key: metricKey.trim() || undefined,
+          // 给定即走「从模板创建」：后端把 ARC-Bench stage-07/08/09 产物物化进 run_dir。
+          template_id: templateId || undefined,
         } as ResearchSessionCreateRequest))
       createdRef.current = created
 
-      if (autoStart) {
-        // 首启一轮
+      if (startAfter) {
+        // 首启一轮。这一步失败时上面的 createdRef 已经记住会话，重试不会再建一个。
         await startMut.mutateAsync({
           sessionId: created.id,
           body: {
@@ -177,19 +234,43 @@ export default function CreateSessionDialog({
         if (!v) reset()
       }}
     >
+      {/* 弹框自身不滚（grid 的隐式行会被内容撑长，把 footer 顶出去）：改成
+          「标题 / 表单 / 按钮」三行定高，只让中间的表单区滚。max-h 落在内容上，
+          表单一长也只有中间那一栏出滚动条，标题与「创建」按钮始终可见。 */}
       <DialogContent
-        className="sm:max-w-[540px] max-h-[85vh] overflow-y-auto"
+        className="sm:max-w-[760px] grid-rows-[auto_minmax(0,1fr)_auto] max-h-[85vh] overflow-hidden"
         preventOutsideClose
       >
+        {/* 浮层挂载点：在收口的 DialogContent 里单独开一个 overflow-visible 的
+            绝对定位层。Popover 挂在这里仍算落在 DialogContent 这个滚动锁 shard
+            内（react-remove-scroll 只把 DialogContent 登记为 shard，挂到 body 上的
+            浮层滚轮事件会被 preventDefault），同时又能超出弹框边界显示，不被
+            DialogContent 的 overflow-hidden 裁掉。pointer-events-none 只是不让这层
+            挡住下面的表单，浮层自身会重新打开指针事件。 */}
+        <div
+          ref={setContentEl}
+          className="pointer-events-none absolute inset-0 overflow-visible"
+          style={{ gridArea: "1 / 1 / -1 / -1" }}
+        />
         <DialogHeader>
           <DialogTitle>{t("autoResearch.create.title")}</DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription>
             {t("autoResearch.create.subtitle")}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
-          <Field label={t("autoResearch.create.topicLabel")} error={topicError}>
+        <div className="-mx-1 space-y-2.5 overflow-y-auto px-1 py-2">
+          <TemplatePicker
+            value={templateId}
+            onChange={handleTemplateChange}
+            portalContainer={contentEl}
+          />
+
+          <Field
+            label={t("autoResearch.create.topicLabel")}
+            error={topicError}
+            required
+          >
             <div className="relative">
               <textarea
                 value={topic}
@@ -208,7 +289,7 @@ export default function CreateSessionDialog({
               />
               {/* 字数统计 */}
               <div
-                className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums backdrop-blur-sm ${
+                className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[11px] font-mono tabular-nums backdrop-blur-sm ${
                   topic.length > TOPIC_MAX
                     ? "bg-destructive/90 text-destructive-foreground"
                     : topic.length > TOPIC_MAX * 0.9
@@ -240,7 +321,7 @@ export default function CreateSessionDialog({
               {/* 字数统计 */}
               {title.length > 0 && (
                 <div
-                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
+                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[11px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
                     title.length > TITLE_MAX
                       ? "bg-destructive/90 text-destructive-foreground"
                       : title.length > TITLE_MAX * 0.9
@@ -263,7 +344,7 @@ export default function CreateSessionDialog({
                     type="button"
                     onClick={() => setProfile(p as ResearchProfile)}
                     className={cn(
-                      "group relative rounded-lg px-4 py-3 text-left transition-all",
+                      "group relative rounded-lg px-3 py-2.5 text-left transition-all",
                       "border-l border-r border-border/60",
                       profile === p
                         ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
@@ -274,7 +355,7 @@ export default function CreateSessionDialog({
                       {/* 选中指示器 */}
                       <div
                         className={cn(
-                          "mt-0.5 size-4 shrink-0 rounded-full border-2 transition-all",
+                          "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
                           profile === p
                             ? "border-primary bg-primary"
                             : "border-muted-foreground/40 bg-background",
@@ -286,18 +367,27 @@ export default function CreateSessionDialog({
                           </div>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <div
-                          className={cn(
-                            "text-sm font-medium transition-colors",
-                            profile === p
-                              ? "text-foreground"
-                              : "text-foreground/80 group-hover:text-foreground",
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "text-sm font-medium transition-colors",
+                              profile === p
+                                ? "text-foreground"
+                                : "text-foreground/80 group-hover:text-foreground",
+                            )}
+                          >
+                            {t(`autoResearch.profile.${p}`)}
+                          </span>
+                          {/* llm4ad 是默认推荐画像：与 autoresearch 走原生 ARC 不同，
+                              它把 9-13 阶段接到 LLM4AD 演化引擎上，是这里的主推路径。 */}
+                          {p === "algorithm_evolution" && (
+                            <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                              {t("autoResearch.create.recommendedMark")}
+                            </span>
                           )}
-                        >
-                          {t(`autoResearch.profile.${p}`)}
                         </div>
-                        <div className="text-[11px] leading-relaxed text-muted-foreground">
+                        <div className="text-xs leading-snug text-muted-foreground">
                           {t(`autoResearch.profileDesc.${p}`)}
                         </div>
                       </div>
@@ -308,13 +398,83 @@ export default function CreateSessionDialog({
             </div>
           </Field>
 
+          {/* 指标名与优化方向本来就描述同一个指标（叫什么 + 越大越好还是越小越好），
+              拆成两块要上下读两遍，合成一行：左边填名字，右边选方向，一眼是一件事。
+              方向用「分段控件」（segmented control）：三个互斥选项全摆在面上，比下拉
+              少一次点击、也比三张卡片省纵向空间；每项的长说明（越大越好/越小越好）
+              做成 tooltip，不占行内宽度。 */}
+          <Field
+            label={t("autoResearch.create.metricLabel")}
+            hint={t("autoResearch.create.metricKeyHint")}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                value={metricKey}
+                onChange={(e) => setMetricKey(e.target.value)}
+                maxLength={64}
+                placeholder={t("autoResearch.create.metricKeyPlaceholder")}
+              />
+              {/* 真 radio 而不是 role="radio" 的按钮：键盘方向键切换、表单语义都是
+                  原生行为，也不用自己维护 aria-checked。输入框用 sr-only 藏掉，
+                  选中态画在外层 label 上。
+                  选中态用「主色底 + 主色描边 + 实心圆点」三重信号：只靠 bg-background
+                  的白底在浅色主题里跟灰槽几乎同色，等于没有反馈；圆点与实验类型那组
+                  卡片用同一套图形语言（外圈 border-2 + 内点），两处选择器看起来是一家的。 */}
+              <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-muted/40 p-0.5">
+                {METRIC_DIRECTION_OPTIONS.map((d) => (
+                  <Tooltip key={d}>
+                    <TooltipTrigger asChild>
+                      <label
+                        className={cn(
+                          /* 分段控件的文字用 text-xs：11px 在「最大化/最小化」这种三字
+                             中文下已经明显发虚，控件本身还有富余宽度。 */
+                          "flex h-full flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-[5px] px-1.5 text-xs transition-colors",
+                          metricDirection === d
+                            ? "bg-primary/15 font-medium text-foreground ring-1 ring-primary/50 ring-inset"
+                            : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="metric-direction"
+                          value={d}
+                          checked={metricDirection === d}
+                          onChange={() =>
+                            setMetricDirection(d as MetricDirection)
+                          }
+                          className="sr-only"
+                        />
+                        <span
+                          className={cn(
+                            "flex size-2.5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                            metricDirection === d
+                              ? "border-primary bg-primary"
+                              : "border-muted-foreground/40",
+                          )}
+                        >
+                          {metricDirection === d && (
+                            <span className="size-1 rounded-full bg-primary-foreground" />
+                          )}
+                        </span>
+                        {t(`autoResearch.metricDirection.${d}`)}
+                      </label>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-64 text-xs">
+                      {t(`autoResearch.metricDirection.${d}Desc`)}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+          </Field>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("autoResearch.create.folderLabel")}>
               <Select
                 value={folderId ?? "__none__"}
                 onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
               >
-                <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -335,7 +495,7 @@ export default function CreateSessionDialog({
                 value={mode}
                 onValueChange={(v) => setMode(v as ResearchMode)}
               >
-                <SelectTrigger size="sm" className="w-full text-xs">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -349,7 +509,10 @@ export default function CreateSessionDialog({
             </Field>
           </div>
 
-          <Field label={t("autoResearch.create.providerLabel")}>
+          <Field
+            label={t("autoResearch.create.providerLabel")}
+            hint={t("autoResearch.create.providerHint")}
+          >
             <ProviderModelPicker
               provider={providerId}
               model={modelName}
@@ -357,39 +520,82 @@ export default function CreateSessionDialog({
                 setProviderId(p)
                 setModelName(m)
               }}
+              portalContainer={contentEl}
             />
           </Field>
 
-          <label className="flex items-center gap-2 text-xs text-muted-foreground pt-1 select-none">
-            <input
-              type="checkbox"
-              checked={autoStart}
-              onChange={(e) => setAutoStart(e.target.checked)}
-              className="size-3.5 accent-primary"
-            />
-            {t("autoResearch.create.createAndStart")}
-          </label>
+          {/* 「仅创建」这个分支更冷门，藏在主按钮右侧的箭头里；原先那个
+              「创建并运行」勾选框因此删掉了——勾选框把「建会话」和「跑首轮」这两件
+              事压成一个布尔值，主按钮文案还得跟着变，不如让按钮本身说明它做什么。 */}
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button
-            onClick={() => void handleSubmit()}
-            disabled={submitting || !topic.trim()}
-          >
-            {submitting && <Loader2 className="size-4 animate-spin" />}
-            {submitting
-              ? t("autoResearch.create.creating")
-              : autoStart
-                ? t("autoResearch.create.createAndStart")
-                : t("autoResearch.create.create")}
-          </Button>
+        <DialogFooter className="items-center sm:justify-between">
+          {/* 左侧常驻一行状态说明：会话建好是停着还是立刻跑，不需要用户记。 */}
+          <p className="hidden text-[11px] text-muted-foreground/70 sm:block">
+            {t("autoResearch.create.footerHint")}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={submitting}
+            >
+              {t("common.cancel")}
+            </Button>
+
+            {/* 主按钮 + 右侧下拉细节：视觉上是一个按钮，点左侧「创建并运行」，
+                点右侧箭头展开「仅创建」。 */}
+            <div className="flex items-stretch">
+              <Button
+                className="rounded-r-none"
+                onClick={() => void handleSubmit(true)}
+                disabled={submitting || (!templateId && !topic.trim())}
+              >
+                {submitting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Play className="size-3.5" />
+                )}
+                {submitting
+                  ? t("autoResearch.create.creating")
+                  : t("autoResearch.create.createAndRun")}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="w-8 rounded-l-none border-l border-primary-foreground/25 px-0"
+                    disabled={submitting || (!templateId && !topic.trim())}
+                    aria-label={t("autoResearch.create.moreActions")}
+                  >
+                    <ChevronDown className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                {/* 不传 container：这里没有滚轮滚动需求，而且 DropdownMenuContent
+                    本身不认 container（只有 Popover 那个 wrapper 改过）。
+                    挂 body 上让 popper 以视口为碰撞边界，面板反而不容易被弹框裁掉。 */}
+                <DropdownMenuContent align="end" side="top" className="w-60">
+                  <DropdownMenuItem onSelect={() => void handleSubmit(true)}>
+                    <Play className="size-3.5 text-muted-foreground" />
+                    <span className="flex flex-col gap-0.5">
+                      <span>{t("autoResearch.create.createAndRun")}</span>
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        {t("autoResearch.create.createAndRunDesc")}
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void handleSubmit(false)}>
+                    <FilePlus2 className="size-3.5 text-muted-foreground" />
+                    <span className="flex flex-col gap-0.5">
+                      <span>{t("autoResearch.create.createOnly")}</span>
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        {t("autoResearch.create.createOnlyDesc")}
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -400,16 +606,59 @@ function Field({
   label,
   children,
   error,
+  required,
+  hint,
 }: {
   label: string
   children: React.ReactNode
   error?: string
+  /** 必填项在标签后加一枚小徽章（不用红星，红星在暗色主题下不够显眼也不带语义）。 */
+  required?: boolean
+  /** 字段说明：挂在标签旁的问号图标上，悬停/聚焦才展开，不单独占一行。 */
+  hint?: string
 }) {
+  const { t } = useTranslation()
   return (
     <div className="space-y-1">
-      <SectionLabel className="block">{label}</SectionLabel>
+      {/* SectionLabel 全站基准是 10px；表单标签承担的是「读字段名」而不是装饰，
+          两个弹框里统一抬到 11px（className 会覆盖掉基础字号）。 */}
+      <SectionLabel className="flex items-center gap-1.5 text-[11px]">
+        <span className="block">{label}</span>
+        {required && (
+          <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium normal-case tracking-normal text-destructive">
+            {t("autoResearch.create.requiredMark")}
+          </span>
+        )}
+        {hint && <FieldHint text={hint} />}
+      </SectionLabel>
       {children}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
+  )
+}
+
+/**
+ * 字段说明的问号入口。说明文字本身不占版面——不悬停就等于不存在，
+ * 表单因此少掉两行常驻灰字，字段间距也不用再为它们留余量。
+ */
+function FieldHint({ text }: { text: string }) {
+  return (
+    <Tooltip>
+      {/* 用 button 而不是 svg 直接做触发器：键盘 Tab 能落到它上面，
+          图标本身没有可访问名字（button 的 aria-label 补上）。
+          尺寸刻意压到 12px 并与标签基线对齐，避免把小标题行撑高。 */}
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={text}
+          className="inline-flex shrink-0 cursor-help items-center text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+        >
+          <HelpCircle className="size-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64 text-xs leading-relaxed">
+        {text}
+      </TooltipContent>
+    </Tooltip>
   )
 }

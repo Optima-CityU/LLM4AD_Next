@@ -37,11 +37,24 @@ dependencies = [
     "agentscope>=2.0,<3.0",
     # Knowledge parser runs the official Python SDK in the task-runner image.
     "claude-agent-sdk>=0.1.80,<0.2",
+    # Official Typst Python binding: the research runtime's stage bridge uses it
+    # to compile-check proposals before publication (see stage_bridge.py).
+    "typst>=0.13.0,<0.14.0",
+    # Kept temporarily for lockfile compatibility; the MCP no longer calls the SDK.
+    "openreview-py>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]
+# Task-runner image only: the ARC pipeline runs inside the container, so it is the
+# sole consumer of torch.
 # uv sync --extra research --upgrade-package researchclaw; torch pinned to CPU index below.
 research = ["researchclaw", "torch>=2.2"]
+# Backend image only: the ARC-Bench topic registry (researchclaw.arc_bench) is read
+# by the API to list templates and materialize stage-07/08/09 artifacts at session
+# creation. researchclaw's own dependency tree is light (arxiv, numpy, pyyaml, rich),
+# so this extra deliberately excludes torch — it is *not* research, which would pull
+# the whole training stack into the API image for nothing.
+arc-templates = ["researchclaw"]
 
 [tool.uv]
 # Drop xgboost's Linux-only NVIDIA NCCL dependency (~400 MB) from the backend
@@ -53,7 +66,7 @@ override-dependencies = ["nvidia-nccl-cu12; sys_platform == 'never'"]
 [tool.uv.sources]
 llm4ad-next = { path = "../..", editable = true }
 # ── AutoResearch (optional) ─────────────────────────────────────────────────
-researchclaw = { git = "https://github.com/y414987863/AutoResearchClawAD.git", branch = "dev/0.5.0-llm4ad_0.1.0" }
+researchclaw = { git = "https://github.com/y414987863/AutoResearchClawAD.git", tag = "v1.0.3-beta.1" }
 torch = [{ index = "pytorch-cpu" }]
 
 # CPU-only torch wheels; explicit = only torch resolves here, rest stays on PyPI.

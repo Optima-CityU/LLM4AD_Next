@@ -846,7 +846,7 @@ random_seed: 42
 # ===== LLM Provider Configuration =====
 providers:
   - name: "default"
-    type: "openai_compatible"
+    type: "{provider_type}"
     base_url: "${{LLM_BASE_URL}}"
     api_key: "${{LLM_API_KEY}}"
     model: "${{LLM_MODEL}}"

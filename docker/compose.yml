@@ -26,7 +26,6 @@ x-shared-env: &shared-env
 
 x-backend-common: &backend-common
   image: "${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}"
-  pull_policy: never
   build:
     context: ../
     dockerfile: src/backend/Dockerfile
@@ -217,8 +216,7 @@ services:
     command: celery -A app.core.celery flower --port=5555
 
   task-runner:
-    image: llm4ad-task-runner:latest
-    pull_policy: never
+    image: "${DOCKER_IMAGE_TASK_RUNNER:-llm4ad-task-runner}:${TAG-latest}"
     build:
       context: ../
       network: host
@@ -242,7 +240,6 @@ services:
 
   frontend:
     image: "${DOCKER_IMAGE_FRONTEND?Variable not set}:${TAG-latest}"
-    pull_policy: never
     restart: always
     depends_on:
       backend:

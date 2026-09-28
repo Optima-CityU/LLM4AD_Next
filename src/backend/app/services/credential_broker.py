@@ -63,6 +63,8 @@ def issue_token(
     auth_token: str = "",
     model: str = "",
     timeout: float = 60.0,
+    workspace_id: str | uuid.UUID | None = None,
+    session_id: str | None = None,
 ) -> str:
     """发放一次性代理 token，并把加密后的真实凭据写入 Redis。
 
@@ -76,6 +78,9 @@ def issue_token(
         auth_token: 真实 auth_token（部分 anthropic 网关使用）。
         model: 模型名（审计用）。
         timeout: 转发到上游时的超时（秒）。
+        workspace_id: 科研工作区 ID（可选）。供 llm_proxy 在上游失败时
+            上报运行时健康事件与内联通知；其他调用方不传。
+        session_id: 科研工作区会话 ID（可选），同上用途。
 
     Returns:
         生成的代理 token（URL-safe 随机串）。
@@ -91,6 +96,10 @@ def issue_token(
         "user_id": str(user_id),
         "task_id": str(task_id),
     }
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
+    if session_id:
+        payload["session_id"] = session_id
     blob = encrypt_secret(json.dumps(payload))
     r = get_sync_redis()
     pipe = r.pipeline()

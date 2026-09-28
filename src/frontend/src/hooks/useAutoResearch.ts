@@ -36,6 +36,8 @@ import {
   type ResearchSessionUpdateRequest,
   type ResearchStageGuideRequest,
   type ResearchStateResponse,
+  type ResearchTemplateDetailResponse,
+  type ResearchTemplateListResponse,
   type ResearchTurnItem,
   type ResearchTurnRetryRequest,
   type ResearchTurnStartRequest,
@@ -86,6 +88,12 @@ export const researchKeys = {
     [...researchKeys.all, "generated", sessionId] as const,
   analysis: (sessionId: string) =>
     [...researchKeys.all, "analysis", sessionId] as const,
+  /** ARC-Bench 课题模板列表（域过滤；注册表静态，很少失效）。 */
+  templates: (domain?: string | null) =>
+    [...researchKeys.all, "templates", domain ?? "__all__"] as const,
+  /** 单个课题模板详情（含 briefing / 假设 / 实验设计预览）。 */
+  templateDetail: (topicId: string) =>
+    [...researchKeys.all, "template", topicId] as const,
 }
 
 // ---- 通用 helpers ----
@@ -134,6 +142,51 @@ function useInvalidator() {
 export function useInvalidateSessionLists() {
   const qc = useQueryClient()
   return useCallback(() => invalidateSessionListsOn(qc), [qc])
+}
+
+// ---- 课题模板（ARC-Bench）----
+
+/**
+ * ARC-Bench 课题模板列表。注册表随镜像静态打包，故 staleTime 给到 30 分钟。
+ *
+ * `available === false` 表示后端镜像没装 `arc-templates` extra——调用方据此隐藏
+ * 「从模板创建」入口，而不是把它当错误处理。
+ */
+export function useResearchTemplates(
+  domain?: string | null,
+  opts?: Omit<
+    UseQueryOptions<ResearchTemplateListResponse>,
+    "queryKey" | "queryFn"
+  >,
+) {
+  return useQuery({
+    queryKey: researchKeys.templates(domain),
+    queryFn: () => Llm4AdResearchService.listTemplates({ domain: domain ?? undefined }),
+    staleTime: 30 * 60_000,
+    ...opts,
+  })
+}
+
+/**
+ * 单个课题模板详情（briefing + 假设 + 实验设计）。
+ *
+ * @param topicId 传 null 则不请求（picker 未选中任何课题时）。
+ */
+export function useResearchTemplateDetail(
+  topicId: string | null | undefined,
+  opts?: Omit<
+    UseQueryOptions<ResearchTemplateDetailResponse>,
+    "queryKey" | "queryFn"
+  >,
+) {
+  return useQuery({
+    queryKey: researchKeys.templateDetail(topicId ?? "__none__"),
+    queryFn: () =>
+      Llm4AdResearchService.getTemplate({ topicId: topicId as string }),
+    enabled: Boolean(topicId),
+    staleTime: 30 * 60_000,
+    ...opts,
+  })
 }
 
 // ---- Folders ----
@@ -199,6 +252,34 @@ export function useReorderResearchFolders() {
   return useMutation({
     mutationFn: (body: ResearchFolderReorderRequest) =>
       Llm4AdResearchService.reorderFolders({ requestBody: body }),
+    onSuccess: () => {
+      inv.invalidateFolders()
+    },
+  })
+}
+
+/**
+ * 置顶 / 取消置顶文件夹。
+ *
+ * 后端两个端点语义对称且幂等（POST 建立 pin、DELETE 撤销），所以这里用一个
+ * hook 按 `pinned` 分派，调用方不必自己选方法。返回的是被改动的那个文件夹，
+ * 但列表顺序同时受影响，故成功后统一失效 folders 缓存重取。
+ *
+ * 只失效 folders、不动会话列表：置顶不影响任何会话的归属或排序。
+ */
+export function usePinResearchFolder() {
+  const inv = useInvalidator()
+  return useMutation({
+    mutationFn: ({
+      folderId,
+      pinned,
+    }: {
+      folderId: string
+      pinned: boolean
+    }) =>
+      pinned
+        ? Llm4AdResearchService.pinFolder({ folderId })
+        : Llm4AdResearchService.unpinFolder({ folderId }),
     onSuccess: () => {
       inv.invalidateFolders()
     },
@@ -656,6 +737,23 @@ export function useDeleteResearchSession() {
   })
 }
 
+/**
+ * 复制一个科研会话（深度拷贝 DB 全子树 + 落盘产物目录），返回新会话。
+ *
+ * 副本沿用原会话标题/画像/运行状态但开启全新生命周期（新 UUID、stream_id 清空），
+ * 故成功后只失效会话列表 + 文件夹计数，不牵连正在浏览的旧会话消息流。
+ */
+export function useCopyResearchSession() {
+  const inv = useInvalidator()
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      Llm4AdResearchService.copySession({ sessionId }),
+    onSuccess: () => {
+      inv.invalidateSessions()
+    },
+  })
+}
+
 // ---- Turns ----
 
 export function useStartResearchTurn() {
@@ -858,6 +956,35 @@ export function useResearchArtifactTree(sessionId: string | null) {
 }
 
 /**
+ * 上传 zip 解压覆盖到产物目录（对齐 /artifacts/archive 的打包口径，逐条目相对
+ * run_dir）。成功后同时失效产物树 + 产物列表 + generated 演化数据，让导入的文件
+ * 立即出现在面板；不牵连会话列表 / 消息流。
+ */
+export function useImportResearchArtifacts() {
+  const qc = useQueryClient()
+  const inv = useInvalidator()
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      file,
+    }: {
+      sessionId: string
+      file: File
+    }) =>
+      Llm4AdResearchService.importArtifactsZip({
+        sessionId,
+        formData: { file },
+      }),
+    onSuccess: (_, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: researchKeys.artifactTree(sessionId) })
+      qc.invalidateQueries({ queryKey: researchKeys.artifacts(sessionId) })
+      qc.invalidateQueries({ queryKey: researchKeys.generated(sessionId) })
+      inv.invalidateSessionDetail(sessionId)
+    },
+  })
+}
+
+/**
  * 实验产物（generated 演化解），内容内联、按 stage 分组。
  *
  * 一次拿全 ``generated*.json`` 解（后端已剥离大字段），供实验面板画演化仿真 /
@@ -913,10 +1040,78 @@ export function downloadResearchArtifact(sessionId: string, path: string) {
   return downloadBlob(url, filename)
 }
 
-/** 打包下载会话全部产物（zip；文件名由后端 Content-Disposition 决定，此处兜底）。 */
-export function downloadResearchArtifactsArchive(sessionId: string) {
-  const url = `${API_BASE}/sessions/${sessionId}/artifacts/archive`
-  return downloadBlob(url, `artifacts-${sessionId.slice(0, 8)}.zip`)
+// ---- 打包下载：票据 + 浏览器原生下载 ----
+
+/** 换取票据这一跳的等待上限：不会读包体，正常也就是几十毫秒。 */
+const ARCHIVE_TICKET_TIMEOUT_MS = 10_000
+
+/** 触发浏览器原生下载，不把包体读进内存。 */
+function dispatchBrowserDownload(url: string) {
+  const a = document.createElement("a")
+  // 不加 download 属性：文件名交给后端 Content-Disposition 决定（含 RFC 5987
+  // 的中文名兜底），带上反而会和它打架。
+  a.href = url
+  a.rel = "noopener"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/**
+ * 换取一张打包下载票据（带 Bearer 头的一次 POST）。
+ *
+ * ``authFetch`` 命中 401 会自行刷新令牌并重试一次，这里不再重复处理。拿到票据后
+ * 就不再需要认证头，包体可以交给浏览器自己拉。
+ */
+async function requestArchiveTicket(sessionId: string): Promise<string> {
+  const url = `${API_BASE}/sessions/${sessionId}/artifacts/archive/ticket`
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ARCHIVE_TICKET_TIMEOUT_MS)
+  try {
+    const resp = await authFetch(url, {
+      method: "POST",
+      signal: controller.signal,
+    })
+    if (!resp.ok) {
+      // 404 多为「run_dir 尚未初始化」或会话不属于当前用户。
+      throw new Error(`HTTP ${resp.status}`)
+    }
+    const data = (await resp.json()) as { ticket?: string }
+    if (!data?.ticket) throw new Error("empty ticket")
+    return data.ticket
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * 打包下载会话全部产物（zip）。
+ *
+ * 两步走，刻意和单文件下载的 ``downloadBlob`` 分开：
+ *
+ * 1. ``POST .../artifacts/archive/ticket`` 用 Bearer 头换一张短时票据；
+ * 2. 用 ``<a href>`` 导航到 ``.../artifacts/archive/stream?ticket=...`` ——
+ *    由浏览器自己发起请求、自己写盘、自己显示「已下载 xx MB」进度。
+ *
+ * 这样做的原因是 ``<a href>`` / ``window.location`` 没法带上 ``Authorization``
+ * 头，而 ``await resp.blob()`` 会把整个 zip 先缓存在内存里，界面在包下完之前
+ * 一直没反应。改成浏览器原生下载后，第一字节到达就开始累加，前端也不必再维护
+ * 进度 UI。代价是响应没有 ``Content-Length``（zip 边压边出，压完才知道总大小），
+ * 所以浏览器面板不显示百分比 —— 这正是当前接受的取舍。
+ *
+ * 导航是「点击即返回」，不是「下载完成即返回」：``await`` 到这里只表示请求已发出，
+ * 换票据失败才会 reject，调用方据此关掉 loading 态即可。文件名由后端
+ * ``Content-Disposition`` 决定，前端不再兜底构造。
+ *
+ * Args:
+ *   sessionId: 会话 id。
+ */
+export async function downloadResearchArtifactsArchive(sessionId: string) {
+  const ticket = await requestArchiveTicket(sessionId)
+  const params = new URLSearchParams({ ticket })
+  dispatchBrowserDownload(
+    `${API_BASE}/sessions/${sessionId}/artifacts/archive/stream?${params}`,
+  )
 }
 
 /**

@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 import uuid
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, File, Header, Query, UploadFile, status
 from starlette.background import BackgroundTask
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, StreamingResponse
 
 from app.api.deps import CurrentUser, SessionDep, TokenDep
 from app.api.llm4ad.sse_utils import redis_sse_stream, sse_response
@@ -21,6 +21,7 @@ from app.schemas.research import (
     ResearchAnalysisGenerateRequest,
     ResearchAnalysisGenerateResponse,
     ResearchAnalysisStopResponse,
+    ResearchArtifactImportResponse,
     ResearchArtifactListResponse,
     ResearchArtifactTranslateRequest,
     ResearchArtifactTranslateResponse,
@@ -48,6 +49,8 @@ from app.schemas.research import (
     ResearchStageGuideRequest,
     ResearchStageGuideResponse,
     ResearchStateResponse,
+    ResearchTemplateDetailResponse,
+    ResearchTemplateListResponse,
     ResearchTurnItem,
     ResearchTurnListResponse,
     ResearchTurnRetryRequest,
@@ -141,6 +144,71 @@ def delete_folder(
     return ResearchDeleteResponse(id=folder_id)
 
 
+@router.post(
+    "/folders/{folder_id}/pin",
+    response_model=ResearchFolderItem,
+    summary="置顶文件夹（幂等）",
+)
+def pin_folder(
+    folder_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """置顶；已在置顶态时重复调用不报错，返回当前状态。"""
+    return research_service.set_folder_pinned(
+        db, folder_id, current_user, pinned=True
+    )
+
+
+@router.delete(
+    "/folders/{folder_id}/pin",
+    response_model=ResearchFolderItem,
+    summary="取消置顶文件夹（幂等）",
+)
+def unpin_folder(
+    folder_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """取消置顶；原本未置顶时重复调用不报错，返回当前状态。
+
+    用 ``DELETE`` 对齐「pin 是一种附属状态」的资源语义：POST 建立、DELETE
+    撤销，天然幂等，且与置顶只差一个键，前端切换时同一个 key 就能失效缓存。
+    """
+    return research_service.set_folder_pinned(
+        db, folder_id, current_user, pinned=False
+    )
+
+
+# ---- 课题模板（ARC-Bench）----
+
+
+@router.get(
+    "/templates",
+    response_model=ResearchTemplateListResponse,
+    summary="列出 ARC-Bench 课题模板（供「从模板创建」选题器）",
+)
+def list_templates(
+    domain: str | None = Query(
+        default=None,
+        description="域过滤：ml / physics / biology / statistics / quantum；不传=全部",
+    ),
+):
+    """静态课题注册表，按域分组。镜像未装 ``arc-templates`` extra 时 ``available=False``。"""
+    items = research_service.list_topics(domain)
+    return ResearchTemplateListResponse(
+        items=items,
+        total=len(items),
+        available=research_service.templates_available(),
+    )
+
+
+@router.get(
+    "/templates/{topic_id}",
+    response_model=ResearchTemplateDetailResponse,
+    summary="课题模板详情（briefing + 假设 + 实验设计预览）",
+)
+def get_template(topic_id: str):
+    """课题 id 不存在时 404；未装 extra 时同样 404（列表已告知 unavailable）。"""
+    return research_service.get_template_detail(topic_id)
+
+
 # ---- 会话 ----
 
 
@@ -169,11 +237,11 @@ def list_sessions(
     ),
     cursor: str | None = Query(
         default=None,
-        description="上一页最后一条的 updated_time ISO；首次不传",
+        description="上一页最后一条的 created_time ISO；首次不传",
     ),
     limit: int = Query(default=50, ge=1, le=200),
 ):
-    """会话游标分页列表，按 updated_time 倒序。"""
+    """会话游标分页列表，按 created_time 倒序。"""
     return research_service.list_sessions(
         db,
         current_user,
@@ -349,6 +417,21 @@ def delete_session(
     """会话必须处于终态；``RUNNING`` / ``PAUSED`` 会返回 409。"""
     research_service.delete_session(db, session_id, current_user)
     return ResearchDeleteResponse(id=session_id)
+
+
+@router.post(
+    "/sessions/{session_id}/copy",
+    response_model=ResearchSessionItem,
+    status_code=status.HTTP_201_CREATED,
+    summary="复制一个科研会话（含 DB 全子树记录 + 落盘产物目录）",
+)
+def copy_session(
+    session_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """深度复制会话：新建 session/turn/message/log 全部新 UUID，外键在新 id 之间
+    重建映射（防主键冲突、关联表一一对应）；产物目录沿源码骨架复制到会话自身目录。
+    返回新会话。"""
+    return research_service.copy_session(db, session_id, current_user)
 
 
 # ---- 轮次 ----
@@ -769,6 +852,86 @@ def download_artifacts_archive(
     )
 
 
+@router.post(
+    "/sessions/{session_id}/artifacts/archive/ticket",
+    summary="换取打包下载票据（供浏览器原生下载）",
+)
+def create_artifacts_archive_ticket(
+    session_id: uuid.UUID, db: SessionDep, current_user: CurrentUser
+):
+    """为「让浏览器自己下载产物包」签发一张短时票据。
+
+    前端拿到票据后拼出 ``.../artifacts/archive/stream?ticket=<票据>``，用
+    ``window.location`` / ``<a href>`` 直接导航过去 —— 这样走的是浏览器自带的下载
+    面板（浏览器自己显示「已下载 xx MB」），前端不必再维护进度 UI。
+
+    这里顺带把下载文件名返回（前端可用于提示文案）；顺手做一次会话归属与
+    ``run_dir`` 校验，让「会话不存在 / 越权 / 还没跑起来」在这一步就暴露成正常的
+    404，而不是等到浏览器导航过去才拿到一张下不出东西的票据。
+    """
+    filename, _ = research_service.open_artifacts_archive(db, session_id, current_user)
+    return {
+        "ticket": research_service.issue_archive_ticket(current_user),
+        "filename": filename,
+    }
+
+
+@router.get(
+    "/sessions/{session_id}/artifacts/archive/stream",
+    summary="打包下载全部产物（zip，票据鉴权 + 流式）",
+)
+def stream_artifacts_archive(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    ticket: str = Query(..., description="由 /artifacts/archive/ticket 换取的短时票据"),
+):
+    """凭票据把 run_dir 下全部产物以 zip 流式下载。
+
+    与 ``GET .../artifacts/archive`` 的区别有两点，都是为了配合浏览器**原生下载**：
+
+    1. 鉴权走查询串里的短时票据而非 ``Authorization`` 头 —— 原生导航带不了自定义头；
+       票据 5 分钟过期、绑定用户，且只能用来下产物包（见
+       :mod:`app.services.research_service.archive_ticket`）。票据与路径必须指向同一
+       会话，否则拿 A 会话的票据就能下载 B 会话的产物。
+    2. 边打包边发字节（``ZIP_STORED`` 不压缩），不再先落临时 zip 等全部压完 —— 这是
+       原先「点了下载卡很久」的主因：zlib 在 PDF / PNG 这类本就压不动的数据上省不下
+       字节，却要吃满单核 CPU。
+
+    响应不带 ``Content-Length``（zip 总长要打包完才知道），因此浏览器下载面板显示的是
+    「未知大小」而非百分比 —— 这是本方案的已知取舍。
+    """
+    user = research_service.verify_archive_ticket(db, ticket)
+    filename, stream = research_service.open_artifacts_archive(db, session_id, user)
+    return StreamingResponse(
+        stream,
+        media_type="application/zip",
+        headers={"Content-Disposition": research_service.archive_disposition(filename)},
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/artifacts/import",
+    response_model=ResearchArtifactImportResponse,
+    summary="上传 zip 解压并覆盖到产物目录（单个条目失败不中断）",
+)
+async def import_artifacts_zip(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    file: UploadFile = File(..., description="产物 zip，条目相对 run_dir"),
+):
+    """上传一个 zip，解压覆盖到该会话的产物目录。
+
+    - 已存在的文件直接覆盖（``overwritten`` 计数）；单个条目解压/写入失败会被捕获并记入
+      ``failed``，不中断整批导入；
+    - 防 zip-slip：越出 run_dir 的条目跳过并记入 ``failed``。
+    """
+    data = await file.read()
+    return research_service.import_artifacts_zip(
+        db, session_id, current_user, data, filename=file.filename
+    )
+
+
 @router.put(
     "/sessions/{session_id}/artifacts/content",
     response_model=ResearchArtifactWriteResponse,
@@ -800,23 +963,27 @@ def write_artifact(
 @router.get(
     "/sessions/{session_id}/generated",
     response_model=ResearchGeneratedResponse,
-    summary="获取所有 generated 解（内容内联，剥离大字段，按 stage 分组）",
+    summary="获取所有 generated 解（内容内联，剥离大字段，按算法名称分组）",
 )
 def list_generated(
     session_id: uuid.UUID,
     db: SessionDep,
     current_user: CurrentUser,
-    stage: int | None = Query(
-        default=None, description="仅返回该 stage 的解；不传返回全部"
+    algorithm: str | None = Query(
+        default=None,
+        description="仅返回该算法名称分组；不传返回全部",
     ),
 ):
-    """一次拿全 ``**/generated/*.json`` 解内容，免去前端逐个 download。
+    """一次拿全 ``stage-13/task_packages/{算法}/runs/*/{run_id}/generated/*.json``
+    解内容，免去前端逐个 download。
 
+    只认 Stage 13（``ITERATIVE_REFINE``）这一处演化产物目录，且目录名精确为
+    ``stage-13``——回跳产生的 ``stage-13_v1`` 等历史快照不列（否则同一份结果会出现两次）。
     大字段（``code_artifacts`` / ``generation_meta`` / ``worktree`` /
-    ``description``）按演化任务持久化口径剥离，按 stage 分组返回。
+    ``description``）按演化任务持久化口径剥离，按算法名称分组返回。
     """
     return research_service.list_generated_solutions(
-        db, session_id, current_user, stage=stage
+        db, session_id, current_user, algorithm=algorithm
     )
 
 

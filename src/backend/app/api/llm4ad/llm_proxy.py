@@ -25,6 +25,11 @@ from starlette.background import BackgroundTask
 from starlette.responses import JSONResponse, StreamingResponse
 
 from app.services import credential_broker
+from app.services.runtime_health import (
+    classify_upstream_error,
+    record_runtime_failure,
+    record_runtime_recovery,
+)
 
 router = APIRouter(prefix="/llmproxy", tags=["llm4ad.llmproxy"])
 
@@ -122,6 +127,10 @@ async def proxy_llm(path: str, request: Request) -> Response:
         )
 
     provider_type = creds.get("type", "openai_compatible")
+    # 科研工作区会话的 token 会携带 workspace/session，用于上游失败时上报健康
+    # 事件与对话内联通知；其他调用方没有这两个字段，走原样代理逻辑。
+    runtime_workspace_id = creds.get("workspace_id")
+    runtime_session_id = creds.get("session_id")
     base_url = (creds.get("base_url") or "").strip() or _DEFAULT_BASE_URL.get(provider_type, "")
     base_url = base_url.rstrip("/")
     if not base_url:
@@ -156,10 +165,30 @@ async def proxy_llm(path: str, request: Request) -> Response:
         upstream_resp = await client.send(upstream_req, stream=True)
     except httpx.HTTPError as exc:
         await client.aclose()
+        if runtime_workspace_id and runtime_session_id:
+            record_runtime_failure(
+                runtime_workspace_id,
+                runtime_session_id,
+                reason=classify_upstream_error(exc, None),
+                status_code=None,
+                message=str(exc),
+            )
         return JSONResponse(
             {"error": f"upstream request failed: {exc}"},
             status_code=502,
         )
+
+    if runtime_workspace_id and runtime_session_id:
+        if upstream_resp.status_code >= 400:
+            record_runtime_failure(
+                runtime_workspace_id,
+                runtime_session_id,
+                reason=classify_upstream_error(None, upstream_resp.status_code),
+                status_code=upstream_resp.status_code,
+                message=upstream_resp.reason_phrase or "",
+            )
+        else:
+            record_runtime_recovery(runtime_workspace_id, runtime_session_id)
 
     resp_headers = {
         k: v
@@ -171,6 +200,19 @@ async def proxy_llm(path: str, request: Request) -> Response:
         try:
             async for chunk in upstream_resp.aiter_bytes():
                 yield chunk
+        except Exception as exc:  # noqa: BLE001
+            # 上游在流式响应中途断连/超时：记录失败（不投递通知），并让异常
+            # 正常终止本流——客户端会看到截断并重试。
+            if runtime_workspace_id and runtime_session_id:
+                record_runtime_failure(
+                    runtime_workspace_id,
+                    runtime_session_id,
+                    reason=classify_upstream_error(exc, None),
+                    status_code=None,
+                    message=str(exc),
+                    notify=False,
+                )
+            raise
         finally:
             await upstream_resp.aclose()
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -49,6 +50,7 @@ from ._common import (
     _get_session_and_turn,
     _parse_cursor,
 )
+from .templates import is_materialized
 
 # 哨兵：区分「调用方未传该覆盖」与「显式传 None」——from_stage /
 # respond_to_message_id 的 None 都是合法值，不能用 None 当默认。
@@ -98,6 +100,7 @@ def _create_turn_row(
     session: ResearchSession,
     request: ResearchTurnStartRequest,
     *,
+    db: Session,
     from_stage: Any = _UNSET,
     to_stage: Any = _UNSET,
     user_input: Any = _UNSET,
@@ -109,6 +112,11 @@ def _create_turn_row(
     ``request.*``；门控恢复路径（:func:`_reply_to_gate`）传入按 submission 算出的值
     覆盖。四者 None 均为合法值，故用 ``_UNSET`` 哨兵区分「未覆盖」与「显式传 None」。
 
+    会话**从未续跑过**且 run_dir 里已有模板预置的 stage-07/08/09 产物时，不指定
+    ``from_stage`` 的默认值取 ``"10"``——那才是真正的续跑；从 1 重跑会白烧掉 7/8/9
+    的 LLM 预算。判定纯查磁盘（见 :func:`templates.is_materialized`），不新增任何
+    session 字段：没有模板产物的普通会话照旧不传 ``from_stage``（ARC 自会从头跑）。
+
     ``celery_task_id`` 在此预生成：与 turn 行同一事务落库，入队时用它作
     ``apply_async(task_id=...)``，杜绝 worker 抢先执行时 ID 仍为空的窗口。
 
@@ -116,6 +124,17 @@ def _create_turn_row(
     都有 FK 指向 ``research_turn.id``，不先 flush 则 UoW 可能把它们的写排到 turn
     INSERT 之前触发 FK 失败。
     """
+    resolved_from_stage = (
+        request.from_stage if from_stage is _UNSET else from_stage
+    )
+    if (
+        resolved_from_stage is None
+        and session.run_dir
+        and _has_no_pipeline_turn(db, session.id)
+        and is_materialized(Path(session.run_dir))
+    ):
+        resolved_from_stage = "10"
+
     return ResearchTurn(
         id=uuid.uuid4(),
         session_id=session.id,
@@ -124,7 +143,7 @@ def _create_turn_row(
         provider_id=request.provider_id or session.provider_id,
         model_name=request.model_name or session.model_name,
         mode=(request.mode.value if request.mode else None),
-        from_stage=(request.from_stage if from_stage is _UNSET else from_stage),
+        from_stage=resolved_from_stage,
         to_stage=(request.to_stage if to_stage is _UNSET else to_stage),
         user_input=(request.content if user_input is _UNSET else user_input),
         respond_to_message_id=(
@@ -133,6 +152,22 @@ def _create_turn_row(
             else respond_to_message_id
         ),
     )
+
+
+def _has_no_pipeline_turn(db: Session, session_id: uuid.UUID) -> bool:
+    """该会话是否还没有跑过 pipeline 轮（模板种子轮 / 协作轮不算）。
+
+    种子轮也是 ``COMPLETED``，单看「有没有 turn」区分不出来，故按是否有过
+    ``from_stage is null`` 的 pipeline 轮判断——那是 :func:`start_turn` 首轮的签名
+    （门控续跑与协作轮的 ``from_stage`` 都非空）。
+    """
+    stmt = (
+        select(ResearchTurn.id)
+        .where(ResearchTurn.session_id == session_id)
+        .where(ResearchTurn.from_stage.is_(None))
+        .limit(1)
+    )
+    return db.exec(stmt).first() is None
 
 
 def _persist_turn_messages(
@@ -325,6 +360,7 @@ def _reply_to_gate(
     turn = _create_turn_row(
         session,
         request,
+        db=db,
         from_stage=from_stage,
         to_stage=None,
         user_input=guidance,
@@ -421,6 +457,7 @@ def start_pipeline_turn(
     turn = _create_turn_row(
         session,
         request,
+        db=db,
         from_stage=from_stage,
         to_stage=None,
         user_input=guidance,
@@ -497,7 +534,7 @@ def start_turn(
     if not check_research_rate_limit(session.id):
         raise HTTPException(status_code=429, detail="rate limit exceeded")
 
-    turn = _create_turn_row(session, request)
+    turn = _create_turn_row(session, request, db=db)
     db.add(turn)
     # 先 flush 让 turn 落库满足 message/session 的 FK（见 _create_turn_row）。
     db.flush()

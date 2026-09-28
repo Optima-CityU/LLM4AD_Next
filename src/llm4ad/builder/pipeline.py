@@ -55,6 +55,7 @@ async def build_task(
     model: str | None = None,
     base_url: str | None = None,
     provider_type: str = "openai_compatible",
+    task_provider_type: str = "openai_compatible",
     provider_name: str | None = None,
     max_repair_attempts: int = 3,
     on_progress: ProgressCallback | None = None,
@@ -78,6 +79,7 @@ async def build_task(
         model: Model name for the builder's LLM.
         base_url: Base URL for the builder's LLM provider.
         provider_type: Provider type (openai, anthropic, openai_compatible).
+        task_provider_type: Provider protocol written into the generated task config.
         provider_name: Reference a named provider from global settings.
         max_repair_attempts: Maximum auto-repair attempts during validation.
         on_progress: Optional callback ``(stage, total, message)`` invoked
@@ -131,7 +133,7 @@ async def build_task(
 
     # Stage 2: Create
     _progress(2, "Generating application artifacts...")
-    creator = TaskCreator(provider)
+    creator = TaskCreator(provider, task_provider_type=task_provider_type)
     blueprint = await creator.create(analysis, description, multimodal=multimodal)
     logger.info(
         "Generation complete: evaluator={}, algorithm={}/{}",
@@ -179,6 +181,7 @@ def build_task_sync(
     model: str | None = None,
     base_url: str | None = None,
     provider_type: str = "openai_compatible",
+    task_provider_type: str = "openai_compatible",
     provider_name: str | None = None,
     max_repair_attempts: int = 3,
     on_progress: ProgressCallback | None = None,
@@ -224,6 +227,7 @@ def build_task_sync(
             model=model,
             base_url=base_url,
             provider_type=provider_type,
+            task_provider_type=task_provider_type,
             provider_name=provider_name,
             max_repair_attempts=max_repair_attempts,
             on_progress=on_progress,

@@ -51,17 +51,26 @@ function DialogContent({
   preventOutsideClose = false,
   onPointerDownOutside,
   onInteractOutside,
+  contentRef,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
   // 为true时点击弹框外侧不会关闭，防止误触
   preventOutsideClose?: boolean
+  /**
+   * 拿到弹框内容节点的回调。用于把内部浮层（Popover / DropdownMenu 等）挂进
+   * DialogContent 里：Radix 的 modal Dialog 靠 react-remove-scroll 锁住外层滚动，
+   * 而锁只把 DialogContent 这一个节点登记为 shard，挂在 body 上的浮层滚轮事件会被
+   * preventDefault 掉（能拖滚动条、滚轮无效）。传出去让调用方做浮层容器。
+   */
+  contentRef?: React.Ref<HTMLDivElement>
 }) {
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        ref={contentRef}
         className={cn(
           "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
           className

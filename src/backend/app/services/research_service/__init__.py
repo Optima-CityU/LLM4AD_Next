@@ -12,11 +12,19 @@ from .analysis import (
     get_analysis_data,
     stop_analysis_report,
 )
+from .archive_ticket import (
+    archive_disposition,
+    artifact_archive_download_name,
+    issue_archive_ticket,
+    verify_archive_ticket,
+)
 from .artifacts import (
     create_artifacts_archive,
     get_artifact_tree,
+    iter_artifacts_archive,
     list_artifacts,
     list_generated_solutions,
+    open_artifacts_archive,
     resolve_artifact_path,
     write_artifact,
 )
@@ -27,6 +35,7 @@ from .folders import (
     get_folder_tree,
     list_folders,
     reorder_folders,
+    set_folder_pinned,
     update_folder,
 )
 from .messages import (
@@ -35,12 +44,19 @@ from .messages import (
     list_messages,
 )
 from .sessions import (
+    copy_session,
     create_session,
     delete_session,
     get_session_detail,
     get_state,
+    import_artifacts_zip,
     list_sessions,
     update_session,
+)
+from .templates import (
+    get_template_detail,
+    list_topics,
+    templates_available,
 )
 from .translate import (
     get_translate_stream_type,
@@ -57,6 +73,9 @@ from .turns import (
 )
 
 __all__ = [
+    "archive_disposition",
+    "artifact_archive_download_name",
+    "copy_session",
     "create_artifacts_archive",
     "create_folder",
     "create_session",
@@ -70,9 +89,13 @@ __all__ = [
     "get_session_detail",
     "get_state",
     "get_stream_context",
+    "get_template_detail",
     "get_translate_stream_type",
     "get_turn",
+    "import_artifacts_zip",
     "inject_stage_guidance",
+    "issue_archive_ticket",
+    "iter_artifacts_archive",
     "list_artifacts",
     "list_folders",
     "list_generated_solutions",
@@ -80,16 +103,21 @@ __all__ = [
     "list_messages",
     "list_session_turns",
     "list_sessions",
+    "list_topics",
+    "open_artifacts_archive",
     "reorder_folders",
     "resolve_artifact_path",
     "retry_turn",
+    "set_folder_pinned",
     "start_collab_turn",
     "start_turn",
     "stop_analysis_report",
     "stop_translation",
     "stop_turn",
+    "templates_available",
     "translate_artifact",
     "update_folder",
     "update_session",
+    "verify_archive_ticket",
     "write_artifact",
 ]

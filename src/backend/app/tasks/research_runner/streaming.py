@@ -82,11 +82,16 @@ def gate_rollback_default(gate_stage: int) -> int | None:
 # 什么、上游给什么、下游要什么」，不追求逐字精确。
 ARC_PIPELINE_OVERVIEW = (
     "ARC (researchclaw) is an autonomous research pipeline that takes a topic "
-    "through 23 sequential stages: refine topic -> survey literature -> extract "
-    "and synthesize knowledge -> form hypotheses -> design and run experiments -> "
-    "analyze results -> write, review and revise a paper -> quality-check and "
-    "publish. Each stage consumes the previous stages' outputs and produces files "
-    "the later stages depend on."
+    "through 23 sequential stages in 8 phases: A scoping (1-2) -> B literature "
+    "(3-6) -> C synthesis (7-8) -> D design (9-11) -> E execution (12-13) -> "
+    "F decision (14-15) -> G writing (16-19) -> H finalize (20-23). Each stage "
+    "consumes the previous stages' outputs and produces files the later stages "
+    "depend on, so anything you rewrite should stay compatible with downstream. "
+    "Once all 23 stages are done the polished, human-facing results are gathered "
+    "into the run root's `deliverables/` directory (final paper in Markdown, "
+    "LaTeX and PDF, bibliography, figures, code, verification reports and "
+    "`manifest.json`) — that is what gets shipped; the `stage-NN/` directories "
+    "are the working record behind it."
 )
 
 _STAGE_DESCRIPTIONS: dict[int, str] = {
@@ -115,6 +120,91 @@ _STAGE_DESCRIPTIONS: dict[int, str] = {
     23: "Verify that all citations are accurate and exist.",
 }
 
+# ARC Phase（A–H）分组：阶段区间 → 单字母组名。与前端 STAGE_GROUPS
+# （frontend/src/components/AutoResearch/tech.tsx）保持同一套分组，便于人和 agent
+# 用同一个词指代同一段流水线（「B 组文献」= stage 3-6）。
+_STAGE_PHASES: tuple[tuple[int, int, str], ...] = (
+    (1, 2, "A scoping"),
+    (3, 6, "B literature"),
+    (7, 8, "C synthesis"),
+    (9, 11, "D design"),
+    (12, 13, "E execution"),
+    (14, 15, "F decision"),
+    (16, 19, "G writing"),
+    (20, 23, "H finalize"),
+)
+
+
+def stage_phase_label(stage_num: int) -> str:
+    """阶段号 → Phase 组名（如 ``B literature``）；未知号返回空串。"""
+    for start, end, label in _STAGE_PHASES:
+        if start <= stage_num <= end:
+            return label
+    return ""
+
+
+# 每个阶段「主要产物」的示意文件名（取自一次真实 run 的产物树，仅列最具代表性的
+# 一两个；``decision.json`` / ``stage_health.json`` 这类每阶段都有的内务文件不列）。
+# 用途是让 agent 一眼知道本步该动哪个文件，不必先 list_dir 猜。产物名缺失或非固定时
+# 给目录名（如 ``cards/``），表示是一批同类文件。
+_STAGE_ARTIFACTS: dict[int, str] = {
+    1: "goal.md, hardware_profile.json",
+    2: "problem_tree.md, topic_evaluation.json",
+    3: "search_plan.yaml, queries.json, sources.json",
+    4: "references.bib, candidates.jsonl",
+    5: "shortlist.jsonl",
+    6: "cards/<paper>.md",
+    7: "synthesis.md, topic_manifest.json",
+    8: "hypotheses.md, novelty_report.json, perspectives/",
+    9: "exp_plan.yaml, domain_profile.json, requirements.json",
+    10: "experiment_spec.md, experiment/ (main.py, evaluator.py, objectives.py, "
+        "hyperparameters.py, data/, algorithms/)",
+    11: "schedule.json",
+    12: "runs/run-*.json, runs/results.json",
+    13: "experiment_v1..vN/, evolution_results/, experiment_final.py, "
+        "llm4ad_comparison.json, task_packages/<algo>/ (LLM4AD task packages — one "
+        "self-contained package per benchmarked algorithm) + task_packages/"
+        "manifest.json",
+    14: "experiment_summary.json, analysis.md, results_table.tex, charts/, "
+        "figure_plan.json",
+    15: "decision.md, decision_structured.json",
+    16: "outline.md",
+    17: "paper_draft.md, references_preverified.bib, draft_quality.json",
+    18: "reviews.md, review_provenance.json",
+    19: "paper_revised.md",
+    20: "quality_report.json, fabrication_flags.json",
+    21: "archive.md, bundle_index.json",
+    22: "paper.tex, paper.pdf, paper_final.md, references.bib, charts/, code/, "
+        "manifest.json — the run's final deliverables are gathered into "
+        "deliverables/ (NOT stage-22/); edit them there",
+    23: "paper_final_verified.md, references_verified.bib, verification_report.json",
+}
+
+# 门控阶段（HITL 强制暂停点）：跑到这里会停下来等人决策。
+_GATE_STAGES: tuple[int, ...] = (5, 9, 20)
+
+# LLM4AD 任务包的落地位置（stage 13 产出）。这段单独成段而不是并进
+# _STAGE_ARTIFACTS[13]：问「LLM4AD 的东西在哪」时需要的是一句明确的指路，而不是
+# 混在长产物清单里让 agent 自己挑。每跑完一个被 benchmark 的算法，ARC 会写一份
+# 自包含的 llm4ad 任务包到这里的同名子目录；`manifest.json` 是算法清单（含
+# primary_metric / metric_direction / n_instances）。
+_LLM4AD_PACKAGES_RELPATH = "stage-13/task_packages"
+LLM4AD_PACKAGES_NOTE = (
+    f"LLM4AD task packages live in `{_LLM4AD_PACKAGES_RELPATH}/`: each subdirectory "
+    "is one self-contained runnable package for a single benchmarked algorithm "
+    "(config.yaml, main.py, evaluator.py, objectives.py, hyperparameters.py, "
+    "algorithms/<algo>/, data/, run_single.py), and "
+    f"`{_LLM4AD_PACKAGES_RELPATH}/manifest.json` lists which algorithms have one "
+    "with their primary metric and direction. Anything LLM4AD-related — task "
+    "definitions, evaluators, benchmark data, run configs — is found there, not "
+    "under the other stage directories."
+)
+
+
+def stage_artifacts(stage_num: int) -> str:
+    """阶段号 → 主要产物示意；未知号返回空串。"""
+    return _STAGE_ARTIFACTS.get(stage_num, "")
+
 
 def stage_description(stage_num: int) -> str:
     """阶段号 → 用途一句话；未知号返回空串。"""
@@ -122,27 +212,39 @@ def stage_description(stage_num: int) -> str:
 
 
 def build_stage_context(stage_num: int) -> str:
-    """拼装协作 agent 用的流水线上下文块：总览 + 上一步 / 本步 / 下一步用途。
+    """拼装协作 agent 用的流水线上下文块：总览 + 本步身份/产物 + 相邻阶段用途。
 
-    只带相邻阶段（而非全 23 步），让 agent 懂本步目标 + 上游可信输入 + 下游消费
-    者，从而改产物时保持下游兼容——同时把注入的 token 控制在有界范围。未知阶段
-    （如 stage 0 / 非门控续跑）只返回总览。
+    内容分三段：Phase 归属 + 门控标记（让 agent 懂「现在在哪、要不要等人」）、
+    本步用途与主要产物（免得它先 list_dir 猜）、上一步 / 下一步用途（改产物时保
+    持下游兼容）。只带相邻阶段而非全 23 步，把注入的 token 控制在有界范围；未知
+    阶段（如 stage 0 / 非门控续跑）只返回总览。
     """
     lines = [ARC_PIPELINE_OVERVIEW]
     cur = stage_description(stage_num)
     if not cur:
         return lines[0]
+
+    phase = stage_phase_label(stage_num)
+    gate = " — APPROVAL GATE: the pipeline pauses here for human sign-off" if (
+        stage_num in _GATE_STAGES
+    ) else ""
+    lines.append("")
+    lines.append(
+        f"Current stage {stage_num} ({stage_display_name(stage_num)})"
+        f"{f' · {phase}' if phase else ''}{gate}: {cur}"
+    )
+    artifacts = stage_artifacts(stage_num)
+    if artifacts:
+        lines.append(f"Main artifacts of this stage: {artifacts}")
+    lines.append(LLM4AD_PACKAGES_NOTE)
+
     prev = stage_description(stage_num - 1)
     nxt = stage_description(stage_num + 1)
-    lines.append("")
     if prev:
         lines.append(
             f"Previous stage {stage_num - 1} "
             f"({stage_display_name(stage_num - 1)}): {prev}"
         )
-    lines.append(
-        f"Current stage {stage_num} ({stage_display_name(stage_num)}): {cur}"
-    )
     if nxt:
         lines.append(
             f"Next stage {stage_num + 1} "

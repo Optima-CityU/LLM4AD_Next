@@ -24,6 +24,47 @@ from app.models.research import (
     ResearchTurnStatus,
 )
 
+# ---- 课题模板（ARC-Bench）----
+
+
+class ResearchTemplateItem(BaseModel):
+    """课题模板摘要（picker 列表用）。"""
+
+    id: str = Field(description="课题 id，如 ML01")
+    title: str = Field(description="展示名（取 manifest 的 title，读不到则截断题面）")
+    topic: str = Field(description="课题描述原文")
+    domains: list[str] = Field(default_factory=list, description="ARC 域标签")
+    metric_key: str = Field(default="", description="该课题建议的指标列名")
+    metric_direction: str = Field(
+        default="", description="'maximize' / 'minimize' / ''（未指定）"
+    )
+    domain: str = Field(default="", description="域目录名：ml / physics / …")
+    domain_label: str = Field(default="", description="域展示名")
+
+
+class ResearchTemplateListResponse(BaseModel):
+    """模板列表响应。"""
+
+    items: list[ResearchTemplateItem] = Field(default_factory=list)
+    total: int = 0
+    available: bool = Field(
+        default=True,
+        description="镜像是否装了 arc-templates extra；False 时 items 恒为空",
+    )
+
+
+class ResearchTemplateDetailResponse(ResearchTemplateItem):
+    """模板详情：摘要 + manifest 全文（创建对话框预览用）。"""
+
+    synthesis: str = Field(default="", description="上游 briefing 全文")
+    hypotheses: list[dict[str, Any]] = Field(
+        default_factory=list, description="假设列表（id / statement / measurable）"
+    )
+    experiment_design: dict[str, Any] = Field(
+        default_factory=dict, description="实验设计（问题 / 条件 / 指标 / 数据集）"
+    )
+
+
 # ---- 分组文件夹 ----
 
 
@@ -34,7 +75,12 @@ class ResearchFolderCreateRequest(BaseModel):
     parent_id: uuid.UUID | None = Field(
         default=None, description="父文件夹 ID，None 表示根"
     )
-    sort_order: int = Field(default=0, description="同级排序权重")
+    sort_order: int | None = Field(
+        default=None,
+        description=(
+            "同级排序权重。不传则置顶（同级最小值 - 1），显式传入则按值插入。"
+        ),
+    )
 
 
 class ResearchFolderUpdateRequest(BaseModel):
@@ -61,6 +107,10 @@ class ResearchFolderItem(BaseModel):
     parent_id: uuid.UUID | None
     name: str
     sort_order: int
+    is_pinned: bool = Field(
+        default=False,
+        description="置顶标记；True 恒定排在未置顶文件夹之前",
+    )
     session_count: int = Field(
         default=0,
         description="该文件夹直接归属的会话数（不含子文件夹内的）",
@@ -76,6 +126,7 @@ class ResearchFolderTreeNode(BaseModel):
     parent_id: uuid.UUID | None
     name: str
     sort_order: int
+    is_pinned: bool = False
     session_count: int = 0
     children: list["ResearchFolderTreeNode"] = Field(default_factory=list)
 
@@ -153,7 +204,21 @@ class ResearchSessionCreateRequest(BaseModel):
         description="会话显示名；缺省时后端用 topic 前 60 字符生成",
     )
     topic: str = Field(
-        min_length=1, max_length=20000, description="研究问题 / 主题"
+        default="",
+        max_length=20000,
+        description=(
+            "研究问题 / 主题。传 template_id 时可留空，后端用模板 manifest 派生；"
+            "两者都空则 400。"
+        ),
+    )
+    template_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "ARC-Bench 课题 id（如 ML01）：给定则建会话时把 stage-07/08/09 产物"
+            "直接物化进 run_dir。纯初始化入参，不落库；显式传的 topic / "
+            "metric_key / metric_direction 优先于模板值。"
+        ),
     )
     profile: str = Field(
         default="algorithm_evolution",
@@ -162,6 +227,22 @@ class ResearchSessionCreateRequest(BaseModel):
     )
     mode: ResearchMode = Field(
         default=ResearchMode.CO_PILOT, description="ARC HITL 模式"
+    )
+    metric_direction: Literal["maximize", "minimize", ""] = Field(
+        default="",
+        description=(
+            "指标优化方向：'maximize' 表示越大越好（如准确率），"
+            "'minimize' 表示越小越好（如损失/误差）；空串表示未指定，原样透传"
+            "给 ARC 处理。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。"
+        ),
+    )
+    metric_key: str = Field(
+        default="",
+        max_length=64,
+        description=(
+            "ARC experiment.metric_key：Stage-13 择优解析结果时按此列名取值；"
+            "空串表示未指定，由后端回落 ARC 默认 'primary_metric'。"
+        ),
     )
     folder_id: uuid.UUID | None = Field(default=None, description="归属分组，可选")
     provider_id: str | None = Field(
@@ -191,6 +272,15 @@ class ResearchSessionUpdateRequest(BaseModel):
         description="传 None 且请求体显式包含该键时移到未分组；未提供不变",
     )
     mode: ResearchMode | None = Field(default=None)
+    metric_direction: Literal["maximize", "minimize", ""] | None = Field(
+        default=None,
+        description="指标优化方向；空串表示清空（回落 ARC 默认）；未提供不变",
+    )
+    metric_key: str | None = Field(
+        default=None,
+        max_length=64,
+        description="ARC experiment.metric_key；空串表示清空（回落 ARC 默认）；未提供不变",
+    )
     provider_id: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
 
@@ -207,6 +297,8 @@ class ResearchSessionItem(BaseModel):
     topic: str
     profile: str
     mode: str
+    metric_direction: str
+    metric_key: str
     provider_id: str | None
     model_name: str | None
     status: ResearchSessionStatus
@@ -228,7 +320,7 @@ class ResearchSessionListResponse(BaseModel):
     items: list[ResearchSessionItem] = Field(default_factory=list)
     next_cursor: str | None = Field(
         default=None,
-        description="下一页游标 = 本页最后一条的 updated_time ISO；None 表示无更多",
+        description="下一页游标 = 本页最后一条的 created_time ISO；None 表示无更多",
     )
     has_more: bool = False
 
@@ -609,7 +701,9 @@ ResearchArtifactTreeNode.model_rebuild()
 class ResearchGeneratedItem(BaseModel):
     """单个 ``generated/*.json`` 解，内容内联且已剥离大字段。
 
-    剥离策略复用演化任务持久化的
+    只扫描 ``stage-NN/task_packages/{算法名称}/runs/{任务名}/{run_id}/generated/*.json``
+    这条路径；``stage`` 字段存的是**算法名称**（task_packages 的下一级），不再是 ARC
+    阶段号。剥离策略复用演化任务持久化的
     :data:`app.utils.log_persist.LIST_STRIPPED_GENERATED_FIELDS`
     （``code_artifacts`` / ``generation_meta`` / ``worktree`` / ``description``
     置空），避免整段源码/长文本撑爆响应。
@@ -617,7 +711,10 @@ class ResearchGeneratedItem(BaseModel):
 
     path: str = Field(description="相对 run_dir 的路径，可直接用于 /artifacts/download")
     name: str = Field(description="文件名")
-    stage: int | None = Field(default=None, description="来自哪个 ARC 阶段")
+    stage: str | None = Field(
+        default=None,
+        description="算法名称（task_packages 下一级目录名，如 esn / mlp）",
+    )
     run_id: str | None = Field(
         default=None,
         description="llm4ad 演化 run 短 id（路径中 generated 的上一级目录名）",
@@ -631,18 +728,32 @@ class ResearchGeneratedItem(BaseModel):
 
 
 class ResearchGeneratedStageGroup(BaseModel):
-    """按 stage 分组的 generated 解。"""
+    """按算法名称分组的 generated 解。"""
 
-    stage: int | None = Field(default=None, description="stage 号；无法解析为 null")
+    stage: str | None = Field(default=None, description="算法名称；无法解析为 null")
     items: list[ResearchGeneratedItem] = Field(default_factory=list)
 
 
 class ResearchGeneratedResponse(BaseModel):
-    """所有 generated 解，内容内联、按 stage 分组。"""
+    """所有 generated 解，内容内联、按算法名称分组。"""
 
     session_id: uuid.UUID
     run_dir: str | None
     groups: list[ResearchGeneratedStageGroup] = Field(default_factory=list)
+
+
+class ResearchArtifactImportResponse(BaseModel):
+    """`POST /sessions/{sid}/artifacts/import` 响应：解压导入结果。
+
+    ``failed`` 列出未成功写入的 zip 条目；单个条目失败不会中断整批导入。
+    """
+
+    session_id: uuid.UUID
+    run_dir: str | None = None
+    source: str | None = Field(default=None, description="上传文件名 / 标识")
+    imported: int = Field(default=0, description="成功写入的条目数")
+    overwritten: int = Field(default=0, description="覆盖已存在文件的条目数")
+    failed: list[str] = Field(default_factory=list, description="失败的 zip 条目名")
 
 
 

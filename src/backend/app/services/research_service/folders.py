@@ -51,20 +51,73 @@ def _session_counts_by_folder(
     return {fid: int(n) for fid, n in db.exec(stmt).all()}
 
 
+_FOLDER_ORDER = (
+    ResearchFolder.is_pinned.desc(),
+    ResearchFolder.sort_order,
+    ResearchFolder.created_time,
+    ResearchFolder.id,
+)
+"""文件夹列表 / 树的统一排序键：置顶优先 → 手动序号 → 创建时间 → id。
+
+置顶做成独立的布尔维度，而不是靠往 ``sort_order`` 里塞极小值来实现：后者
+会让「序号」同时承载「用户意图的位置」和「是否置顶」两种语义，取消置顶时
+无法还原到原来的位置。独立布尔列则让置顶 / 取消置顶成为纯粹的开关切换，
+完全不碰 ``sort_order``（见 ``set_folder_pinned``），因此天然无损。
+
+末位 ``id`` 只为消除并列时间戳的不确定性（同批插入的若干行 ``created_time``
+可能完全相同），与 session 列表的复合排序保持一致的思路，让顺序稳定可复现。
+"""
+
+
+def _top_sort_order(
+    db: Session, user: models.User, parent_id: uuid.UUID | None
+) -> int:
+    """同一父级下「最前」用的新序号：现有最小值 - 1，无同级时 -1。
+
+    新建文件夹默认排在同级最前，避免 ``sort_order`` 全为 0 时新文件夹被
+    ``created_time`` 兜底压到列表末尾导致用户找不到。
+
+    ``parent_id`` 为 ``None``（根文件夹）时必须用 ``IS NULL``：SQL 里
+    ``parent_id = NULL`` 恒为假，写等值比较会退化成跨父级取最小值。
+
+    起始值取 ``-1`` 而非 ``0``：历史数据 ``sort_order`` 全是 0，从 0 起会与
+    既有文件夹撞号并再次落到末尾。向下递减无下限压力（int4 余量充足）。
+    """
+    same_level = (
+        ResearchFolder.parent_id.is_(None)
+        if parent_id is None
+        else ResearchFolder.parent_id == parent_id
+    )
+    current_min = db.exec(
+        select(func.min(ResearchFolder.sort_order))
+        .where(ResearchFolder.user_id == user.id)
+        .where(same_level)
+    ).one()
+    return current_min - 1 if current_min is not None else -1
+
+
+def _sort_folder_items(
+    rows: list[ResearchFolder], counts: dict[uuid.UUID | None, int]
+) -> list[ResearchFolderItem]:
+    """把 ORM 行按 ``_FOLDER_ORDER`` 转成响应项并填 session_count。"""
+    items: list[ResearchFolderItem] = []
+    for f in rows:
+        item = ResearchFolderItem.model_validate(f)
+        item.session_count = counts.get(f.id, 0)
+        items.append(item)
+    return items
+
+
 def list_folders(db: Session, user: models.User) -> ResearchFolderListResponse:
     """返回该用户的所有文件夹 + 每个 folder 的直接归属会话数 + 未分组会话数。"""
     folders = db.exec(
         select(ResearchFolder)
         .where(ResearchFolder.user_id == user.id)
-        .order_by(ResearchFolder.sort_order, ResearchFolder.created_time)
+        .order_by(*_FOLDER_ORDER)
     ).all()
     # 一次 GROUP BY 拿全部 folder → session 计数，避免 N+1
     counts = _session_counts_by_folder(db, user)
-    items: list[ResearchFolderItem] = []
-    for f in folders:
-        item = ResearchFolderItem.model_validate(f)
-        item.session_count = counts.get(f.id, 0)
-        items.append(item)
+    items = _sort_folder_items(list(folders), counts)
     return ResearchFolderListResponse(
         items=items,
         total=len(folders),
@@ -75,15 +128,31 @@ def list_folders(db: Session, user: models.User) -> ResearchFolderListResponse:
 def create_folder(
     db: Session, request: ResearchFolderCreateRequest, user: models.User
 ) -> ResearchFolderItem:
-    """新建文件夹。父级不存在或跨用户时 404。"""
+    """新建文件夹。父级不存在或跨用户时 404。
+
+    未显式指定 ``sort_order`` 时排到同级最前（同级最小值 - 1），避免新文件夹
+    被既有的 0 号与 ``created_time`` 一起压到列表末尾；显式传入则尊重请求值，
+    供「按指定位置插入」这类调用方使用。
+
+    新建的文件夹 ``is_pinned`` 恒为 False：它排在最前是位置结果，不代表用户
+    置顶意图，用户若真要钉住需显式调用置顶接口。
+    """
     if request.parent_id is not None:
         _get_folder(db, request.parent_id, user)  # 校验 parent 归属
+        parent_id = request.parent_id
+    else:
+        parent_id = None
+
+    if request.sort_order is None:
+        sort_order = _top_sort_order(db, user, parent_id)
+    else:
+        sort_order = request.sort_order
 
     folder = ResearchFolder(
         user_id=user.id,
-        parent_id=request.parent_id,
+        parent_id=parent_id,
         name=request.name.strip(),
-        sort_order=request.sort_order,
+        sort_order=sort_order,
     )
     db.add(folder)
     try:
@@ -194,14 +263,47 @@ def reorder_folders(
     db.commit()
     for r in rows:
         db.refresh(r)
-    # 按新 sort_order 返回，方便前端直接替换
+    # 按新的排序键返回，方便前端直接替换（置顶维度也一并生效）
     counts = _session_counts_by_folder(db, user, folder_ids=ids)
-    result: list[ResearchFolderItem] = []
-    for r in sorted(rows, key=lambda x: x.sort_order):
-        item = ResearchFolderItem.model_validate(r)
-        item.session_count = counts.get(r.id, 0)
-        result.append(item)
-    return result
+    ordered = sorted(
+        rows,
+        key=lambda x: (
+            not x.is_pinned,
+            x.sort_order,
+            x.created_time,
+            x.id,
+        ),
+    )
+    return _sort_folder_items(ordered, counts)
+
+
+def set_folder_pinned(
+    db: Session,
+    folder_id: uuid.UUID,
+    user: models.User,
+    *,
+    pinned: bool,
+) -> ResearchFolderItem:
+    """置顶 / 取消置顶文件夹（幂等）。
+
+    只翻转 ``is_pinned``，绝不改 ``sort_order``。序号是用户在组内手动排序
+    的意图，置顶是另一个正交维度（见 ``_FOLDER_ORDER``）；若置顶时把序号
+    改小，取消置顶就再也回不到原来的位置，反复置顶还会让序号单调累积。
+
+    组内置顶项之间的先后沿用各自的 ``sort_order``，不按置顶时间重排；
+    这样置顶/取消置顶对序号完全无损。
+
+    重复调用同一状态不会改变 ``updated_time`` 之外的任何东西，前端可以放心
+    重试。
+    """
+    folder = _get_folder(db, folder_id, user)
+    if folder.is_pinned != pinned:
+        folder.is_pinned = pinned
+        folder.updated_time = datetime.now(UTC)
+        db.add(folder)
+        db.commit()
+        db.refresh(folder)
+    return ResearchFolderItem.model_validate(folder)
 
 
 def get_folder_tree(
@@ -211,7 +313,7 @@ def get_folder_tree(
     folders = db.exec(
         select(ResearchFolder)
         .where(ResearchFolder.user_id == user.id)
-        .order_by(ResearchFolder.sort_order, ResearchFolder.created_time)
+        .order_by(*_FOLDER_ORDER)
     ).all()
     counts = _session_counts_by_folder(db, user)
 
@@ -223,6 +325,7 @@ def get_folder_tree(
             parent_id=f.parent_id,
             name=f.name,
             sort_order=f.sort_order,
+            is_pinned=f.is_pinned,
             session_count=counts.get(f.id, 0),
         )
     roots: list[ResearchFolderTreeNode] = []

@@ -2,12 +2,13 @@ import {
   Activity,
   GitBranch,
   Layers,
+  ListStart,
   Loader2,
   Trophy,
   TrendingUp,
   Users,
 } from "lucide-react"
-import { useEffect, useId, useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ResearchGeneratedItem } from "@/client"
@@ -16,8 +17,20 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card"
-import { useResearchGenerated } from "@/hooks/useAutoResearch"
-import { cn } from "@/lib/utils"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { algorithmKey, useExperimentAlgorithm } from "./useExperimentAlgorithm"
 
 /**
  * 右侧「实验」区：llm4ad 演化的仿真概览 + 趋势分析，接入真实 generated 数据。
@@ -155,7 +168,15 @@ function buildExpData(items: ResearchGeneratedItem[]): ExpData {
   }
 }
 
-/** 演化仿真 ⇄ 趋势分析切换段控件（放在区域标题行，与标题水平对齐）。 */
+/**
+ * 演化仿真 ⇄ 趋势分析切换按钮。
+ *
+ * 段控件（两个并排选项）要占掉两枚按钮的宽度，而这一行同时还要放算法分组
+ * 选择器，窄面板下会很挤。这里改成单枚按钮：按钮上显示的是**即将切到的视图**
+ * （图标 + 文案），点一下即互换，于是同一时刻只需要一个目标词的宽度。
+ * 因为在按钮上写的是目标态而非当前态，语义容易读反，故 hover 用 tooltip
+ * 明确写出「点击切换到 X」，避免歧义。
+ */
 export function ExperimentTabToggle({
   value,
   onChange,
@@ -164,70 +185,67 @@ export function ExperimentTabToggle({
   onChange: (v: ExperimentTab) => void
 }) {
   const { t } = useTranslation()
-  const items: { key: ExperimentTab; icon: typeof Activity; label: string }[] =
-    [
-      {
-        key: "simulation",
-        icon: Activity,
-        label: t("autoResearch.experiment.simulation"),
-      },
-      {
-        key: "trend",
-        icon: TrendingUp,
-        label: t("autoResearch.experiment.trend"),
-      },
-    ]
+  const target: ExperimentTab = value === "simulation" ? "trend" : "simulation"
+  const TargetIcon = target === "simulation" ? Activity : TrendingUp
+  const targetLabel = t(
+    target === "simulation"
+      ? "autoResearch.experiment.simulation"
+      : "autoResearch.experiment.trend",
+  )
+
   return (
-    <div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-card/60 p-0.5">
-      {items.map(({ key, icon: Icon, label }) => (
-        <button
-          key={key}
-          type="button"
-          onClick={() => onChange(key)}
-          aria-pressed={value === key}
-          className={cn(
-            "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
-            value === key
-              ? "bg-primary/15 text-primary"
-              : "text-muted-foreground hover:text-foreground/80",
-          )}
-        >
-          <Icon className="size-3" />
-          {label}
-        </button>
-      ))}
-    </div>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => onChange(target)}
+            aria-label={t("autoResearch.experiment.switchTo", {
+              view: targetLabel,
+            })}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/60 bg-card/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+          >
+            <TargetIcon className="size-3" />
+            {targetLabel}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="px-2 py-1 text-[11px]">
+          {t("autoResearch.experiment.switchTo", { view: targetLabel })}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
 export default function ExperimentPanel({
   sessionId,
   running,
+  algorithm,
+  onAlgorithmChange,
 }: {
   sessionId: string
   running?: boolean
+  /** 当前选中的算法名（由 ArtifactsPanel 持有，与全屏弹框共享）。 */
+  algorithm?: string | null
+  onAlgorithmChange?: (algo: string) => void
 }) {
   const { t } = useTranslation()
-  const genQ = useResearchGenerated(sessionId, running)
+  const { genQ, groups, selected, onSelect } = useExperimentAlgorithm(
+    sessionId,
+    running,
+  )
   const [tab, setTab] = useState<ExperimentTab>("simulation")
 
-  // 只保留有个体的 stage 分组。
-  const groups = useMemo(
-    () => (genQ.data?.groups ?? []).filter((g) => (g.items?.length ?? 0) > 0),
-    [genQ.data],
+  // 受控优先：父层给了算法名就用它，否则用 hook 的缺省（最后一个分组）。
+  const stage = algorithm ?? selected
+  const handleSelect = onAlgorithmChange ?? onSelect
+
+  const activeGroup = useMemo(
+    () =>
+      groups.find((g) => algorithmKey(g.stage) === stage) ??
+      groups[groups.length - 1],
+    [groups, stage],
   )
-
-  const [stage, setStage] = useState<number | null>(null)
-  useEffect(() => {
-    if (groups.length === 0) return
-    const stages = groups.map((g) => g.stage ?? -1)
-    if (stage == null || !stages.includes(stage)) {
-      setStage(stages[stages.length - 1])
-    }
-  }, [groups, stage])
-
-  const activeGroup =
-    groups.find((g) => (g.stage ?? -1) === stage) ?? groups[groups.length - 1]
   const data = useMemo(
     () => buildExpData(activeGroup?.items ?? []),
     [activeGroup?.items],
@@ -252,39 +270,39 @@ export default function ExperimentPanel({
 
   return (
     <div>
-      {/* 视图切换（演化仿真在左 / 趋势分析在右） */}
-      <div className="mb-2 flex items-center gap-1">
+      {/* 控制行：左侧算法分组选择、右侧视图切换，两端对齐（中间靠 justify-between
+          撑开）。只有一个算法分组时同样渲染选择器——它此时是「当前算法名」的展示位
+          （用户要求单个也要看得到算法名），只是没有下拉项可切换。 */}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <Select value={stage ?? ""} onValueChange={handleSelect}>
+          <SelectTrigger
+            size="sm"
+            aria-label={t("autoResearch.experiment.selectAlgorithm")}
+            className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 shrink-0"
+          >
+            <ListStart className="size-3 shrink-0" />
+            <SelectValue placeholder={t("autoResearch.experiment.selectAlgorithm")} />
+          </SelectTrigger>
+          <SelectContent>
+            {groups.map((g) => (
+              <SelectItem
+                key={algorithmKey(g.stage)}
+                value={algorithmKey(g.stage)}
+                className="text-xs"
+              >
+                {g.stage ?? "?"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <ExperimentTabToggle value={tab} onChange={setTab} />
       </div>
-      {/* stage 选择 */}
-      {groups.length > 1 && (
-        <div className="mb-2 flex items-center gap-1.5">
-          <span className="text-[10px] text-muted-foreground">
-            {t("autoResearch.stages.title")}
-          </span>
-          <select
-            value={stage ?? ""}
-            onChange={(e) => setStage(Number(e.target.value))}
-            className="h-6 rounded border border-border/60 bg-background/60 px-1.5 text-[11px] focus:border-primary/50 focus:outline-none"
-          >
-            {groups.map((g) => (
-              <option key={g.stage ?? -1} value={g.stage ?? -1}>
-                #{g.stage ?? "?"}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
 
       {tab === "simulation" ? (
         <SimulationView data={data} />
       ) : (
         <TrendView data={data} />
       )}
-
-      <p className="mt-1.5 text-[10px] text-muted-foreground/50">
-        {t("autoResearch.experiment.population")}: {data.population}
-      </p>
     </div>
   )
 }

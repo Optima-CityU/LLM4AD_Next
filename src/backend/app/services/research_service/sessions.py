@@ -9,8 +9,13 @@
 
 from __future__ import annotations
 
+import io
+import shutil
 import uuid
+import zipfile
+from copy import deepcopy
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -21,7 +26,9 @@ from sqlmodel import Session, select
 from app import models
 from app.core.redis import delete_research_stream
 from app.models.research import (
+    ResearchLog,
     ResearchMessage,
+    ResearchMessageRole,
     ResearchSession,
     ResearchSessionStatus,
     ResearchTurn,
@@ -39,6 +46,7 @@ from app.schemas.research import (
     ResearchTurnItem,
 )
 from app.tasks.research_runner import cleanup_run_dir, stage_display_name
+from app.tasks.research_runner.snapshots import resolve_run_dir, snap_session
 
 from ._common import (
     _encode_reverse_cursor,
@@ -52,9 +60,31 @@ from .profile_switch import (
     purge_stage_artifacts,
     purge_stage_data,
 )
+from .templates import derive_topic, load_manifest, materialize, rematerialize
 
 # 会话 title 兜底策略：优先用户传的 title；否则从 topic 截取，超长加省略号。
 _TITLE_MAX = 60
+
+# 复制会话时给副本标题追加的后缀，让副本在侧栏列表里一眼可辨。
+_COPY_TITLE_SUFFIX = "（副本）"
+# `ResearchSession.title` 的列长（模型定义处 max_length=255），拼后缀时据此截断。
+_MODEL_TITLE_MAX = 255
+
+
+def _derive_copy_title(title: str | None) -> str:
+    """给副本起名：原标题 + :data:`_COPY_TITLE_SUFFIX`。
+
+    超长时先截断原标题再拼后缀——保后缀优先，否则用户在列表里又分不清哪个是副本。
+
+    Args:
+        title: 源会话标题；None / 空串视为 "untitled"。
+
+    Returns:
+        副本标题，长度不超过 ``ResearchSession.title`` 的 255 上限。
+    """
+    base = (title or "").strip() or "untitled"
+    limit = _MODEL_TITLE_MAX - len(_COPY_TITLE_SUFFIX)
+    return base[:limit] + _COPY_TITLE_SUFFIX
 
 
 def _derive_session_title(explicit: str | None, topic: str) -> str:
@@ -69,14 +99,115 @@ def _derive_session_title(explicit: str | None, topic: str) -> str:
     return normalized[: _TITLE_MAX - 1] + "…"
 
 
+def _seed_template_checkpoint(
+    db: Session,
+    session: ResearchSession,
+    *,
+    topic_id: str,
+) -> None:
+    """把「模板已预置 stage-07/08/09」写成一枚种子轮 + 6 条 stage 事件。
+
+    run_dir 里已有 stage-07/08/09 产物与 ``checkpoint.json``（见
+    :func:`templates.materialize`），若 DB 里没有任何痕迹，前端阶段 rail 会显示
+    空白。这里补一条 ``COMPLETED`` 的种子轮 + 每个阶段一对
+    ``running``/``done`` 的 ``stage_transition`` 消息，让 :func:`get_state` 的
+    回放逻辑（只读 ``event_type == "stage_transition"`` 的行）重建出「7/8/9 已完成」。
+
+    刻意**不**置 ``session.status``：会话仍是 ``PENDING``，首轮走的是
+    :func:`turns.start_turn` 的「新建 turn」路径，与非模板会话完全一致。种子轮只是
+    这批消息的 FK 载体（``ResearchMessage.turn_id`` 非空）。
+
+    Args:
+        db: 数据库会话（调用方负责 commit）。
+        session: 已 flush 出 id 的会话行。
+        topic_id: 课题 id，仅用于文案。
+    """
+    now = _now_utc()
+    turn = ResearchTurn(
+        id=uuid.uuid4(),
+        session_id=session.id,
+        status=ResearchTurnStatus.COMPLETED.value,
+        from_stage="7",
+        to_stage="9",
+        user_input=f"initialized from template {topic_id}",
+        started_at=now,
+        ended_at=now,
+    )
+    db.add(turn)
+    db.flush()
+
+    for seq, stage in enumerate((7, 8, 9), start=1):
+        name = stage_display_name(stage)
+        for offset, status in enumerate(("running", "done")):
+            db.add(
+                ResearchMessage(
+                    session_id=session.id,
+                    turn_id=turn.id,
+                    role=ResearchMessageRole.SYSTEM,
+                    content=f"[stage-{stage}] {name} {status}",
+                    turn_status=ResearchTurnStatus.COMPLETED.value,
+                    event_type="stage_transition",
+                    event_key=f"stage_transition:{seq}{offset}",
+                    stage=stage,
+                    seq=seq * 10 + offset,
+                    payload={
+                        "kind": "stage_progress",
+                        "stage": stage,
+                        "name": name,
+                        "status": status,
+                    },
+                )
+            )
+
+
 def create_session(
     db: Session, request: ResearchSessionCreateRequest, user: models.User
 ) -> ResearchSessionItem:
-    """新建会话（不立即启动首轮）。"""
+    """新建会话（不立即启动首轮）。
+
+    ``request.template_id`` 给定即走「从模板创建」：把 ARC-Bench 课题的
+    stage-07/08/09 产物物化进 run_dir，并补一枚种子轮 + 7/8/9 的 stage 事件。
+    其余流程与非模板会话完全一致——模板只是**创建时的一次性初始化输入**，不落任何
+    session 字段，后续对会话的读写路径无需感知它。
+    """
     if request.folder_id is not None:
         _get_folder(db, request.folder_id, user)
 
-    title = _derive_session_title(request.title, request.topic)
+    topic = (request.topic or "").strip()
+    title = request.title
+    metric_direction = request.metric_direction
+    metric_key = request.metric_key
+    profile = request.profile
+    manifest: dict[str, Any] | None = None
+
+    if request.template_id:
+        # 课题不存在 / 镜像未装 extra 都在这里 404 / 503，早于任何写库。
+        manifest = load_manifest(request.template_id)
+        if not topic:
+            topic = derive_topic(manifest)
+        if not title:
+            # 模板标题比派生 topic 全文更适合当会话名。
+            title = str(manifest.get("title") or request.template_id)
+        metrics = (manifest.get("experiment_design") or {}).get("metrics") or []
+        if metrics:
+            # 与 run_bench_init.materialize_config 同款：取首个 metric。
+            # 显式传值优先——用户可以在建会话时覆盖模板建议。
+            primary = metrics[0]
+            if not metric_key:
+                metric_key = str(primary.get("name") or "")
+            if not metric_direction:
+                direction = str(primary.get("direction") or "")
+                if direction in ("maximize", "minimize"):
+                    metric_direction = direction
+        # profile 与模板域无关（config_builder 恒用 mathematics_optimization），
+        # 不按域改写；模板自带的 domain_profile.json 由容器内 stage-10 消费。
+
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="topic is required when template_id is not given",
+        )
+
     workspace_dict = (
         request.llm4ad_workspace.model_dump(mode="json")
         if request.llm4ad_workspace
@@ -86,17 +217,43 @@ def create_session(
     session = ResearchSession(
         user_id=user.id,
         folder_id=request.folder_id,
-        title=title,
-        topic=request.topic,
-        profile=request.profile,
+        title=_derive_session_title(title, topic),
+        topic=topic,
+        profile=profile,
         mode=request.mode.value,
+        metric_direction=metric_direction,
+        metric_key=metric_key,
         provider_id=request.provider_id,
         model_name=request.model_name,
         llm4ad_workspace=workspace_dict,
     )
+    if request.template_id:
+        # run_dir 在建会话时就定下来并落库：与 _bootstrap 的 resolve_run_dir 同口径
+        # （session.run_dir 优先），物化与后续 pipeline 读写必然同一目录。
+        session.run_dir = str(
+            resolve_run_dir(snap_session(session))
+        )
     db.add(session)
     db.commit()
     db.refresh(session)
+
+    # 磁盘物化 + 种子轮都放在主提交之后（best-effort）：即便失败，会话已存在、
+    # 首轮照常可跑，只是没有预置产物与 7/8/9 的进度痕迹。
+    if request.template_id:
+        if not materialize(Path(session.run_dir), request.template_id):
+            logger.warning(
+                f"template {request.template_id} not materialized for session {session.id}"
+            )
+        try:
+            _seed_template_checkpoint(db, session, topic_id=request.template_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.opt(exception=True).warning(
+                f"seed template checkpoint failed session={session.id}"
+            )
+        db.refresh(session)
+
     return ResearchSessionItem.model_validate(session)
 
 
@@ -162,6 +319,10 @@ def update_session(
         session.folder_id = folder_change[1]
     if request.mode is not None:
         session.mode = request.mode.value
+    if request.metric_direction is not None:
+        session.metric_direction = request.metric_direction
+    if request.metric_key is not None:
+        session.metric_key = request.metric_key
     if request.provider_id is not None:
         session.provider_id = request.provider_id
     if request.model_name is not None:
@@ -177,6 +338,11 @@ def update_session(
     if needs_purge:
         purge_stage_artifacts(run_dir_snapshot)
         purge_stage_data(db, session.id)
+        # 模型产物被清后，模板预置的 stage-09 也一并没了。若 run_dir 里还留着题面
+        # （topic_manifest.json，见 templates.rematerialize），就地补回来——否则要拖到
+        # 下一轮 worker bootstrap 才补，期间前端看到的是空 stage-09。
+        if run_dir_snapshot:
+            rematerialize(Path(run_dir_snapshot))
 
     db.refresh(session)
     return ResearchSessionItem.model_validate(session)
@@ -193,10 +359,18 @@ def list_sessions(
     cursor: str | None,
     limit: int,
 ) -> ResearchSessionListResponse:
-    """按分组 / 状态 / 关键词过滤会话，游标分页（updated_time 倒序）。
+    """按分组 / 状态 / 关键词过滤会话，游标分页（created_time 倒序）。
+
+    排序键取 ``created_time`` 而非 ``updated_time``：后者会被一堆与「用户最近
+    在用它」无关的写入顶上来（后台 stage 推进、config 快照、改分组、空 PATCH），
+    列表位置因此不稳定。创建时间不可变，位置稳定可预期；副本会话在
+    :func:`copy_session` 里取当前时间作为新的生命周期起点，故天然排最前。
+
+    代价是「正在跑的会话不会浮到最前」——会话侧没有置顶维度可以兜底；若要
+    找回某个老会话，走 ``q`` 关键词过滤。
 
     - ``q``：对 topic + title 做大小写不敏感模糊匹配（ILIKE）。
-    - cursor = 上一页最后一条的 ``updated_time`` ISO 字符串；首次不传。
+    - cursor = 上一页最后一条的 ``created_time`` ISO 字符串；首次不传。
     """
     query = select(ResearchSession).where(ResearchSession.user_id == user.id)
     if ungrouped_only:
@@ -219,29 +393,29 @@ def list_sessions(
             )
         )
     if cursor:
-        # 复合游标 (updated_time, id)：仅按 updated_time 严格小于时，多条会话同一
-        # updated_time 且恰好跨页边界会被整体跳过而丢失。带 id 次级键给出全序边界。
+        # 复合游标 (created_time, id)：仅按 created_time 严格小于时，多条会话同一
+        # created_time 且恰好跨页边界会被整体跳过而丢失。带 id 次级键给出全序边界。
         cur_ts, cur_id = _parse_reverse_cursor(cursor)
         if cur_id is not None:
             query = query.where(
-                tuple_(ResearchSession.updated_time, ResearchSession.id)
+                tuple_(ResearchSession.created_time, ResearchSession.id)
                 < (cur_ts, cur_id)
             )
         else:
             # 旧版纯 ISO 游标兜底：仅时间戳比较（切换期短暂，可能少量重复不丢数据）。
-            query = query.where(ResearchSession.updated_time < cur_ts)
+            query = query.where(ResearchSession.created_time < cur_ts)
 
     page = max(1, min(limit, 200))
     rows = db.exec(
         query.order_by(
-            ResearchSession.updated_time.desc(),
+            ResearchSession.created_time.desc(),
             ResearchSession.id.desc(),
         ).limit(page + 1)
     ).all()
     has_more = len(rows) > page
     items = rows[:page]
     next_cursor = (
-        _encode_reverse_cursor(items[-1].updated_time, items[-1].id)
+        _encode_reverse_cursor(items[-1].created_time, items[-1].id)
         if has_more and items
         else None
     )
@@ -347,6 +521,276 @@ def delete_session(
         logger.opt(exception=True).warning(
             f"post-delete cleanup failed session={deleted_session_id}"
         )
+
+
+# ---- 复制会话与产物导入 ----
+
+
+def _now_utc() -> datetime:
+    """当前 UTC 时间（带时区），与 ``TimeMixin`` 的存储口径一致。"""
+    return datetime.now(UTC)
+
+
+def _derive_copied_run_dir(source: ResearchSession, new_session_id: uuid.UUID) -> str:
+    """为新会话派生 run_dir：沿用源码路径的目录骨架，仅把 ``{session_id}`` 段换成新 id。
+
+    源码 ``run_dir`` 形如 ``{home}/code_user-{uid}/research/{session_id}``，复制后落在
+    同一用户空间、新的会话目录下，与原始目录并存且物理隔离。若源码从未启动（无
+    run_dir），返回空串；若路径里找不到会话 id 段，退而求其次在新目录名旁追加 id。
+    """
+    if not source.run_dir:
+        return ""
+    path = Path(source.run_dir)
+    parts = list(path.parts)
+    old_id = str(source.id)
+    for idx in range(len(parts) - 1, -1, -1):
+        if parts[idx] == old_id:
+            parts[idx] = str(new_session_id)
+            return str(Path(*parts))
+    return str(path.parent / str(new_session_id))
+
+
+def copy_session(
+    db: Session, session_id: uuid.UUID, user: models.User
+) -> ResearchSessionItem:
+    """复制一个科研会话：整棵 DB 记录 + 落盘产物目录。
+
+    - **DB**：生成全部新 UUID（session / turn / message / log），杜绝主键冲突；
+      关联外键（``turn.session_id``、``message.session_id/turn_id``、
+      ``session.active_turn_id``、``turn.respond_to_message_id``、``log.*``）在新 id
+      之间重建映射，保证关联表一一对应。
+    - **产物目录**：沿源码 ``run_dir`` 目录骨架复制到新会话 id 下（见
+      :func:`_derive_copied_run_dir`）；复制失败不翻成 500，记日志后仍返回 DB 副本。
+    - ``stream_id`` 全部清空：副本没有对应的 Redis Stream，保留旧 id 会误导 SSE 续传
+      去读别的会话。
+    - ``title`` 追加 :data:`_COPY_TITLE_SUFFIX`，否则副本与原会话同名，列表里无从分辨。
+    """
+    source = _get_session(db, session_id, user)
+    new_session_id = uuid.uuid4()
+    new_run_dir = _derive_copied_run_dir(source, new_session_id)
+    now = _now_utc()
+
+    new_session = ResearchSession(
+        id=new_session_id,
+        user_id=source.user_id,
+        folder_id=source.folder_id,
+        title=_derive_copy_title(source.title),
+        topic=source.topic,
+        profile=source.profile,
+        mode=source.mode,
+        metric_direction=source.metric_direction,
+        metric_key=source.metric_key,
+        provider_id=source.provider_id,
+        model_name=source.model_name,
+        status=source.status,
+        active_stage=source.active_stage,
+        active_stage_name=source.active_stage_name,
+        run_dir=new_run_dir or None,
+        latest_config=deepcopy(source.latest_config),
+        llm4ad_workspace=deepcopy(source.llm4ad_workspace),
+        best_objective=source.best_objective,
+        best_code_sha256=source.best_code_sha256,
+        ended_time=source.ended_time,
+        error=source.error,
+        analysis_report=source.analysis_report,
+        # 副本是新的生命周期起点：创建/更新时间取当前，避免沿用旧值被当成过期会话清理
+        created_time=now,
+        updated_time=now,
+    )
+    db.add(new_session)
+    db.flush()  # 拿到 new_session_id（虽自生成，flush 保证后续 FK 可见）
+
+    # 1) 复制 turn（respond_to_message_id 稍后按消息映射补齐）
+    old_turns = db.exec(
+        select(ResearchTurn).where(ResearchTurn.session_id == source.id)
+    ).all()
+    turn_map: dict[uuid.UUID, ResearchTurn] = {}
+    for t in old_turns:
+        new_turn = ResearchTurn(
+            id=uuid.uuid4(),
+            session_id=new_session_id,
+            celery_task_id=None,  # 无活任务；旧 task id 只会误导
+            status=t.status,
+            provider_id=t.provider_id,
+            model_name=t.model_name,
+            mode=t.mode,
+            from_stage=t.from_stage,
+            to_stage=t.to_stage,
+            user_input=t.user_input,
+            respond_to_message_id=None,
+            error=t.error,
+            started_at=t.started_at,
+            ended_at=t.ended_at,
+            created_time=t.created_time,
+            updated_time=t.updated_time,
+        )
+        db.add(new_turn)
+        turn_map[t.id] = new_turn
+    db.flush()
+
+    # 2) 复制 message（建立旧→新 id 映射，供 respond_to_message_id / active_turn 用）
+    old_messages = db.exec(
+        select(ResearchMessage).where(ResearchMessage.session_id == source.id)
+    ).all()
+    message_map: dict[uuid.UUID, ResearchMessage] = {}
+    for m in old_messages:
+        target_turn = turn_map.get(m.turn_id)
+        if target_turn is None:  # 消息挂到了不存在的 turn？跳过，避免 KeyError
+            logger.warning(
+                f"copy_session orphan message skipped msg={m.id} turn={m.turn_id}"
+            )
+            continue
+        new_message = ResearchMessage(
+            id=uuid.uuid4(),
+            session_id=new_session_id,
+            turn_id=target_turn.id,
+            role=m.role,
+            content=m.content,
+            turn_status=m.turn_status,
+            error=m.error,
+            payload=m.payload,
+            payload_locked=m.payload_locked,
+            payload_locked_at=m.payload_locked_at,
+            payload_submission=m.payload_submission,
+            stage=m.stage,
+            event_type=m.event_type,
+            event_key=m.event_key,
+            seq=m.seq,
+            stream_id=None,  # 无 Redis stream（见函数 docstring）
+            created_time=m.created_time,
+            updated_time=m.updated_time,
+        )
+        db.add(new_message)
+        message_map[m.id] = new_message
+    db.flush()
+
+    # 3) 补齐 turn.respond_to_message_id（消息已建，映射可解）
+    for old_turn in old_turns:
+        if old_turn.respond_to_message_id:
+            new_msg = message_map.get(old_turn.respond_to_message_id)
+            if new_msg is not None:
+                new_turn = turn_map[old_turn.id]
+                new_turn.respond_to_message_id = new_msg.id
+
+    # 4) 复制 log
+    old_logs = db.exec(
+        select(ResearchLog).where(ResearchLog.session_id == source.id)
+    ).all()
+    for lg in old_logs:
+        target_turn = turn_map.get(lg.turn_id)
+        if target_turn is None:
+            logger.warning(
+                f"copy_session orphan log skipped log={lg.id} turn={lg.turn_id}"
+            )
+            continue
+        new_log = ResearchLog(
+            id=uuid.uuid4(),
+            session_id=new_session_id,
+            turn_id=target_turn.id,
+            level=lg.level,
+            message=lg.message,
+            source=lg.source,
+            module=lg.module,
+            event_key=lg.event_key,
+            turn_status=lg.turn_status,
+            stage=lg.stage,
+            ts=lg.ts,
+            seq=lg.seq,
+            stream_id=None,
+            created_time=lg.created_time,
+            updated_time=lg.updated_time,
+        )
+        db.add(new_log)
+
+    # 5) 会话活动轮指针映射到新 turn
+    if source.active_turn_id and source.active_turn_id in turn_map:
+        new_session.active_turn_id = turn_map[source.active_turn_id].id
+
+    db.commit()
+    db.refresh(new_session)
+
+    # 6) 复制落盘产物（best-effort：失败记录日志，不阻断已完成的 DB 复制）
+    if source.run_dir and new_run_dir:
+        src = Path(source.run_dir)
+        dst = Path(new_run_dir)
+        if src.is_dir() and not dst.exists():
+            try:
+                shutil.copytree(src, dst)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"copy_session files failed session={source.id} -> {new_session_id}"
+                )
+
+    return ResearchSessionItem.model_validate(new_session)
+
+
+def import_artifacts_zip(
+    db: Session,
+    session_id: uuid.UUID,
+    user: models.User,
+    data: bytes,
+    filename: str | None,
+) -> dict[str, Any]:
+    """上传 zip 解压覆盖到产物目录（run_dir）。
+
+    - zip 条目以**相对 run_dir** 的关系解压（对齐 ``/artifacts/archive`` 的打包口径：
+      归档内不含顶层容器目录）。
+    - 已存在的文件直接覆盖；单个条目失败（解压/写入）**捕获并记录**，不中断整批，
+      完成后返回失败清单。
+    - 防 zip-slip：每个目标路径 resolve 后必须仍在 run_dir 之内，越界条目跳过并记失败。
+    """
+    session = _get_session(db, session_id, user)
+    root = Path(session.run_dir) if session.run_dir else None
+    if not root or not root.is_dir():
+        raise HTTPException(status_code=404, detail="run_dir not initialized")
+    root = root.resolve()
+
+    imported = 0
+    overwritten = 0
+    failed: list[str] = []
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise HTTPException(status_code=400, detail="invalid zip file") from exc
+
+    with archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            name = info.filename.replace("\\", "/")
+            # 容错：去掉前导斜杠，防绝对路径 / 盘符越过 root 判断
+            name = name.lstrip("/")
+            if name.startswith("../") or ".." in name.split("/"):
+                failed.append(info.filename)
+                continue
+            target = (root / name).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                failed.append(info.filename)
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                existed = target.exists()
+                target.write_bytes(archive.read(info))
+                imported += 1
+                if existed:
+                    overwritten += 1
+            except Exception:
+                logger.opt(exception=True).warning(
+                    f"import artifacts failed entry={info.filename}"
+                )
+                failed.append(info.filename)
+
+    return {
+        "session_id": session.id,
+        "run_dir": session.run_dir,
+        "source": filename,
+        "imported": imported,
+        "overwritten": overwritten,
+        "failed": failed,
+    }
 
 
 def get_state(

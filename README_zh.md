@@ -42,6 +42,7 @@
 
 ## 🔥 最新动态
 
+- 🔬 [2026.09][自动科研]：**[LLM4AD_Next 接入 AutoResearchClaw](https://github.com/Optima-CityU/LLM4AD_Next/wiki/News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en)**，在 23 阶段科研流程的第 13 阶段、实验代码定稿前演化核心算法。候选版本沿用原评测程序验证，只有表现更好才替换原版；未改进时保留原代码。[在线体验](https://llm4ad-next.cn/autoresearch)时请选择 `llm4ad` 实验类型。
 - 🧮 [2026.09][新数据集]：新增 **[AlphaEvolve 数学基准套件](examples/applications/alphaevolve_math_benchmark/README.md)**，包含 11 个可独立运行的数学优化案例、案例级评估器、演化实现与可复用经验。
 - 🏝️ [2026.09][新搜索方法]：新增**多样岛屿遗传算法（Diverse Island GA）**，支持任意岛屿数量下连续分配利用、纠错与独立探索行为，并协同控制迁移和记忆使用。
 - 🎯 [2026.08][新功能]：**算法设计 Skill** —— 模块化方法定义（EoH, FunSearch, ReEvo, MEoH, MOEA/D），使 coding agent 能够自主设计算法。请参阅[算法设计 Skill](skills/algo-design/)。
@@ -73,6 +74,7 @@ uv run llm4ad chat
 * 🧠 **LLM 驱动的设计** & 🧬 **进化优化** 相结合，自动进化出高性能代码。
 * 💬 **交互式配置 (`llm4ad chat`)** —— 您的对话式 AI 顾问，一键生成完整的可运行应用框架。
 * 🔍 **进化块顾问与推荐器** —— 将 LLM4AD_Next 指向任意代码仓库，它将扫描、评分并精确推荐*哪些*代码块最有可能通过进化来实现您的目标。
+* 🔬 **[AutoResearch 自动科研](https://llm4ad-next.cn/autoresearch)** —— 基于 [AutoResearchClaw](https://arxiv.org/abs/2605.20025) 执行科研流程；选择 `llm4ad` 实验类型后演化算法，若新版本没有胜过原版，则保留原代码。
 
 ## 搜索方法（自动启发式设计）
 
@@ -266,22 +268,47 @@ mkdocs build
 ## 项目结构
 
 ```
-LLM4AD/
-├── src/llm4ad/          # 主源代码
-│   ├── config/           # 配置模式和全局设置
-│   ├── consultant/       # 交互式配置向导
-│   ├── builder/          # 任务构建器（分析器、创建器、验证器、写入器）
-│   ├── advisor/          # 进化块顾问与推荐器
-│   ├── provider/         # LLM 提供商实现
-│   ├── planner/          # 算法规划层
-│   ├── coder/            # 代码生成层
-│   ├── evaluator/        # 评估层
-│   ├── orchestrator/     # 工作流编排
-│   ├── infra/            # 基础设施（Ray、监控）
-│   └── utils/            # 工具库
-├── examples/             # 示例配置和应用
-├── tests/                # 测试套件
-└── docs/                 # 文档
+LLM4AD_Next/
+├── src/
+│   ├── llm4ad/           # 核心 Python 包与 CLI
+│   │   ├── agent/        # 对话式任务构建智能体
+│   │   ├── advisor/      # 进化块顾问与推荐器
+│   │   ├── builder/      # 可运行任务包构建器
+│   │   ├── config/       # 配置模式与全局设置
+│   │   ├── planner/      # 算法规划
+│   │   ├── coder/        # 代码生成
+│   │   ├── evaluator/    # 候选算法评测
+│   │   ├── orchestrator/ # 进化工作流
+│   │   ├── memory/       # 记忆集成
+│   │   └── infra/        # 模型供应商与共享基础设施
+│   ├── backend/          # FastAPI、工作进程、迁移与 API 测试
+│   └── frontend/         # React/Vite 前端与界面测试
+├── skills/               # 智能体技能
+│   ├── algo-design/      # 算法设计方法
+│   ├── autodiscovery/    # 从论文发现可进化任务
+│   ├── autorebuttal/     # 审稿回复与 AC 总结
+│   ├── document-knowledge-organizer/ # Markdown 知识整理
+│   ├── llm4ad-task-builder/ # 可运行任务包构建
+│   ├── openair-proposal/ # 分阶段科研申报书写作
+│   ├── research-stage-publication/ # 阶段成果发布
+│   └── typst-author/    # Typst 文档编写
+├── docker/               # Compose 配置与运行时支持
+├── third_party/          # 集成的上游子模块
+│   ├── CloudCLI/         # 云端开发工作区
+│   └── MindMemOS/        # 记忆服务与 SDK
+├── examples/             # 示例任务与基准测试
+│   ├── applications/    # 可运行任务与基准测试（下列为部分示例）
+│   │   ├── alphaevolve_math_benchmark/ # 数学优化案例
+│   │   ├── lunarlander_python/ # 强化学习示例
+│   │   ├── sorting_benchmark/ # 排序算法基准测试
+│   │   └── tsp_benchmark_python/ # 旅行商问题基准测试
+│   ├── auto_applications/ # 自动构建任务示例
+│   │   ├── from_code/   # 从已有代码构建任务
+│   │   └── from_description/ # 从文字描述构建任务
+│   └── config/          # 示例配置文件
+├── tests/                # 核心 Python 测试
+├── docs/                 # 中英文文档
+└── scripts/              # 仓库维护工具
 ```
 
 ## 参与贡献

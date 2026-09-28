@@ -355,6 +355,7 @@ class PythonRunnerContractTests(unittest.TestCase):
         self.assertIn('"autoCompactEnabled": True', runner)
         self.assertIn('"PreCompact"', runner)
         self.assertIn("PermissionResultAllow", runner)
+        self.assertIn('disallowed_tools=["WebFetch", "WebSearch"]', runner)
         self.assertIn("cc-switch", runner)
         self.assertNotIn('output_format={"type": "json_schema"', runner)
         self.assertNotIn("max_turns=", runner)

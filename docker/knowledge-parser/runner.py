@@ -258,7 +258,9 @@ def build_parser_prompt() -> str:
             )
         ),
     ]
-    if BACKGROUND_PATH.exists() and (background := BACKGROUND_PATH.read_text(encoding="utf-8").strip()):
+    if BACKGROUND_PATH.exists() and (
+        background := BACKGROUND_PATH.read_text(encoding="utf-8").strip()
+    ):
         sections.append(
             "\n".join(
                 (
@@ -268,8 +270,10 @@ def build_parser_prompt() -> str:
                 )
             )
         )
-    if JOB_MODE == "execute" and INSTRUCTION_PATH.exists() and (
-        instruction := INSTRUCTION_PATH.read_text(encoding="utf-8").strip()
+    if (
+        JOB_MODE == "execute"
+        and INSTRUCTION_PATH.exists()
+        and (instruction := INSTRUCTION_PATH.read_text(encoding="utf-8").strip())
     ):
         sections.append(
             "\n".join(
@@ -305,9 +309,13 @@ def build_parser_prompt() -> str:
             "请使用 Read 覆盖清单中的每个完整文件路径；可在同一轮并行读取多个文件，确认全部读取完成后再生成方案。"
         )
     elif JOB_MODE == "execute":
-        sections.append("请逐一使用 Read 读取清单中的每个完整文件路径，确认全部读取完成后再开始整理。")
+        sections.append(
+            "请逐一使用 Read 读取清单中的每个完整文件路径，确认全部读取完成后再开始整理。"
+        )
     else:
-        sections.append("请先读取当前整理结果；仅在事实不确定或优化要求涉及原文时，按需回看清单中的对应原始文件。")
+        sections.append(
+            "请先读取当前整理结果；仅在事实不确定或优化要求涉及原文时，按需回看清单中的对应原始文件。"
+        )
     return "\n\n".join(sections)
 
 
@@ -345,7 +353,9 @@ async def wait_for_proxy(proxy: asyncio.subprocess.Process) -> bool:
         if proxy.returncode is not None:
             return False
         try:
-            reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", int(PROXY_PORT)), timeout=0.5)
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", int(PROXY_PORT)), timeout=0.5
+            )
             writer.write(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
             await writer.drain()
             status_line = await asyncio.wait_for(reader.readline(), timeout=0.5)
@@ -439,10 +449,16 @@ class ParserAgent:
             str(event["stage"]),
             str(event["message"]),
             str(event["type"]),
-            **{key: value for key, value in event.items() if key not in {"progress", "stage", "message", "type", "error_code"}},
+            **{
+                key: value
+                for key, value in event.items()
+                if key not in {"progress", "stage", "message", "type", "error_code"}
+            },
         )
 
-    async def wait_for_plan_answer(self, question_id: str, questions: list[dict[str, Any]]) -> dict[str, str]:
+    async def wait_for_plan_answer(
+        self, question_id: str, questions: list[dict[str, Any]]
+    ) -> dict[str, str]:
         question_progress = max(45, self.state.last_progress)
         emit(
             question_progress,
@@ -495,7 +511,9 @@ class ParserAgent:
             questions = normalize_plan_questions(input_data)
             question_id = str(getattr(context, "tool_use_id", None) or "plan-question")
             answers = await self.wait_for_plan_answer(question_id, questions)
-            return PermissionResultAllow(updated_input={**input_data, "questions": questions, "answers": answers})
+            return PermissionResultAllow(
+                updated_input={**input_data, "questions": questions, "answers": answers}
+            )
         if tool_name in {"Read", "Glob", "Grep"}:
             return PermissionResultAllow(updated_input=input_data)
         if tool_name in PLAN_MCP_TOOL_NAMES:
@@ -521,7 +539,9 @@ class ParserAgent:
 
     async def run(self, prompt: str, sdk_settings_path: Path, claude_env: dict[str, str]) -> None:
         resume_session_id = load_resume_session_id()
-        plan_server = create_plan_store_server(PlanStore(OUTPUT_DIR)) if JOB_MODE == "plan" else None
+        plan_server = (
+            create_plan_store_server(PlanStore(OUTPUT_DIR)) if JOB_MODE == "plan" else None
+        )
         tools = (
             ["Read", "Glob", "Grep", *(["AskUserQuestion"] if COLLABORATIVE_PLANNING else [])]
             if JOB_MODE == "plan"
@@ -537,10 +557,15 @@ class ParserAgent:
             can_use_tool=self.can_use_tool if COLLABORATIVE_PLANNING else None,
             mcp_servers={PLAN_MCP_SERVER_NAME: plan_server} if plan_server else {},
             allowed_tools=sorted(PLAN_MCP_TOOL_NAMES) if plan_server else [],
+            disallowed_tools=["WebFetch", "WebSearch"],
             setting_sources=["user"],
             settings=str(sdk_settings_path),
             skills=[str(SKILL_PATH)],
-            system_prompt={"type": "preset", "preset": "claude_code", "append": COMPACTION_INSTRUCTIONS},
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": COMPACTION_INSTRUCTIONS,
+            },
             tools=tools,
             hooks={"PreCompact": [HookMatcher(matcher=None, hooks=[self.pre_compact_hook])]},
         )
@@ -557,7 +582,11 @@ class ParserAgent:
             persist_session_id(message)
             if self.shutdown.is_set():
                 raise asyncio.CancelledError
-            if isinstance(message, ResultMessage) and message.subtype == "success" and message.structured_output:
+            if (
+                isinstance(message, ResultMessage)
+                and message.subtype == "success"
+                and message.structured_output
+            ):
                 self.structured_plan = message.structured_output
             for event in translate_sdk_message(message, self.state):
                 self.forward_event(event)
@@ -639,7 +668,9 @@ def validate_output(agent: ParserAgent) -> int:
             else (plan.read_text(encoding="utf-8") if plan.exists() else "")
         )
         if payload := recover_json_object(primary, agent.assistant_transcript):
-            plan.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            plan.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
             emit(88, "verifying", "已接收结构化解析方案，正在校验")
     complete = (
         plan.exists() and plan.stat().st_size > 0
@@ -650,9 +681,11 @@ def validate_output(agent: ParserAgent) -> int:
         emit(
             100,
             "failed",
-            "Knowledge parser did not generate a complete plan.json"
-            if JOB_MODE == "plan"
-            else "Knowledge parser did not generate a complete manifest.json",
+            (
+                "Knowledge parser did not generate a complete plan.json"
+                if JOB_MODE == "plan"
+                else "Knowledge parser did not generate a complete manifest.json"
+            ),
             "error",
             error_code="invalid_parser_output",
         )
@@ -660,7 +693,11 @@ def validate_output(agent: ParserAgent) -> int:
     emit(
         90,
         "generated",
-        "解析方案已生成，等待平台保存" if JOB_MODE == "plan" else "预提取文档块已生成，等待平台保存",
+        (
+            "解析方案已生成，等待平台保存"
+            if JOB_MODE == "plan"
+            else "预提取文档块已生成，等待平台保存"
+        ),
     )
     return 0
 
@@ -675,7 +712,11 @@ async def async_main() -> int:
     drain_tasks: list[asyncio.Task[None]] = []
     try:
         validate_configuration()
-        emit(12, "starting", "解析方案生成环境已启动" if JOB_MODE == "plan" else "文档块整理环境已启动")
+        emit(
+            12,
+            "starting",
+            "解析方案生成环境已启动" if JOB_MODE == "plan" else "文档块整理环境已启动",
+        )
         emit(15, "protocol_adapter", "正在准备模型协议转换代理")
         runtime_env, sdk_settings_path = prepare_runtime()
         proxy = await asyncio.create_subprocess_exec(
@@ -714,7 +755,9 @@ async def async_main() -> int:
         agent_task = asyncio.create_task(agent.run(prompt, sdk_settings_path, claude_env))
         proxy_task = asyncio.create_task(proxy.wait())
         shutdown_task = asyncio.create_task(shutdown.wait())
-        done, _ = await asyncio.wait({agent_task, proxy_task, shutdown_task}, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(
+            {agent_task, proxy_task, shutdown_task}, return_when=asyncio.FIRST_COMPLETED
+        )
         if agent_task in done:
             await agent_task
             return validate_output(agent)
@@ -722,7 +765,9 @@ async def async_main() -> int:
         await asyncio.gather(agent_task, return_exceptions=True)
         if shutdown_task in done:
             return 130
-        raise ProtocolAdapterError(f"cc-switch protocol adapter exited with status {proxy.returncode}")
+        raise ProtocolAdapterError(
+            f"cc-switch protocol adapter exited with status {proxy.returncode}"
+        )
     except ProtocolAdapterError as error:
         message = error_message(error)
         print(message, file=sys.stderr)

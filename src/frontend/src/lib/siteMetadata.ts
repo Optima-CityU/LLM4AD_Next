@@ -1,6 +1,9 @@
 export const GITHUB_PROJECT_URL =
   "https://github.com/Optima-CityU/LLM4AD_Next"
 export const GITHUB_ISSUES_URL = `${GITHUB_PROJECT_URL}/issues/new/choose`
+/** AutoResearchClaw 官方仓里 ARC-Bench 课题模板（experiments/arc_bench/config）的源码位置。 */
+export const AUTORESEARCHCLAW_TEMPLATE_SOURCE_URL =
+  "https://github.com/aiming-lab/AutoResearchClaw/tree/main/experiments/arc_bench/config"
 
 type SiteEnvironment = Partial<{
   VITE_APP_VERSION: string

@@ -50,6 +50,16 @@ export const STAGE_GROUPS: StageGroup[] = [
 /** GATE 阶段（HITL 强制暂停点）：文献筛选 / 实验设计 / 质量门。 */
 export const GATE_STAGES = new Set([5, 9, 20])
 
+/**
+ * 接入本项目 llm4ad 演化引擎、与原生 ARC 行为不同的**单个阶段**。
+ *
+ * 注意是逐阶段而非整组：实验设计组（9-11）里只有 Stage 10 改为产出五段式问题描述
+ * / 种子算法配置；Stage 9 与 11 仍走原生 ARC 描述，只是产物格式不同、算法质量不变。
+ * 实验执行组（12-13）只有 Stage 13 用 LLM4AD 算法发现做迭代优化。分组徽章 / 顶轨
+ * 标签据此逐阶段判定，避免把未改动的阶段误标为 LLM4AD。
+ */
+export const LLM4AD_STAGES = new Set([10, 13])
+
 /** 质量门阶段号（收尾阶段起点，也是 degraded 决策的落点）。 */
 export const QUALITY_GATE_STAGE = 20
 
@@ -195,6 +205,88 @@ export function buildStageRoadmap(
     })
   }
   return cells
+}
+
+/** 阶段事件消息可取字段的最小子集（结构化类型，避免依赖生成的 client 类型）。 */
+export interface StageMessageLike {
+  stage?: number | null
+  event_type?: string | null
+  payload?: { [key: string]: unknown } | null
+}
+
+/** 从消息中取阶段号（``stage`` 字段优先，回退 ``payload.stage``）。 */
+export function stageOf(m: StageMessageLike): number | null {
+  const p = (m.payload ?? {}) as { stage?: number }
+  return m.stage ?? p.stage ?? null
+}
+
+/** 从消息中取阶段状态串（``running`` / ``done`` / ``failed`` / ``waiting`` ...）。 */
+export function statusOf(m: StageMessageLike): string {
+  return String((m.payload as { status?: unknown })?.status ?? "")
+}
+
+/**
+ * 底部「起始阶段」选择器与顶部阶段轨共用的**天然起点**：按会话历史里的阶段消息算。
+ *
+ * 规则（只看**最后一条带阶段号的消息**）：
+ * - 没有任何带阶段号的消息（全新会话）→ `null`，即「从头开始」。
+ * - 最后一条是已完成 → 从它的下一步开始；已是最后一阶段（23）则没有下一步，退回 23
+ *   （在最后一步重跑，产物最全、代价最小）。
+ * - 最后一条不是已完成（failed / waiting / running / skipped）→ 从该阶段本身开始。
+ *
+ * 与模板无关：模板种子会话同样有阶段消息（stage-07/08/09 已完成），算出来就是 10，
+ * 与后端 `start_turn` 在「run_dir 有模板产物」时的缺省一致，无需再特判。
+ *
+ * 注意这里**只看最后一条**：若更早的阶段有 failed，规则仍从最后一条往后推，
+ * 中间的空洞由用户在阶段轨上点「从此步运行」手动补齐。
+ *
+ * @param messages 升序排列的消息列表（最旧在前）。
+ */
+export function naturalStageFromMessages(
+  messages: StageMessageLike[],
+): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if ((m.event_type ?? "") !== "stage_transition") continue
+    const stage = stageOf(m)
+    if (stage == null || stage <= 0) continue
+    if (statusOf(m) === "done") return Math.min(stage + 1, TOTAL_STAGES)
+    return Math.min(stage, TOTAL_STAGES)
+  }
+  return null
+}
+
+/**
+ * 「仅运行一步」的落点：由会话历史算出**下一步该跑哪一阶段**。
+ *
+ * 起点（run）与终点（to）取同一阶段号，即 ARC 的 ``--from-stage N --to-stage N``——
+ * ``execute_pipeline`` 的 ``to_stage`` 是**闭区间**（跑到该阶段即 break），所以这样
+ * 恰好只跑一步，不会白跑该阶段之后的内容。
+ *
+ * 与 {@link naturalStageFromMessages} 同口径，只多两处「一步」特有的处理：
+ *
+ * - **空历史回退到 1**：天然起点为 `null` 时（全新会话，没有「上一步」可依据）从第 1
+ *   阶段起——`null` 对「一步」没有意义，它等于全程跑。
+ * - **全跑完给 `null`**：天然起点在末步已完成时会被 `Math.min(stage + 1, TOTAL_STAGES)`
+ *   夹回 23，分不出「第 23 步待跑」和「23 步已全跑完」。这里单独看一眼末条阶段消息，
+ *   后者返回 `null`，让调用方把入口置灰，而不是把第 23 步默默重跑一遍。
+ *
+ * @param messages 升序排列的消息列表（最旧在前）。
+ * @returns 1..TOTAL_STAGES 的阶段号；`null` = 没有下一步（全跑完了）。
+ */
+export function oneStepStageFromMessages(
+  messages: StageMessageLike[],
+): number | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if ((m.event_type ?? "") !== "stage_transition") continue
+    const stage = stageOf(m)
+    if (stage == null || stage <= 0) continue
+    // 末条已完成且已是最后一阶段 → 没有下一步。
+    if (statusOf(m) === "done" && stage >= TOTAL_STAGES) return null
+    break
+  }
+  return naturalStageFromMessages(messages) ?? 1
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -1,40 +1,51 @@
-import { Loader2 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { ListStart, Loader2 } from "lucide-react"
+import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import TrendPanel from "@/components/Evolution/TaskDetail/TrendPanel"
-import { useResearchGenerated } from "@/hooks/useAutoResearch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { EvolutionProvider } from "./EvolutionProvider"
 import { convertToEvolutionData } from "./evolutionDataAdapter"
+import { algorithmKey, useExperimentAlgorithm } from "./useExperimentAlgorithm"
 
 interface Props {
   sessionId: string
   running?: boolean
+  /** 当前选中的算法名（与右侧面板共享同一份状态）。 */
+  algorithm?: string | null
+  onAlgorithmChange?: (algo: string) => void
 }
 
 /**
  * 趋势分析完整版：使用 evolution 页面的 TrendPanel 组件。
  * 包含完整的交互、tooltip、视图切换（global/instance）等功能。
  */
-export default function ExperimentTrend({ sessionId, running }: Props) {
+export default function ExperimentTrend({
+  sessionId,
+  running,
+  algorithm,
+  onAlgorithmChange,
+}: Props) {
   const { t } = useTranslation()
-  const genQ = useResearchGenerated(sessionId, running)
-
-  const groups = useMemo(
-    () => (genQ.data?.groups ?? []).filter((g) => (g.items?.length ?? 0) > 0),
-    [genQ.data],
+  const { genQ, groups, selected, onSelect } = useExperimentAlgorithm(
+    sessionId,
+    running,
   )
 
-  const [stage, setStage] = useState<number | null>(null)
-  useEffect(() => {
-    if (groups.length === 0) return
-    const stages = groups.map((g) => g.stage ?? -1)
-    if (stage == null || !stages.includes(stage)) {
-      setStage(stages[stages.length - 1])
-    }
-  }, [groups, stage])
+  const stage = algorithm ?? selected
+  const handleSelect = onAlgorithmChange ?? onSelect
 
-  const activeGroup =
-    groups.find((g) => (g.stage ?? -1) === stage) ?? groups[groups.length - 1]
+  const activeGroup = useMemo(
+    () =>
+      groups.find((g) => algorithmKey(g.stage) === stage) ??
+      groups[groups.length - 1],
+    [groups, stage],
+  )
 
   // 转换为 evolution 数据格式
   const evolutionData = useMemo(() => {
@@ -68,25 +79,31 @@ export default function ExperimentTrend({ sessionId, running }: Props) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* stage 选择 */}
-      {groups.length > 1 && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40">
-          <span className="text-xs text-muted-foreground">
-            {t("autoResearch.stages.title")}
-          </span>
-          <select
-            value={stage ?? ""}
-            onChange={(e) => setStage(Number(e.target.value))}
-            className="h-7 rounded border border-border/60 bg-background/60 px-2 text-xs focus:border-primary/50 focus:outline-none"
+      {/* 算法分组选择：单个分组也渲染，用作「当前算法名」的展示位。
+          控制行常显（不再随分组数隐藏），与右侧面板的排布保持一致。 */}
+      <div className="mb-2 flex items-center gap-1 px-4 py-2 border-b border-border/40">
+        <Select value={stage ?? ""} onValueChange={handleSelect}>
+          <SelectTrigger
+            size="sm"
+            aria-label={t("autoResearch.experiment.selectAlgorithm")}
+            className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent dark:bg-transparent dark:hover:bg-transparent px-1.5 py-0 text-[11px] font-medium text-muted-foreground shadow-none hover:text-foreground focus-visible:ring-0 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 shrink-0"
           >
+            <ListStart className="size-3 shrink-0" />
+            <SelectValue placeholder={t("autoResearch.experiment.selectAlgorithm")} />
+          </SelectTrigger>
+          <SelectContent>
             {groups.map((g) => (
-              <option key={g.stage ?? -1} value={g.stage ?? -1}>
-                #{g.stage ?? "?"}
-              </option>
+              <SelectItem
+                key={algorithmKey(g.stage)}
+                value={algorithmKey(g.stage)}
+                className="text-xs"
+              >
+                {g.stage ?? "?"}
+              </SelectItem>
             ))}
-          </select>
-        </div>
-      )}
+          </SelectContent>
+        </Select>
+      </div>
 
       {/* 趋势分析：使用 evolution 的完整组件 */}
       <div className="flex-1 min-h-0 p-4">

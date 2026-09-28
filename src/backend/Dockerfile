@@ -33,7 +33,7 @@ RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
     GIT_CONFIG_VALUE_0="https://github.com/" \
-    uv sync --no-install-workspace
+    uv sync --no-install-workspace --extra arc-templates
 
 # ---------- 复制应用代码 ----------
 COPY ./src/backend/scripts    /app/backend/scripts
@@ -48,12 +48,14 @@ COPY ./pyproject.toml     /pyproject.toml
 COPY ./README.md          /README.md
 
 # ---------- 安装工作区包 ----------
+# arc-templates 提供 ARC-Bench 课题注册表（researchclaw.arc_bench），供 API 侧列出
+# 模板并在建会话时落 stage-07/08/09 产物。刻意不含 torch —— 那是任务容器的 extra。
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
     GIT_CONFIG_VALUE_0="https://github.com/" \
-    uv sync
+    uv sync --extra arc-templates
 
 # ---------- 启动服务 ----------
 CMD ["fastapi", "run", "--workers", "4", "app/main.py"]

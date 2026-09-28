@@ -10,6 +10,7 @@ import {
   ListChecks,
   type LucideIcon,
   Search,
+  ShieldCheck,
   Sparkles,
   XCircle,
 } from "lucide-react"
@@ -1230,12 +1231,942 @@ function WebSearchView({ data }: { data: WebSearchData }) {
   )
 }
 
+// ── llm4ad_comparison.json ────────────────────────────────────────────────────
+
+/** 单个算法在本次对比中的结果。 */
+interface ComparisonAlgorithm {
+  baseline?: number | null
+  evolved?: number | null
+  /** 相对基线的变化百分比（如 0.3252 表示 +0.33%）。 */
+  delta_pct?: number | null
+  promoted?: boolean | null
+  failed?: boolean | null
+  n_instances_compared?: number | null
+  n_instances_total?: number | null
+  lost_instances?: number | null
+  reason?: string | null
+}
+
+interface ComparisonData {
+  generated?: string | null
+  /** 指标方向：maximize / minimize。 */
+  metric_direction?: string | null
+  base?: string | null
+  n_promoted?: number | null
+  algorithms?: Record<string, ComparisonAlgorithm> | null
+}
+
+/** 数值格式化：比较结果通常带 6 位小数，太短会丢掉有效差异。 */
+function formatCompareValue(
+  value: number | null | undefined,
+  digits = 6,
+): string {
+  if (value == null || !Number.isFinite(value)) return "—"
+  return value.toFixed(digits)
+}
+
+/** 变化百分比带符号展示，正数补 “+”。 */
+function formatDeltaPct(pct: number): string {
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`
+}
+
+/** 坐标轴刻度用的短格式：固定小数位后去掉多余的尾零。 */
+function formatTick(value: number): string {
+  return value.toFixed(4).replace(/\.?0+$/, "")
+}
+
+/** 单个算法的对比卡片：算法名 + 状态徽章，下面 baseline / evolved 双条，右侧变化幅度。 */
+function AlgorithmCompareRow({
+  name,
+  item,
+  domain,
+  maxAbsDelta,
+}: {
+  name: string
+  item: ComparisonAlgorithm
+  /** baseline / evolved 两条共用的数值域（两个算法的量纲一致，共用才能直接比长度）。 */
+  domain: { min: number; max: number }
+  maxAbsDelta: number
+}) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.comparisonFields.${k}`, opts ?? {})
+  const failed = item.failed === true
+  const promoted = item.promoted === true
+  const delta = item.delta_pct ?? null
+
+  // 状态优先级：失败 > 提升 > 未提升。
+  const tone: Tone = failed ? "danger" : promoted ? "positive" : "neutral"
+  const s = toneOf(tone)
+  const deltaTone: Tone = failed
+    ? "danger"
+    : delta == null
+      ? "neutral"
+      : delta > 0
+        ? "positive"
+        : delta < 0
+          ? "warning"
+          : "neutral"
+
+  // 基线 / 进化后两根条的长度，映射到共享数值域；域为 0 宽时退化为全长。
+  const span = Math.max(domain.max - domain.min, Number.EPSILON)
+  const pctOf = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(v)
+      ? 0
+      : ((v - domain.min) / span) * 100
+  const baselinePct = pctOf(item.baseline)
+  const evolvedPct = pctOf(item.evolved)
+
+  // 变化幅度条：以中点为 0，向右为正、向左为负，长度对全表最大绝对变化归一。
+  const deltaRatio =
+    delta == null || maxAbsDelta <= 0
+      ? 0
+      : Math.max(-1, Math.min(1, delta / maxAbsDelta))
+  const deltaWidth = Math.abs(deltaRatio) * 50
+
+  const lost = item.lost_instances ?? 0
+  const compared = item.n_instances_compared ?? null
+  const total = item.n_instances_total ?? null
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border px-3.5 py-3",
+        tone === "neutral"
+          ? "border-border/50 bg-background/70"
+          : cn(s.border, s.softBg),
+      )}
+    >
+      {/* 标题行：算法名 + 状态徽章；右侧是变化幅度条与数值 */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-mono text-[12px] font-semibold text-foreground">
+            {name}
+          </span>
+          <Pill
+            tone={tone}
+            icon={failed ? XCircle : promoted ? CheckCircle2 : Circle}
+          >
+            {failed
+              ? f("failed")
+              : promoted
+                ? f("promoted")
+                : f("notPromoted")}
+          </Pill>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="relative hidden h-1.5 w-20 overflow-hidden rounded-full bg-muted/50 sm:block">
+            <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
+            {deltaRatio !== 0 && (
+              <div
+                className={cn(
+                  "absolute top-0 h-full rounded-full",
+                  deltaRatio > 0
+                    ? "left-1/2 bg-emerald-500/80"
+                    : "right-1/2 bg-amber-500/80",
+                )}
+                style={{ width: `${deltaWidth}%` }}
+              />
+            )}
+          </div>
+          <span
+            className={cn(
+              "text-[13px] font-semibold tabular-nums",
+              toneOf(deltaTone).text,
+            )}
+          >
+            {delta == null ? "—" : formatDeltaPct(delta)}
+          </span>
+        </div>
+      </div>
+
+      {/* 双条对比：同一数值域下直接比长度，数值另附在右侧 */}
+      <div className="mt-3 space-y-2">
+        <div className="flex items-center gap-2.5">
+          <span className="w-14 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+            {f("baseline")}
+          </span>
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/50">
+            <div
+              className="h-full rounded-full bg-muted-foreground/50"
+              style={{ width: `${baselinePct}%` }}
+            />
+          </div>
+          <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+            {formatCompareValue(item.baseline)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className="w-14 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+            {f("evolved")}
+          </span>
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/50">
+            <div
+              className={cn("h-full rounded-full", s.bar)}
+              style={{ width: `${evolvedPct}%` }}
+            />
+          </div>
+          <span
+            className={cn(
+              "w-20 shrink-0 text-right font-mono text-[11px] font-semibold tabular-nums",
+              tone === "neutral" ? "text-foreground" : s.text,
+            )}
+          >
+            {formatCompareValue(item.evolved)}
+          </span>
+        </div>
+      </div>
+
+      {/* 脚注：判定理由 + 实例数（对比数 / 总数，丢失实例单独标红） */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        {item.reason && (
+          <span className="min-w-0 truncate">
+            <span className="text-muted-foreground/60">{f("reason")}: </span>
+            {item.reason}
+          </span>
+        )}
+        {compared != null && (
+          <span className="tabular-nums">
+            <span className="text-muted-foreground/60">{f("instances")}: </span>
+            {f("instanceValue", {
+              compared,
+              total: total ?? compared,
+            })}
+          </span>
+        )}
+        {lost > 0 && (
+          <span className="font-medium tabular-nums text-destructive">
+            {f("lostInstances", { count: lost })}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 全局哑铃图：所有算法共用一根横轴，每行一个算法，灰点为基线、彩点为进化后，
+ * 中间连线表示移动方向。
+ *
+ * 与逐卡对比的差别在于“跨算法可比”：卡片只看得到自己那套刻度，某个算法
+ * 即便相对提升很大，绝对水平仍可能低于另一个算法的基线——只有共用横轴时
+ * 这层位置关系才显形。
+ */
+function ComparisonDumbbell({
+  rows,
+  domain,
+}: {
+  rows: [string, ComparisonAlgorithm][]
+  domain: { min: number; max: number }
+}) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.comparisonFields.${k}`, opts ?? {})
+  const span = Math.max(domain.max - domain.min, Number.EPSILON)
+  const xOf = (v: number) => ((v - domain.min) / span) * 100
+
+  // 端点样式显式写出：SVG 的 fill-* / stroke-* 无法由 TONE_STYLES.bar（bg-*）
+  // 推导，这里与语义色调保持一致即可。
+  const dotClass = (failed: boolean, promoted: boolean) =>
+    failed
+      ? "bg-destructive border-destructive"
+      : promoted
+        ? "bg-emerald-500 border-emerald-600"
+        : "bg-muted-foreground/50 border-muted-foreground"
+
+  // 连线颜色按移动方向：向右为涨（绿）、向左为跌（琥珀）。
+  const linkClass = (item: ComparisonAlgorithm) => {
+    const { baseline, evolved, failed } = item
+    if (failed || baseline == null || evolved == null) return "bg-muted-foreground/30"
+    if (evolved > baseline) return "bg-emerald-500/60"
+    if (evolved < baseline) return "bg-amber-500/70"
+    return "bg-muted-foreground/30"
+  }
+
+  return (
+    <div className="space-y-1">
+      {rows.map(([name, item]) => {
+        const baseline =
+          item.baseline != null && Number.isFinite(item.baseline)
+            ? item.baseline
+            : null
+        const evolved =
+          item.evolved != null && Number.isFinite(item.evolved)
+            ? item.evolved
+            : null
+        const x1 = baseline == null ? null : xOf(baseline)
+        const x2 = evolved == null ? null : xOf(evolved)
+        const dot = dotClass(item.failed === true, item.promoted === true)
+
+        return (
+          <div key={name} className="flex items-center gap-3">
+            <span className="w-28 shrink-0 truncate text-right font-mono text-[11px] text-foreground/85 sm:w-40">
+              {name}
+            </span>
+            {/* 绘图区：纯 CSS 定位，随容器宽度自适应且点 / 线不被拉伸变形 */}
+            <div className="relative h-7 min-w-0 flex-1">
+              <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/40" />
+              {x1 != null && x2 != null && x1 !== x2 && (
+                <div
+                  className={cn(
+                    "absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full",
+                    linkClass(item),
+                  )}
+                  style={{
+                    left: `${Math.min(x1, x2)}%`,
+                    width: `${Math.abs(x2 - x1)}%`,
+                  }}
+                />
+              )}
+              {x1 != null && (
+                <div
+                  className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border bg-muted-foreground/40 border-muted-foreground/60"
+                  style={{ left: `${x1}%` }}
+                  title={`${f("baseline")} ${formatCompareValue(item.baseline)}`}
+                />
+              )}
+              {x2 != null && (
+                <div
+                  className={cn(
+                    "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2",
+                    dot,
+                  )}
+                  style={{ left: `${x2}%` }}
+                  title={`${f("evolved")} ${formatCompareValue(item.evolved)}`}
+                />
+              )}
+            </div>
+            <span className="w-20 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+              {formatCompareValue(item.evolved)}
+            </span>
+          </div>
+        )
+      })}
+
+      {/* 横轴刻度：起止值贴边对齐，避免溢出绘图区 */}
+      <div className="flex items-center gap-3 pt-0.5">
+        <span className="w-28 shrink-0 sm:w-40" />
+        <div className="relative h-3.5 min-w-0 flex-1 text-[10px] tabular-nums text-muted-foreground/60">
+          <span className="absolute left-0">{formatTick(domain.min)}</span>
+          <span className="absolute left-1/2 -translate-x-1/2">
+            {formatTick((domain.min + domain.max) / 2)}
+          </span>
+          <span className="absolute right-0">{formatTick(domain.max)}</span>
+        </div>
+        <span className="w-20 shrink-0" />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 实例覆盖条（按需出现）：只有存在丢失或未比满的实例时才渲染，否则每行都是
+ * 一条满格条，纯噪声。分段含义见图例：已比 / 丢失 / 未比。
+ */
+function InstanceCoverage({ rows }: { rows: [string, ComparisonAlgorithm][] }) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.comparisonFields.${k}`, opts ?? {})
+  const seg = (
+    n: number,
+    total: number,
+    cls: string,
+    label: string,
+  ): ReactNode =>
+    n > 0 ? (
+      <div
+        className={cn("h-full", cls)}
+        style={{ width: `${(n / total) * 100}%` }}
+        title={`${label} ${n}`}
+      />
+    ) : null
+
+  return (
+    <div className="space-y-2.5">
+      {rows.map(([name, item]) => {
+        const total = item.n_instances_total ?? 0
+        if (total <= 0) return null
+        const compared = item.n_instances_compared ?? 0
+        const lost = item.lost_instances ?? 0
+        const skipped = Math.max(0, total - compared - lost)
+        return (
+          <div key={name} className="flex items-center gap-2.5">
+            <span className="w-32 shrink-0 truncate font-mono text-[11px] text-foreground/85">
+              {name}
+            </span>
+            <div className="flex h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/50">
+              {seg(compared - lost, total, "bg-emerald-500/70", f("compared"))}
+              {seg(lost, total, "bg-destructive/80", f("lost"))}
+              {seg(skipped, total, "bg-amber-500/60", f("skipped"))}
+            </div>
+            <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+              {f("instanceValue", { compared, total })}
+            </span>
+          </div>
+        )
+      })}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 pt-0.5 text-[10px] text-muted-foreground/60">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-emerald-500/70" />
+          {f("compared")}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-destructive/80" />
+          {f("lost")}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-amber-500/60" />
+          {f("skipped")}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * llm4ad_comparison.json（算法晋级对比）专属视图。
+ *
+ * 该产物汇总各算法“进化前 vs 进化后”的分数与晋级判定，故可视化以
+ * 成对条形对比为主体：所有算法共用同一数值域，条长可直接横向比较；
+ * 卡片右上是相对基线的变化幅度条（中点为零，右正左负），颜色随方向
+ * 与晋级状态变化。列表按变化百分比降序，最优算法排在最前。
+ * 其下补一张共用横轴的哑铃图给出跨算法的绝对水平位置；若本表存在
+ * 丢失 / 未比满的实例，再追加一张实例覆盖条。
+ */
+function ComparisonView({ data }: { data: ComparisonData }) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.comparisonFields.${k}`, opts ?? {})
+
+  const entries = Object.entries(data.algorithms ?? {})
+  const direction = (data.metric_direction ?? "").toLowerCase()
+
+  const promotedCount =
+    data.n_promoted ?? entries.filter(([, a]) => a.promoted === true).length
+  const failedCount = entries.filter(([, a]) => a.failed === true).length
+
+  // 分数域：取本表出现的最小 / 最大分数（含两端留白），供所有算法共用。
+  const scores = entries
+    .flatMap(([, a]) => [a.baseline, a.evolved])
+    .filter((v): v is number => v != null && Number.isFinite(v))
+  const rawMin = scores.length ? Math.min(...scores) : 0
+  const rawMax = scores.length ? Math.max(...scores) : 1
+  const pad = Math.max((rawMax - rawMin) * 0.6, Math.abs(rawMax) * 0.002, 1e-9)
+  const domain = { min: rawMin - pad, max: rawMax + pad }
+
+  // 变化幅度条归一基准。
+  const maxAbsDelta = entries.reduce(
+    (m, [, a]) =>
+      a.delta_pct != null && Number.isFinite(a.delta_pct)
+        ? Math.max(m, Math.abs(a.delta_pct))
+        : m,
+    0,
+  )
+  const sorted = [...entries].sort(
+    (a, b) => (b[1].delta_pct ?? -Infinity) - (a[1].delta_pct ?? -Infinity),
+  )
+
+  // 实例覆盖条只在“跑得不完整”时才有信息量：全是 compared == total 且无丢失时
+  // 每行都是满格条，属于噪声，直接不渲染。
+  const hasCoverageGap = entries.some(([, a]) => {
+    const total = a.n_instances_total ?? 0
+    const compared = a.n_instances_compared ?? 0
+    return (a.lost_instances ?? 0) > 0 || (total > 0 && compared < total)
+  })
+
+  const tone: Tone =
+    failedCount > 0
+      ? "warning"
+      : promotedCount > 0
+        ? "positive"
+        : entries.length
+          ? "neutral"
+          : "warning"
+
+  const stats: StatItem[] = [
+    {
+      label: f("metricDirection"),
+      value: data.metric_direction || "—",
+      pill: true,
+      tone: direction === "minimize" ? "warning" : "info",
+    },
+    {
+      label: f("nPromoted"),
+      value: f("promotedValue", { n: promotedCount, total: entries.length }),
+      tone: promotedCount > 0 ? "positive" : "neutral",
+    },
+    {
+      label: f("algorithmsCompared"),
+      value: String(entries.length),
+      mono: true,
+    },
+    {
+      label: f("failedCount"),
+      value: String(failedCount),
+      tone: failedCount > 0 ? "danger" : "neutral",
+    },
+    {
+      label: f("generated"),
+      value: data.generated || "—",
+      mono: true,
+    },
+    { label: f("base"), value: data.base || "—", mono: true, full: true },
+  ]
+
+  return (
+    <ArtifactCanvas>
+      <Hero
+        icon={Sparkles}
+        tone={tone}
+        title={f("heroTitle")}
+        subtitle={data.generated || undefined}
+        badge={
+          <Pill tone={tone} icon={Sparkles}>
+            {f("promotedValue", { n: promotedCount, total: entries.length })}
+          </Pill>
+        }
+      />
+
+      <StatGrid items={stats} />
+
+      {entries.length ? (
+        <SectionCard
+          title={f("comparison")}
+          icon={ListChecks}
+          tone="info"
+          count={entries.length}
+        >
+          <div className="space-y-2.5">
+            {sorted.map(([name, item]) => (
+              <AlgorithmCompareRow
+                key={name}
+                name={name}
+                item={item}
+                domain={domain}
+                maxAbsDelta={maxAbsDelta}
+              />
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground/70">
+            {direction === "minimize"
+              ? f("axisNoteMinimize")
+              : f("axisNote")}
+          </p>
+        </SectionCard>
+      ) : (
+        <EmptyHint />
+      )}
+
+      {entries.length ? (
+        <SectionCard title={f("dumbbellTitle")} icon={Sparkles} tone="info">
+          <ComparisonDumbbell rows={sorted} domain={domain} />
+          {/* 图例 + 刻度口径说明 */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted-foreground/60">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-2 rounded-full border border-muted-foreground/60 bg-muted-foreground/40" />
+              {f("baseline")}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              {f("promoted")}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-destructive" />
+              {f("failed")}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-muted-foreground/50" />
+              {f("notPromoted")}
+            </span>
+          </div>
+          {/* 刻度口径必须写明：横轴刻意不从 0 起，否则读图会误判差距大小 */}
+          <p className="mt-1.5 text-[10px] text-muted-foreground/50">
+            {f("domainNote")}
+          </p>
+        </SectionCard>
+      ) : null}
+
+      {hasCoverageGap && (
+        <SectionCard title={f("coverageTitle")} icon={ListChecks} count={entries.length}>
+          <InstanceCoverage rows={sorted} />
+        </SectionCard>
+      )}
+    </ArtifactCanvas>
+  )
+}
+
+// ── verification_report.json ──────────────────────────────────────────────────
+
+/** 单条引用的核验结果。 */
+interface CitationResult {
+  cite_key?: string | null
+  title?: string | null
+  /** verified / suspicious / hallucinated / skipped */
+  status?: string | null
+  /** 0–1，method 为 skipped 时无意义。 */
+  confidence?: number | null
+  /** arxiv_id / doi / title_search / skipped */
+  method?: string | null
+  details?: string | null
+  /** 仅在该条做过 LLM 相关性评估时才有这个键（可能整份报告都缺）。 */
+  relevance_score?: number | null
+  matched_paper?: {
+    title?: string | null
+    authors?: string[] | null
+    year?: number | null
+    source?: string | null
+  } | null
+}
+
+interface VerificationData {
+  summary?: {
+    total?: number | null
+    verified?: number | null
+    suspicious?: number | null
+    hallucinated?: number | null
+    skipped?: number | null
+    /** 无参考文献时为 null（写入方刻意不写 1.0，避免“零引用全过”被读成通过）。 */
+    integrity_score?: number | null
+  } | null
+  results?: CitationResult[] | null
+}
+
+/** 核验状态 → 色调。与 statusTone 的通用词表不同，这里是本文件专属的四个状态。 */
+function citationTone(status: string | null | undefined): Tone {
+  switch ((status ?? "").toLowerCase()) {
+    case "verified":
+      return "positive"
+    case "suspicious":
+      return "warning"
+    case "hallucinated":
+      return "danger"
+    default:
+      return "neutral"
+  }
+}
+
+function citationIcon(status: string | null | undefined): LucideIcon {
+  switch ((status ?? "").toLowerCase()) {
+    case "verified":
+      return CheckCircle2
+    case "suspicious":
+      return AlertTriangle
+    case "hallucinated":
+      return XCircle
+    default:
+      return Circle
+  }
+}
+
+/**
+ * 单条引用的核验卡。
+ *
+ * 卡片要回答的是“这条引用到底算不算数”，所以状态徽章放最显眼处，
+ * 命中方式（DOI / arXiv ID 是硬匹配，标题模糊匹配则弱得多）与相似度
+ * 紧随其后——同样是 verified，靠 DOI 命中和靠标题搜索命中的可信度
+ * 不在一个量级，只给一个状态词是不够的。
+ */
+function CitationCard({
+  item,
+  index,
+}: {
+  item: CitationResult
+  index: number
+}) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.verificationFields.${k}`, opts ?? {})
+
+  const tone = citationTone(item.status)
+  const s = toneOf(tone)
+  const StatusIcon = citationIcon(item.status)
+  const statusKey = (item.status ?? "").toLowerCase()
+  const statusLabel = item.status
+    ? f(`status_${statusKey}`, { defaultValue: item.status })
+    : "—"
+  const methodLabel = item.method
+    ? f(`method_${item.method}`, { defaultValue: item.method })
+    : null
+
+  const relevance = item.relevance_score
+  // 评估过但相似度低于 0.5（与阶段 23 的 RELEVANCE_THRESHOLD 一致）才提示；
+  // 键缺失表示没做这步评估，与“评估过但分数低”是两件事，不能都标黄。
+  const lowRelevance =
+    relevance != null && Number.isFinite(relevance) && relevance < 0.5
+  const relevanceTone: Tone =
+    relevance == null ? "neutral" : lowRelevance ? "warning" : "positive"
+
+  const matched = item.matched_paper
+  const matchedAuthors = matched?.authors?.length
+    ? matched.authors.slice(0, 3).join(", ") +
+      (matched.authors.length > 3 ? " et al." : "")
+    : null
+
+  return (
+    <div className="rounded-xl border border-border/50 bg-background/70 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md bg-muted/60 text-[11px] font-semibold tabular-nums text-muted-foreground">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold leading-snug text-foreground">
+              {item.title || item.cite_key || "—"}
+            </div>
+            {item.cite_key && (
+              <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground/70">
+                {item.cite_key}
+              </div>
+            )}
+          </div>
+        </div>
+        <Pill tone={tone} icon={StatusIcon}>
+          {statusLabel}
+        </Pill>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+        {methodLabel && (
+          <span>
+            <span className="text-muted-foreground/60">{f("method")}: </span>
+            <span className={cn(s.text, "font-medium")}>{methodLabel}</span>
+          </span>
+        )}
+        {item.confidence != null && (
+          <span className="tabular-nums">
+            <span className="text-muted-foreground/60">
+              {f("confidence")}:{" "}
+            </span>
+            {(item.confidence * 100).toFixed(0)}%
+          </span>
+        )}
+        <span className="tabular-nums">
+          <span className="text-muted-foreground/60">{f("relevance")}: </span>
+          {relevance == null ? (
+            <span className="text-muted-foreground/60">
+              {f("relevanceNotEvaluated")}
+            </span>
+          ) : (
+            <span className={cn("font-medium", toneOf(relevanceTone).text)}>
+              {relevance.toFixed(2)}
+            </span>
+          )}
+        </span>
+      </div>
+
+      {matched && (matched.title || matched.year || matchedAuthors) && (
+        <div className="mt-2.5 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+            {f("matchedPaper")}
+          </div>
+          {matched.title && (
+            <div className="mt-1 text-xs leading-snug text-foreground/85">
+              {matched.title}
+            </div>
+          )}
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {matchedAuthors && <span>{matchedAuthors}</span>}
+            {matched.year != null && (
+              <span className="tabular-nums">{matched.year}</span>
+            )}
+            {matched.source && (
+              <span className="rounded bg-muted/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                {matched.source}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {item.details && (
+        <div className="mt-2.5 break-words text-[11px] leading-relaxed text-muted-foreground">
+          {item.details}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VerificationView({ data }: { data: VerificationData }) {
+  const { t } = useTranslation()
+  const f = (k: string, opts?: Record<string, unknown>) =>
+    t(`autoResearch.artifacts.verificationFields.${k}`, opts ?? {})
+
+  const summary = data.summary ?? {}
+  const results = data.results ?? []
+  const nVerified = summary.verified ?? 0
+  const nSuspicious = summary.suspicious ?? 0
+  const nHallucinated = summary.hallucinated ?? 0
+  const nSkipped = summary.skipped ?? 0
+  const total = summary.total ?? results.length
+  const integrity = summary.integrity_score
+
+  // 整体色调由最坏情况决定：有捏造的引用就该是红的，而不是被一堆 verified 冲淡。
+  const tone: Tone =
+    nHallucinated > 0
+      ? "danger"
+      : nSuspicious > 0
+        ? "warning"
+        : total > 0
+          ? "positive"
+          : "neutral"
+
+  // 占比条的分母用 total，四种状态按固定顺序拼满整条。
+  const share = (n: number) => (total > 0 ? (n / total) * 100 : 0)
+  const barSegments: { key: string; n: number; cls: string }[] = [
+    { key: "verified", n: nVerified, cls: "bg-emerald-500" },
+    { key: "suspicious", n: nSuspicious, cls: "bg-amber-500" },
+    { key: "hallucinated", n: nHallucinated, cls: "bg-destructive" },
+    { key: "skipped", n: nSkipped, cls: "bg-muted-foreground/40" },
+  ]
+
+  const stats: StatItem[] = [
+    {
+      label: f("totalCites"),
+      value: String(total),
+      mono: true,
+    },
+    {
+      label: f("verified"),
+      value: String(nVerified),
+      mono: true,
+      tone: nVerified > 0 ? "positive" : "neutral",
+    },
+    {
+      label: f("suspicious"),
+      value: String(nSuspicious),
+      mono: true,
+      tone: nSuspicious > 0 ? "warning" : "neutral",
+    },
+    {
+      label: f("hallucinated"),
+      value: String(nHallucinated),
+      mono: true,
+      tone: nHallucinated > 0 ? "danger" : "neutral",
+    },
+    {
+      label: f("skipped"),
+      value: String(nSkipped),
+      mono: true,
+    },
+    {
+      label: f("integrityScore"),
+      value:
+        integrity == null ? (
+          <span className="text-muted-foreground/60">
+            {f("integrityUnavailable")}
+          </span>
+        ) : (
+          <span className="tabular-nums">{integrity.toFixed(2)}</span>
+        ),
+      tone:
+        integrity == null
+          ? "neutral"
+          : integrity >= 0.9
+            ? "positive"
+            : "warning",
+    },
+  ]
+
+  return (
+    <ArtifactCanvas>
+      <Hero
+        icon={ShieldCheck}
+        tone={tone}
+        title={f("heroTitle")}
+        subtitle={f("heroSubtitle")}
+        badge={
+          <Pill
+            tone={tone}
+            icon={
+              nHallucinated > 0
+                ? XCircle
+                : nSuspicious > 0
+                  ? AlertTriangle
+                  : CheckCircle2
+            }
+          >
+            {f("verifiedRatio", { verified: nVerified, total })}
+          </Pill>
+        }
+      />
+
+      <StatGrid items={stats} />
+
+      {total > 0 && (
+        <SectionCard title={f("distributionTitle")} icon={ListChecks}>
+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted/60">
+            {barSegments.map(
+              (seg) =>
+                seg.n > 0 && (
+                  <div
+                    key={seg.key}
+                    className={cn("h-full", seg.cls)}
+                    style={{ width: `${share(seg.n)}%` }}
+                    title={`${f(seg.key)}: ${seg.n}`}
+                  />
+                ),
+            )}
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+            {barSegments.map((seg) => (
+              <span key={seg.key} className="inline-flex items-center gap-1.5">
+                <span className={cn("size-2 rounded-full", seg.cls)} />
+                {f(seg.key)}
+                <span className="tabular-nums text-muted-foreground/60">
+                  {seg.n}
+                </span>
+              </span>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* integrity_score 为 null 不是 0 分：整份报告没有参考文献时写入方特意留空，
+          1.0 会被读成“全部通过”。这种情况必须显式说明，不能画一根空进度条。 */}
+      {integrity == null && (
+        <ProseBlock
+          title={f("integrityUnavailable")}
+          icon={Info}
+          tone="warning"
+          text={f("integrityNullNote")}
+        />
+      )}
+
+      {nSkipped > 0 && (
+        <ProseBlock
+          title={f("skippedNoteTitle")}
+          icon={Info}
+          text={f("skippedNote")}
+        />
+      )}
+
+      {results.length ? (
+        <SectionCard
+          title={f("citationsTitle")}
+          icon={FileText}
+          count={results.length}
+        >
+          <div className="space-y-2.5">
+            {results.map((item, i) => (
+              <CitationCard key={i} item={item} index={i} />
+            ))}
+          </div>
+        </SectionCard>
+      ) : (
+        <EmptyHint />
+      )}
+    </ArtifactCanvas>
+  )
+}
+
 // ── 分发入口 ─────────────────────────────────────────────────────────────────
 
 const NAMED_RENDERERS: Record<
   string,
   (data: Record<string, unknown>) => ReactNode
 > = {
+  "llm4ad_comparison.json": (d) => <ComparisonView data={d} />,
   "decision.json": (d) => <DecisionView data={d} />,
   "hardware_profile.json": (d) => <HardwareView data={d} />,
   "stage_health.json": (d) => <StageHealthView data={d} />,
@@ -1244,6 +2175,7 @@ const NAMED_RENDERERS: Record<
   "queries.json": (d) => <QueriesView data={d} />,
   "search_meta.json": (d) => <SearchMetaView data={d} />,
   "sources.json": (d) => <SourcesView data={d} />,
+  "verification_report.json": (d) => <VerificationView data={d} />,
   "web_search_result.json": (d) => <WebSearchView data={d} />,
 }
 

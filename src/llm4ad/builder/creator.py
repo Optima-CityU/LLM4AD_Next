@@ -43,9 +43,15 @@ from llm4ad.infra.provider.base import BaseProvider
 class TaskCreator:
     """Generate all LLM4AD application artifacts from analysis."""
 
-    def __init__(self, provider: BaseProvider) -> None:
-        """Initialize with an LLM provider for generation calls."""
+    def __init__(
+        self,
+        provider: BaseProvider,
+        *,
+        task_provider_type: str = "openai_compatible",
+    ) -> None:
+        """Initialize generation and generated-task provider settings."""
         self._provider = provider
+        self._task_provider_type = task_provider_type
 
     async def create(
         self,
@@ -738,6 +744,7 @@ class TaskCreator:
 
         config = CONFIG_YAML_TEMPLATE.format(
             project_name=analysis.project_name,
+            provider_type=self._task_provider_type,
             background_indented=background_indented,
             multimodal_config_yaml=multimodal_config_yaml,
             evaluator_module=evaluator_module,

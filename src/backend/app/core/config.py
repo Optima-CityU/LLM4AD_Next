@@ -243,7 +243,7 @@ class Settings(BaseSettings):
     # time_budget_sec（≈3h）的独立墙钟上限，再加 build/figure/9 段文档 stage，健康长任务
     # 可逼近 5~6h。取 12h 作 backstop——远低于 7 天（卡死容器不再挂一周），又舒适高于任何
     # 现实健康 pipeline 的总预算，不会误杀长任务。超时容器被 stop/kill 收 TIMED_OUT。
-    RESEARCH_CONTAINER_TIMEOUT: int = 12 * 3600  # 研究容器执行硬超时（秒），默认 12 小时
+    RESEARCH_CONTAINER_TIMEOUT: int = 24 * 3600  # 研究容器执行硬超时（秒），默认 24 小时
 
     # ---- 文档知识库 Claude Agent SDK 解析容器 ----
     KNOWLEDGE_PARSER_IMAGE: str = "llm4ad-task-runner:latest"
@@ -361,6 +361,13 @@ class Settings(BaseSettings):
     # ---- Code-Server 空闲清理 ----
     CODE_SERVER_IDLE_TIMEOUT_SECONDS: int = 24 * 60 * 60  # 容器空闲超过该时长则停止
     CODE_SERVER_CLEANUP_INTERVAL_SECONDS: int = 10 * 60  # 后台清理任务执行间隔
+
+    # Research workspace containers are created per workspace because their
+    # source root and stage write boundary are fixed at creation time. Stopping
+    # an idle container is safe because its source tree is bind-mounted and the
+    # same container is restarted when the workspace is opened again.
+    PAPER_WORKSPACE_IDLE_TIMEOUT_SECONDS: int = 2 * 60 * 60
+    PAPER_WORKSPACE_CLEANUP_INTERVAL_SECONDS: int = 10 * 60
 
     # ---- 首页资讯（GitHub Wiki 拉取） ----
     # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。

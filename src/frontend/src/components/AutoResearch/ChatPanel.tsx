@@ -24,6 +24,11 @@ import type {
   ResearchSessionItem,
 } from "@/client"
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card"
+import {
   researchKeys,
   useResearchLogs,
   useResearchSessionDetail,
@@ -41,22 +46,25 @@ import {
   useResearchStream,
 } from "@/hooks/useResearchStream"
 import { cn } from "@/lib/utils"
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card"
 
 import BottomComposer, { type RunOverrides } from "./BottomComposer"
+import { CollabToolCard, type CollabToolCall } from "./CollabToolCard"
 import MessageItem from "./MessageItem"
-import { ML_VISION_PROFILE } from "./shared"
 import { StageProgressBar } from "./StageProgress"
-import type { StreamLogEntry } from "./StreamLogConsole"
 import StageTimeline, {
   type StageEntry,
   type StageStatus,
 } from "./StageTimeline"
+import type { StreamLogEntry } from "./StreamLogConsole"
+import { ML_VISION_PROFILE } from "./shared"
 import TurnLogPanel from "./TurnLogPanel"
+import {
+  buildStageRoadmap,
+  naturalStageFromMessages,
+  oneStepStageFromMessages,
+  stageOf,
+  statusOf,
+} from "./tech"
 
 interface Props {
   session: ResearchSessionItem | null
@@ -94,17 +102,6 @@ type RenderItem =
   | { kind: "msg"; message: ResearchMessageItem }
   | { kind: "stage"; entry: StageEntry }
 
-/** 从消息中取阶段号（message.stage 优先，回退 payload.stage）。 */
-function stageOf(m: ResearchMessageItem): number | null {
-  const p = (m.payload ?? {}) as { stage?: number }
-  return m.stage ?? p.stage ?? null
-}
-
-/** 阶段事件的状态串（running/waiting/done/failed）。 */
-function statusOf(m: ResearchMessageItem): string {
-  return String((m.payload as { status?: unknown })?.status ?? "")
-}
-
 /**
  * 折叠某一轮内**同阶段**的 stage_transition 为一个时间轴条目，多个状态
  * （如 running→done）按时序叠加进 `statuses`；右侧即可展示各状态发生的时刻。
@@ -141,9 +138,9 @@ function collapseTurn(messages: ResearchMessageItem[]): RenderItem[] {
     }
     if (stage === lastStage && lastIdx >= 0) {
       // 与上一条同阶段且紧邻 → 状态叠加
-      ;(items[lastIdx] as Extract<RenderItem, { kind: "stage" }>).entry.statuses.push(
-        st,
-      )
+      ;(
+        items[lastIdx] as Extract<RenderItem, { kind: "stage" }>
+      ).entry.statuses.push(st)
     } else {
       const occurrence = (occByStage.get(stage) ?? 0) + 1
       occByStage.set(stage, occurrence)
@@ -272,7 +269,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
   const [collabTurnId, setCollabTurnId] = useState<string | null>(null)
   // collab agent 流式回复的实时拼接文本（本轮内存，done 后由 messages 接管）。
   const [collabStreamText, setCollabStreamText] = useState("")
-  const [collabToolHint, setCollabToolHint] = useState<string | null>(null)
+  // 本轮工具调用的累积列表：start 帧先占位（只带工具名），end 帧按 tool_call_id
+  // 回填入参 / 结果 / 状态。清空时机与 collabStreamText 一致（done / 新轮开始时）。
+  const [collabTools, setCollabTools] = useState<CollabToolCall[]>([])
   // pipeline turn 的显式重连令牌：retry 复用同一 turn_id，需手动 bump 让 SSE 重连。
   const [streamReconnectToken, setStreamReconnectToken] = useState(0)
 
@@ -300,6 +299,13 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     refetchInterval: false,
   })
   const displayStages = stateQ.data?.stages ?? []
+  // 底部「起始阶段」选择器用的完整 23 阶段清单：已跑到的阶段保留真实态，未跑到
+  // 的阶段合成为 pending。这样用户也能从尚未执行过的后续阶段起步（后端按
+  // --from-stage 接受任意合法 stage 号）。默认选中见下方 naturalFromStage。
+  const displayStageOptions = useMemo(
+    () => buildStageRoadmap(displayStages),
+    [displayStages],
+  )
 
   // 运行配置（provider / model / mode / 起始阶段）提升到此，让底部运行工具行与
   // 顶部阶段轨的「从此步运行」共用同一份参数——从阶段点运行 == 设好起始阶段再点运行。
@@ -309,25 +315,14 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     (session.mode as ResearchMode) ?? "co-pilot",
   )
   const [runFromStage, setRunFromStage] = useState("")
-  // 切换会话时重置运行配置：默认从最后一个允许的阶段开始。显式带上 session.id，
-  // 即便新旧会话 provider/model/mode 相同也要重置起始阶段（否则会串上一个会话）。
+
+  // 切换会话时重置运行配置（起始阶段不在此处，由下方「天然起点」单独兜管）。
   // biome-ignore lint/correctness/useExhaustiveDependencies: session.id 用于会话切换重置
   useEffect(() => {
     setRunProvider(session.provider_id ?? "")
     setRunModel(session.model_name ?? "")
     setRunMode((session.mode as ResearchMode) ?? "co-pilot")
-    setRunFromStage(
-      displayStages.length > 0
-        ? String(displayStages[displayStages.length - 1].stage)
-        : "",
-    )
-  }, [
-    session.id,
-    session.provider_id,
-    session.model_name,
-    session.mode,
-    displayStages,
-  ])
+  }, [session.id, session.provider_id, session.model_name, session.mode])
 
   // 实时消息叠加层：SSE 持久化事件按 event_key upsert，避免等待 API refetch。
   const [liveMessages, setLiveMessages] = useState<ResearchMessageItem[]>([])
@@ -398,6 +393,31 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     })
   }, [msgQ.data, liveMessages])
 
+  // 起始阶段的天然起点：由「会话历史里最后一条带阶段号的消息」推出（规则见
+  // tech.naturalStageFromMessages）。模板会话不特判——它同样有 stage-07/08/09 的
+  // 阶段消息，算出来就是 10，与后端 start_turn 在「run_dir 有模板产物」时的缺省
+  // 一致；显式传 9 反而会触发 profile_switch 从 9 重置、删掉刚物化的 exp_plan。
+  // 用 messages（升序，REST + SSE 合并）而非 /state 快照：快照按阶段号折叠，看不出
+  // 「最后跑的是哪一步、那一步是成是败」。
+  const naturalFromStage = useMemo(
+    () => naturalStageFromMessages(messages),
+    [messages],
+  )
+  // 「仅运行一步」的落点：`naturalFromStage` 是「起始阶段」选择器要显示的值，全新会话
+  // 时为 null（＝从头跑）；而「一步」必须落在一个具体阶段上，故回退到 1。
+  // 另：末步已完成时 `naturalStageFromMessages` 会把它**夹到 TOTAL_STAGES**，分不出
+  // 「第 23 步待跑」和「23 步全跑完」——后者由 tech 那边返回 null，让入口（▾）置灰，
+  // 而不是把第 23 步默默重跑一遍。规则都在 tech.oneStepStageFromMessages。
+  const nextStage = useMemo(
+    () => oneStepStageFromMessages(messages),
+    [messages],
+  )
+  // 默认值跟随天然起点：切换会话、跑完一轮、阶段推进都会重算，重新贴到选择器上。
+  // 用户手动改过之后若天然起点没变（refetch 造出等价新数组）也不会被覆盖。
+  useEffect(() => {
+    setRunFromStage(naturalFromStage ? String(naturalFromStage) : "")
+  }, [naturalFromStage])
+
   // 当前待回复的门控 form 消息：turn 进入 paused_gate 时最后一条未锁定的 form。
   // 移到底部 GatePanel 操作；消息流里不再重复渲染这一条（见 renderedMessages）。
   //
@@ -420,6 +440,25 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     () =>
       gateMessage ? messages.filter((m) => m.id !== gateMessage.id) : messages,
     [messages, gateMessage],
+  )
+
+  // 模板种子会话：pending 且历史里只有 stage_transition。
+  //
+  // 「从模板创建」会在建会话时预置一枚种子轮 + 7/8/9 各一对 running/done 的
+  // stage_transition 消息（后端 _seed_template_checkpoint），让阶段轨立刻显示
+  // 「已跑到 9」。副作用是消息列表非空：`messages.length === 0` 的启动入口不再
+  // 命中，而 pending 又隐藏了底部操作区，于是两个入口同时消失——用户看不到任何
+  // 运行按钮。这里识别出这种「只有阶段痕迹、没有任何对话」的会话，让它继续走
+  // 空态启动入口（EmptyState），并放行底部操作区。
+  //
+  // 用「全部是 stage_transition」而非「消息数 == 6」：换模板/重物化时条数会变，
+  // 且真实跑过一轮的会话必然含非 stage_transition 消息（user/assistant/log）。
+  const seedOnly = useMemo(
+    () =>
+      session.status === "pending" &&
+      renderedMessages.length > 0 &&
+      renderedMessages.every((m) => m.event_type === "stage_transition"),
+    [session.status, renderedMessages],
   )
 
   const LOG_CAP = 500
@@ -650,7 +689,8 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           // 后端已在 SSE data 中回填 message_id（streaming.py:226），优先使用它作为
           // DB 主键；未提供时回退到 event_key 合成临时 ID（向后兼容）。
           const messageId =
-            (evt.message_id as string | undefined) ?? `live:${currentTurnId}:${evt.event_key}`
+            (evt.message_id as string | undefined) ??
+            `live:${currentTurnId}:${evt.event_key}`
           setLiveMessages((prev) => {
             const existing = prev.find((message) => message.id === messageId)
             const liveMessage: ResearchMessageItem = {
@@ -723,7 +763,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 
         setCollabTurnId(null)
         setCollabStreamText("")
-        setCollabToolHint(null)
+        setCollabTools([])
         qc.invalidateQueries({
           queryKey: researchKeys.sessionMessages(session.id),
         })
@@ -749,7 +789,46 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         if (evt.type === "collab_message" && typeof evt.delta === "string") {
           setCollabStreamText((prev) => prev + evt.delta)
         } else if (evt.type === "collab_tool") {
-          setCollabToolHint((evt.tool as string) || null)
+          // 一次调用两帧：start 只有工具名（先渲染「正在执行」），end 带完整入参 /
+          // 结果 / 状态。按 tool_call_id 归并，end 帧内的 name 可能为空（后端只回传
+          // tool/phase/id/input/output/state），故保留 start 帧的 name。
+          const toolId = (evt.tool_call_id as string) || ""
+          const toolName = (evt.tool as string) || ""
+          const isEnd = evt.phase === "end"
+          setCollabTools((prev) => {
+            // 没有 tool_call_id 时的兜底键（后端应始终回填，这里是防御性处理）。
+            const key = toolId || `#${prev.length}:${toolName}`
+            const idx = prev.findIndex((c) => c.id === key)
+            // end 帧可能在 start 帧丢失（如断线重连）时单独到达，此时补建一条，
+            // 否则这次调用的入参 / 结果就再也看不到了。
+            if (idx < 0) {
+              return [
+                ...prev,
+                {
+                  id: key,
+                  name: toolName,
+                  done: isEnd,
+                  input: evt.input ?? null,
+                  inputRaw: (evt.input_raw as string) || "",
+                  output: (evt.output as string) || "",
+                  state: (evt.state as string) || (isEnd ? "success" : ""),
+                },
+              ]
+            }
+            const next = prev.slice()
+            next[idx] = isEnd
+              ? {
+                  ...next[idx],
+                  name: next[idx].name || toolName,
+                  done: true,
+                  input: evt.input ?? null,
+                  inputRaw: (evt.input_raw as string) || "",
+                  output: (evt.output as string) || "",
+                  state: (evt.state as string) || "success",
+                }
+              : { ...next[idx], name: toolName || next[idx].name }
+            return next
+          })
         }
       },
     },
@@ -771,7 +850,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
     const box = scrollBox.current
     // 运行中用户上滚回看历史时不强行拽回底部；离底部超过 ~120px 就不自动跟随。
     // 但如果 collabBusy 刚变为 true（刚发送消息），则强制滚动到底部
-    if (box && box.scrollHeight - box.scrollTop - box.clientHeight > 120 && !collabBusy) {
+    if (
+      box &&
+      box.scrollHeight - box.scrollTop - box.clientHeight > 120 &&
+      !collabBusy
+    ) {
       return
     }
     scrollAnchor.current?.scrollIntoView({ behavior: "smooth" })
@@ -806,6 +889,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           model_name: overrides.model_name ?? null,
           mode: overrides.mode,
           from_stage: overrides.from_stage ?? null,
+          // 「仅运行一步」时 = from_stage（ARC 的 to_stage 闭区间，到该步即 break）；
+          // 否则为 null，交回后端「一路跑到底」。
+          to_stage: overrides.to_stage ?? null,
         } as never,
       },
       {
@@ -829,7 +915,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 
   const handleCollabSend = (message: string) => {
     setCollabStreamText("")
-    setCollabToolHint(null)
+    setCollabTools([])
     collabMut.mutate(
       { sessionId: session.id, body: { message } },
       {
@@ -854,7 +940,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           if (isCollab) {
             setCollabTurnId(null)
             setCollabStreamText("")
-            setCollabToolHint(null)
+            setCollabTools([])
           }
         },
         onError: toastErr,
@@ -1011,16 +1097,15 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
             ) : messages.length === 0 ? (
               <EmptyState session={session} onRun={handleRun} running={busy} />
             ) : (
-              <div className={cn(
-                "py-3 space-y-1",
-                // 运行中或协作中时，添加底部内边距，确保内容不被遮挡
-                (busy || collabBusy) && "pb-24"
-              )}>
+              <div
+                className={cn(
+                  "py-3 space-y-1",
+                  // 运行中或协作中时，添加底部内边距，确保内容不被遮挡
+                  (busy || collabBusy) && "pb-24",
+                )}
+              >
                 {groupedMessages.map((group) => (
-                  <div
-                    key={group.turnId}
-                    className="group/turn relative pl-3"
-                  >
+                  <div key={group.turnId} className="group/turn relative pl-3">
                     {/* 左侧竖线：hover 时高亮 */}
                     <span
                       aria-hidden
@@ -1046,15 +1131,25 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
                 ))}
                 {collabBusy && (
                   <div className="flex justify-start px-4 py-1">
-                    <div className="w-full rounded-2xl rounded-tl-sm bg-primary/[0.06] border border-primary/25 px-4 py-2 text-sm whitespace-pre-wrap break-words">
-                      {collabStreamText || (
+                    <div className="w-full rounded-2xl rounded-tl-sm bg-primary/[0.06] border border-primary/25 px-4 py-2 text-sm break-words">
+                      {/* 工具调用卡片放在回复文本上方：agent 一轮里往往先调工具再
+                          写结论，卡片随 SSE 实时出现（start 帧即渲染「执行中」），
+                          用户不必等文字流完才知道它在干什么。 */}
+                      {collabTools.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {collabTools.map((call) => (
+                            <CollabToolCard key={call.id} call={call} />
+                          ))}
+                        </div>
+                      )}
+                      {collabStreamText ? (
+                        <div className="whitespace-pre-wrap">
+                          {collabStreamText}
+                        </div>
+                      ) : (
                         <span className="italic opacity-70 inline-flex items-center gap-1.5">
                           <Loader2 className="size-3 animate-spin" />
-                          {collabToolHint
-                            ? t("autoResearch.collab.usingTool", {
-                                tool: collabToolHint,
-                              })
-                            : t("autoResearch.collab.thinking")}
+                          {t("autoResearch.collab.thinking")}
                         </span>
                       )}
                     </div>
@@ -1102,8 +1197,11 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
         )}
       </div>
 
-      {/* pending 状态不显示底部操作区，由 EmptyState 承载启动入口 */}
-      {session.status !== "pending" && (
+      {/* pending 状态不显示底部操作区，由 EmptyState 承载启动入口。
+          例外：模板种子会话（seedOnly）历史里已有阶段痕迹、阶段轨也有内容，
+          底部会被 EmptyState 顶掉后空出一大片，故照常放行——它已预置 7/8/9，
+          从阶段 10 起步是有效操作。 */}
+      {session.status !== "pending" || seedOnly ? (
         <BottomComposer
           session={session}
           gateMessage={gateMessage}
@@ -1111,12 +1209,13 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           running={session.status === "running"}
           paused={session.status === "paused"}
           sending={busy}
-          stages={displayStages}
+          stages={displayStageOptions}
           canRetry={canRetry}
           provider={runProvider}
           model={runModel}
           mode={runMode}
           fromStage={runFromStage}
+          nextStage={nextStage}
           onProviderModelChange={(p, m) => {
             setRunProvider(p)
             setRunModel(m)
@@ -1129,7 +1228,7 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
           onRetry={handleRetry}
           onGateSubmit={handleFormSubmit}
         />
-      )}
+      ) : null}
     </div>
   )
 }
@@ -1137,6 +1236,9 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
 /**
  * 消息为空时的占位：pending（会话已建、待开跑）与已选会话无消息两种文案，
  * 配图标 + 引导语，避免单薄的一行灰字。pending 状态显示可编辑 topic + 运行按钮。
+ *
+ * 模板种子会话（预置了 stage-07/08/09）不走这里：它历史里已有阶段痕迹，走消息列表
+ * 更贴合实际状态，也不再需要单独换一套「从阶段 10 继续」的文案。
  */
 function EmptyState({
   session,
@@ -1156,7 +1258,7 @@ function EmptyState({
   const [error, setError] = useState("")
 
   const TOPIC_MIN = 1
-  const TOPIC_MAX = 500
+  const TOPIC_MAX = 1000
 
   const handleSave = async () => {
     const trimmed = topic.trim()

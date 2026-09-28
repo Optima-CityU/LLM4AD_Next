@@ -96,6 +96,26 @@ from app.models.llm4ad import (  # noqa: F401
     UserMemoryConfig,
 )
 
+# Paper optimization metadata; source bodies and artifacts live in RustFS.
+from app.models.paper import (  # noqa: F401
+    PaperAgentRun,
+    PaperAgentRunKind,
+    PaperAgentRunStatus,
+    PaperAlgorithmProposal,
+    PaperBoundarySnapshot,
+    PaperCleanupJob,
+    PaperEvaluationMetric,
+    PaperJudgeResult,
+    PaperOptimizationTarget,
+    PaperReview,
+    PaperRevisionCandidate,
+    PaperSourceKind,
+    PaperSourceVersion,
+    PaperTaskLink,
+    PaperWorkspace,
+    ResearchWorkspaceMode,
+)
+
 # RBAC 权限模型（定义关联表，需在 User 之前导入）
 from app.models.rbac import (  # noqa: F401
     Permission,
