@@ -52,3 +52,26 @@ export function cssColorToHslChannels(value: string): string | null {
   const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1))
   return `${formatChannel(hue)} ${formatChannel(saturation * 100)}% ${formatChannel(lightness * 100)}%`
 }
+
+/** Keep an embedded document aligned with the host's authoritative theme. */
+export function observeEmbeddedTheme(
+  hostRoot: HTMLElement,
+  embeddedRoot: HTMLElement,
+  syncAppearance: () => void,
+): () => void {
+  const restoreHostTheme = () => {
+    if (
+      embeddedRoot.classList.contains("dark") !==
+      hostRoot.classList.contains("dark")
+    ) {
+      syncAppearance()
+    }
+  }
+  const observer = new MutationObserver(restoreHostTheme)
+  observer.observe(embeddedRoot, {
+    attributes: true,
+    attributeFilter: ["class"],
+  })
+  restoreHostTheme()
+  return () => observer.disconnect()
+}
