@@ -23,7 +23,10 @@ import {
   usePaperRuntimeSession,
 } from "@/hooks/usePapers"
 import { useRuntimeEvents } from "@/hooks/useRuntimeEvents"
-import { cssColorToHslChannels } from "@/lib/embeddedAppearance"
+import {
+  cssColorToHslChannels,
+  observeEmbeddedTheme,
+} from "@/lib/embeddedAppearance"
 import { cn } from "@/lib/utils"
 
 type PaperWorkflowStage = PaperRuntimeSessionCreate["workflow_stage"]
@@ -169,6 +172,9 @@ export default function PaperNativeRuntime({
     const target = frameRef.current?.contentWindow
     if (!target) return
     const root = document.documentElement
+    const theme = root.classList.contains("dark") ? "dark" : "light"
+    const embeddedRoot = frameRef.current?.contentDocument?.documentElement
+    if (embeddedRoot) embeddedRoot.style.colorScheme = theme
     const computed = window.getComputedStyle(root)
     const tokens = EMBEDDED_COLOR_TOKENS.reduce<Record<string, string>>(
       (result, name) => {
@@ -183,7 +189,7 @@ export default function PaperNativeRuntime({
     target.postMessage(
       {
         type: "llm4ad:appearance",
-        theme: root.classList.contains("dark") ? "dark" : "light",
+        theme,
         language: i18n.resolvedLanguage ?? i18n.language,
         fontFamily: window.getComputedStyle(document.body).fontFamily,
         stageTitle,
@@ -211,6 +217,17 @@ export default function PaperNativeRuntime({
     })
     return () => observer.disconnect()
   }, [syncAppearance])
+
+  useEffect(() => {
+    if (!frameReady) return
+    const embeddedRoot = frameRef.current?.contentDocument?.documentElement
+    if (!embeddedRoot) return
+    return observeEmbeddedTheme(
+      document.documentElement,
+      embeddedRoot,
+      syncAppearance,
+    )
+  }, [frameReady, syncAppearance])
 
   useEffect(() => {
     const handleConversationRewind = (event: MessageEvent) => {

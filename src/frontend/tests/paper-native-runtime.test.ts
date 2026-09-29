@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
 
-import { cssColorToHslChannels } from "../src/lib/embeddedAppearance"
+import {
+  cssColorToHslChannels,
+  observeEmbeddedTheme,
+} from "../src/lib/embeddedAppearance"
 import { parseResearchWorkspaceMode } from "../src/lib/researchWorkspace"
 
 const sidebarSource = await Bun.file(
@@ -117,6 +120,61 @@ test("host CSS colors are converted to CloudCLI HSL channels", () => {
     "221.212 83.193% 53.333%",
   )
   expect(cssColorToHslChannels("not-a-color")).toBeNull()
+})
+
+test("embedded theme changes are restored to the host theme", () => {
+  expect(nativeRuntimeSource).toContain(
+    "embeddedRoot.style.colorScheme = theme",
+  )
+  expect(nativeRuntimeSource).toContain("return observeEmbeddedTheme(")
+  const originalObserver = globalThis.MutationObserver
+  let notifyMutation: (() => void) | undefined
+  let observedAttribute: string[] | undefined
+  let disconnected = false
+  globalThis.MutationObserver = class {
+    constructor(callback: MutationCallback) {
+      notifyMutation = () => callback([], this as unknown as MutationObserver)
+    }
+
+    observe(_target: Node, options: MutationObserverInit) {
+      observedAttribute = options.attributeFilter
+    }
+
+    disconnect() {
+      disconnected = true
+    }
+  } as unknown as typeof MutationObserver
+
+  try {
+    let hostDark = true
+    let embeddedDark = false
+    let syncCount = 0
+    const hostRoot = {
+      classList: { contains: () => hostDark },
+    } as unknown as HTMLElement
+    const embeddedRoot = {
+      classList: { contains: () => embeddedDark },
+    } as unknown as HTMLElement
+    const stopObserving = observeEmbeddedTheme(hostRoot, embeddedRoot, () => {
+      syncCount += 1
+    })
+
+    expect(observedAttribute).toEqual(["class"])
+    expect(syncCount).toBe(1)
+    embeddedDark = true
+    notifyMutation?.()
+    expect(syncCount).toBe(1)
+    embeddedDark = false
+    notifyMutation?.()
+    expect(syncCount).toBe(2)
+    hostDark = false
+    notifyMutation?.()
+    expect(syncCount).toBe(2)
+    stopObserving()
+    expect(disconnected).toBe(true)
+  } finally {
+    globalThis.MutationObserver = originalObserver
+  }
 })
 
 test("research projects remain independent from normal project management", () => {
