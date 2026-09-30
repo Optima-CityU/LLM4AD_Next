@@ -28,6 +28,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { useProviders, useUserDefaultModels } from "@/hooks/useProviders"
 import { cn } from "@/lib/utils"
+import { formatProviderModel } from "@/lib/providerModel"
 
 function parseModels(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -86,10 +87,10 @@ function ModelInput({
     <div ref={containerRef} className="relative">
       <Input
         ref={inputRef}
-        value={value}
+        value={value === "codex-default" ? "" : value}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => !isReadOnly && suggestions.length > 0 && setOpen(true)}
-        placeholder={placeholder}
+        placeholder={value === "codex-default" ? formatProviderModel(value) : placeholder}
         disabled={disabled}
         readOnly={readOnly}
         className={cn(
@@ -131,7 +132,7 @@ function ModelInput({
                   value === model ? "opacity-100" : "opacity-0",
                 )}
               />
-              {model}
+              {formatProviderModel(model)}
             </button>
           ))}
         </div>
@@ -366,13 +367,13 @@ export default function EvolutionProviderSelect({
 
   const plannerHint = [
     defaultModels?.planner_provider_name,
-    defaultModels?.planner_model_name,
+    defaultModels?.planner_model_name ? formatProviderModel(defaultModels.planner_model_name) : "",
   ]
     .filter(Boolean)
     .join(", ")
   const coderHint = [
     defaultModels?.coder_provider_name,
-    defaultModels?.coder_model_name,
+    defaultModels?.coder_model_name ? formatProviderModel(defaultModels.coder_model_name) : "",
   ]
     .filter(Boolean)
     .join(", ")
@@ -544,7 +545,7 @@ export function EvaluatorProviderSelect({
   // user's "other" default — same hint format as the planner/coder rows.
   const evaluatorHint = [
     defaultModels?.other_provider_name,
-    defaultModels?.other_model_name,
+    defaultModels?.other_model_name ? formatProviderModel(defaultModels.other_model_name) : "",
   ]
     .filter(Boolean)
     .join(", ")

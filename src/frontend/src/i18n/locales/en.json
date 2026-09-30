@@ -1963,6 +1963,40 @@
         "text_embedding": "Text embedding",
         "code_embedding": "Code embedding"
       }
+    },
+    "codex": {
+      "title": "Connect local Codex",
+      "description": "Use the ChatGPT account signed in on this computer for experiment planning and code generation.",
+      "boundSuccess": "Local Codex connected and available for experiments",
+      "unboundSuccess": "Binding removed. Your local Codex login is unchanged.",
+      "bound": "Connected",
+      "available": "Ready to connect",
+      "disconnected": "Disconnected",
+      "defaultsActive": "Default for planning and coding",
+      "model": "Codex model",
+      "modelPlaceholder": "Enter a model ID supported by Codex",
+      "check": "Check connection",
+      "bind": "Connect Codex",
+      "update": "Update connection",
+      "unbind": "Disconnect",
+      "setDefaults": "Use by default for planning and code generation",
+      "loginHint": "Sign in from a terminal on the computer running this project, then check again:",
+      "serviceHint": "Start the Codex connection service on the computer running this project, then check the connection.",
+      "usageHint": "Uses your local login without an API key and consumes subscription usage. Existing tasks with an explicit provider need to select local Codex in their model settings.",
+      "status": {
+        "checking": "Checking local Codex…",
+        "ready": "Signed in with ChatGPT. Codex is ready.",
+        "not_logged_in": "Codex is installed. Sign in with your ChatGPT account.",
+        "not_installed": "Codex CLI is not installed on this computer.",
+        "not_configured": "The local Codex connection service is not configured.",
+        "unreachable": "The local Codex connection service is unavailable."
+      },
+      "selectModel": "Select a model",
+      "followDefault": "Follow local Codex settings",
+      "followDefaultModel": "Follow local Codex settings ({{model}})",
+      "customModel": "Enter a model ID manually",
+      "modelsHint": "Models are read from local Codex. Update the binding to save your selection.",
+      "modelsUnavailable": "Model list unavailable. Check the connection again or enter a model ID manually."
     }
   },
   "evolution": {
