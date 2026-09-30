@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from llm4ad.config.coder import ClaudeCodeConfig, CustomCoderConfig, OpenCodeConfig
+from llm4ad.config.coder import ClaudeCodeConfig, CodexCLIConfig, CustomCoderConfig, OpenCodeConfig
 from llm4ad.config.evaluator import (
     CustomEvaluatorConfig,
     ExecutableEvaluatorConfig,
@@ -47,7 +47,7 @@ class ProviderConfig(BaseModel):
             desc_en="Unique name to reference this provider from other components",
         ),
     )
-    type: Literal["openai", "anthropic", "openai_compatible", "mock"] = Field(
+    type: Literal["openai", "anthropic", "openai_compatible", "codex_cli", "mock"] = Field(
         default="openai",
         json_schema_extra=ui(
             label_zh="提供者类型", label_en="Provider Type",
@@ -88,6 +88,20 @@ class ProviderConfig(BaseModel):
             desc_zh="要使用的模型名称，如 gpt-4、claude-3-opus 等", desc_en="Model name to use, e.g. gpt-4, claude-3-opus, etc.",
         ),
     )
+
+    binary_path: str = Field(default="codex", description="Executable path for the codex_cli provider")
+
+    @model_validator(mode="before")
+    @classmethod
+    def codex_defaults(cls, data: Any) -> Any:
+        """Use CLI defaults instead of API model and timeout defaults."""
+        if isinstance(data, dict) and data.get("type") == "codex_cli":
+            data = dict(data)
+            data.setdefault("model", "")
+            data.setdefault("timeout", 600.0)
+            if any(data.get(key) for key in ("api_key", "auth_token", "base_url")):
+                raise ValueError("codex_cli uses the local ChatGPT login; omit API credentials and base_url.")
+        return data
 
     temperature: float = Field(
         default=0.7, ge=0.0, le=2.0, description="Sampling temperature",
@@ -463,12 +477,12 @@ class AppConfig(BaseModel):
             desc_en="Select evolution strategy: Island GA, Diverse Island GA, DyCA, MEoH, EoH, ReEvo, or MCTS-AHD",
         ),
     )
-    coder: CustomCoderConfig | ClaudeCodeConfig | OpenCodeConfig = Field(
+    coder: CustomCoderConfig | ClaudeCodeConfig | OpenCodeConfig | CodexCLIConfig = Field(
         discriminator="type", default_factory=CustomCoderConfig,
         json_schema_extra=ui(
             label_zh="代码生成器", label_en="Coder",
-            desc_zh="配置代码生成方式，支持自定义 LLM、Claude Code 或 OpenCode",
-            desc_en="Configure code generation: custom LLM, Claude Code, or OpenCode",
+            desc_zh="配置代码生成方式，支持自定义 LLM、Claude Code、OpenCode 或 Codex CLI",
+            desc_en="Configure code generation: custom LLM, Claude Code, OpenCode, or Codex CLI",
         ),
     )
     memory: MemoryConfig = Field(

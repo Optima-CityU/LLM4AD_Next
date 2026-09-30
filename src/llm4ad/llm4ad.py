@@ -222,24 +222,21 @@ class LLM4AD:
         # Initialize planner
         from llm4ad.planner.memory import create_memory, create_memory_extractor
 
-        # Get coder provider
-        coder_provider_name = self.config.coder.provider
-        if coder_provider_name not in self._providers:
-            raise ValueError(
-                f"Coder provider '{coder_provider_name}' not found in providers configuration"
-            )
-        coder_provider = self._providers[coder_provider_name]
-        coder_provider_config = next(
-            p for p in self.config.providers if p.name == coder_provider_name
-        )
-
         # Initialize coder
         coder_type = self.config.coder.type
         coder_kwargs: dict[str, Any] = {"config": self.config.coder}
-        if coder_type == "custom":
-            coder_kwargs["provider"] = coder_provider
-        elif coder_type in ("claude_code", "opencode"):
-            coder_kwargs["provider_config"] = coder_provider_config
+        if coder_type != "codex_cli":
+            coder_provider_name = self.config.coder.provider
+            if coder_provider_name not in self._providers:
+                raise ValueError(
+                    f"Coder provider '{coder_provider_name}' not found in providers configuration"
+                )
+            if coder_type == "custom":
+                coder_kwargs["provider"] = self._providers[coder_provider_name]
+            elif coder_type in ("claude_code", "opencode"):
+                coder_kwargs["provider_config"] = next(
+                    p for p in self.config.providers if p.name == coder_provider_name
+                )
         self._coder = BaseCoder.create(
             coder_type,
             **coder_kwargs,
