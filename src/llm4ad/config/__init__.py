@@ -13,6 +13,7 @@ from llm4ad.config.app import (
 from llm4ad.config.coder import (
     ClaudeCodeConfig,
     CoderConfig,
+    CodexCLIConfig,
     CustomCoderConfig,
     OpenCodeConfig,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "EvalContext",
     # coder
     "CoderConfig",
+    "CodexCLIConfig",
     "ClaudeCodeConfig",
     "OpenCodeConfig",
     "CustomCoderConfig",
