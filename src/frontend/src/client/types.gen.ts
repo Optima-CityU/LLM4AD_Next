@@ -2529,6 +2529,7 @@ export type ProviderCreate = {
  * 用户自有供应商的 base_url 非敏感，原样返回以便编辑。
  */
 export type ProviderResponse = {
+    is_local_codex?: boolean;
     id: string;
     created_time: string;
     updated_time: string;

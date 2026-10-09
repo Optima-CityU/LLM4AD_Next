@@ -41,6 +41,8 @@ const DeleteProvider = ({ id, onSuccess }: DeleteProviderProps) => {
     onError: handleError.bind(showErrorToast),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["providers"] })
+      queryClient.invalidateQueries({ queryKey: ["local-codex-status"] })
+      queryClient.invalidateQueries({ queryKey: ["user-default-models"] })
     },
   })
 

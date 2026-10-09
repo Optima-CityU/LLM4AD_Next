@@ -1963,6 +1963,40 @@
         "text_embedding": "Text embedding",
         "code_embedding": "Code embedding"
       }
+    },
+    "codex": {
+      "title": "绑定本机 Codex",
+      "description": "使用这台电脑已登录的 ChatGPT 账号，为实验完成规划和代码生成。",
+      "boundSuccess": "已绑定本机 Codex，可在实验中选择使用",
+      "unboundSuccess": "已解除绑定，本机 Codex 登录状态保持不变",
+      "bound": "已绑定",
+      "available": "可绑定",
+      "disconnected": "未连接",
+      "defaultsActive": "规划与代码生成默认模型",
+      "model": "Codex 模型",
+      "modelPlaceholder": "输入 Codex 支持的模型 ID",
+      "check": "检测连接",
+      "bind": "绑定 Codex",
+      "update": "更新绑定",
+      "unbind": "解除绑定",
+      "setDefaults": "设为规划和代码生成的默认模型",
+      "loginHint": "请在运行项目的电脑终端登录，然后重新检测：",
+      "serviceHint": "请在运行项目的电脑上启动 Codex 连接服务，再点击“检测连接”。",
+      "usageHint": "复用本机登录，无需填写 API Key。调用消耗套餐额度；已有任务如指定了其他供应商，需在实验的模型选择中切换到本机 Codex。",
+      "status": {
+        "checking": "正在检测本机 Codex…",
+        "ready": "ChatGPT 已登录，Codex 可以使用",
+        "not_logged_in": "已找到 Codex，请先使用 ChatGPT 账号登录",
+        "not_installed": "这台电脑尚未安装 Codex CLI",
+        "not_configured": "本机 Codex 连接服务尚未配置",
+        "unreachable": "暂时无法连接本机 Codex 服务"
+      },
+      "selectModel": "选择模型",
+      "followDefault": "跟随本机配置",
+      "followDefaultModel": "跟随本机配置（{{model}}）",
+      "customModel": "手动输入模型 ID",
+      "modelsHint": "模型列表来自本机 Codex，选择后点击更新绑定保存。",
+      "modelsUnavailable": "暂时无法读取模型列表，可检测连接重试或手动输入模型 ID。"
     }
   },
   "evolution": {
