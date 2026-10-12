@@ -2230,12 +2230,17 @@ export function PaperWorkbench({
       files: state
         ? candidateFiles.filter((path) => activeSource?.manifest.includes(path))
         : [],
+      foundationBlocks:
+        stage === "formatting" && state
+          ? (workspace?.proposal_foundation?.blocks ?? [])
+          : [],
     }
   }, [
     activeSource?.manifest,
     nativeStage,
     proposalEntryPath,
     t,
+    workspace?.proposal_foundation?.blocks,
     workspace?.proposal_stage_states,
   ])
   const nativeArtifactPaths = useMemo(() => {

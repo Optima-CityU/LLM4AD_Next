@@ -590,8 +590,29 @@
     },
     "proposalResults": {
       "title": "Current stage result",
+      "stageIndex": "Stage {{current}} / {{total}}",
+      "summary": "Stage summary",
+      "foundation": "Project foundation",
+      "foundationHint": "This is the current shared foundation; later confirmed updates appear here too.",
+      "sourceRefs": "Sources",
+      "pageRange": "{{from}}–{{to}} of {{total}}",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "paginationLabel": "{{section}} pages",
+      "pendingTitle": "Awaiting stage result",
       "pending": "No result has been published for this stage yet. Continue in the conversation on the left.",
       "files": "Stage files",
+      "openFile": "Open {{path}} in the editor",
+      "findingTitles": {
+        "formatting": "Stage decisions",
+        "literature": "Evidence and literature threads",
+        "rationale": "Research case",
+        "objectives": "Objectives and key questions",
+        "methods": "Methodological route",
+        "innovation_plan": "Innovation and implementation",
+        "foundation_feasibility": "Foundation and feasibility",
+        "final_review": "Final review observations"
+      },
       "editor": "Editor / PDF"
     },
     "workflow": {

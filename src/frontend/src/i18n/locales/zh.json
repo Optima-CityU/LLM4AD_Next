@@ -590,8 +590,29 @@
     },
     "proposalResults": {
       "title": "当前阶段成果",
+      "stageIndex": "第 {{current}} / {{total}} 阶段",
+      "summary": "阶段摘要",
+      "foundation": "项目研究基础",
+      "foundationHint": "这里展示当前共享的项目基础，后续阶段确认的新信息也会同步更新。",
+      "sourceRefs": "依据",
+      "pageRange": "第 {{from}}–{{to}} 项，共 {{total}} 项",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "paginationLabel": "{{section}}分页",
+      "pendingTitle": "等待阶段成果",
       "pending": "此阶段尚未发布成果。可在左侧对话中补充要求并推进。",
       "files": "本阶段文件",
+      "openFile": "在编辑器中打开 {{path}}",
+      "findingTitles": {
+        "formatting": "阶段决策",
+        "literature": "证据与文献线索",
+        "rationale": "立项论证要点",
+        "objectives": "研究目标与关键问题",
+        "methods": "技术路线要点",
+        "innovation_plan": "创新与实施要点",
+        "foundation_feasibility": "研究基础与可行性要点",
+        "final_review": "终审检查与建议"
+      },
       "editor": "编辑器 / PDF"
     },
     "workflow": {
