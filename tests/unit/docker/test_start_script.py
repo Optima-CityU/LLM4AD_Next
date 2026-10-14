@@ -81,13 +81,13 @@ def test_mirrors_overrides_registry_and_preserves_tag(
     fake_docker_env["TAG"] = "v1.2.3"
 
     result = run_start(
-        ["upgrade", "--mirrors", "docker.1ms.run/noah2012", "--dry-run"],
+        ["upgrade", "--mirrors", "registry.example.com/noah2012", "--dry-run"],
         fake_docker_env,
     )
 
     assert result.returncode == 0, result.stderr
     docker_env = read_docker_env(fake_docker_env)
-    assert "SWR_REGISTRY=docker.1ms.run/noah2012\n" in docker_env
+    assert "SWR_REGISTRY=registry.example.com/noah2012\n" in docker_env
     assert "TAG=v1.2.3\n" in docker_env
 
 

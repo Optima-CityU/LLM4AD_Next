@@ -1750,7 +1750,7 @@ export type PaperAgentRunResponse = {
     id: string;
     workspace_id: string;
     source_version_id: string;
-    run_kind: 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+    run_kind: 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
     status: 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
     progress: number;
     stage: string;
@@ -1766,7 +1766,7 @@ export type PaperAgentRunResponse = {
     updated_time: string;
 };
 
-export type run_kind = 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+export type run_kind = 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
 
 export type status2 = 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
 
@@ -1922,6 +1922,71 @@ export type PaperJudgeResultResponse = {
     rationale: string;
     citations: Array<(string)>;
     created_time: string;
+};
+
+/**
+ * Result of a child creation or parameter update.
+ */
+export type PaperLinkedTaskChangeResponse = {
+    task: PaperLinkedTaskSnapshot;
+    changes?: {
+        [key: string]: {
+            [key: string]: (number | boolean);
+        };
+    };
+};
+
+/**
+ * Create a non-activating child to test an evolution-parameter change.
+ */
+export type PaperLinkedTaskChildCreate = {
+    expected_version_time: string;
+    parameters?: {
+        [key: string]: (number | boolean);
+    };
+};
+
+/**
+ * Optimistic evolution-parameter update for an unstarted child version.
+ */
+export type PaperLinkedTaskPatch = {
+    expected_version_time: string;
+    parameters: {
+        [key: string]: (number | boolean);
+    };
+};
+
+/**
+ * Bounded public task state for an AutoDiscovery proposal family.
+ */
+export type PaperLinkedTaskSnapshot = {
+    proposal_id: string;
+    project_id: string;
+    root_task_id: string;
+    active_task_id: string;
+    tasks?: Array<{
+        [key: string]: unknown;
+    }>;
+    selected_task_id: string;
+    status: string;
+    stopped_by_user?: boolean;
+    solution_count?: number;
+    avg_score?: (number | null);
+    max_score?: (number | null);
+    recent_logs?: Array<{
+        [key: string]: unknown;
+    }>;
+    result?: ({
+    [key: string]: unknown;
+} | null);
+    evolution_parameters?: {
+        [key: string]: unknown;
+    };
+    parameter_diff?: {
+        [key: string]: {
+            [key: string]: (number | boolean);
+        };
+    };
 };
 
 /**
@@ -2154,10 +2219,10 @@ export type PaperRevisionPatchResponse = {
  * Select the backend-owned stage profile for a native session.
  */
 export type PaperRuntimeSessionCreate = {
-    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
 };
 
-export type workflow_stage = 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+export type workflow_stage = 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
 
 /**
  * Opaque browser session for an embedded research runtime.
@@ -2187,7 +2252,7 @@ export type PaperSourceFileResponse = {
 export type PaperSourceFileUpdateRequest = {
     path: string;
     content: string;
-    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
 };
 
 /**
@@ -2195,7 +2260,7 @@ export type PaperSourceFileUpdateRequest = {
  */
 export type PaperSourcePathDeleteRequest = {
     path: string;
-    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
 };
 
 /**
@@ -2219,10 +2284,23 @@ export type PaperSourceVersionResponse = {
 export type source_kind = 'markdown' | 'latex_zip' | 'source_bundle';
 
 /**
+ * Published result and revision metadata for one research stage.
+ */
+export type PaperStageArtifactResponse = {
+    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    run_id: string;
+    source_version_id: string;
+    status: string;
+    artifact: {
+        [key: string]: unknown;
+    };
+};
+
+/**
  * Invalidate the stage revision replaced by an edited conversation turn.
  */
 export type PaperStageInvalidateRequest = {
-    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
     expected_iteration?: (number | null);
 };
 
@@ -2277,8 +2355,8 @@ export type PaperWorkspaceDetail = {
     revision_candidates?: Array<PaperRevisionCandidateResponse>;
     active_run?: (PaperAgentRunResponse | null);
     workflow_available: boolean;
-    workflow_stages?: Array<('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
-    available_run_kinds?: Array<('proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
+    workflow_stages?: Array<('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
+    available_run_kinds?: Array<('proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
 };
 
 /**
@@ -5025,6 +5103,56 @@ export type Llm4AdPapersDeleteWorkspaceData = {
 };
 
 export type Llm4AdPapersDeleteWorkspaceResponse = (void);
+
+export type Llm4AdPapersGetStageArtifactData = {
+    runId?: (string | null);
+    stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workspaceId: string;
+};
+
+export type Llm4AdPapersGetStageArtifactResponse = (PaperStageArtifactResponse);
+
+export type Llm4AdPapersGetLinkedTaskData = {
+    proposalId: string;
+    taskId?: (string | null);
+    workspaceId: string;
+};
+
+export type Llm4AdPapersGetLinkedTaskResponse = (PaperLinkedTaskSnapshot);
+
+export type Llm4AdPapersCreateLinkedChildData = {
+    proposalId: string;
+    requestBody: PaperLinkedTaskChildCreate;
+    taskId: string;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersCreateLinkedChildResponse = (PaperLinkedTaskChangeResponse);
+
+export type Llm4AdPapersPatchLinkedChildData = {
+    proposalId: string;
+    requestBody: PaperLinkedTaskPatch;
+    taskId: string;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersPatchLinkedChildResponse = (PaperLinkedTaskChangeResponse);
+
+export type Llm4AdPapersRunLinkedTaskData = {
+    proposalId: string;
+    taskId: string;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersRunLinkedTaskResponse = (PaperLinkedTaskSnapshot);
+
+export type Llm4AdPapersStopLinkedTaskData = {
+    proposalId: string;
+    taskId: string;
+    workspaceId: string;
+};
+
+export type Llm4AdPapersStopLinkedTaskResponse = (PaperLinkedTaskSnapshot);
 
 export type Llm4AdPapersInvalidateWorkflowStageData = {
     requestBody: PaperStageInvalidateRequest;

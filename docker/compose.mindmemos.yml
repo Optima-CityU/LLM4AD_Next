@@ -2,7 +2,7 @@ name: ${PROJECT_NAME:-llm4ad-web}
 
 services:
   mindmemos-qdrant:
-    image: qdrant/qdrant:v1.18.0
+    image: "${DOCKERHUB_REGISTRY:-}qdrant/qdrant:v1.18.0"
     restart: always
     volumes:
       - ./app-data/mindmemos/qdrant/storage:/qdrant/storage
@@ -13,7 +13,7 @@ services:
       retries: 12
 
   mindmemos-neo4j:
-    image: neo4j:2026.05.0
+    image: "${DOCKERHUB_REGISTRY:-}library/neo4j:2026.05.0"
     restart: always
     environment:
       NEO4J_AUTH: "${MINDMEMOS_NEO4J_USERNAME:-neo4j}/${MINDMEMOS_NEO4J_PASSWORD:-mindmemos_dev_password}"
@@ -28,7 +28,7 @@ services:
       retries: 30
 
   mindmemos-kafka:
-    image: apache/kafka:3.9.0
+    image: "${DOCKERHUB_REGISTRY:-}apache/kafka:3.9.0"
     restart: always
     environment:
       KAFKA_NODE_ID: "0"
@@ -57,7 +57,8 @@ services:
       context: ../
       dockerfile: docker/mindmemos/Dockerfile
       args:
-        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://mirrors.aliyun.com/pypi/simple}
+        DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.org/simple}
       ulimits:
         nofile:
           soft: 65535

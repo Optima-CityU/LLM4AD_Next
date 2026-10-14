@@ -90,6 +90,17 @@ def _publication_request(token: str) -> Request:
     )
 
 
+def test_arxiv_tools_are_scoped_to_paper_discovery_and_literature() -> None:
+    """Offer arXiv intake in baseline without exposing it to later stages."""
+    for stage in ("literature", "discovery_baseline"):
+        servers, tools = paper_runtime._runtime_stage_mcp_configuration(stage)
+        assert "arxiv" in servers
+        assert "mcp__arxiv__download_paper" in tools
+    servers, tools = paper_runtime._runtime_stage_mcp_configuration("discovery_candidates")
+    assert servers == {}
+    assert tools == []
+
+
 def test_stage_publication_advances_current_stage_and_stales_dependents() -> None:
     """Make the durable workflow state follow a newly published stage result."""
     source_id = uuid.uuid4()
@@ -711,6 +722,120 @@ def test_algorithm_discovery_replaces_drafts_and_marks_result_ready(
         assert proposals[0].package_object_prefix
         assert persisted_workspace is not None
         assert persisted_workspace.proposal_stage_states["discovery"]["status"] == "ready"
+
+
+def test_autodiscovery_stages_publish_independent_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Store each research decision in RustFS and advance only ready predecessors."""
+    object_storage = _ObjectStorage()
+    monkeypatch.setattr(paper_agent, "storage", object_storage)
+    monkeypatch.setattr(paper_service, "_storage", lambda: object_storage)
+
+    with Session(engine) as db:
+        user = create_random_user(db)
+        workspace = models.PaperWorkspace(user_id=user.id, title="Staged discovery", mode="algorithm")
+        db.add(workspace)
+        db.flush()
+        source = models.PaperSourceVersion(
+            workspace_id=workspace.id,
+            version=1,
+            source_kind=models.PaperSourceKind.MARKDOWN.value,
+            filename="paper.md",
+            object_key=f"paper/{user.id}/{workspace.id}/sources/current/paper.md",
+            content_hash="source",
+            content_size=8,
+            manifest=["paper.md"],
+        )
+        db.add(source)
+        db.flush()
+        workspace.active_source_version_id = source.id
+        db.add(workspace)
+        db.commit()
+        user_id, workspace_id, source_id = user.id, workspace.id, source.id
+
+    stages = [
+        (
+            models.PaperAgentRunKind.DISCOVERY_BASELINE.value,
+            {
+                "schema_version": "discovery-baseline-v1",
+                "summary": "A bounded algorithm exists",
+                "algorithm_summary": "Candidate generation can be evolved",
+                "evidence": [{"claim": "Generator is defined", "source_path": "paper.md"}],
+                "unknowns": [],
+            },
+            "discovery_baseline",
+            "ready",
+        ),
+        (
+            models.PaperAgentRunKind.DISCOVERY_CANDIDATES.value,
+            {
+                "schema_version": "discovery-candidates-v1",
+                "summary": "One feasible direction",
+                "candidates": [
+                    {
+                        "id": "candidate-a",
+                        "title": "Generator",
+                        "evolvable_boundary": "generate(instance, seed)",
+                        "rationale": "Paper describes this method",
+                        "feasibility": "Python implementation is available",
+                    }
+                ],
+                "selected_candidate_id": "candidate-a",
+            },
+            "discovery_candidates",
+            "ready",
+        ),
+        (
+            models.PaperAgentRunKind.DISCOVERY_EVALUATION.value,
+            {
+                "schema_version": "discovery-evaluation-v1",
+                "summary": "Paired comparison against the original",
+                "candidate_id": "candidate-a",
+                "metrics": ["quality"],
+                "optimization_direction": "maximize",
+                "baseline": "Unmodified algorithm",
+                "data_protocol": "Same held-out instances and seeds",
+                "validity_checks": ["Reject malformed outputs"],
+                "ready_for_build": True,
+            },
+            "discovery_evaluation",
+            "ready",
+        ),
+    ]
+    for index, (run_kind, payload, stage, expected_status) in enumerate(stages):
+        with Session(engine) as db:
+            run = models.PaperAgentRun(
+                workspace_id=workspace_id,
+                source_version_id=source_id,
+                run_kind=run_kind,
+                status=models.PaperAgentRunStatus.RUNNING.value,
+            )
+            db.add(run)
+            db.commit()
+            run_id = run.id
+        output_dir = tmp_path / f"stage-{index}" / "output"
+        output_dir.mkdir(parents=True)
+        (output_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        assert paper_agent._persist_output(run_id, user_id, output_dir.parent) is False
+
+        with Session(engine) as db:
+            result = paper_service.get_stage_artifact(db, user_id, workspace_id, stage)
+            workspace = db.get(models.PaperWorkspace, workspace_id)
+            assert result.artifact["schema_version"] == payload["schema_version"]
+            assert result.source_version_id == source_id
+            assert workspace is not None
+            assert workspace.proposal_stage_states[stage]["status"] == expected_status
+
+    with Session(engine) as db:
+        workspace = db.get(models.PaperWorkspace, workspace_id)
+        assert workspace is not None
+        paper_service._stale_proposal_stages(workspace, "discovery_candidates")
+        assert workspace.proposal_stage_states["discovery_baseline"]["status"] == "ready"
+        assert workspace.proposal_stage_states["discovery_candidates"]["status"] == "stale"
+        assert workspace.proposal_stage_states["discovery_evaluation"]["status"] == "stale"
 
 
 def test_blocking_final_review_is_persisted_as_needs_revision(

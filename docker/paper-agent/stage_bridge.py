@@ -1,6 +1,6 @@
 """Workspace-local MCP bridge for publishing validated research artifacts.
 
-Exposes three tools to the research runtime's agent:
+Exposes stage-scoped tools to the research runtime's agent, including:
 
 - ``check_typst``: compile the proposal Typst document in-process (official
   ``typst`` binding) and return errors/warnings so the agent can fix its own
@@ -10,6 +10,7 @@ Exposes three tools to the research runtime's agent:
 - ``publish_stage_result``: publish the finished stage artifact; the same
   compile check gates publication, so a stage result that does not compile can
   never be published.
+- ``import_arxiv_paper``: persist a downloaded AutoDiscovery paper as source.
 """
 
 from __future__ import annotations
@@ -243,6 +244,154 @@ async def build_algorithm_task(
     except Exception:
         shutil.rmtree(build_root, ignore_errors=True)
         raise
+
+
+@mcp.tool()
+async def import_arxiv_paper(paper_id: str) -> dict[str, Any]:
+    """Import a paper downloaded by the arXiv MCP into this project's source.
+
+    Call ``mcp__arxiv__download_paper`` first. The backend reads its locally
+    cached Markdown and stores a durable source version; this tool cannot
+    import an arbitrary filesystem path or unpublished text.
+    """
+    if _required_environment("LLM4AD_STAGE_NAME") != "discovery_baseline":
+        raise RuntimeError("arXiv intake is available only in the baseline stage")
+    payload = {
+        "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+        "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+        "paper_id": paper_id,
+    }
+    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        response = await client.post(
+            _required_environment("LLM4AD_STAGE_ARXIV_IMPORT_URL"),
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+            json=payload,
+        )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise RuntimeError(detail or f"arXiv import failed with HTTP {response.status_code}")
+    return response.json()
+
+
+@mcp.tool()
+async def read_predecessor_artifact(stage: str) -> dict[str, Any]:
+    """Read one published predecessor artifact in this workspace and source revision."""
+    if stage not in {"discovery_baseline", "discovery_candidates", "discovery_evaluation"}:
+        raise ValueError("Unknown AutoDiscovery predecessor stage")
+    current = _required_environment("LLM4AD_STAGE_NAME")
+    order = ("discovery_baseline", "discovery_candidates", "discovery_evaluation", "discovery")
+    if current not in order or order.index(stage) >= order.index(current):
+        raise ValueError("Only a predecessor of the current stage can be read")
+    url = f"{_required_environment('LLM4AD_STAGE_READ_URL')}/{stage}"
+    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+        response = await client.get(
+            url,
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+            params={
+                "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+                "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+            },
+        )
+    if not response.is_success:
+        raise RuntimeError(f"Predecessor artifact unavailable (HTTP {response.status_code})")
+    return response.json()
+
+
+async def _linked_task_call(
+    operation: str,
+    proposal_id: str | None = None,
+    task_id: str | None = None,
+    expected_version_time: str | None = None,
+    parameters: dict[str, int | float | bool] | None = None,
+) -> dict[str, Any]:
+    """Call the backend's owner-checked final-stage task adapter."""
+    if _required_environment("LLM4AD_STAGE_NAME") != "discovery":
+        raise RuntimeError("Linked task tools are available only in the final stage")
+    payload: dict[str, Any] = {
+        "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+        "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+        "operation": operation,
+    }
+    if proposal_id:
+        payload["proposal_id"] = proposal_id
+    if task_id:
+        payload["task_id"] = task_id
+    if expected_version_time:
+        payload["expected_version_time"] = expected_version_time
+    if parameters is not None:
+        payload["parameters"] = parameters
+    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        response = await client.post(
+            _required_environment("LLM4AD_STAGE_TASK_URL"),
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+            json=payload,
+        )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise RuntimeError(detail or f"Linked task operation failed (HTTP {response.status_code})")
+    return response.json()
+
+
+@mcp.tool()
+async def list_algorithm_proposals() -> dict[str, Any]:
+    """List this workspace's published proposals and their linked task IDs."""
+    return await _linked_task_call("list")
+
+
+@mcp.tool()
+async def link_algorithm_task(proposal_id: str) -> dict[str, Any]:
+    """Import the current published package once and link its ordinary task."""
+    return await _linked_task_call("link", proposal_id)
+
+
+@mcp.tool()
+async def linked_task_status(proposal_id: str, task_id: str | None = None) -> dict[str, Any]:
+    """Read current linked task status, child versions and observed results."""
+    return await _linked_task_call("status", proposal_id, task_id)
+
+
+@mcp.tool()
+async def create_child_task(
+    proposal_id: str,
+    parent_task_id: str,
+    expected_version_time: str,
+    parameters: dict[str, int | float | bool] | None = None,
+) -> dict[str, Any]:
+    """On explicit user request, copy a child experiment without activating it."""
+    return await _linked_task_call(
+        "create_child", proposal_id, parent_task_id, expected_version_time, parameters
+    )
+
+
+@mcp.tool()
+async def patch_child_parameters(
+    proposal_id: str,
+    child_task_id: str,
+    expected_version_time: str,
+    parameters: dict[str, int | float | bool],
+) -> dict[str, Any]:
+    """On explicit user request, apply a validated diff to an unstarted child."""
+    return await _linked_task_call(
+        "patch_child", proposal_id, child_task_id, expected_version_time, parameters
+    )
+
+
+@mcp.tool()
+async def start_linked_task(proposal_id: str, task_id: str) -> dict[str, Any]:
+    """Start a linked task only when the user explicitly delegates the action."""
+    return await _linked_task_call("start", proposal_id, task_id)
+
+
+@mcp.tool()
+async def stop_linked_task(proposal_id: str, task_id: str) -> dict[str, Any]:
+    """Stop a linked task only when the user explicitly delegates the action."""
+    return await _linked_task_call("stop", proposal_id, task_id)
 
 
 @mcp.tool()

@@ -31,6 +31,82 @@ class DiscoveryArtifact(BaseModel):
     proposals: list[DiscoveryProposalArtifact] = Field(min_length=1, max_length=20)
 
 
+class DiscoveryEvidence(BaseModel):
+    """One source-grounded observation, with its original file reference."""
+
+    claim: str = Field(min_length=1)
+    source_path: str = Field(min_length=1)
+    source_quote: str | None = None
+
+
+class DiscoveryBaselineArtifact(BaseModel):
+    """Research baseline before choosing an algorithm to evolve."""
+
+    schema_version: str = Field(pattern=r"^discovery-baseline-v1$")
+    summary: str = Field(min_length=1)
+    algorithm_summary: str = Field(min_length=1)
+    evidence: list[DiscoveryEvidence] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+
+
+class DiscoveryCandidate(BaseModel):
+    """One independent algorithm direction supported by paper evidence."""
+
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    evolvable_boundary: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    feasibility: str = Field(min_length=1)
+    evaluation_risks: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+
+
+class DiscoveryCandidatesArtifact(BaseModel):
+    """Candidate comparison that may remain open until one is selected."""
+
+    schema_version: str = Field(pattern=r"^discovery-candidates-v1$")
+    summary: str = Field(min_length=1)
+    candidates: list[DiscoveryCandidate] = Field(default_factory=list)
+    selected_candidate_id: str | None = None
+    open_questions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def selected_candidate_exists(self) -> DiscoveryCandidatesArtifact:
+        """Reject a selected candidate absent from the published comparison."""
+        ids = [candidate.id for candidate in self.candidates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Candidate IDs must be unique")
+        if self.selected_candidate_id and self.selected_candidate_id not in ids:
+            raise ValueError("Selected candidate is missing from the comparison")
+        return self
+
+
+class DiscoveryEvaluationArtifact(BaseModel):
+    """Evaluation contract, not a claim of observed algorithm improvement."""
+
+    schema_version: str = Field(pattern=r"^discovery-evaluation-v1$")
+    summary: str = Field(min_length=1)
+    candidate_id: str = Field(min_length=1)
+    metrics: list[str] = Field(default_factory=list)
+    optimization_direction: str | None = Field(default=None, pattern=r"^(minimize|maximize)$")
+    baseline: str | None = None
+    data_protocol: str | None = None
+    validity_checks: list[str] = Field(default_factory=list)
+    reproducibility: str | None = None
+    source_refs: list[str] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+    ready_for_build: bool = False
+
+    @model_validator(mode="after")
+    def require_complete_contract(self) -> DiscoveryEvaluationArtifact:
+        """Prevent a ready contract with no executable evaluation design."""
+        if self.ready_for_build and not all(
+            (self.metrics, self.optimization_direction, self.baseline, self.data_protocol, self.validity_checks)
+        ):
+            raise ValueError("A ready evaluation requires metrics, direction, baseline, data and validity checks")
+        return self
+
+
 class ProposalFormattingArtifact(BaseModel):
     """Validated Typst result and its durable project-level foundation."""
 
@@ -773,6 +849,46 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
                         **target_payload,
                     )
                 )
+        elif run.run_kind == models.PaperAgentRunKind.DISCOVERY_BASELINE.value:
+            artifact = DiscoveryBaselineArtifact.model_validate(payload)
+            source = db.get(models.PaperSourceVersion, run.source_version_id)
+            if source is None:
+                raise RuntimeError("Paper source is missing")
+            for evidence in artifact.evidence:
+                _canonical_source_reference(evidence.source_path, source.manifest)
+            _update_proposal_stage_state(
+                workspace, run, run.source_version_id, summary=artifact.summary, findings=artifact.unknowns
+            )
+        elif run.run_kind == models.PaperAgentRunKind.DISCOVERY_CANDIDATES.value:
+            artifact = DiscoveryCandidatesArtifact.model_validate(payload)
+            _update_proposal_stage_state(
+                workspace,
+                run,
+                run.source_version_id,
+                status="ready" if artifact.selected_candidate_id else "needs_revision",
+                summary=artifact.summary,
+                findings=artifact.open_questions,
+            )
+        elif run.run_kind == models.PaperAgentRunKind.DISCOVERY_EVALUATION.value:
+            artifact = DiscoveryEvaluationArtifact.model_validate(payload)
+            candidate_state = (workspace.proposal_stage_states or {}).get("discovery_candidates") or {}
+            candidate_run_id = candidate_state.get("run_id")
+            candidate_run = db.get(models.PaperAgentRun, uuid.UUID(candidate_run_id)) if candidate_run_id else None
+            if candidate_run is None or not candidate_run.artifact_object_key:
+                raise ValueError("Selected candidate artifact is unavailable")
+            candidates = DiscoveryCandidatesArtifact.model_validate(
+                json.loads(storage.download(candidate_run.artifact_object_key))
+            )
+            if artifact.candidate_id != candidates.selected_candidate_id:
+                raise ValueError("Evaluation contract must match the selected candidate")
+            _update_proposal_stage_state(
+                workspace,
+                run,
+                run.source_version_id,
+                status="ready" if artifact.ready_for_build else "needs_revision",
+                summary=artifact.summary,
+                findings=artifact.unknowns,
+            )
         elif run.run_kind == models.PaperAgentRunKind.ALGORITHM_DISCOVERY.value:
             artifact = DiscoveryArtifact.model_validate(payload)
             existing_drafts = list(

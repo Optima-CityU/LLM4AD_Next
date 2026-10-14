@@ -1,4 +1,5 @@
-FROM python:3.12-bookworm
+ARG DOCKERHUB_REGISTRY=""
+FROM ${DOCKERHUB_REGISTRY}library/python:3.12-bookworm
 
 ENV PYTHONUNBUFFERED=1
 ENV UV_COMPILE_BYTECODE=1
@@ -11,7 +12,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /uvx /bin/
 WORKDIR /app/mindmemos
 ENV PATH="/app/mindmemos/.venv/bin:$PATH"
 
-ARG UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple
+ARG UV_DEFAULT_INDEX=https://pypi.org/simple
 ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX}
 
 COPY third_party/MindMemOS/pyproject.toml third_party/MindMemOS/uv.lock ./

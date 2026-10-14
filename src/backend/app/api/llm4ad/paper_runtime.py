@@ -9,8 +9,9 @@ import secrets
 import tempfile
 import uuid
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from fastapi import (
@@ -24,7 +25,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 from websockets.asyncio.client import connect as websocket_connect
 
 from app.api.deps import CurrentUser, SessionDep, TokenDep
@@ -36,19 +37,25 @@ from app.models import (
     LLMProvider,
     PaperAgentRun,
     PaperAgentRunStatus,
+    PaperAlgorithmProposal,
     PaperSourceVersion,
+    PaperTaskLink,
     PaperWorkspace,
+    User,
 )
+from app.schemas import paper as paper_schemas
 from app.schemas.paper import (
     PaperConversationPreferences,
     PaperRuntimeSessionCreate,
     PaperRuntimeSessionResponse,
+    ResearchWorkflowStage,
 )
 from app.services import (
     claude_protocol,
     credential_broker,
     knowledge_service,
     paper_service,
+    paper_task_control,
     paper_workflow,
 )
 from app.services.paper_workspace_runtime import (
@@ -88,6 +95,26 @@ class _StagePublicationRequest(BaseModel):
     run_id: uuid.UUID
     idempotency_key: str = Field(min_length=1, max_length=128)
     artifact: dict
+
+
+class _ArxivImportRequest(BaseModel):
+    """Private source import request from the AutoDiscovery baseline bridge."""
+
+    workspace_id: uuid.UUID
+    run_id: uuid.UUID
+    paper_id: str = Field(min_length=1, max_length=80)
+
+
+class _LinkedTaskToolRequest(BaseModel):
+    """Private request from a final-stage AutoDiscovery MCP tool."""
+
+    workspace_id: uuid.UUID
+    run_id: uuid.UUID
+    proposal_id: uuid.UUID | None = None
+    operation: Literal["list", "link", "status", "create_child", "patch_child", "start", "stop"]
+    task_id: uuid.UUID | None = None
+    expected_version_time: datetime | None = None
+    parameters: dict[str, int | float | bool] = Field(default_factory=dict)
 
 
 def _stage_publication_key(request: _StagePublicationRequest) -> str:
@@ -239,7 +266,7 @@ def _runtime_stage_mcp_configuration(
     workflow_stage: str,
 ) -> tuple[dict[str, object], list[str]]:
     """Return external read-only MCP servers and tools for one stage."""
-    if workflow_stage == "literature":
+    if workflow_stage in {"literature", "discovery_baseline"}:
         return (
             {
                 "arxiv": {
@@ -337,13 +364,21 @@ async def create_runtime_session(
     if provider is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research model provider is unavailable")
     knowledge_service.validate_parser_binding(provider, current_user.id, workspace.analysis_model_name)
-    if workspace.active_source_version_id is None:
+    intake_without_source = (
+        workspace.mode == "algorithm"
+        and request.workflow_stage == "discovery_baseline"
+        and workspace.active_source_version_id is None
+    )
+    if workspace.active_source_version_id is None and not intake_without_source:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research source is unavailable")
-    source = db.get(PaperSourceVersion, workspace.active_source_version_id)
-    if source is None or source.workspace_id != workspace.id:
+    source = db.get(PaperSourceVersion, workspace.active_source_version_id) if workspace.active_source_version_id else None
+    if source is None and not intake_without_source:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research source is unavailable")
-    paper_service.sync_paper_workspace_source(workspace, source)
-    if workspace.mode == "manuscript":
+    if source is not None and source.workspace_id != workspace.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research source is unavailable")
+    if source is not None:
+        paper_service.sync_paper_workspace_source(workspace, source)
+    if workspace.mode == "manuscript" and source is not None:
         paper_service.sync_paper_workspace_reviews(db, workspace, source)
         paper_service.sync_paper_workspace_rebuttal_context(workspace)
 
@@ -354,13 +389,13 @@ async def create_runtime_session(
         run = PaperAgentRun(
             id=run_id,
             workspace_id=workspace.id,
-            source_version_id=source.id,
+            source_version_id=source.id if source else None,
             run_kind=run_kind,
             status=PaperAgentRunStatus.READY.value,
             progress=0,
             stage="native_session",
         )
-    run.source_version_id = source.id
+    run.source_version_id = source.id if source else None
     run.provider_id = provider.id
     run.model_name = workspace.analysis_model_name
     run.session_id = session_id
@@ -433,9 +468,19 @@ async def create_runtime_session(
                 "LLM4AD_STAGE_PUBLISH_URL": (
                     f"http://backend:8000{settings.API_V1_STR}/llm4ad/papers/runtime/stage-results"
                 ),
+                "LLM4AD_STAGE_ARXIV_IMPORT_URL": (
+                    f"http://backend:8000{settings.API_V1_STR}/llm4ad/papers/runtime/arxiv-import"
+                ),
+                "LLM4AD_STAGE_READ_URL": (
+                    f"http://backend:8000{settings.API_V1_STR}/llm4ad/papers/runtime/stage-artifacts"
+                ),
+                "LLM4AD_STAGE_TASK_URL": (
+                    f"http://backend:8000{settings.API_V1_STR}/llm4ad/papers/runtime/linked-tasks"
+                ),
                 "LLM4AD_STAGE_RUNTIME_TOKEN": paper_workspace_runtime_token(workspace_id),
                 "LLM4AD_STAGE_WORKSPACE_ID": str(workspace_id),
                 "LLM4AD_STAGE_RUN_ID": str(run_id),
+                "LLM4AD_STAGE_NAME": request.workflow_stage,
                 "LLM4AD_STAGE_REQUIRES_TYPST": "true" if workspace.mode == "proposal" else "false",
                 "LLM4AD_BUILDER_API_KEY": "llm4ad-local-proxy",
                 "LLM4AD_BUILDER_BASE_URL": f"http://127.0.0.1:{PAPER_PROTOCOL_ADAPTER_PORT}",
@@ -447,8 +492,23 @@ async def create_runtime_session(
         }
     }
     allowed_tools.append("mcp__llm4ad_stage__publish_stage_result")
+    if workspace.mode == "algorithm" and request.workflow_stage == "discovery_baseline":
+        allowed_tools.append("mcp__llm4ad_stage__import_arxiv_paper")
     if workspace.mode == "algorithm":
+        allowed_tools.append("mcp__llm4ad_stage__read_predecessor_artifact")
+    if workspace.mode == "algorithm" and request.workflow_stage == "discovery":
         allowed_tools.append("mcp__llm4ad_stage__build_algorithm_task")
+        allowed_tools.extend(
+            [
+                "mcp__llm4ad_stage__linked_task_status",
+                "mcp__llm4ad_stage__list_algorithm_proposals",
+                "mcp__llm4ad_stage__link_algorithm_task",
+                "mcp__llm4ad_stage__create_child_task",
+                "mcp__llm4ad_stage__patch_child_parameters",
+                "mcp__llm4ad_stage__start_linked_task",
+                "mcp__llm4ad_stage__stop_linked_task",
+            ]
+        )
     if workspace.mode == "proposal":
         allowed_tools.append("mcp__llm4ad_stage__check_typst")
     external_mcp_servers, external_mcp_tools = _runtime_stage_mcp_configuration(request.workflow_stage)
@@ -572,6 +632,171 @@ async def workspace_runtime_events(
     )
 
 
+@router.post("/runtime/arxiv-import", include_in_schema=False)
+def import_runtime_arxiv_paper(
+    payload: _ArxivImportRequest,
+    http_request: Request,
+) -> dict[str, str]:
+    """Persist a paper already downloaded by this workspace's arXiv MCP."""
+    supplied = http_request.headers.get("x-llm4ad-runtime-token", "")
+    if not secrets.compare_digest(supplied, paper_workspace_runtime_token(payload.workspace_id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid research runtime token")
+    with Session(engine) as db:
+        workspace = db.get(PaperWorkspace, payload.workspace_id)
+        run = db.get(PaperAgentRun, payload.run_id)
+        if (
+            workspace is None
+            or run is None
+            or run.workspace_id != workspace.id
+            or run.id != _native_run_id(workspace.id, "discovery_baseline")
+            or run.run_kind != "discovery_baseline"
+            or run.session_id != f"{workspace.id.hex}-discovery_baseline"
+        ):
+            raise HTTPException(status_code=404, detail="AutoDiscovery intake session not found")
+        source = paper_service.import_arxiv_source_version(db, workspace, payload.paper_id)
+        run.source_version_id = source.id
+        db.add(run)
+        db.commit()
+        return {
+            "paper_id": payload.paper_id,
+            "source_version_id": str(source.id),
+            "source_path": "/workspace/source/paper.md",
+        }
+
+
+@router.post("/runtime/linked-tasks", include_in_schema=False)
+def operate_runtime_linked_task(request: _LinkedTaskToolRequest, http_request: Request) -> dict:
+    """Run one scoped task operation for a final-stage AutoDiscovery session."""
+    supplied_token = http_request.headers.get("x-llm4ad-runtime-token", "")
+    if not secrets.compare_digest(supplied_token, paper_workspace_runtime_token(request.workspace_id)):
+        raise HTTPException(status_code=401, detail="Invalid runtime service token")
+    with Session(engine) as db:
+        workspace = db.get(PaperWorkspace, request.workspace_id)
+        run = db.get(PaperAgentRun, request.run_id)
+        if workspace is None or run is None or run.workspace_id != workspace.id:
+            raise HTTPException(status_code=404, detail="Research stage session not found")
+        if workspace.mode != "algorithm" or run.run_kind != "algorithm_discovery":
+            raise HTTPException(status_code=403, detail="Task tools are available only in the final stage")
+        if run.session_id is None or (run.request_payload or {}).get("native_runtime") != "cloudcli":
+            raise HTTPException(status_code=409, detail="Research stage session is invalid")
+        user = db.get(User, workspace.user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="Research owner not found")
+        if request.operation == "list":
+            proposals = db.exec(
+                select(PaperAlgorithmProposal)
+                .where(PaperAlgorithmProposal.workspace_id == workspace.id)
+                .order_by(col(PaperAlgorithmProposal.created_time).desc())
+                .limit(50)
+            ).all()
+            links = {
+                link.proposal_id: link.task_id
+                for link in db.exec(
+                    select(PaperTaskLink).where(PaperTaskLink.workspace_id == workspace.id)
+                ).all()
+            }
+            return {
+                "proposals": [
+                    {
+                        "id": str(item.id),
+                        "title": item.title,
+                        "source_version_id": str(item.source_version_id),
+                        "current_run": item.run_id == run.id,
+                        "task_id": str(links[item.id]) if item.id in links else None,
+                    }
+                    for item in proposals
+                ]
+            }
+        if request.proposal_id is None:
+            raise HTTPException(status_code=422, detail="Proposal ID is required")
+        if request.operation == "link":
+            proposal = db.get(PaperAlgorithmProposal, request.proposal_id)
+            if proposal is None or proposal.workspace_id != workspace.id or proposal.run_id != run.id:
+                raise HTTPException(status_code=404, detail="Current-stage proposal not found")
+            links = paper_service.create_proposal_tasks(
+                db,
+                user,
+                workspace.id,
+                paper_schemas.PaperProposalTaskCreateRequest(proposal_ids=[proposal.id]),
+            )
+            return links[0].model_dump(mode="json")
+        if request.operation == "status":
+            snapshot = paper_task_control.linked_task_snapshot(
+                db, user, workspace.id, request.proposal_id, request.task_id
+            )
+            return snapshot.model_dump(mode="json")
+        if request.task_id is None:
+            raise HTTPException(status_code=422, detail="Task ID is required")
+        if request.operation in {"create_child", "patch_child"}:
+            if request.expected_version_time is None:
+                raise HTTPException(status_code=422, detail="Expected task version is required")
+            if request.operation == "create_child":
+                task, changes = paper_task_control.create_child(
+                    db,
+                    user,
+                    workspace.id,
+                    request.proposal_id,
+                    request.task_id,
+                    paper_schemas.PaperLinkedTaskChildCreate(
+                        expected_version_time=request.expected_version_time,
+                        parameters=request.parameters,
+                    ),
+                )
+            else:
+                task, changes = paper_task_control.patch_child(
+                    db,
+                    user,
+                    workspace.id,
+                    request.proposal_id,
+                    request.task_id,
+                    paper_schemas.PaperLinkedTaskPatch(
+                        expected_version_time=request.expected_version_time,
+                        parameters=request.parameters,
+                    ),
+                )
+            return {
+                "task": paper_task_control.linked_task_snapshot(
+                    db, user, workspace.id, request.proposal_id, task.id
+                ).model_dump(mode="json"),
+                "changes": changes,
+            }
+        if request.operation == "start":
+            paper_task_control.start_linked_task(db, user, workspace.id, request.proposal_id, request.task_id)
+        else:
+            paper_task_control.stop_linked_task(db, user, workspace.id, request.proposal_id, request.task_id)
+        return paper_task_control.linked_task_snapshot(
+            db, user, workspace.id, request.proposal_id, request.task_id
+        ).model_dump(mode="json")
+
+
+@router.get("/runtime/stage-artifacts/{stage}", include_in_schema=False)
+def read_runtime_stage_artifact(
+    stage: ResearchWorkflowStage,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+    http_request: Request,
+) -> dict:
+    """Give one live stage session read-only access to ready predecessors."""
+    supplied_token = http_request.headers.get("x-llm4ad-runtime-token", "")
+    if not secrets.compare_digest(supplied_token, paper_workspace_runtime_token(workspace_id)):
+        raise HTTPException(status_code=401, detail="Invalid runtime service token")
+    with Session(engine) as db:
+        workspace = db.get(PaperWorkspace, workspace_id)
+        run = db.get(PaperAgentRun, run_id)
+        if workspace is None or run is None or run.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Research stage session not found")
+        if run.session_id is None or (run.request_payload or {}).get("native_runtime") != "cloudcli":
+            raise HTTPException(status_code=409, detail="Research stage session is invalid")
+        workflow = paper_workflow.get_research_workflow(workspace.mode)
+        current_stage = workflow.stage_for_run_kind(run.run_kind)
+        if stage not in workflow.stages or workflow.stages.index(stage) >= workflow.stages.index(current_stage):
+            raise HTTPException(status_code=403, detail="Only predecessor stages can be read")
+        result = paper_service.get_stage_artifact(db, workspace.user_id, workspace_id, stage)
+        if result.status != "ready" or result.source_version_id != workspace.active_source_version_id:
+            raise HTTPException(status_code=409, detail="Predecessor artifact is stale or requires revision")
+        return result.model_dump(mode="json")
+
+
 @router.post("/runtime/stage-results", include_in_schema=False)
 async def publish_runtime_stage_result(
     request: _StagePublicationRequest,
@@ -603,6 +828,22 @@ async def publish_runtime_stage_result(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research stage session is invalid")
         if workspace.active_source_version_id is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research source is unavailable")
+        if workspace.mode == "algorithm":
+            workflow = paper_workflow.get_research_workflow(workspace.mode)
+            stage = workflow.stage_for_run_kind(run.run_kind)
+            if run.source_version_id != workspace.active_source_version_id:
+                raise HTTPException(status_code=409, detail="Research source changed during this stage")
+            missing = [
+                predecessor
+                for predecessor in workflow.prerequisites_by_run_kind.get(run.run_kind, ())
+                if not workflow.prerequisite_satisfied(
+                    stage,
+                    predecessor,
+                    ((workspace.proposal_stage_states or {}).get(predecessor) or {}).get("status"),
+                )
+            ]
+            if missing:
+                raise HTTPException(status_code=409, detail=f"Predecessor stage changed: {', '.join(missing)}")
         run.source_version_id = workspace.active_source_version_id
         run.status = PaperAgentRunStatus.RUNNING.value
         run.progress = 95

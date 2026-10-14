@@ -31,8 +31,9 @@ x-backend-common: &backend-common
     dockerfile: src/backend/Dockerfile
     network: host
     args:
+      DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
       UV_INDEX_URL: ${UV_INDEX_URL:-}
-      GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-https://gh-proxy.org}
+      GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-}
   env_file:
     - .env
   environment:
@@ -44,7 +45,7 @@ services:
   # ============================================================
 
   db:
-    image: postgres:18
+    image: "${DOCKERHUB_REGISTRY:-}library/postgres:18"
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -61,7 +62,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
 
   redis:
-    image: redis:latest
+    image: "${DOCKERHUB_REGISTRY:-}library/redis:latest"
     restart: always
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
@@ -74,7 +75,7 @@ services:
       - ./app-data/redis/data:/data
 
   rustfs-permission-init:
-    image: rustfs/rustfs:latest
+    image: "${DOCKERHUB_REGISTRY:-}rustfs/rustfs:latest"
     user: "0:0"
     restart: "no"
     entrypoint:
@@ -89,7 +90,7 @@ services:
       - ./app-data/rustfs/data/certs/:/opt/tls
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: "${DOCKERHUB_REGISTRY:-}rustfs/rustfs:latest"
     restart: always
     depends_on:
       rustfs-permission-init:
@@ -124,7 +125,7 @@ services:
       start_period: 40s
 
   adminer:
-    image: adminer
+    image: "${DOCKERHUB_REGISTRY:-}library/adminer:latest"
     restart: always
     profiles: ["debug"]
     depends_on:
@@ -133,7 +134,7 @@ services:
       - ADMINER_DESIGN=pepa-linha-dark
 
   mailcatcher:
-    image: schickling/mailcatcher
+    image: "${DOCKERHUB_REGISTRY:-}schickling/mailcatcher:latest"
     restart: always
     profiles: ["debug"]
 
@@ -222,15 +223,17 @@ services:
       network: host
       dockerfile: src/backend/Dockerfile.task
       args:
+        DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
-        GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-https://gh-proxy.org}
-        CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download}
+        GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-}
+        CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://github.com/SaladDay/cc-switch-cli/releases/download}
+        OPENCODE_RELEASE_BASE: ${OPENCODE_RELEASE_BASE:-https://github.com/anomalyco/opencode/releases/download}
     restart: "no"
     entrypoint: ["true"]
 
   code_server_proxy:
-    image: nginx:latest
+    image: "${DOCKERHUB_REGISTRY:-}library/nginx:latest"
     restart: always
     environment:
       - AUTH_BACKEND_URL=${AUTH_BACKEND_URL:-http://backend:8000}
@@ -251,6 +254,7 @@ services:
       network: host
       dockerfile: src/frontend/Dockerfile
       args:
+        - DOCKERHUB_REGISTRY=${DOCKERHUB_REGISTRY:-}
         - VITE_API_URL=
         - VITE_CODE_SERVER_URL=${VITE_CODE_SERVER_URL:-/code_ide}
         - VITE_FOOTER_BEIAN=${VITE_FOOTER_BEIAN:-}

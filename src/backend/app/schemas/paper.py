@@ -23,6 +23,9 @@ PaperRunKind = Literal[
     "ac_summary",
     "boundary_analysis",
     "issue_extraction",
+    "discovery_baseline",
+    "discovery_candidates",
+    "discovery_evaluation",
     "algorithm_discovery",
     "metric_suggestion",
     "paper_revision",
@@ -43,6 +46,9 @@ ResearchWorkflowStage = Literal[
     "rebuttal_baseline",
     "autorebuttal",
     "ac_summary",
+    "discovery_baseline",
+    "discovery_candidates",
+    "discovery_evaluation",
     "discovery",
     "reviews",
     "boundary",
@@ -668,6 +674,57 @@ class PaperRuntimeSessionResponse(BaseModel):
 
     runtime_url: str
     session_id: str
+
+
+class PaperStageArtifactResponse(BaseModel):
+    """Published result and revision metadata for one research stage."""
+
+    workflow_stage: ResearchWorkflowStage
+    run_id: uuid.UUID
+    source_version_id: uuid.UUID
+    status: str
+    artifact: dict
+
+
+class PaperLinkedTaskSnapshot(BaseModel):
+    """Bounded public task state for an AutoDiscovery proposal family."""
+
+    proposal_id: uuid.UUID
+    project_id: uuid.UUID
+    root_task_id: uuid.UUID
+    active_task_id: uuid.UUID
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    selected_task_id: uuid.UUID
+    status: str
+    stopped_by_user: bool = False
+    solution_count: int = 0
+    avg_score: float | None = None
+    max_score: float | None = None
+    recent_logs: list[dict[str, Any]] = Field(default_factory=list)
+    result: dict[str, Any] | None = None
+    evolution_parameters: dict[str, Any] = Field(default_factory=dict)
+    parameter_diff: dict[str, dict[str, int | float | bool]] = Field(default_factory=dict)
+
+
+class PaperLinkedTaskPatch(BaseModel):
+    """Optimistic evolution-parameter update for an unstarted child version."""
+
+    expected_version_time: datetime
+    parameters: dict[str, int | float | bool] = Field(min_length=1)
+
+
+class PaperLinkedTaskChildCreate(BaseModel):
+    """Create a non-activating child to test an evolution-parameter change."""
+
+    expected_version_time: datetime
+    parameters: dict[str, int | float | bool] = Field(default_factory=dict)
+
+
+class PaperLinkedTaskChangeResponse(BaseModel):
+    """Result of a child creation or parameter update."""
+
+    task: PaperLinkedTaskSnapshot
+    changes: dict[str, dict[str, int | float | bool]] = Field(default_factory=dict)
 
 
 class PaperRuntimeSessionCreate(BaseModel):

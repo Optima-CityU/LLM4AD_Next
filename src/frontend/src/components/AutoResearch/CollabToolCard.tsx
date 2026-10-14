@@ -10,10 +10,16 @@
  * 所以 end 帧才代表这条调用完整。渲染时按 `tool_call_id` 归并：同 id 的 end 覆盖 start。
  */
 
-import { AlertTriangle, ChevronRight, Loader2, SquareTerminal } from "lucide-react"
+import {
+  AlertTriangle,
+  ChevronRight,
+  Loader2,
+  SquareTerminal,
+} from "lucide-react"
 import { memo, useState } from "react"
 import { useTranslation } from "react-i18next"
 
+import type { ResearchMessageItem } from "@/client"
 import { cn } from "@/lib/utils"
 
 /** 一次工具调用的累积状态（由 ChatPanel 按 tool_call_id 归并 start / end 两帧）。 */
@@ -30,6 +36,22 @@ export interface CollabToolCall {
   state: string
 }
 
+/** Convert a persisted tool event to the same shape used by the live stream. */
+export function collabToolCallFromMessage(
+  message: ResearchMessageItem,
+): CollabToolCall {
+  const payload = (message.payload ?? {}) as Record<string, unknown>
+  return {
+    id: (payload.tool_call_id as string) || message.id,
+    name: (payload.tool as string) || "",
+    done: true,
+    input: payload.input ?? null,
+    inputRaw: (payload.input_raw as string) || "",
+    output: (payload.output as string) || "",
+    state: (payload.state as string) || "success",
+  }
+}
+
 // 折叠态摘要的最大字符数：工具入参里常带整段正文（Write 的 content、Edit 的 new_str），
 // 不裁剪会把整条摘要撑成十几行，折叠就失去意义了。
 const SUMMARY_MAX_CHARS = 120
@@ -38,7 +60,10 @@ const SUMMARY_MAX_CHARS = 120
 const IO_MAX_CHARS = 4000
 
 /** 把任意入参压成单行短摘要，供折叠态显示。 */
-function summarize(input: unknown, inputRaw: string): string {
+export function summarizeCollabToolInput(
+  input: unknown,
+  inputRaw: string,
+): string {
   if (input && typeof input === "object") {
     // 优先展示路径类字段——问「改了哪个文件」是最常见的问题。
     const record = input as Record<string, unknown>
@@ -86,7 +111,7 @@ function CollabToolCardInner({ call }: { call: CollabToolCall }) {
   // state 为空代表还在跑（后端在结果到达前报的是 ""）。denied / interrupted / error
   // 都按失败上色，方便一眼看出这轮里有没有工具调用被拒绝或被打断。
   const failed = call.done && !!call.state && call.state !== "success"
-  const summary = summarize(call.input, call.inputRaw)
+  const summary = summarizeCollabToolInput(call.input, call.inputRaw)
   const inputText = formatInput(call)
   const hasDetail = !!inputText || !!call.output
 

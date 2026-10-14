@@ -26,7 +26,7 @@ import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { cn } from "@/lib/utils"
 
 import ArtifactPreviewDialog from "./ArtifactPreviewDialog"
-import { CollabToolCard } from "./CollabToolCard"
+import { CollabToolCard, collabToolCallFromMessage } from "./CollabToolCard"
 import { stageNameByLang } from "./tech"
 
 /** 聊天气泡内的 markdown 渲染（GFM + 代码高亮 + mermaid）。 */
@@ -154,17 +154,7 @@ function SystemEventRow({ message }: { message: ResearchMessageItem }) {
   if (eventType === "collab_tool") {
     return (
       <div className="px-4 py-0.5">
-        <CollabToolCard
-          call={{
-            id: (payload.tool_call_id as string) || message.id,
-            name: (payload.tool as string) || "",
-            done: true,
-            input: payload.input ?? null,
-            inputRaw: (payload.input_raw as string) || "",
-            output: (payload.output as string) || "",
-            state: (payload.state as string) || "success",
-          }}
-        />
+        <CollabToolCard call={collabToolCallFromMessage(message)} />
       </div>
     )
   }

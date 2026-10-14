@@ -273,6 +273,9 @@ def copy_task(
     task_id: uuid.UUID,
     current_user: models.User,
     is_child: bool = False,
+    activate_child: bool = True,
+    copy_logs: bool = True,
+    inherit_reports: bool = True,
 ) -> models.Task:
     """复制任务：名称加后缀，数据存在则在 S3 中复制一份，状态重置为 UNINITIALIZED。
 
@@ -281,6 +284,9 @@ def copy_task(
         task_id: 源任务 ID
         current_user: 当前登录用户
         is_child: 是否作为子任务复制；为 True 时保留父子关系和分组信息
+        activate_child: Whether to select the new child as the active version.
+        copy_logs: Whether to seed the child with the source task's logs.
+        inherit_reports: Whether to copy source reports into the new task.
 
     Returns:
         复制后的新任务对象
@@ -308,7 +314,7 @@ def copy_task(
         project_id=src_task.project_id,
         input_args=src_task.input_args,
         input_data_path=new_data_path,
-        reports=src_task.reports,
+        reports=src_task.reports if inherit_reports else None,
         status=TaskStatus.UNINITIALIZED,
         version_time=datetime.now(UTC),
         celery_task_id=None,
@@ -320,8 +326,8 @@ def copy_task(
     db.commit()
     db.refresh(new_task)
 
-    # 子任务复制时，同步复制源任务的日志记录关联到新任务
-    if is_child:
+    # Preserve legacy child logs only when requested.
+    if is_child and copy_logs:
         from app.models import TaskLog
 
         src_logs = db.exec(select(TaskLog).where(TaskLog.task_id == src_task.id)).all()
@@ -337,11 +343,12 @@ def copy_task(
                 )
             )
 
-        # 自动将根任务的活跃子版本指向新创建的子任务
-        root_id = group_id  # group_id 即根任务 ID
+    if is_child:
+        # Keep a non-activating child's root selection on the original task.
+        root_id = group_id
         root_task = db.get(models.Task, root_id)
-        if root_task is not None:
-            root_task.active_child_id = new_task.id
+        if root_task is not None and (activate_child or root_task.active_child_id is None):
+            root_task.active_child_id = new_task.id if activate_child else root_task.id
             root_task.updated_time = datetime.now(UTC)
             db.add(root_task)
 

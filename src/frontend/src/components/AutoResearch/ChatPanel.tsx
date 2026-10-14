@@ -48,7 +48,13 @@ import {
 import { cn } from "@/lib/utils"
 
 import BottomComposer, { type RunOverrides } from "./BottomComposer"
-import { CollabToolCard, type CollabToolCall } from "./CollabToolCard"
+import {
+  type CollabToolCall,
+  CollabToolCard,
+  collabToolCallFromMessage,
+} from "./CollabToolCard"
+import { CollabToolGroup } from "./CollabToolGroup"
+import { groupConsecutiveCollabTools } from "./collabToolGrouping"
 import MessageItem from "./MessageItem"
 import { StageProgressBar } from "./StageProgress"
 import StageTimeline, {
@@ -174,7 +180,26 @@ function renderTurnItems(
     )
     run = []
   }
-  for (const it of items) {
+  const groupedItems = groupConsecutiveCollabTools(items, (item) => {
+    if (item.kind !== "msg" || item.message.event_type !== "collab_tool") {
+      return null
+    }
+    return collabToolCallFromMessage(item.message).name || null
+  })
+  for (const groupedItem of groupedItems) {
+    if (groupedItem.kind === "group") {
+      flush()
+      const calls = groupedItem.items.flatMap((item) =>
+        item.kind === "msg" ? [collabToolCallFromMessage(item.message)] : [],
+      )
+      out.push(
+        <div key={`tool-group:${calls[0].id}`} className="px-4 py-0.5">
+          <CollabToolGroup calls={calls} />
+        </div>,
+      )
+      continue
+    }
+    const it = groupedItem.item
     if (it.kind === "stage") {
       run.push(it.entry)
     } else {
@@ -1137,9 +1162,22 @@ function ChatPanelInner({ session }: { session: ResearchSessionItem }) {
                           用户不必等文字流完才知道它在干什么。 */}
                       {collabTools.length > 0 && (
                         <div className="mb-2 space-y-1">
-                          {collabTools.map((call) => (
-                            <CollabToolCard key={call.id} call={call} />
-                          ))}
+                          {groupConsecutiveCollabTools(
+                            collabTools,
+                            (call) => call.name || null,
+                          ).map((item) =>
+                            item.kind === "group" ? (
+                              <CollabToolGroup
+                                key={`tool-group:${item.items[0].id}`}
+                                calls={item.items}
+                              />
+                            ) : (
+                              <CollabToolCard
+                                key={item.item.id}
+                                call={item.item}
+                              />
+                            ),
+                          )}
                         </div>
                       )}
                       {collabStreamText ? (
