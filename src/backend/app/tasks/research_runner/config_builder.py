@@ -129,6 +129,38 @@ _PROVIDER_TYPE_TO_ARC = {
     "mock": "mock",
 }
 
+# provider.base_url 为空时按 ARC provider 类型兜底的官方入口。anthropic 与
+# openai 的默认地址不同（且 /v1 后缀约定相反），统一回落到 openai 会让
+# Anthropic 直连的调用方（ARL worker 容器）打到错误的域名。
+_DEFAULT_BASE_URLS = {
+    "anthropic": "https://api.anthropic.com",
+}
+_FALLBACK_BASE_URL = "https://api.openai.com/v1"
+
+
+def _provider_accessible(db: Any, provider: Any, user_id: uuid.UUID) -> bool:
+    """Check whether the user may use the provider's credentials.
+
+    Mirrors ``provider_service.get_provider_with_auth``: own providers,
+    builtin providers visible to all, or any provider for superusers.
+
+    Args:
+        db: Open database session.
+        provider: ``LLMProvider`` row.
+        user_id: ID of the user the credentials are resolved for.
+
+    Returns:
+        True if access is allowed.
+    """
+    from app.models import User
+
+    if provider.user_id == user_id:
+        return True
+    if provider.is_builtin and provider.visible_to_all:
+        return True
+    user = db.get(User, user_id)
+    return bool(user and user.is_superuser)
+
 
 def resolve_provider_for_arc(
         provider_id: str | None,
@@ -185,6 +217,9 @@ def resolve_provider_for_arc(
         if not provider:
             logger.warning(f"provider {resolved_id} not found; mock")
             return _mock()
+        if not _provider_accessible(db, provider, user_id):
+            logger.warning(f"provider {resolved_id} not accessible by user {user_id}; mock")
+            return _mock()
 
         provider_type = _PROVIDER_TYPE_TO_ARC.get(
             provider.type.value if hasattr(provider.type, "value") else str(provider.type),
@@ -193,7 +228,8 @@ def resolve_provider_for_arc(
         raw_model = (provider.model or "").split(";")[0].strip()
         return {
             "provider": provider_type,
-            "base_url": provider.base_url or "https://api.openai.com/v1",
+            "base_url": provider.base_url
+            or _DEFAULT_BASE_URLS.get(provider_type, _FALLBACK_BASE_URL),
             "wire_api": "chat_completions",
             "api_key_env": ARC_API_KEY_ENV,
             "primary_model": resolved_model or raw_model or "gpt-4o",

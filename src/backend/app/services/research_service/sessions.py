@@ -45,6 +45,7 @@ from app.schemas.research import (
     ResearchStateResponse,
     ResearchTurnItem,
 )
+from app.services.provider_service import get_provider_with_auth
 from app.tasks.research_runner import cleanup_run_dir, stage_display_name
 from app.tasks.research_runner.snapshots import resolve_run_dir, snap_session
 
@@ -202,7 +203,8 @@ def create_session(
         # profile 与模板域无关（config_builder 恒用 mathematics_optimization），
         # 不按域改写；模板自带的 domain_profile.json 由容器内 stage-10 消费。
 
-    if not topic:
+    # 常规模式验证：topic 必需（除非有 template_id）
+    if request.session_type != "arl" and not topic:
         raise HTTPException(
             status_code=400,
             detail="topic is required when template_id is not given",
@@ -213,6 +215,52 @@ def create_session(
         if request.llm4ad_workspace
         else None
     )
+
+    # ARL 配置（只有 session_type='arl' 时使用）
+    arl_config_dict = None
+    if request.session_type == "arl":
+        # ARL 模式下不要求 topic（由用户在 UI 中填写标题即可）
+        # topic 在 ARL 中不像常规模式那样重要，可以用 title 替代
+        if not topic:
+            topic = request.title or "ARL Session"
+
+        # 验证 arl_config 结构
+        if not request.arl_config:
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config is required for ARL sessions",
+            )
+
+        worker = request.arl_config.get("worker", {})
+        validator = request.arl_config.get("validator", {})
+
+        if not worker.get("provider_id") or not worker.get("model_name"):
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config.worker must contain provider_id and model_name",
+            )
+
+        if not validator.get("provider_id") or not validator.get("model_name"):
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config.validator must contain provider_id and model_name",
+            )
+
+        # Reject providers the user cannot access; otherwise another user's
+        # API key would be injected into this session's containers.
+        for role_cfg in (worker, validator):
+            try:
+                provider_uuid = uuid.UUID(str(role_cfg["provider_id"]))
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"invalid provider_id: {role_cfg['provider_id']!r}",
+                )
+            get_provider_with_auth(db, provider_uuid, user)
+
+        # 直接使用前端传来的 arl_config（只包含 provider_id 和 model_name）
+        arl_config_dict = request.arl_config
+
 
     session = ResearchSession(
         user_id=user.id,
@@ -226,6 +274,8 @@ def create_session(
         provider_id=request.provider_id,
         model_name=request.model_name,
         llm4ad_workspace=workspace_dict,
+        session_type=request.session_type,
+        arl_config=arl_config_dict,
     )
     if request.template_id:
         # run_dir 在建会话时就定下来并落库：与 _bootstrap 的 resolve_run_dir 同口径
@@ -505,6 +555,7 @@ def delete_session(
         )
     deleted_session_id = session.id
     run_dir = session.run_dir
+    is_arl = session.session_type == "arl"
     # 收集本会话全部 turn id：一个 session 跨多轮，每轮可能有独立 Redis Stream。
     # 只清 active_turn 会漏掉历史轮的 stream，造成 Redis key 泄漏，故先全量取出。
     turn_ids = db.exec(
@@ -521,6 +572,29 @@ def delete_session(
         logger.opt(exception=True).warning(
             f"post-delete cleanup failed session={deleted_session_id}"
         )
+
+    # ARL 会话还挂着两个常驻容器（各 4g 内存上限）与挂载目录。只删 DB 行会
+    # 把它们永久留在宿主上——启动期对账能兜底捞回孤儿，但不该等到下次重启。
+    if is_arl:
+        try:
+            _cleanup_arl_containers(deleted_session_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"ARL container cleanup failed session={deleted_session_id}"
+            )
+
+
+def _cleanup_arl_containers(session_id: uuid.UUID) -> None:
+    """清理 ARL 会话的容器、代理 token 与挂载目录。
+
+    幂等；失败由调用方记日志（DB 删除已经生效，不该再翻成 500）。
+
+    Args:
+        session_id: 被删除的会话 ID
+    """
+    from app.services.arl.runtime import get_arl_runtime
+
+    get_arl_runtime().cleanup_session_sync(str(session_id))
 
 
 # ---- 复制会话与产物导入 ----

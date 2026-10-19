@@ -16,6 +16,7 @@ TASK_LOGS_PREFIX = "task_logs:"
 TASK_LOGS_DB = 2
 TASK_LOGS_TTL = 7 * 24 * 3600  # 7 days
 TASK_EXECUTION_LOCK_PREFIX = "task_execution_lock:"
+ARL_SESSION_LOCK_PREFIX = "arl_session_lock:"
 KNOWLEDGE_PARSE_STREAM_PREFIX = "knowledge_parse_stream:"
 KNOWLEDGE_PARSE_CONTEXT_PREFIX = "knowledge_parse_context:"
 KNOWLEDGE_PARSE_STREAM_TTL = 24 * 3600
@@ -27,6 +28,9 @@ if redis.call('get', KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+
+# 同一把「仅持有者可释放」的 CAS 语义，ARL 会话锁复用（见 acquire_arl_session_lock）。
+_RELEASE_ARL_SESSION_LOCK_SCRIPT = _RELEASE_TASK_EXECUTION_LOCK_SCRIPT
 
 
 def _build_url() -> str:
@@ -64,6 +68,50 @@ def release_task_execution_lock(task_id: str | uuid.UUID, owner_token: str) -> b
             _RELEASE_TASK_EXECUTION_LOCK_SCRIPT,
             1,
             task_execution_lock_key(task_id),
+            owner_token,
+        )
+    )
+
+
+# ---- ARL 会话容器编排锁 ----
+# ARL 的容器名按 session_id 确定性派生，多个 WS 连接（可能落在不同 uvicorn
+# worker）会同时尝试启动同一对容器。没有跨进程互斥时，后到者的 containers.run
+# 撞名报 409，其失败清理会把先到者正在使用的容器强删。故编排路径必须串行化。
+
+
+def arl_session_lock_key(session_id: str | uuid.UUID) -> str:
+    """构造 ARL 会话容器编排锁的 Redis key。"""
+    return f"{ARL_SESSION_LOCK_PREFIX}{session_id}"
+
+
+def acquire_arl_session_lock(
+    session_id: str | uuid.UUID, owner_token: str, ttl_seconds: int
+) -> bool:
+    """原子获取 ARL 会话的容器编排锁。
+
+    Args:
+        session_id: 科研会话 ID（即 ARL 容器标识）。
+        owner_token: 持有者标识，释放时校验，避免误删他人的锁。
+        ttl_seconds: 锁 TTL，须覆盖最坏情况下的容器启动耗时；持有者进程崩溃时
+            靠它兜底自动释放。
+
+    Returns:
+        True 表示抢到锁。
+    """
+    return bool(
+        get_sync_redis().set(
+            arl_session_lock_key(session_id), owner_token, nx=True, ex=ttl_seconds
+        )
+    )
+
+
+def release_arl_session_lock(session_id: str | uuid.UUID, owner_token: str) -> bool:
+    """仅当锁仍归当前持有者所有时释放 ARL 会话编排锁。"""
+    return bool(
+        get_sync_redis().eval(
+            _RELEASE_ARL_SESSION_LOCK_SCRIPT,
+            1,
+            arl_session_lock_key(session_id),
             owner_token,
         )
     )
@@ -664,6 +712,85 @@ def pop_idle_paper_workspaces(threshold_ts: float) -> list[str]:
     pipeline = redis_client.pipeline()
     pipeline.zrangebyscore(PAPER_WORKSPACE_ACTIVE_KEY, "-inf", threshold_ts)
     pipeline.zremrangebyscore(PAPER_WORKSPACE_ACTIVE_KEY, "-inf", threshold_ts)
+    members, _ = pipeline.execute()
+    return list(members)
+
+
+# ---- ARL 会话活跃度跟踪 ----
+# 每个 ARL 会话常驻两个容器（worker + validator），只在 WS 连接期间被使用。
+# 用一个 zset 记录最后活跃时间，后台循环据此停掉空闲会话的容器——与
+# paper workspace 同构，故放在一起。
+
+ARL_SESSION_ACTIVE_KEY = "arl_session:last_active"
+
+
+def touch_arl_session_active(session_id: str | uuid.UUID, ts: float | None = None) -> None:
+    """刷新 ARL 会话的最后活跃时间。
+
+    Redis 故障只记日志不抛出：活跃度跟踪失败不该阻断用户连接会话。
+
+    Args:
+        session_id: ARL 会话 ID。
+        ts: Unix 时间戳（秒），缺省取当前时间。
+    """
+    if ts is None:
+        ts = time.time()
+    try:
+        get_sync_redis().zadd(ARL_SESSION_ACTIVE_KEY, {str(session_id): ts})
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to touch ARL session active for session_id=%s",
+            session_id,
+            exc_info=True,
+        )
+
+
+def forget_arl_session_active(session_id: str | uuid.UUID) -> None:
+    """移除已删除 ARL 会话的活跃记录。
+
+    Args:
+        session_id: ARL 会话 ID。
+    """
+    try:
+        get_sync_redis().zrem(ARL_SESSION_ACTIVE_KEY, str(session_id))
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to forget ARL session active for session_id=%s",
+            session_id,
+            exc_info=True,
+        )
+
+
+def get_arl_session_last_active(session_id: str | uuid.UUID) -> float | None:
+    """Return the last active timestamp of an ARL session.
+
+    Args:
+        session_id: ARL session ID.
+
+    Returns:
+        Unix timestamp in seconds, or None if the session is not tracked.
+    """
+    score = get_sync_redis().zscore(ARL_SESSION_ACTIVE_KEY, str(session_id))
+    return float(score) if score is not None else None
+
+
+def pop_idle_arl_sessions(threshold_ts: float) -> list[str]:
+    """原子取出并移除最后活跃时间早于阈值的 ARL 会话。
+
+    Args:
+        threshold_ts: 判定空闲的时间戳上界。
+
+    Returns:
+        被移出活跃集合的会话 ID 列表。
+    """
+    redis_client = get_sync_redis()
+    pipeline = redis_client.pipeline()
+    pipeline.zrangebyscore(ARL_SESSION_ACTIVE_KEY, "-inf", threshold_ts)
+    pipeline.zremrangebyscore(ARL_SESSION_ACTIVE_KEY, "-inf", threshold_ts)
     members, _ = pipeline.execute()
     return list(members)
 

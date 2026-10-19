@@ -11,6 +11,9 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { ResearchSessionItem, ResearchSessionStatus } from "@/client"
+import ARLArtifactsPanel from "@/components/AutoResearch/ARLArtifactsPanel"
+import ARLPanel from "@/components/AutoResearch/ARLPanel"
+import { ARLSessionProvider } from "@/components/AutoResearch/ARLSessionContext"
 import ArtifactsPanel from "@/components/AutoResearch/ArtifactsPanel"
 import ChatPanel from "@/components/AutoResearch/ChatPanel"
 import CreateSessionDialog from "@/components/AutoResearch/CreateSessionDialog"
@@ -36,15 +39,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { isArlResearchSession } from "@/hooks/useARLWebSocket"
 import {
   downloadResearchArtifactsArchive,
   useCopyResearchSession,
   useCreateResearchFolder,
   useDeleteResearchFolder,
   useDeleteResearchSession,
+  usePinResearchFolder,
   useResearchFolders,
   useResearchSessionDetail,
-  usePinResearchFolder,
   useUpdateResearchFolder,
   useUpdateResearchSession,
 } from "@/hooks/useAutoResearch"
@@ -109,6 +113,7 @@ function AutoResearchPage() {
   // 完全依赖详情查询确定选中会话（脱离侧栏分页/检索状态）。
   const activeDetailQ = useResearchSessionDetail(activeSessionId)
   const activeSession = activeDetailQ.data?.session ?? null
+  const isArlSession = isArlResearchSession(activeSession)
 
   // 仅在详情确定会话不可用（404 已删除 / 403 无权限）时回退到 null；
   // 瞬时 500 / 网络错误保留选中，交由 React Query 自动重试。
@@ -430,73 +435,87 @@ function AutoResearchPage() {
         label={t("autoResearch.sidebar.title")}
       />
 
-      {/* 中：对话主区（重点区）。两主题同款布局——留外边距 + 圆角 + 边框，作为浮起的
+      {/* ARL 会话的 WS 连接提到这里：中间对话区与右侧文件面板共用同一条连接。
+          非 ARL 会话传 null，hook 保持空闲。Provider 不产生 DOM，不影响 flex 布局。 */}
+      <ARLSessionProvider session={isArlSession ? activeSession : null}>
+        {/* 中：对话主区（重点区）。两主题同款布局——留外边距 + 圆角 + 边框，作为浮起的
           卡片；仅背景不同：浅色纯白、深色沿用主色渐变。 */}
-      <main className="flex-1 min-w-0 overflow-hidden p-2">
-        <TechPanel
-          showCorners={false}
-          className="h-full flex flex-col rounded-xl border border-border/60 bg-card dark:bg-linear-to-b dark:from-primary/[0.07] dark:via-card/50 dark:to-background/40"
-        >
-          <ChatPanel
-            session={activeSession}
-            onCreateSession={() => openCreate(null)}
-          />
-        </TechPanel>
-      </main>
+        <main className="flex-1 min-w-0 overflow-hidden p-2">
+          <TechPanel
+            showCorners={false}
+            className="h-full flex flex-col rounded-xl border border-border/60 bg-card dark:bg-linear-to-b dark:from-primary/[0.07] dark:via-card/50 dark:to-background/40"
+          >
+            {isArlSession ? (
+              <ARLPanel />
+            ) : (
+              <ChatPanel
+                session={activeSession}
+                onCreateSession={() => openCreate(null)}
+              />
+            )}
+          </TechPanel>
+        </main>
 
-      {/* 右侧拖拽手柄：拖动改宽 · 点击折叠/展开（对齐 evolution 右侧栏） */}
-      <button
-        type="button"
-        onMouseDown={handleRightControlMouseDown}
-        aria-label={
-          rightCollapsed
-            ? t("evolution.expandPanel")
-            : t("evolution.collapsePanel")
-        }
-        title={
-          rightCollapsed
-            ? t("autoResearch.tabs.artifacts")
-            : t("autoResearch.sidebar.dragOrClick", {
-                defaultValue: "拖动调整宽度 · 点击收起",
-              })
-        }
-        className={cn(
-          `relative z-20 shrink-0 flex items-center justify-center w-5
+        {/* 右侧拖拽手柄：拖动改宽 · 点击折叠/展开（对齐 evolution 右侧栏） */}
+        <button
+          type="button"
+          onMouseDown={handleRightControlMouseDown}
+          aria-label={
+            rightCollapsed
+              ? t("evolution.expandPanel")
+              : t("evolution.collapsePanel")
+          }
+          title={
+            rightCollapsed
+              ? t("autoResearch.tabs.artifacts")
+              : t("autoResearch.sidebar.dragOrClick", {
+                  defaultValue: "拖动调整宽度 · 点击收起",
+                })
+          }
+          className={cn(
+            `relative z-20 shrink-0 flex items-center justify-center w-5
           border-l border-r text-muted-foreground/70
           hover:bg-primary/10 hover:text-primary hover:border-primary/30
           transition-colors`,
-          "border-r-border/40 border-l-transparent",
-          isResizingRight && "bg-primary/15 border-primary/50 text-primary",
-          rightCollapsed ? "cursor-pointer" : "cursor-ew-resize",
-        )}
-      >
-        {/* 只留箭头，不套圆片：圆片在 20px 宽的竖条里几乎占满，视觉上像个按钮；
+            "border-r-border/40 border-l-transparent",
+            isResizingRight && "bg-primary/15 border-primary/50 text-primary",
+            rightCollapsed ? "cursor-pointer" : "cursor-ew-resize",
+          )}
+        >
+          {/* 只留箭头，不套圆片：圆片在 20px 宽的竖条里几乎占满，视觉上像个按钮；
             单箭头跟着竖条的 hover 一起变色，更轻。点击热区仍是整条 20×h。 */}
-        {rightCollapsed ? (
-          <ChevronLeft className="size-4" />
-        ) : (
-          <ChevronRight className="size-4" />
-        )}
-      </button>
+          {rightCollapsed ? (
+            <ChevronLeft className="size-4" />
+          ) : (
+            <ChevronRight className="size-4" />
+          )}
+        </button>
 
-      {/* 右：产物 / 最优解面板（可折叠 + 可拖拽调宽） */}
-      <aside
-        className={cn(
-          "shrink-0 overflow-hidden",
-          !isResizingRight && "transition-[width] duration-300 ease-in-out",
-        )}
-        style={{ width: rightCollapsed ? 0 : rightWidth }}
-        {...(rightCollapsed ? { inert: true } : {})}
-      >
-        <div className="h-full" style={{ width: rightWidth }}>
-          <TechPanel className="h-full flex flex-col bg-muted/60 dark:bg-background/50">
-            <ArtifactsPanel
-              session={activeSession}
-              rightCollapsed={rightCollapsed}
-            />
-          </TechPanel>
-        </div>
-      </aside>
+        {/* 右：产物 / 最优解面板（可折叠 + 可拖拽调宽） */}
+        <aside
+          className={cn(
+            "shrink-0 overflow-hidden",
+            !isResizingRight && "transition-[width] duration-300 ease-in-out",
+          )}
+          style={{ width: rightCollapsed ? 0 : rightWidth }}
+          {...(rightCollapsed ? { inert: true } : {})}
+        >
+          <div className="h-full" style={{ width: rightWidth }}>
+            <TechPanel className="h-full flex flex-col bg-muted/60 dark:bg-background/50">
+              {/* ARL 会话产物在容器工作区里，走 WS 文件面板，不触发旧产物查询；
+                按会话 key，切换会话时树状态整体重置 */}
+              {isArlSession && activeSession ? (
+                <ARLArtifactsPanel key={activeSession.id} />
+              ) : (
+                <ArtifactsPanel
+                  session={activeSession}
+                  rightCollapsed={rightCollapsed}
+                />
+              )}
+            </TechPanel>
+          </div>
+        </aside>
+      </ARLSessionProvider>
 
       <CreateSessionDialog
         open={createOpen}

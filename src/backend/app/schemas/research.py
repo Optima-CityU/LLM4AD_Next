@@ -256,6 +256,23 @@ class ResearchSessionCreateRequest(BaseModel):
         description="LLM4AD workspace 引用；缺省时首轮会引导用户补齐",
     )
 
+    # ---- ARL 字段 ----
+    session_type: Literal["research", "arl"] = Field(
+        default="research",
+        description="会话类型：'research'(默认) | 'arl'",
+    )
+    # ARL 配置（只有 session_type='arl' 时使用）
+    # 结构：
+    # {
+    #   "worker": {"provider_id": "uuid", "model_name": "claude-opus-5"},
+    #   "validator": {"provider_id": "uuid", "model_name": "gpt-5.5"}
+    # }
+    arl_config: dict[str, Any] | None = Field(
+        default=None,
+        description="ARL 容器配置（worker 和 validator 的 provider_id + model_name）",
+    )
+
+
 
 class ResearchSessionUpdateRequest(BaseModel):
     """更新会话（改名 / 移动分组 / 改默认 provider / 改 mode / 改 topic 等）。"""
@@ -312,6 +329,10 @@ class ResearchSessionItem(BaseModel):
     error: str | None
     created_time: datetime
     updated_time: datetime
+
+    # ARL 字段
+    session_type: str = "research"
+    arl_config: dict[str, Any] | None = None
 
 
 class ResearchSessionListResponse(BaseModel):

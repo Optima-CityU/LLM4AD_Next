@@ -42,6 +42,8 @@ dependencies = [
     "typst>=0.13.0,<0.14.0",
     # Kept temporarily for lockfile compatibility; the MCP no longer calls the SDK.
     "openreview-py>=2.0,<3.0",
+    # WebSocket client for ARL daemon communication
+    "websockets>=13.0,<14.0",
 ]
 
 [project.optional-dependencies]

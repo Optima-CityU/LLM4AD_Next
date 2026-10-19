@@ -66,6 +66,16 @@ async def lifespan(_app: FastAPI):
         logger.exception("启动时对账科研工作区容器失败")
 
     try:
+        # ARL 会话的容器由 session_id 确定性命名，会话删除后若清理失败就成了
+        # 孤儿（每个会话两个容器、各 4g 内存上限）。启动期对账一次，同时为
+        # 仍在运行的容器补活跃时间戳，否则空闲回收永远看不到它们。
+        from app.services.arl.runtime import reconcile_arl_containers
+
+        reconcile_arl_containers()
+    except Exception:
+        logger.exception("启动时对账 ARL 容器失败")
+
+    try:
         from app.services.knowledge_cleanup import recover_pending_cleanup_jobs
 
         recovered = recover_pending_cleanup_jobs()
@@ -86,6 +96,13 @@ async def lifespan(_app: FastAPI):
 
     paper_cleanup_task = asyncio.create_task(run_paper_workspace_idle_cleanup_loop())
 
+    # 同理，每个 ARL 会话常驻一对容器。断连不等于会话结束（用户会刷新页面或
+    # 改天继续），所以只能靠空闲阈值回收：停止容器而非删除，bind mount 里的
+    # agent 会话状态保留，重连时原地 start 即恢复。
+    from app.services.arl.runtime import run_arl_idle_cleanup_loop
+
+    arl_cleanup_task = asyncio.create_task(run_arl_idle_cleanup_loop())
+
     try:
         yield
     finally:
@@ -98,6 +115,11 @@ async def lifespan(_app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await paper_cleanup_task
         logger.info("科研工作区空闲清理循环已停止")
+
+        arl_cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await arl_cleanup_task
+        logger.info("ARL 空闲清理循环已停止")
 
         news_refresh_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

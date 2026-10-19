@@ -3585,12 +3585,27 @@ export type ResearchSessionCreateRequest = {
      * LLM4AD workspace 引用；缺省时首轮会引导用户补齐
      */
     llm4ad_workspace?: (ResearchLLM4ADWorkspaceRef | null);
+    /**
+     * 会话类型：'research'(默认) | 'arl'
+     */
+    session_type?: 'research' | 'arl';
+    /**
+     * ARL 容器配置（worker 和 validator 的 provider_id + model_name）
+     */
+    arl_config?: ({
+    [key: string]: unknown;
+} | null);
 };
 
 /**
  * 指标优化方向：'maximize' 表示越大越好（如准确率），'minimize' 表示越小越好（如损失/误差）；空串表示未指定，原样透传给 ARC 处理。传递给 ARC experiment.metric_direction，影响 Stage-13/14 择优与演化增强。
  */
 export type metric_direction = 'maximize' | 'minimize' | '';
+
+/**
+ * 会话类型：'research'(默认) | 'arl'
+ */
+export type session_type = 'research' | 'arl';
 
 /**
  * 会话详情 + 分页消息 + 最近一轮。
@@ -3632,6 +3647,10 @@ export type ResearchSessionItem = {
     error: (string | null);
     created_time: string;
     updated_time: string;
+    session_type?: string;
+    arl_config?: ({
+    [key: string]: unknown;
+} | null);
 };
 
 /**
@@ -5795,6 +5814,30 @@ export type Llm4AdResearchStreamArtifactsArchiveData = {
 };
 
 export type Llm4AdResearchStreamArtifactsArchiveResponse = (unknown);
+
+export type Llm4AdResearchCreateArlWorkspaceArchiveTicketData = {
+    /**
+     * worker / validator / all
+     */
+    role?: string;
+    sessionId: string;
+};
+
+export type Llm4AdResearchCreateArlWorkspaceArchiveTicketResponse = (unknown);
+
+export type Llm4AdResearchStreamArlWorkspaceArchiveData = {
+    /**
+     * worker / validator / all
+     */
+    role?: string;
+    sessionId: string;
+    /**
+     * 由 .../archive/ticket 换取的短时票据
+     */
+    ticket: string;
+};
+
+export type Llm4AdResearchStreamArlWorkspaceArchiveResponse = (unknown);
 
 export type Llm4AdResearchImportArtifactsZipData = {
     formData: research_import_artifacts_zip;

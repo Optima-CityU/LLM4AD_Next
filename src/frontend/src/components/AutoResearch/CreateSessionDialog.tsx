@@ -87,6 +87,12 @@ export default function CreateSessionDialog({
   const [metricKey, setMetricKey] = useState("")
   const [topicError, setTopicError] = useState("")
   const [titleError, setTitleError] = useState("")
+  // ARL 会话类型
+  const [sessionType, setSessionType] = useState<"normal" | "arl">("normal")
+  const [workerProviderId, setWorkerProviderId] = useState("")
+  const [workerModel, setWorkerModel] = useState("")
+  const [validatorProviderId, setValidatorProviderId] = useState("")
+  const [validatorModel, setValidatorModel] = useState("")
   /**
    * 课题模板浮层的挂载节点（DialogContent 内部的绝对定位层）。存 state 而非 ref：
    * 浮层需要「节点出现后」才渲染，ref 变化不会触发重渲染，挂载点会一直是 null。
@@ -122,6 +128,11 @@ export default function CreateSessionDialog({
     setMetricKey("")
     setTopicError("")
     setTitleError("")
+    setSessionType("normal")
+    setWorkerProviderId("")
+    setWorkerModel("")
+    setValidatorProviderId("")
+    setValidatorModel("")
     createdRef.current = null
   }
 
@@ -149,55 +160,128 @@ export default function CreateSessionDialog({
   }
 
   const handleSubmit = async (startAfter: boolean) => {
-    const trimmed = topic.trim()
-    // 选了模板时空题面是合法的：后端会用 manifest 派生 topic。
-    if (!templateId && trimmed.length < TOPIC_MIN) {
-      setTopicError(
-        t("autoResearch.chat.topicTooShort", {
-          defaultValue: "主题至少需要 {{min}} 个字符",
-          min: TOPIC_MIN,
-        }),
-      )
-      return
-    }
-    if (trimmed.length > TOPIC_MAX) {
-      setTopicError(
-        t("autoResearch.chat.topicTooLong", {
-          defaultValue: "主题最多 {{max}} 个字符",
-          max: TOPIC_MAX,
-        }),
-      )
-      return
+    // ARL 模式独立验证
+    if (sessionType === "arl") {
+      // 标题必需
+      const trimmedTitle = title.trim()
+      if (!trimmedTitle) {
+        setTitleError(t("autoResearch.create.arlTitleRequired"))
+        return
+      }
+      if (trimmedTitle.length > TITLE_MAX) {
+        setTitleError(
+          t("autoResearch.chat.titleTooLong", {
+            defaultValue: "标题最多 {{max}} 个字符",
+            max: TITLE_MAX,
+          }),
+        )
+        return
+      }
+
+      // Worker 必需（不允许 default/mock）
+      if (!workerProviderId || workerProviderId === "default" || workerProviderId === "mock") {
+        toast.error(t("autoResearch.create.arlWorkerProviderRequired"))
+        return
+      }
+      if (!workerModel?.trim()) {
+        toast.error(t("autoResearch.create.arlWorkerModelRequired"))
+        return
+      }
+
+      // Validator 必需（不允许 default/mock）
+      if (!validatorProviderId || validatorProviderId === "default" || validatorProviderId === "mock") {
+        toast.error(t("autoResearch.create.arlValidatorProviderRequired"))
+        return
+      }
+      if (!validatorModel?.trim()) {
+        toast.error(t("autoResearch.create.arlValidatorModelRequired"))
+        return
+      }
+    } else {
+      // 常规模式验证
+      const trimmedTitle = title.trim()
+      if (trimmedTitle.length > TITLE_MAX) {
+        setTitleError(
+          t("autoResearch.chat.titleTooLong", {
+            defaultValue: "标题最多 {{max}} 个字符",
+            max: TITLE_MAX,
+          }),
+        )
+        return
+      }
+
+      const trimmed = topic.trim()
+      // 选了模板时空题面是合法的：后端会用 manifest 派生 topic。
+      if (!templateId && trimmed.length < TOPIC_MIN) {
+        setTopicError(
+          t("autoResearch.chat.topicTooShort", {
+            defaultValue: "主题至少需要 {{min}} 个字符",
+            min: TOPIC_MIN,
+          }),
+        )
+        return
+      }
+      if (trimmed.length > TOPIC_MAX) {
+        setTopicError(
+          t("autoResearch.chat.topicTooLong", {
+            defaultValue: "主题最多 {{max}} 个字符",
+            max: TOPIC_MAX,
+          }),
+        )
+        return
+      }
     }
 
+    // 标题处理（两种模式都用）
     const trimmedTitle = title.trim()
-    if (trimmedTitle.length > TITLE_MAX) {
-      setTitleError(
-        t("autoResearch.chat.titleTooLong", {
-          defaultValue: "标题最多 {{max}} 个字符",
-          max: TITLE_MAX,
-        }),
-      )
-      return
-    }
 
     try {
       // 复用上次已建的会话（autoStart 失败后重试场景），否则新建
+      // 只复用同类型的会话：切到 ARL 后不能拿之前建好的常规会话顶替。
+      const reusable =
+        createdRef.current &&
+        (createdRef.current.session_type === "arl") === (sessionType === "arl")
+          ? createdRef.current
+          : null
       const created =
-        createdRef.current ??
-        (await createMut.mutateAsync({
-          topic: trimmed,
-          title: trimmedTitle || undefined,
-          folder_id: folderId,
-          provider_id: providerId.trim() || null,
-          model_name: modelName.trim() || null,
-          mode,
-          profile,
-          metric_direction: metricDirectionToApi(metricDirection),
-          metric_key: metricKey.trim() || undefined,
-          // 给定即走「从模板创建」：后端把 ARC-Bench stage-07/08/09 产物物化进 run_dir。
-          template_id: templateId || undefined,
-        } as ResearchSessionCreateRequest))
+        reusable ??
+        (await createMut.mutateAsync(
+          sessionType === "arl"
+            ? ({
+                // ARL 模式：不要求 topic，后端会用 title 或 "ARL Session"
+                topic: "",
+                title: trimmedTitle || undefined,
+                session_type: "arl",
+                // Same folder semantics as a regular session: an explicit key
+                // (including null) is what the PATCH-style backend reads as
+                // "place it here". Omitting it dropped the picker's value and
+                // filed every ARL session under ungrouped.
+                folder_id: folderId,
+                arl_config: {
+                  worker: {
+                    provider_id: workerProviderId,
+                    model_name: workerModel,
+                  },
+                  validator: {
+                    provider_id: validatorProviderId,
+                    model_name: validatorModel,
+                  },
+                },
+              } as ResearchSessionCreateRequest)
+            : ({
+                topic: topic.trim(),
+                title: trimmedTitle || undefined,
+                folder_id: folderId,
+                provider_id: providerId.trim() || null,
+                model_name: modelName.trim() || null,
+                mode,
+                profile,
+                metric_direction: metricDirectionToApi(metricDirection),
+                metric_key: metricKey.trim() || undefined,
+                // 给定即走「从模板创建」：后端把 ARC-Bench stage-07/08/09 产物物化进 run_dir。
+                template_id: templateId || undefined,
+              } as ResearchSessionCreateRequest),
+        ))
       createdRef.current = created
 
       if (startAfter) {
@@ -225,6 +309,32 @@ export default function CreateSessionDialog({
   }
 
   const submitting = createMut.isPending || startMut.isPending
+
+  // Folder picker, shared by both session types: ARL sessions live in the same
+  // sidebar tree, so hiding it there silently ignored `initialFolderId` when
+  // the dialog was opened from inside a folder.
+  const folderField = (
+    <Field label={t("autoResearch.create.folderLabel")}>
+      <Select
+        value={folderId ?? "__none__"}
+        onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">
+            {t("autoResearch.create.folderNone")}
+          </SelectItem>
+          {folders.map((f) => (
+            <SelectItem key={f.id} value={f.id}>
+              {f.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
 
   return (
     <Dialog
@@ -260,6 +370,182 @@ export default function CreateSessionDialog({
         </DialogHeader>
 
         <div className="-mx-1 space-y-2.5 overflow-y-auto px-1 py-2">
+          {/* 1. 会话类型（第一个字段） */}
+          <Field label={t("autoResearch.create.sessionTypeLabel")}>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setSessionType("normal")}
+                className={cn(
+                  "group relative rounded-lg px-3 py-2.5 text-left transition-all",
+                  "border-l border-r border-border/60",
+                  sessionType === "normal"
+                    ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
+                    : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  <div
+                    className={cn(
+                      "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
+                      sessionType === "normal"
+                        ? "border-primary bg-primary"
+                        : "border-muted-foreground/40 bg-background",
+                    )}
+                  >
+                    {sessionType === "normal" && (
+                      <div className="size-full flex items-center justify-center">
+                        <div className="size-1.5 rounded-full bg-primary-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "text-sm font-medium transition-colors",
+                          sessionType === "normal"
+                            ? "text-foreground"
+                            : "text-foreground/80 group-hover:text-foreground",
+                        )}
+                      >
+                        {t("autoResearch.create.sessionTypeNormal")}
+                      </span>
+                      <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                        {t("autoResearch.create.recommendedMark")}
+                      </span>
+                    </div>
+                    <div className="text-xs leading-snug text-muted-foreground">
+                      {t("autoResearch.create.sessionTypeNormalDesc")}
+                    </div>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSessionType("arl")}
+                className={cn(
+                  "group relative rounded-lg px-3 py-2.5 text-left transition-all",
+                  "border-l border-r border-border/60",
+                  sessionType === "arl"
+                    ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
+                    : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  <div
+                    className={cn(
+                      "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
+                      sessionType === "arl"
+                        ? "border-primary bg-primary"
+                        : "border-muted-foreground/40 bg-background",
+                    )}
+                  >
+                    {sessionType === "arl" && (
+                      <div className="size-full flex items-center justify-center">
+                        <div className="size-1.5 rounded-full bg-primary-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <span
+                      className={cn(
+                        "text-sm font-medium transition-colors",
+                        sessionType === "arl"
+                          ? "text-foreground"
+                          : "text-foreground/80 group-hover:text-foreground",
+                      )}
+                    >
+                      {t("autoResearch.create.sessionTypeArl")}
+                    </span>
+                    <div className="text-xs leading-snug text-muted-foreground">
+                      {t("autoResearch.create.sessionTypeArlDesc")}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </Field>
+
+          {/* 2. 标题（两种模式都有） */}
+          <Field label={t("autoResearch.create.titleLabel")} error={titleError}>
+            <div className="relative">
+              <Input
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value)
+                  if (titleError) setTitleError("")
+                }}
+                placeholder={t("autoResearch.create.titlePlaceholder")}
+                maxLength={TITLE_MAX}
+                className={
+                  titleError
+                    ? "border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30"
+                    : ""
+                }
+              />
+              {/* 字数统计 */}
+              {title.length > 0 && (
+                <div
+                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[11px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
+                    title.length > TITLE_MAX
+                      ? "bg-destructive/90 text-destructive-foreground"
+                      : title.length > TITLE_MAX * 0.9
+                        ? "bg-amber-500/90 text-white"
+                        : "bg-muted/80 text-muted-foreground"
+                  }`}
+                >
+                  {title.length} / {TITLE_MAX}
+                </div>
+              )}
+            </div>
+          </Field>
+
+          {/* 3. ARL 专用字段 */}
+          {sessionType === "arl" && (
+            <>
+              <Field
+                label="Worker"
+                hint={t("autoResearch.create.arlWorkerHint")}
+                required
+              >
+                <ProviderModelPicker
+                  provider={workerProviderId}
+                  model={workerModel}
+                  onChange={(p, m) => {
+                    setWorkerProviderId(p)
+                    setWorkerModel(m)
+                  }}
+                  portalContainer={contentEl}
+                  excludeSpecial
+                />
+              </Field>
+
+              <Field
+                label="Validator"
+                hint={t("autoResearch.create.arlValidatorHint")}
+                required
+              >
+                <ProviderModelPicker
+                  provider={validatorProviderId}
+                  model={validatorModel}
+                  onChange={(p, m) => {
+                    setValidatorProviderId(p)
+                    setValidatorModel(m)
+                  }}
+                  portalContainer={contentEl}
+                  excludeSpecial
+                />
+              </Field>
+
+              {folderField}
+            </>
+          )}
+
+          {/* 4. 常规会话字段 */}
+          {sessionType === "normal" && (
+            <>
           <TemplatePicker
             value={templateId}
             onChange={handleTemplateChange}
@@ -299,39 +585,6 @@ export default function CreateSessionDialog({
               >
                 {topic.length} / {TOPIC_MAX}
               </div>
-            </div>
-          </Field>
-
-          <Field label={t("autoResearch.create.titleLabel")} error={titleError}>
-            <div className="relative">
-              <Input
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value)
-                  if (titleError) setTitleError("")
-                }}
-                placeholder={t("autoResearch.create.titlePlaceholder")}
-                maxLength={TITLE_MAX}
-                className={
-                  titleError
-                    ? "border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30"
-                    : ""
-                }
-              />
-              {/* 字数统计 */}
-              {title.length > 0 && (
-                <div
-                  className={`absolute top-1/2 -translate-y-1/2 right-2 px-1.5 py-0.5 rounded text-[11px] font-mono tabular-nums backdrop-blur-sm pointer-events-none ${
-                    title.length > TITLE_MAX
-                      ? "bg-destructive/90 text-destructive-foreground"
-                      : title.length > TITLE_MAX * 0.9
-                        ? "bg-amber-500/90 text-white"
-                        : "bg-muted/80 text-muted-foreground"
-                  }`}
-                >
-                  {title.length} / {TITLE_MAX}
-                </div>
-              )}
             </div>
           </Field>
 
@@ -469,26 +722,7 @@ export default function CreateSessionDialog({
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label={t("autoResearch.create.folderLabel")}>
-              <Select
-                value={folderId ?? "__none__"}
-                onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">
-                    {t("autoResearch.create.folderNone")}
-                  </SelectItem>
-                  {folders.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+            {folderField}
 
             <Field label={t("autoResearch.create.modeLabel")}>
               <Select
@@ -523,6 +757,8 @@ export default function CreateSessionDialog({
               portalContainer={contentEl}
             />
           </Field>
+            </>
+          )}
 
           {/* 「仅创建」这个分支更冷门，藏在主按钮右侧的箭头里；原先那个
               「创建并运行」勾选框因此删掉了——勾选框把「建会话」和「跑首轮」这两件
@@ -543,58 +779,75 @@ export default function CreateSessionDialog({
               {t("common.cancel")}
             </Button>
 
-            {/* 主按钮 + 右侧下拉细节：视觉上是一个按钮，点左侧「创建并运行」，
-                点右侧箭头展开「仅创建」。 */}
-            <div className="flex items-stretch">
+            {/* ARL 模式：只显示"创建"按钮，不支持"创建并运行" */}
+            {sessionType === "arl" ? (
               <Button
-                className="rounded-r-none"
-                onClick={() => void handleSubmit(true)}
-                disabled={submitting || (!templateId && !topic.trim())}
+                onClick={() => void handleSubmit(false)}
+                disabled={submitting}
               >
                 {submitting ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
-                  <Play className="size-3.5" />
+                  <FilePlus2 className="size-3.5" />
                 )}
                 {submitting
                   ? t("autoResearch.create.creating")
-                  : t("autoResearch.create.createAndRun")}
+                  : t("autoResearch.create.createOnly")}
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="w-8 rounded-l-none border-l border-primary-foreground/25 px-0"
-                    disabled={submitting || (!templateId && !topic.trim())}
-                    aria-label={t("autoResearch.create.moreActions")}
-                  >
-                    <ChevronDown className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                {/* 不传 container：这里没有滚轮滚动需求，而且 DropdownMenuContent
-                    本身不认 container（只有 Popover 那个 wrapper 改过）。
-                    挂 body 上让 popper 以视口为碰撞边界，面板反而不容易被弹框裁掉。 */}
-                <DropdownMenuContent align="end" side="top" className="w-60">
-                  <DropdownMenuItem onSelect={() => void handleSubmit(true)}>
-                    <Play className="size-3.5 text-muted-foreground" />
-                    <span className="flex flex-col gap-0.5">
-                      <span>{t("autoResearch.create.createAndRun")}</span>
-                      <span className="text-xs leading-snug text-muted-foreground">
-                        {t("autoResearch.create.createAndRunDesc")}
+            ) : (
+              /* 常规模式：主按钮 + 右侧下拉细节：视觉上是一个按钮，点左侧「创建并运行」，
+                  点右侧箭头展开「仅创建」。 */
+              <div className="flex items-stretch">
+                <Button
+                  className="rounded-r-none"
+                  onClick={() => void handleSubmit(true)}
+                  disabled={submitting || (!templateId && !topic.trim())}
+                >
+                  {submitting ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Play className="size-3.5" />
+                  )}
+                  {submitting
+                    ? t("autoResearch.create.creating")
+                    : t("autoResearch.create.createAndRun")}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      className="w-8 rounded-l-none border-l border-primary-foreground/25 px-0"
+                      disabled={submitting || (!templateId && !topic.trim())}
+                      aria-label={t("autoResearch.create.moreActions")}
+                    >
+                      <ChevronDown className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  {/* 不传 container：这里没有滚轮滚动需求，而且 DropdownMenuContent
+                      本身不认 container（只有 Popover 那个 wrapper 改过）。
+                      挂 body 上让 popper 以视口为碰撞边界，面板反而不容易被弹框裁掉。 */}
+                  <DropdownMenuContent align="end" side="top" className="w-60">
+                    <DropdownMenuItem onSelect={() => void handleSubmit(true)}>
+                      <Play className="size-3.5 text-muted-foreground" />
+                      <span className="flex flex-col gap-0.5">
+                        <span>{t("autoResearch.create.createAndRun")}</span>
+                        <span className="text-xs leading-snug text-muted-foreground">
+                          {t("autoResearch.create.createAndRunDesc")}
+                        </span>
                       </span>
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void handleSubmit(false)}>
-                    <FilePlus2 className="size-3.5 text-muted-foreground" />
-                    <span className="flex flex-col gap-0.5">
-                      <span>{t("autoResearch.create.createOnly")}</span>
-                      <span className="text-xs leading-snug text-muted-foreground">
-                        {t("autoResearch.create.createOnlyDesc")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void handleSubmit(false)}>
+                      <FilePlus2 className="size-3.5 text-muted-foreground" />
+                      <span className="flex flex-col gap-0.5">
+                        <span>{t("autoResearch.create.createOnly")}</span>
+                        <span className="text-xs leading-snug text-muted-foreground">
+                          {t("autoResearch.create.createOnlyDesc")}
+                        </span>
                       </span>
-                    </span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
           </div>
         </DialogFooter>
       </DialogContent>

@@ -18,6 +18,7 @@ from .archive_ticket import (
     issue_archive_ticket,
     verify_archive_ticket,
 )
+from .arl_archive import open_arl_workspace_archive
 from .artifacts import (
     create_artifacts_archive,
     get_artifact_tree,
@@ -97,6 +98,7 @@ __all__ = [
     "issue_archive_ticket",
     "iter_artifacts_archive",
     "list_artifacts",
+    "open_arl_workspace_archive",
     "list_folders",
     "list_generated_solutions",
     "list_logs",
