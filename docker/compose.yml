@@ -232,6 +232,31 @@ services:
     restart: "no"
     entrypoint: ["true"]
 
+  # ARL (Auto-DL-Loop) 镜像，按需动态创建容器
+  arl-worker:
+    image: "${DOCKER_IMAGE_ARL_WORKER:-llm4ad-arl-worker}:${TAG-latest}"
+    build:
+      context: ../third_party/auto-dl-loop
+      dockerfile: docker/Dockerfile
+      target: worker
+      network: host
+      args:
+        DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+    restart: "no"
+    entrypoint: ["true"]
+
+  arl-validator:
+    image: "${DOCKER_IMAGE_ARL_VALIDATOR:-llm4ad-arl-validator}:${TAG-latest}"
+    build:
+      context: ../third_party/auto-dl-loop
+      dockerfile: docker/Dockerfile
+      target: validator
+      network: host
+      args:
+        DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+    restart: "no"
+    entrypoint: ["true"]
+
   code_server_proxy:
     image: "${DOCKERHUB_REGISTRY:-}library/nginx:latest"
     restart: always
