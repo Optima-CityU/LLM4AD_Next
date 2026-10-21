@@ -60,6 +60,7 @@ def _resolve_providers(
         处理后的 *input_args* 字典。
     """
     from app.models import LLMProvider
+    from app.services.local_codex_service import bridge_base_url, configure_experiment
     from app.services.user_default_model_service import get_user_default_model
 
     input_args["providers"] = []
@@ -150,6 +151,10 @@ def _resolve_providers(
     if not evaluator_provider or evaluator_provider == "default":
         if defaults and defaults.other_provider_id and defaults.other_model_name:
             evaluator_config["provider"] = f"{defaults.other_provider_id}{defaults.other_model_name}"
+        elif settings.LOCAL_CODEX_BRIDGE_URL and provider_configs_map.get(
+            planner_config["provider"], {}
+        ).get("base_url") == bridge_base_url():
+            evaluator_config["provider"] = planner_config["provider"]
         else:
             raise HTTPException(
                 status_code=400,
@@ -175,6 +180,7 @@ def _resolve_providers(
     input_args["planner"] = planner_config
     input_args["coder"] = coder_config
     input_args["evaluator"] = evaluator_config
+    configure_experiment(input_args, provider_configs_map)
     embedding_config = _build_embedding_config(db, defaults)
     if embedding_config:
         input_args["embedding"] = embedding_config

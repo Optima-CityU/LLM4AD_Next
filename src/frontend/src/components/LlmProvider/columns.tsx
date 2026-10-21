@@ -8,6 +8,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import i18n from "@/i18n"
+import { formatProviderModel } from "@/lib/providerModel"
 import { formatDateTime } from "@/lib/utils"
 import { ProviderActionsMenu } from "./ProviderActionsMenu"
 
@@ -55,7 +56,7 @@ export const columns: ColumnDef<ProviderResponse>[] = [
     header: i18n.t("llmProvider.columns.type"),
     cell: ({ row }) => (
       <Badge variant="secondary">
-        {providerTypeLabels[row.original.type] ?? row.original.type}
+        {row.original.is_local_codex ? "Codex CLI" : providerTypeLabels[row.original.type] ?? row.original.type}
       </Badge>
     ),
   },
@@ -71,7 +72,7 @@ export const columns: ColumnDef<ProviderResponse>[] = [
         <div className="flex flex-wrap gap-1">
           {models.map((model, index) => (
             <Badge key={`${model}-${index}`} variant="outline">
-              {model}
+              {formatProviderModel(model)}
             </Badge>
           ))}
         </div>
