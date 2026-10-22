@@ -306,6 +306,39 @@ class ResearchSession(SQLModel, TimeMixin, table=True):
         default=None, sa_column=Column(JSON, nullable=True)
     )
 
+    # ---- ARL (Auto-Research-Loop) 会话字段 ----
+    # session_type 为 "arl" 时使用这些字段
+    session_type: str = Field(
+        default="research",
+        max_length=32,
+        sa_column=Column(
+            Text, nullable=False, server_default="research"
+        ),
+        description="会话类型：'research'(默认) | 'arl'",
+    )
+    # ARL 容器配置与状态（只有 session_type='arl' 时使用）
+    # 结构示例：
+    # {
+    #   "worker": {
+    #     "provider_id": "uuid",  // LLMProvider ID (Claude)
+    #     "model_name": "claude-opus-5"
+    #   },
+    #   "validator": {
+    #     "provider_id": "uuid",  // LLMProvider ID (OpenAI/Codex)
+    #     "model_name": "gpt-5.5"
+    #   },
+    #   "password": "xxx",  // Paseo daemon 密码（自动生成）
+    #   "worker_port": 16767,  // 容器端口（自动分配）
+    #   "validator_port": 16768
+    # }
+    # 注意：API Key/Token/Base URL 等敏感信息不存在这里，
+    # 而是在启动容器时从 LLMProvider 表读取。
+    arl_config: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+        description="ARL 容器配置与状态",
+    )
+
     user: Optional["User"] = Relationship()  # type: ignore[name-defined]  # noqa: F821
     # 显式 foreign_keys：session ↔ turn 有两条 FK 路径，指明本 collection 只走
     # turn.session_id，否则 SQLAlchemy 抛 AmbiguousForeignKeys。

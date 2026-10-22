@@ -202,7 +202,8 @@ def create_session(
         # profile 与模板域无关（config_builder 恒用 mathematics_optimization），
         # 不按域改写；模板自带的 domain_profile.json 由容器内 stage-10 消费。
 
-    if not topic:
+    # 常规模式验证：topic 必需（除非有 template_id）
+    if request.session_type != "arl" and not topic:
         raise HTTPException(
             status_code=400,
             detail="topic is required when template_id is not given",
@@ -213,6 +214,40 @@ def create_session(
         if request.llm4ad_workspace
         else None
     )
+
+    # ARL 配置（只有 session_type='arl' 时使用）
+    arl_config_dict = None
+    if request.session_type == "arl":
+        # ARL 模式下不要求 topic（由用户在 UI 中填写标题即可）
+        # topic 在 ARL 中不像常规模式那样重要，可以用 title 替代
+        if not topic:
+            topic = request.title or "ARL Session"
+
+        # 验证 arl_config 结构
+        if not request.arl_config:
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config is required for ARL sessions",
+            )
+
+        worker = request.arl_config.get("worker", {})
+        validator = request.arl_config.get("validator", {})
+
+        if not worker.get("provider_id") or not worker.get("model_name"):
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config.worker must contain provider_id and model_name",
+            )
+
+        if not validator.get("provider_id") or not validator.get("model_name"):
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config.validator must contain provider_id and model_name",
+            )
+
+        # 直接使用前端传来的 arl_config（只包含 provider_id 和 model_name）
+        arl_config_dict = request.arl_config
+
 
     session = ResearchSession(
         user_id=user.id,
@@ -226,6 +261,8 @@ def create_session(
         provider_id=request.provider_id,
         model_name=request.model_name,
         llm4ad_workspace=workspace_dict,
+        session_type=request.session_type,
+        arl_config=arl_config_dict,
     )
     if request.template_id:
         # run_dir 在建会话时就定下来并落库：与 _bootstrap 的 resolve_run_dir 同口径

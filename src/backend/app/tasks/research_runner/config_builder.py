@@ -129,6 +129,14 @@ _PROVIDER_TYPE_TO_ARC = {
     "mock": "mock",
 }
 
+# provider.base_url 为空时按 ARC provider 类型兜底的官方入口。anthropic 与
+# openai 的默认地址不同（且 /v1 后缀约定相反），统一回落到 openai 会让
+# Anthropic 直连的调用方（ARL worker 容器）打到错误的域名。
+_DEFAULT_BASE_URLS = {
+    "anthropic": "https://api.anthropic.com",
+}
+_FALLBACK_BASE_URL = "https://api.openai.com/v1"
+
 
 def resolve_provider_for_arc(
         provider_id: str | None,
@@ -193,7 +201,8 @@ def resolve_provider_for_arc(
         raw_model = (provider.model or "").split(";")[0].strip()
         return {
             "provider": provider_type,
-            "base_url": provider.base_url or "https://api.openai.com/v1",
+            "base_url": provider.base_url
+            or _DEFAULT_BASE_URLS.get(provider_type, _FALLBACK_BASE_URL),
             "wire_api": "chat_completions",
             "api_key_env": ARC_API_KEY_ENV,
             "primary_model": resolved_model or raw_model or "gpt-4o",
