@@ -261,6 +261,18 @@ class Settings(BaseSettings):
     ARL_DAEMON_READY_TIMEOUT: float = 120.0  # 等待 daemon /api/health 就绪的超时（秒）
     ARL_INSTALL_READY_TIMEOUT: float = 180.0  # 等待 .aris/install.json 出现的超时（秒）
     ARL_NETWORK: str = ""  # ARL 容器网络名称（空则从 PROJECT_NAME 推导 {项目名}_default）
+    # 复用已在运行的容器时的探活超时（秒）。容器已 running 且 daemon 常驻，正常
+    # 应毫秒级响应；给一个短超时即可区分「daemon 活着」与「容器壳还在但进程死了」，
+    # 不必按冷启动的 ARL_DAEMON_READY_TIMEOUT 等那么久。
+    ARL_DAEMON_RECHECK_TIMEOUT: float = 10.0
+    # ARL 会话空闲回收：容器只在 WS 连接期间被使用，但 workspace 与 paseo-home
+    # 都是 bind mount，停止不丢数据，重连时原地 start 即恢复 agent 会话。
+    # 阈值取 2h，与 paper workspace 一致（同为「一个会话常驻一组容器」的形态）。
+    ARL_SESSION_IDLE_TIMEOUT_SECONDS: int = 2 * 60 * 60
+    ARL_SESSION_CLEANUP_INTERVAL_SECONDS: int = 10 * 60
+    # WS 连接期间刷新活跃时间的心跳间隔（秒）。须远小于空闲阈值，否则长时间
+    # 静默观察 agent 输出的连接会被误判空闲而被停掉。
+    ARL_SESSION_HEARTBEAT_INTERVAL: float = 60.0
 
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）

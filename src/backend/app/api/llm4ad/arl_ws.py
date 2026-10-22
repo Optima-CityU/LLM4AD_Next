@@ -23,12 +23,15 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from loguru import logger
 from sqlmodel import Session, select
 
+from app.core.config import settings
 from app.core.db import engine
+from app.core.redis import touch_arl_session_active
 from app.core.security import decode_access_token
 from app.models.research import ResearchSession
 from app.models.user import User
 from app.services.arl.daemon_client import PaseoDaemonClient
-from app.services.arl.runtime import get_arl_runtime
+from app.services.arl.runtime import daemon_endpoints, get_arl_runtime
+from app.services.arl.types import ARLDaemonConfig
 from app.tasks.research_runner.config_builder import resolve_provider_for_arc
 
 router = APIRouter(prefix="/research")
@@ -48,6 +51,19 @@ ROLES = ("worker", "validator")
 
 #: 历史回填时每个 agent 最多拉取的条目数（daemon 侧上限为 200）
 HISTORY_LIMIT = 200
+
+#: 前端允许发送的消息类型。白名单之外一律回 error 帧，不做静默忽略。
+KNOWN_MESSAGE_TYPES = frozenset(
+    {
+        "agent_send",
+        "agent_cancel",
+        "set_agent_mode",
+        "file_read",
+        "file_write",
+        "file_list",
+        "permission_response",
+    }
+)
 
 
 def _resolve_role_providers(
@@ -208,6 +224,8 @@ def _agent_summary(agent: dict[str, Any]) -> dict[str, Any]:
 def _persist_role_mode(session_id: uuid.UUID, role: str, mode_id: str) -> None:
     """把用户选的权限模式写回会话配置，下次连接沿用。
 
+    阻塞式数据库调用，调用方须经 ``asyncio.to_thread`` 下沉。
+
     Args:
         session_id: 会话 ID
         role: 容器角色（worker / validator）
@@ -274,24 +292,36 @@ async def _backfill_history(
     )
 
 
-async def _authenticate_ws(
-    websocket: WebSocket,
-    token: str,
-    session_id: uuid.UUID,
-    db: Session,
-) -> tuple[User, ResearchSession] | None:
-    """验证 WebSocket 连接。
+def _load_session_context(
+    token: str, session_id: uuid.UUID
+) -> tuple[uuid.UUID, str, str | None, dict] | None:
+    """校验 token 并取出会话上下文（阻塞，供 ``to_thread`` 调用）。
+
+    一次性把后续要用的字段取成普通值返回，避免把 ORM 实例或 DB session
+    带出线程（``Session`` 关闭后实例会脱离）。
+
+    Args:
+        token: JWT access token
+        session_id: 会话 ID
 
     Returns:
-        (user, session) if valid, None otherwise
+        ``(user_id, user_email, folder_id, arl_config)``；校验失败返回 None。
     """
     try:
         payload = decode_access_token(token)
-        user_id = uuid.UUID(payload.get("sub"))
+        subject = (payload or {}).get("sub")
+        if not subject:
+            logger.warning("ARL WS 鉴权失败：token 缺少 sub")
+            return None
+        user_id = uuid.UUID(subject)
+    except Exception as e:
+        logger.warning(f"ARL WS token 解析失败: {e}")
+        return None
 
+    with Session(engine) as db:
         user = db.exec(select(User).where(User.id == user_id)).first()
         if not user:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid user")
+            logger.warning(f"ARL WS 鉴权失败：用户 {user_id} 不存在")
             return None
 
         session = db.exec(
@@ -300,21 +330,44 @@ async def _authenticate_ws(
                 ResearchSession.user_id == user_id,
             )
         ).first()
-
         if not session:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Session not found")
+            logger.warning(f"ARL WS 鉴权失败：会话 {session_id} 不存在或不属于该用户")
             return None
-
         if session.session_type != "arl":
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Not an ARL session")
+            logger.warning(f"ARL WS 鉴权失败：会话 {session_id} 不是 ARL 类型")
             return None
 
-        return user, session
+        return (
+            user.id,
+            user.email,
+            str(session.folder_id) if session.folder_id else None,
+            dict(session.arl_config or {}),
+        )
 
-    except Exception as e:
-        logger.error(f"WebSocket auth failed: {e}")
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Auth failed")
-        return None
+
+async def _heartbeat(session_id: uuid.UUID) -> None:
+    """连接期间周期性刷新会话活跃时间。
+
+    空闲回收靠活跃时间戳决定停谁的容器。只在连接建立时打一次是不够的：
+    用户长时间静默观察 agent 输出（ARL 的常态）会越过空闲阈值，容器被
+    停掉，正在跑的回合就断了。故连接存续期间持续心跳。
+
+    心跳只是辅助功能：单次刷新失败只记日志，下个周期再试。否则它一旦
+    抛异常就会结束，触发 ``asyncio.wait(FIRST_COMPLETED)`` 提前收摊，
+    把正在跑的会话一起断掉。``CancelledError`` 不属于 ``Exception``，
+    取消语义不受影响。
+
+    Args:
+        session_id: 会话 ID
+    """
+    while True:
+        try:
+            await asyncio.to_thread(touch_arl_session_active, str(session_id))
+        except Exception:
+            logger.opt(exception=True).warning(
+                "⚠️ [Session {}] 刷新活跃时间失败，下个周期重试", session_id
+            )
+        await asyncio.sleep(settings.ARL_SESSION_HEARTBEAT_INTERVAL)
 
 
 @router.websocket("/sessions/{session_id}/arl/ws")
@@ -354,23 +407,27 @@ async def arl_websocket(
     await websocket.accept()
     logger.info(f"✅ [Session {session_id}] WebSocket accepted")
 
-    # 1. 鉴权
-    with Session(engine) as db:
-        logger.info(f"🔐 [Session {session_id}] Authenticating...")
-        auth_result = await _authenticate_ws(websocket, token, session_id, db)
-        if not auth_result:
-            logger.warning(f"❌ [Session {session_id}] Authentication failed")
-            return
-        user, session = auth_result
-        logger.info(f"✅ [Session {session_id}] Authenticated: user_id={user.id}, email={user.email}")
-        # 会话关闭后 ORM 实例可能脱离，先把后续要用的字段取成普通值
-        user_id = user.id
-        arl_config = dict(session.arl_config or {})
+    # 1. 鉴权（DB 调用下沉到线程池，不阻塞 event loop）
+    logger.info(f"🔐 [Session {session_id}] Authenticating...")
+    context = await asyncio.to_thread(_load_session_context, token, session_id)
+    if context is None:
+        logger.warning(f"❌ [Session {session_id}] Authentication failed")
+        await websocket.close(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Auth failed"
+        )
+        return
+    user_id, user_email, folder_id, arl_config = context
+    logger.info(
+        f"✅ [Session {session_id}] Authenticated: user_id={user_id}, email={user_email}"
+    )
 
     # 2. 解析两个角色的 provider 凭证
     #    容器启动（API base_url/key）与 agent 创建（model）都要用，所以
     #    无论容器是否已存在都先解析一次。
-    role_providers = _resolve_role_providers(arl_config, user_id)
+    #    内部要查 provider 表，同样下沉到线程池。
+    role_providers = await asyncio.to_thread(
+        _resolve_role_providers, arl_config, user_id
+    )
     for role in ROLES:
         provider_config = role_providers[role]
         logger.info(
@@ -382,96 +439,77 @@ async def arl_websocket(
             provider_config["primary_model"],
         )
 
-    # 3. 按需启动容器
+    # 3. 确保容器就绪
+    #    ensure_session 幂等并自带跨进程互斥：不存在就创建、配置变了就重建、
+    #    停着就原地拉起、在跑就复用，返回前一定按真实可达路径探活过。
+    if not arl_config:
+        logger.error(f"❌ [Session {session_id}] ARL config not found in database")
+        await _push(websocket, "error", {"message": "ARL config not found"})
+        await websocket.close()
+        return
+
+    # 没有可用凭证时容器起来也调不通大模型，提前失败
+    missing = [role for role in ROLES if not _credential(role_providers[role])]
+    if missing:
+        logger.error(f"❌ [Session {session_id}] No usable credential for: {missing}")
+        await _push(
+            websocket,
+            "error",
+            {"message": f"Incomplete ARL config: no credential for {', '.join(missing)}"},
+        )
+        await websocket.close()
+        return
+
     runtime = get_arl_runtime()
-
-    # 使用数据库 session_id 作为容器标识
     container_session_id = str(session_id)
-    arl_session = runtime.get_session(container_session_id)
+    worker_provider = role_providers["worker"]
+    validator_provider = role_providers["validator"]
 
-    if not arl_session:
-        # 首次连接，启动容器
-        logger.info(f"🚀 [Session {session_id}] ARL session not found, starting new containers...")
-        if not arl_config:
-            logger.error(f"❌ [Session {session_id}] ARL config not found in database")
-            await _push(websocket, "error", {"message": "ARL config not found"})
-            await websocket.close()
-            return
+    # daemon 配置里装的是真实凭据；是否换发为代理 token 由 runtime 决定
+    # （LLM_PROXY_ENABLE 开启时真实 key 不进容器）。base_url 的 /v1 后缀
+    # 也由 runtime 按角色规范化。
+    daemon_config = ARLDaemonConfig(
+        # Worker (Claude)
+        base_url=worker_provider["base_url"],
+        auth_token=_credential(worker_provider, prefer_auth_token=True),
+        model=worker_provider["primary_model"],
+        small_fast_model=(arl_config.get("worker") or {}).get("small_fast_model"),
+        provider_type=worker_provider.get("provider") or "anthropic",
+        # Validator (OpenAI/Codex)
+        validator_base_url=validator_provider["base_url"],
+        validator_api_key=_credential(validator_provider),
+        validator_model=validator_provider["primary_model"],
+        validator_provider_type=validator_provider.get("provider") or "openai",
+    )
 
-        # 没有可用凭证时容器起来也调不通大模型，提前失败
-        missing = [role for role in ROLES if not _credential(role_providers[role])]
-        if missing:
-            logger.error(
-                f"❌ [Session {session_id}] No usable credential for: {missing}"
-            )
-            await _push(
-                websocket,
-                "error",
-                {"message": f"Incomplete ARL config: no credential for {', '.join(missing)}"},
-            )
-            await websocket.close()
-            return
-
-        try:
-            await _push(websocket, "system", {"message": "Starting ARL containers..."})
-            logger.info(f"📦 [Session {session_id}] Notified frontend: starting containers")
-
-            worker_provider = role_providers["worker"]
-            validator_provider = role_providers["validator"]
-
-            # 准备 daemon 配置（base_url 的 /v1 后缀由 runtime 按角色规范化）
-            from app.services.arl.types import ARLDaemonConfig
-
-            daemon_config = ARLDaemonConfig(
-                # Worker (Claude)
-                base_url=worker_provider["base_url"],
-                auth_token=_credential(worker_provider, prefer_auth_token=True),
-                model=worker_provider["primary_model"],
-                small_fast_model=(arl_config.get("worker") or {}).get("small_fast_model"),
-                # Validator (OpenAI/Codex)
-                validator_base_url=validator_provider["base_url"],
-                validator_api_key=_credential(validator_provider),
-                validator_model=validator_provider["primary_model"],
-            )
-
-            # 启动容器（传入数据库 session_id）
-            arl_session = await runtime.create_session(
-                session_id=container_session_id,
-                project_id=0,  # TODO: 使用实际的 project_id
-                user_id=str(user_id),
-                daemon_config=daemon_config,
-            )
-
-            await _push(websocket, "system", {"message": "ARL session ready"})
-
-        except Exception as e:
-            logger.error(f"Failed to start ARL session: {e}")
-            await _push(websocket, "error", {"message": f"Failed to start: {e}"})
-            await websocket.close()
-            return
-    else:
-        # 容器已存在，直接连接
-        logger.info(f"✅ [Session {session_id}] ARL session already exists, reconnecting...")
+    try:
+        await _push(websocket, "system", {"message": "Preparing ARL containers..."})
+        arl_session = await runtime.ensure_session(
+            session_id=container_session_id,
+            user_id=str(user_id),
+            daemon_config=daemon_config,
+            folder_id=folder_id,
+        )
         await _push(websocket, "system", {"message": "ARL session ready"})
+    except Exception as e:
+        logger.error(f"❌ [Session {session_id}] Failed to prepare ARL session: {e}")
+        await _push(websocket, "error", {"message": f"Failed to start: {e}"})
+        await websocket.close()
+        return
 
     # 4. 连接两个 daemon
     worker_client = None
     validator_client = None
 
     try:
-        # 自动检测运行环境，选择正确的连接方式
-        from app.core.env_detect import use_container_network
-
-        if use_container_network():
-            # backend 在容器内：通过 Docker 网络连接（容器名 + 内部端口）
-            worker_url = f"ws://{arl_session.worker.name}:6767/ws"
-            validator_url = f"ws://{arl_session.validator.name}:6767/ws"
-            logger.info(f"🔌 [Session {session_id}] Connecting via Docker network: worker={arl_session.worker.name}, validator={arl_session.validator.name}")
-        else:
-            # backend 在宿主机：通过 localhost 连接（映射端口）
-            worker_url = f"ws://127.0.0.1:{arl_session.worker.port}/ws"
-            validator_url = f"ws://127.0.0.1:{arl_session.validator.port}/ws"
-            logger.info(f"🔌 [Session {session_id}] Connecting via localhost: worker_port={arl_session.worker.port}, validator_port={arl_session.validator.port}")
+        # 地址由 runtime 统一给出：容器网络走容器名 DNS，宿主机模式走映射
+        # 端口。与探活用的是同一套地址，不会出现「探通了但连不上」。
+        _, worker_url = daemon_endpoints(arl_session.worker)
+        _, validator_url = daemon_endpoints(arl_session.validator)
+        logger.info(
+            f"🔌 [Session {session_id}] Connecting daemons: "
+            f"worker={worker_url}, validator={validator_url}"
+        )
 
         worker_client = PaseoDaemonClient(
             url=worker_url,
@@ -515,8 +553,15 @@ async def arl_websocket(
             role_providers["validator"]["primary_model"],
             validator_mode,
         )
+        # daemon 理应总返回 id；缺了就没法把消息投给 agent，提前失败比让
+        # 后续每条消息都带着 None agent_id 去 daemon 碰运气更好诊断。
         worker_agent_id = worker_agent.get("id")
         validator_agent_id = validator_agent.get("id")
+        if not worker_agent_id or not validator_agent_id:
+            raise RuntimeError(
+                "daemon 返回的 agent 快照缺少 id："
+                f"worker={worker_agent_id!r}, validator={validator_agent_id!r}"
+            )
 
         # 先把已有的聊天记录回填给前端（刷新/重连后靠它恢复消息列表），
         # 再广播 agents_ready，避免前端在 agent id 就绪前先收到历史。
@@ -533,7 +578,7 @@ async def arl_websocket(
 
         logger.info(f"✅ [Session {session_id}] All daemons connected, starting message forwarding...")
 
-        # 5. 启动三个并发任务
+        # 5. 启动并发任务：前端→daemon 转发、两路 timeline 转发、活跃心跳
         tasks = [
             asyncio.create_task(
                 _forward_from_frontend(
@@ -543,29 +588,49 @@ async def arl_websocket(
                     validator_client,
                     worker_agent_id,
                     validator_agent_id,
-                )
+                ),
+                name="arl-frontend",
             ),
-            asyncio.create_task(_forward_timeline(websocket, worker_client, "worker")),
-            asyncio.create_task(_forward_timeline(websocket, validator_client, "validator")),
+            asyncio.create_task(
+                _forward_timeline(websocket, worker_client, "worker"),
+                name="arl-timeline-worker",
+            ),
+            asyncio.create_task(
+                _forward_timeline(websocket, validator_client, "validator"),
+                name="arl-timeline-validator",
+            ),
+            asyncio.create_task(_heartbeat(session_id), name="arl-heartbeat"),
         ]
 
-        logger.info(f"🚀 [Session {session_id}] Started 3 forwarding tasks")
+        logger.info(f"🚀 [Session {session_id}] Started {len(tasks)} forwarding tasks")
 
-        # 等待任务完成，但不使用 return_exceptions
-        # 如果任何一个 task 失败，其他 tasks 会被取消
-        try:
-            await asyncio.gather(*tasks)
-        except Exception as e:
-            logger.error(f"❌ [Session {session_id}] One of the forwarding tasks failed: {e}", exc_info=True)
-            # 取消所有其他任务
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            # 等待所有任务清理完成
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
+        # 任一任务结束即收摊，然后取消其余任务。
+        #
+        # 不能用 gather：前端断开时 _forward_from_frontend 捕获
+        # WebSocketDisconnect 后**正常返回**，而 _forward_timeline 的循环条件
+        # 是 daemon 侧的 _connected，与前端死活无关——daemon 还活着，它就
+        # 永不退出。gather 于是一直等下去，finally 里的 close() 永不执行，
+        # 每次刷新页面泄漏两条 daemon WS 连接和若干 task。心跳任务更是永不
+        # 自行结束。故必须 FIRST_COMPLETED + 主动取消。
+        done, pending = await asyncio.wait(
+            tasks, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
-        logger.info(f"🏁 [Session {session_id}] All forwarding tasks completed")
+        # 先结束的那个若是因异常退出，这里重新抛出，交由外层统一处理
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                logger.error(
+                    f"❌ [Session {session_id}] Task {task.get_name()} failed: {exc}",
+                    exc_info=exc,
+                )
+                raise exc
+
+        logger.info(f"🏁 [Session {session_id}] Forwarding stopped")
 
     except WebSocketDisconnect:
         logger.info(f"🔌 [Session {session_id}] Frontend WebSocket disconnected normally")
@@ -596,147 +661,238 @@ async def _forward_from_frontend(
     worker_agent_id: str,
     validator_agent_id: str,
 ):
-    """转发前端消息到对应的 daemon。"""
+    """转发前端消息到对应的 daemon。
+
+    单条消息的处理失败（字段缺失、daemon 报错、路径不存在等）只回一帧
+    ``error`` 给前端，**不中断连接**：一个畸形帧或一次失败的文件读取不该
+    把两个容器的会话一起拆掉。只有前端断开或 ``receive_json`` 本身失效
+    （连接已不可用）才退出循环。
+    """
     try:
         while True:
-            data = await websocket.receive_json()
+            try:
+                data = await websocket.receive_json()
+            except WebSocketDisconnect:
+                raise
+            except Exception as e:
+                # 非 JSON 帧：连接本身还在，回错误帧后继续
+                logger.warning(f"⚠️ [Frontend → Backend] Malformed frame: {e}")
+                await _push(websocket, "error", {"message": "malformed message frame"})
+                continue
+
+            if not isinstance(data, dict):
+                await _push(websocket, "error", {"message": "message must be an object"})
+                continue
+
             msg_type = data.get("type")
             role = data.get("role")
-            payload = data.get("payload", {})
+            payload = data.get("payload")
+            if not isinstance(payload, dict):
+                payload = {}
 
             logger.info(f"📨 [Frontend → Backend] Received message: type={msg_type}, role={role}, payload={payload}")
+
+            # role 必须显式合法：原先 `role == "worker"` 之外的一切（None、
+            # 拼错的值）都被当成 validator，会把消息静默投错容器。
+            if role not in ROLES:
+                logger.warning(f"⚠️ [Frontend → Backend] Invalid role: {role!r}")
+                await _push(
+                    websocket,
+                    "error",
+                    {"message": f"invalid role: {role!r}; expected one of {list(ROLES)}"},
+                )
+                continue
+
+            if msg_type not in KNOWN_MESSAGE_TYPES:
+                logger.warning(f"⚠️ [Frontend → Backend] Unknown message type: {msg_type}")
+                await _push(
+                    websocket,
+                    "error",
+                    {"message": f"unknown message type: {msg_type!r}"},
+                    role=role,
+                )
+                continue
 
             is_worker = role == "worker"
             client = worker_client if is_worker else validator_client
             agent_id = worker_agent_id if is_worker else validator_agent_id
-            target_name = "worker" if is_worker else "validator"
+            target_name = role
 
-            if msg_type == "agent_send":
-                # 发送消息给 agent
-                content = payload.get("content", "")
-                logger.info(f"📤 [Backend → {target_name}] Sending agent_send: agent={agent_id}, content_len={len(content)}")
-
-                try:
-                    await client.send_agent_message(
-                        agent_id=payload.get("agent_id") or agent_id,
-                        text=content,
-                        active_turn_behavior=payload.get("active_turn_behavior"),
-                    )
-                    logger.info(f"✅ [Backend → {target_name}] agent_send sent successfully")
-                except Exception as e:
-                    logger.error(f"❌ [Backend → {target_name}] Failed to send agent_send: {e}")
-                    raise
-
-            elif msg_type == "file_read":
-                # 读取文件
-                logger.info(f"📤 [Backend → {target_name}] Reading file: path={payload['path']}")
-                content = await client.read_file(payload["path"])
-                await websocket.send_json({
-                    "type": "file_content",
-                    "role": role,
-                    "data": {"path": payload["path"], "content": content}
-                })
-                logger.info(f"✅ [Backend → Frontend] Sent file_content: path={payload['path']}, len={len(content)}")
-
-            elif msg_type == "file_write":
-                # 写入文件
-                logger.info(f"📤 [Backend → {target_name}] Writing file: path={payload['path']}, len={len(payload['content'])}")
-                await client.write_file(payload["path"], payload["content"])
-                await websocket.send_json({
-                    "type": "file_written",
-                    "role": role,
-                    "data": {"path": payload["path"]}
-                })
-                logger.info(f"✅ [Backend → Frontend] File written: path={payload['path']}")
-
-            elif msg_type == "file_list":
-                # 列出目录（空路径表示项目根目录）
-                path = payload.get("path", "")
-                logger.info(f"📤 [Backend → {target_name}] Listing files: path={path!r}")
-                files = await client.list_files(path)
-                await websocket.send_json({
-                    "type": "file_list",
-                    "role": role,
-                    "data": {"path": path, "files": files}
-                })
-                logger.info(f"✅ [Backend → Frontend] Sent file_list: path={path!r}, count={len(files)}")
-
-            elif msg_type == "permission_response":
-                # 响应权限请求；request_id 来自 agent_permission_request 事件
-                request_id = payload["request_id"]
-                response = payload["response"]
-                logger.info(f"📤 [Backend → {target_name}] Permission response: request_id={request_id}, response={response}")
-                await client.resolve_permission(
-                    agent_id=payload.get("agent_id") or agent_id,
-                    request_id=request_id,
-                    response=response,
+            try:
+                await _handle_frontend_message(
+                    websocket=websocket,
+                    session_id=session_id,
+                    client=client,
+                    role=role,
+                    target_name=target_name,
+                    agent_id=agent_id,
+                    msg_type=msg_type,
+                    payload=payload,
                 )
-                logger.info(f"✅ [Backend → {target_name}] Permission response sent")
-
-            elif msg_type == "agent_cancel":
-                # 停止当前回合（前端「停止」按钮）。失败不致命：只回一帧结果，
-                # 让前端把按钮状态解开即可。
-                target_agent = payload.get("agent_id") or agent_id
-                logger.info(f"📤 [Backend → {target_name}] Cancel turn: agent={target_agent}")
-                try:
-                    await client.cancel_agent(target_agent)
-                    await _push(
-                        websocket, "agent_cancel_result", {"ok": True}, role=role
-                    )
-                    logger.info(f"✅ [Backend → {target_name}] Cancel sent")
-                except Exception as e:
-                    logger.warning(f"⚠️ [Backend → {target_name}] Cancel failed: {e}")
-                    await _push(
-                        websocket,
-                        "agent_cancel_result",
-                        {"ok": False, "message": str(e)},
-                        role=role,
-                    )
-
-            elif msg_type == "set_agent_mode":
-                # 切换权限模式（auto / bypass / 逐条确认…），并写回会话配置
-                mode_id = payload.get("mode_id")
-                target_agent = payload.get("agent_id") or agent_id
-                logger.info(
-                    f"📤 [Backend → {target_name}] Set mode: agent={target_agent}, mode={mode_id}"
+            except WebSocketDisconnect:
+                raise
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ [Backend → {target_name}] Handling {msg_type} failed: {e}",
+                    exc_info=True,
                 )
-                if not mode_id:
-                    await _push(
-                        websocket,
-                        "agent_mode_result",
-                        {"ok": False, "message": "mode_id is required"},
-                        role=role,
-                    )
-                    continue
-                try:
-                    await client.set_agent_mode(target_agent, mode_id)
-                    _persist_role_mode(session_id, target_name, mode_id)
-                    await _push(
-                        websocket,
-                        "agent_mode_result",
-                        {"ok": True, "mode_id": mode_id},
-                        role=role,
-                    )
-                    logger.info(f"✅ [Backend → {target_name}] Mode switched to {mode_id}")
-                except Exception as e:
-                    logger.warning(f"⚠️ [Backend → {target_name}] Set mode failed: {e}")
-                    await _push(
-                        websocket,
-                        "agent_mode_result",
-                        {"ok": False, "mode_id": mode_id, "message": str(e)},
-                        role=role,
-                    )
-
-            else:
-                logger.warning(f"⚠️ [Frontend → Backend] Unknown message type: {msg_type}")
+                await _push(
+                    websocket,
+                    "error",
+                    {"message": f"{msg_type} failed: {e}", "type": msg_type},
+                    role=role,
+                )
 
     except WebSocketDisconnect:
         logger.info("🔌 [Frontend] WebSocket disconnected")
-        # 正常断开，不抛出异常
+        # 正常断开：返回后由上层 asyncio.wait 收摊并取消其余任务
     except Exception as e:
         logger.error(f"❌ [Frontend → Backend] Error forwarding message: {e}", exc_info=True)
-        # 严重错误，抛出异常以关闭连接
         raise
+
+
+async def _handle_frontend_message(
+    *,
+    websocket: WebSocket,
+    session_id: uuid.UUID,
+    client: PaseoDaemonClient,
+    role: str,
+    target_name: str,
+    agent_id: str,
+    msg_type: str,
+    payload: dict,
+) -> None:
+    """处理单条前端消息。
+
+    不自行捕获异常——由 :func:`_forward_from_frontend` 统一转成 error 帧。
+    唯一例外是 ``agent_cancel`` / ``set_agent_mode``：它们有专门的结果帧
+    （``*_result``），前端靠这两帧解开按钮状态，故在此就地处理失败。
+
+    Args:
+        websocket: 前端连接
+        session_id: 会话 ID
+        client: 目标 daemon 客户端
+        role: 角色标识（worker / validator）
+        target_name: 日志用的目标名
+        agent_id: 该角色的默认 agent ID
+        msg_type: 消息类型（已校验在白名单内）
+        payload: 消息负载
+
+    Raises:
+        KeyError: 必填字段缺失（由调用方转成 error 帧）
+    """
+    target_agent = payload.get("agent_id") or agent_id
+
+    if msg_type == "agent_send":
+        content = payload.get("content", "")
+        logger.info(
+            f"📤 [Backend → {target_name}] Sending agent_send: "
+            f"agent={target_agent}, content_len={len(content)}"
+        )
+        await client.send_agent_message(
+            agent_id=target_agent,
+            text=content,
+            active_turn_behavior=payload.get("active_turn_behavior"),
+        )
+        logger.info(f"✅ [Backend → {target_name}] agent_send sent successfully")
+
+    elif msg_type == "file_read":
+        path = payload["path"]
+        logger.info(f"📤 [Backend → {target_name}] Reading file: path={path}")
+        content = await client.read_file(path)
+        await _push(
+            websocket, "file_content", {"path": path, "content": content}, role=role
+        )
+        logger.info(
+            f"✅ [Backend → Frontend] Sent file_content: path={path}, len={len(content)}"
+        )
+
+    elif msg_type == "file_write":
+        path = payload["path"]
+        content = payload["content"]
+        logger.info(
+            f"📤 [Backend → {target_name}] Writing file: path={path}, len={len(content)}"
+        )
+        await client.write_file(path, content)
+        await _push(websocket, "file_written", {"path": path}, role=role)
+        logger.info(f"✅ [Backend → Frontend] File written: path={path}")
+
+    elif msg_type == "file_list":
+        # 列出目录（空路径表示项目根目录）
+        path = payload.get("path", "")
+        logger.info(f"📤 [Backend → {target_name}] Listing files: path={path!r}")
+        files = await client.list_files(path)
+        await _push(websocket, "file_list", {"path": path, "files": files}, role=role)
+        logger.info(
+            f"✅ [Backend → Frontend] Sent file_list: path={path!r}, count={len(files)}"
+        )
+
+    elif msg_type == "permission_response":
+        # 响应权限请求；request_id 来自 agent_permission_request 事件
+        request_id = payload["request_id"]
+        response = payload["response"]
+        logger.info(
+            f"📤 [Backend → {target_name}] Permission response: "
+            f"request_id={request_id}, response={response}"
+        )
+        await client.resolve_permission(
+            agent_id=target_agent,
+            request_id=request_id,
+            response=response,
+        )
+        logger.info(f"✅ [Backend → {target_name}] Permission response sent")
+
+    elif msg_type == "agent_cancel":
+        # 停止当前回合（前端「停止」按钮）。失败不致命：只回一帧结果，
+        # 让前端把按钮状态解开即可。
+        logger.info(f"📤 [Backend → {target_name}] Cancel turn: agent={target_agent}")
+        try:
+            await client.cancel_agent(target_agent)
+            await _push(websocket, "agent_cancel_result", {"ok": True}, role=role)
+            logger.info(f"✅ [Backend → {target_name}] Cancel sent")
+        except Exception as e:
+            logger.warning(f"⚠️ [Backend → {target_name}] Cancel failed: {e}")
+            await _push(
+                websocket,
+                "agent_cancel_result",
+                {"ok": False, "message": str(e)},
+                role=role,
+            )
+
+    elif msg_type == "set_agent_mode":
+        # 切换权限模式（auto / bypass / 逐条确认…），并写回会话配置
+        mode_id = payload.get("mode_id")
+        logger.info(
+            f"📤 [Backend → {target_name}] Set mode: agent={target_agent}, mode={mode_id}"
+        )
+        if not mode_id:
+            await _push(
+                websocket,
+                "agent_mode_result",
+                {"ok": False, "message": "mode_id is required"},
+                role=role,
+            )
+            return
+        try:
+            await client.set_agent_mode(target_agent, mode_id)
+            # 写库是阻塞调用，下沉到线程池：切模式走的是消息循环，
+            # 在 event loop 里同步开事务会卡住本 worker 的所有请求。
+            await asyncio.to_thread(_persist_role_mode, session_id, role, mode_id)
+            await _push(
+                websocket,
+                "agent_mode_result",
+                {"ok": True, "mode_id": mode_id},
+                role=role,
+            )
+            logger.info(f"✅ [Backend → {target_name}] Mode switched to {mode_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ [Backend → {target_name}] Set mode failed: {e}")
+            await _push(
+                websocket,
+                "agent_mode_result",
+                {"ok": False, "mode_id": mode_id, "message": str(e)},
+                role=role,
+            )
 
 
 async def _forward_timeline(
@@ -763,7 +919,11 @@ async def _forward_timeline(
 
     except asyncio.CancelledError:
         logger.info(f"🛑 [{role}] Timeline subscription cancelled")
-        # 正常取消，不抛出异常
+        # 前端断开后由上层主动取消，属正常路径。必须重新抛出：吞掉
+        # CancelledError 会让 task 以「正常完成」收尾，破坏取消语义。
+        raise
+    except WebSocketDisconnect:
+        logger.info(f"🔌 [{role}] Frontend disconnected during timeline forward")
     except Exception as e:
         logger.error(f"❌ [{role}] Error forwarding timeline: {e}", exc_info=True)
         # 严重错误，抛出异常以关闭连接

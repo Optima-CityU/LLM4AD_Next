@@ -542,6 +542,7 @@ def delete_session(
         )
     deleted_session_id = session.id
     run_dir = session.run_dir
+    is_arl = session.session_type == "arl"
     # 收集本会话全部 turn id：一个 session 跨多轮，每轮可能有独立 Redis Stream。
     # 只清 active_turn 会漏掉历史轮的 stream，造成 Redis key 泄漏，故先全量取出。
     turn_ids = db.exec(
@@ -558,6 +559,29 @@ def delete_session(
         logger.opt(exception=True).warning(
             f"post-delete cleanup failed session={deleted_session_id}"
         )
+
+    # ARL 会话还挂着两个常驻容器（各 4g 内存上限）与挂载目录。只删 DB 行会
+    # 把它们永久留在宿主上——启动期对账能兜底捞回孤儿，但不该等到下次重启。
+    if is_arl:
+        try:
+            _cleanup_arl_containers(deleted_session_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"ARL container cleanup failed session={deleted_session_id}"
+            )
+
+
+def _cleanup_arl_containers(session_id: uuid.UUID) -> None:
+    """清理 ARL 会话的容器、代理 token 与挂载目录。
+
+    幂等；失败由调用方记日志（DB 删除已经生效，不该再翻成 500）。
+
+    Args:
+        session_id: 被删除的会话 ID
+    """
+    from app.services.arl.runtime import get_arl_runtime
+
+    get_arl_runtime().cleanup_session_sync(str(session_id))
 
 
 # ---- 复制会话与产物导入 ----
