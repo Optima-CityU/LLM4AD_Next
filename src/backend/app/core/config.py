@@ -252,6 +252,16 @@ class Settings(BaseSettings):
     KNOWLEDGE_PARSER_CPU_LIMIT: float = 1.0
     KNOWLEDGE_PLAN_QUESTION_TIMEOUT: int = 900
 
+    # ---- ARL (Agent Research Loop) 容器配置 ----
+    ARL_WORKER_IMAGE: str = "llm4ad-arl-worker:latest"  # Worker 容器镜像
+    ARL_VALIDATOR_IMAGE: str = "llm4ad-arl-validator:latest"  # Validator 容器镜像
+    ARL_CONTAINER_MEMORY_LIMIT: str = "4g"  # ARL 容器内存限制
+    ARL_CONTAINER_CPU_LIMIT: float = 2.0  # ARL 容器 CPU 核心数限制
+    ARL_PASEO_PORT: int = 6767  # Paseo daemon 监听端口（容器内）
+    ARL_DAEMON_READY_TIMEOUT: float = 120.0  # 等待 daemon /api/health 就绪的超时（秒）
+    ARL_INSTALL_READY_TIMEOUT: float = 180.0  # 等待 .aris/install.json 出现的超时（秒）
+    ARL_NETWORK: str = ""  # ARL 容器网络名称（空则从 PROJECT_NAME 推导 {项目名}_default）
+
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）
     CHAT_TUNE_CONTAINER_MEMORY_LIMIT: str = "1g"      # 调参容器内存限制
@@ -306,6 +316,16 @@ class Settings(BaseSettings):
             and self.MINDMEMOS_EMBED_API_KEY.strip()
             and self.MINDMEMOS_EMBED_DIMENSIONS > 0
         )
+
+    @property
+    def arl_network_name(self) -> str:
+        """ARL 容器所在的 Docker 网络名称。
+
+        优先使用 ARL_NETWORK 配置；为空则推导为 {PROJECT_NAME}_default。
+        """
+        if self.ARL_NETWORK:
+            return self.ARL_NETWORK
+        return f"{self.PROJECT_NAME}_default"
 
     @property
     def mindmemos_rerank_configured(self) -> bool:

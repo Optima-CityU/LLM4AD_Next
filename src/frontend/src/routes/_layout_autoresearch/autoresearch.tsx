@@ -12,6 +12,7 @@ import { toast } from "sonner"
 
 import type { ResearchSessionItem, ResearchSessionStatus } from "@/client"
 import ArtifactsPanel from "@/components/AutoResearch/ArtifactsPanel"
+import ARLPanel from "@/components/AutoResearch/ARLPanel"
 import ChatPanel from "@/components/AutoResearch/ChatPanel"
 import CreateSessionDialog from "@/components/AutoResearch/CreateSessionDialog"
 import EditSessionDialog from "@/components/AutoResearch/EditSessionDialog"
@@ -437,10 +438,14 @@ function AutoResearchPage() {
           showCorners={false}
           className="h-full flex flex-col rounded-xl border border-border/60 bg-card dark:bg-linear-to-b dark:from-primary/[0.07] dark:via-card/50 dark:to-background/40"
         >
-          <ChatPanel
-            session={activeSession}
-            onCreateSession={() => openCreate(null)}
-          />
+          {activeSession && (activeSession as any).session_type === "arl" ? (
+            <ARLPanel session={activeSession} />
+          ) : (
+            <ChatPanel
+              session={activeSession}
+              onCreateSession={() => openCreate(null)}
+            />
+          )}
         </TechPanel>
       </main>
 

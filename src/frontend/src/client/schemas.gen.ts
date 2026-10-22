@@ -11385,6 +11385,26 @@ export const ResearchSessionCreateRequestSchema = {
                 }
             ],
             description: 'LLM4AD workspace 引用；缺省时首轮会引导用户补齐'
+        },
+        session_type: {
+            type: 'string',
+            enum: ['research', 'arl'],
+            title: 'Session Type',
+            description: "会话类型：'research'(默认) | 'arl'",
+            default: 'research'
+        },
+        arl_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Arl Config',
+            description: 'ARL 容器配置（worker 和 validator 的 provider_id + model_name）'
         }
     },
     type: 'object',
@@ -11609,6 +11629,23 @@ export const ResearchSessionItemSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Updated Time'
+        },
+        session_type: {
+            type: 'string',
+            title: 'Session Type',
+            default: 'research'
+        },
+        arl_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Arl Config'
         }
     },
     type: 'object',

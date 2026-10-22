@@ -154,6 +154,11 @@ interface Props {
    * 浮层超出弹框的部分也会被 overflow-hidden 裁掉。参见 popover.tsx 的 container。
    */
   portalContainer?: HTMLElement | null
+  /**
+   * 是否排除特殊 provider（default 和 mock）。
+   * 用于 ARL 配置，要求用户必须选择真实的 provider。
+   */
+  excludeSpecial?: boolean
 }
 
 /**
@@ -167,11 +172,18 @@ export default function ProviderModelPicker({
   allowInherit,
   className,
   portalContainer,
+  excludeSpecial,
 }: Props) {
   const { t } = useTranslation()
   const { data, isLoading, isError } = useProviders()
   const { data: defaultModels } = useUserDefaultModels()
-  const providers: ProviderResponse[] = data?.items ?? []
+  const allProviders: ProviderResponse[] = data?.items ?? []
+
+  // 根据 excludeSpecial 决定是否排除 default 和 mock
+  // 当 excludeSpecial 为 true 时（ARL 配置），只显示真实的 providers
+  const providers = excludeSpecial
+    ? allProviders.filter((p) => p.id !== "default" && p.id !== "mock")
+    : allProviders
 
   // 「默认」项显示实际生效的系统默认供应商/模型（与 evolution 的 AI 构建选择器一致）。
   const defaultHint = [
@@ -214,32 +226,37 @@ export default function ProviderModelPicker({
                 </span>
               </SelectItem>
             )}
-            <SelectItem value="default">
-              <div className="flex items-center gap-2">
-                <Badge
-                  variant="secondary"
-                  className="text-[10px] font-medium px-1.5 py-0 bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
-                >
-                  DEFAULT
-                </Badge>
-                <span className="text-muted-foreground">
-                  {defaultHint || t("autoResearch.provider.default")}
-                </span>
-              </div>
-            </SelectItem>
-            <SelectItem value="mock">
-              <div className="flex items-center gap-2">
-                <Badge
-                  variant="secondary"
-                  className="text-[10px] font-medium px-1.5 py-0 bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                >
-                  MOCK
-                </Badge>
-                <span className="text-muted-foreground">
-                  {t("autoResearch.provider.mock")}
-                </span>
-              </div>
-            </SelectItem>
+            {/* 当 excludeSpecial 为 true 时（ARL 配置），隐藏 default 和 mock */}
+            {!excludeSpecial && (
+              <>
+                <SelectItem value="default">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] font-medium px-1.5 py-0 bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                    >
+                      DEFAULT
+                    </Badge>
+                    <span className="text-muted-foreground">
+                      {defaultHint || t("autoResearch.provider.default")}
+                    </span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="mock">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] font-medium px-1.5 py-0 bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                    >
+                      MOCK
+                    </Badge>
+                    <span className="text-muted-foreground">
+                      {t("autoResearch.provider.mock")}
+                    </span>
+                  </div>
+                </SelectItem>
+              </>
+            )}
             {providers.length > 0 && <SelectSeparator />}
             {/* 用户自定义供应商的加载/失败态：default/mock 始终可用，故这里只在
                 自定义列表区给出轻量反馈，不阻断整个选择器。 */}
