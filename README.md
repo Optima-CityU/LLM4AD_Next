@@ -289,6 +289,7 @@ LLM4AD_Next/
 │   ├── autorebuttal/     # Reviewer response and AC summary workflow
 │   ├── document-knowledge-organizer/ # Markdown knowledge organization
 │   ├── llm4ad-task-builder/ # Runnable task-package creation
+│   ├── llm4ad-cloud-package/ # Locally validated ZIP packages for web project import
 │   ├── openair-proposal/ # Staged research proposal writing
 │   ├── research-stage-publication/ # Stage result publication
 │   └── typst-author/    # Typst document authoring

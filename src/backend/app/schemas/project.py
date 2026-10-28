@@ -47,6 +47,16 @@ class ProjectResponse(BaseModel):
     user_id: uuid.UUID
 
 
+class ProjectPackageImportResponse(BaseModel):
+    """Identifiers of a newly imported project and its configured first task."""
+
+    project_id: uuid.UUID
+    task_id: uuid.UUID
+    task_name: str
+    evolution_type: str
+    file_count: int
+
+
 # ---- 分页 ----
 
 

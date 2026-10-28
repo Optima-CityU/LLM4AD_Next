@@ -289,6 +289,7 @@ LLM4AD_Next/
 │   ├── autorebuttal/     # 审稿回复与 AC 总结
 │   ├── document-knowledge-organizer/ # Markdown 知识整理
 │   ├── llm4ad-task-builder/ # 可运行任务包构建
+│   ├── llm4ad-cloud-package/ # 本地验证、打包并导入网页项目
 │   ├── openair-proposal/ # 分阶段科研申报书写作
 │   ├── research-stage-publication/ # 阶段成果发布
 │   └── typst-author/    # Typst 文档编写

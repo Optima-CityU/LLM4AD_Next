@@ -7,8 +7,9 @@
 
 import json
 import uuid
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 
@@ -62,6 +63,21 @@ def list_tasks(
 
 
 # ---- 任务 CRUD ----
+
+
+@router.post("/import-package", response_model=schemas.TaskResponse, status_code=201)
+def import_task_package(
+    db: SessionDep,
+    current_user: CurrentUser,
+    project_id: Annotated[uuid.UUID, Form()],
+    file: Annotated[UploadFile, File(description="Cloud task ZIP containing one task folder")],
+    name: Annotated[str | None, Form(max_length=255)] = None,
+    language: Annotated[Literal["en", "zh"], Form()] = "en",
+):
+    """Import a task ZIP into an existing project without starting evolution."""
+    from app.services.project_package_service import import_task_package as import_package
+
+    return import_package(db, current_user, project_id, file.file, name=name, language=language)
 
 
 @router.get("/{task_id}", response_model=schemas.TaskResponse, summary="获取任务详情")

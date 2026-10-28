@@ -8444,6 +8444,37 @@ export const ProjectMemoryConfigResponseSchema = {
     description: 'Project-level memory defaults response.'
 } as const;
 
+export const ProjectPackageImportResponseSchema = {
+    properties: {
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        task_name: {
+            type: 'string',
+            title: 'Task Name'
+        },
+        evolution_type: {
+            type: 'string',
+            title: 'Evolution Type'
+        },
+        file_count: {
+            type: 'integer',
+            title: 'File Count'
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'task_id', 'task_name', 'evolution_type', 'file_count'],
+    title: 'ProjectPackageImportResponse',
+    description: 'Identifiers of a newly imported project and its configured first task.'
+} as const;
+
 export const ProjectResponseSchema = {
     properties: {
         id: {
@@ -14788,6 +14819,50 @@ export const papers_upload_sourceSchema = {
     title: 'Body_llm4ad.papers-upload_source'
 } as const;
 
+export const projects_import_project_packageSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File',
+            description: 'Cloud task ZIP containing one project folder'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        language: {
+            type: 'string',
+            enum: ['en', 'zh'],
+            title: 'Language',
+            default: 'en'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_llm4ad.projects-import_project_package'
+} as const;
+
 export const research_import_artifacts_zipSchema = {
     properties: {
         file: {
@@ -14800,6 +14875,43 @@ export const research_import_artifacts_zipSchema = {
     type: 'object',
     required: ['file'],
     title: 'Body_llm4ad.research-import_artifacts_zip'
+} as const;
+
+export const tasks_import_task_packageSchema = {
+    properties: {
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File',
+            description: 'Cloud task ZIP containing one task folder'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        language: {
+            type: 'string',
+            enum: ['en', 'zh'],
+            title: 'Language',
+            default: 'en'
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'file'],
+    title: 'Body_llm4ad.tasks-import_task_package'
 } as const;
 
 export const tasks_upload_task_dataSchema = {

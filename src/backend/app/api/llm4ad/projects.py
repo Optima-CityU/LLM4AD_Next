@@ -6,8 +6,9 @@
 """
 
 import uuid
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, File, Form, Query, UploadFile
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models import Message
@@ -16,6 +17,33 @@ from app.services import project_service
 
 # tags 加前缀防止前端 OpenAPI 重名冲突
 router = APIRouter(prefix="/projects", tags=["llm4ad.projects"])
+
+
+@router.post("/import-package", response_model=schemas.ProjectPackageImportResponse, status_code=201)
+def import_project_package(
+    db: SessionDep,
+    current_user: CurrentUser,
+    file: Annotated[UploadFile, File(description="Cloud task ZIP containing one project folder")],
+    name: Annotated[str | None, Form(max_length=255)] = None,
+    description: Annotated[str | None, Form(max_length=255)] = None,
+    language: Annotated[Literal["en", "zh"], Form()] = "en",
+):
+    """Import source files and configuration without starting evolution.
+
+    Args:
+        db: Request-scoped database session.
+        current_user: Authenticated project owner.
+        file: Uploaded cloud package.
+        name: Optional project name override.
+        description: Optional project description override.
+        language: Preferred language for the imported description.
+
+    Returns:
+        Identifiers of the created project and task.
+    """
+    from app.services.project_package_service import import_project_package as import_package
+
+    return import_package(db, current_user, file.file, name=name, description=description, language=language)
 
 
 @router.post(

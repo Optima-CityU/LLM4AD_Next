@@ -2497,6 +2497,17 @@ export type ProjectMemoryConfigResponse = {
 };
 
 /**
+ * Identifiers of a newly imported project and its configured first task.
+ */
+export type ProjectPackageImportResponse = {
+    project_id: string;
+    task_id: string;
+    task_name: string;
+    evolution_type: string;
+    file_count: number;
+};
+
+/**
  * 项目基础响应。
  */
 export type ProjectResponse = {
@@ -2507,6 +2518,16 @@ export type ProjectResponse = {
     description: (string | null);
     icon: (string | null);
     user_id: string;
+};
+
+export type projects_import_project_package = {
+    /**
+     * Cloud task ZIP containing one project folder
+     */
+    file: (Blob | File);
+    name?: (string | null);
+    description?: (string | null);
+    language?: 'en' | 'zh';
 };
 
 /**
@@ -4268,6 +4289,16 @@ export type TaskRunResponse = {
     status: TaskStatus;
 };
 
+export type tasks_import_task_package = {
+    project_id: string;
+    /**
+     * Cloud task ZIP containing one task folder
+     */
+    file: (Blob | File);
+    name?: (string | null);
+    language?: 'en' | 'zh';
+};
+
 export type tasks_upload_task_data = {
     /**
      * 上传的文件列表
@@ -5335,6 +5366,12 @@ export type Llm4AdPapersWorkspaceRuntimeEventsData = {
 
 export type Llm4AdPapersWorkspaceRuntimeEventsResponse = (unknown);
 
+export type Llm4AdProjectsImportProjectPackageData = {
+    formData: projects_import_project_package;
+};
+
+export type Llm4AdProjectsImportProjectPackageResponse = (ProjectPackageImportResponse);
+
 export type Llm4AdProjectsCreateProjectData = {
     requestBody: ProjectCreate;
 };
@@ -5916,6 +5953,12 @@ export type Llm4AdTasksListTasksData = {
 };
 
 export type Llm4AdTasksListTasksResponse = (PaginatedTaskResponse);
+
+export type Llm4AdTasksImportTaskPackageData = {
+    formData: tasks_import_task_package;
+};
+
+export type Llm4AdTasksImportTaskPackageResponse = (TaskResponse);
 
 export type Llm4AdTasksGetTaskData = {
     taskId: string;
