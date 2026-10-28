@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://llm4ad-next.cn/">官方网站</a> ·
   <a href="#快速开始">快速开始</a> ·
+  <a href="#agent-to-platform">Agent 生成任务包</a> ·
   <a href="docs/en/index.md">文档</a> ·
   <a href="https://github.com/Optima-CityU/LLM4AD_Next/wiki">Wiki</a> 
 </p>
@@ -179,6 +180,27 @@ Read the skill, read the task package, run [N] generations, give me the best alg
     </td>
   </tr>
 </table>
+
+<a id="agent-to-platform"></a>
+
+### 让 Agent 生成任务包，导入平台开始进化
+
+使用能在本地读写文件、执行命令的 coding agent 准备任务，再到平台启动进化。
+
+1. 将完整的 [Cloud Package Skill 目录](skills/llm4ad-cloud-package/) 提供给 Agent，复制下面的提示词：
+
+   ```text
+   请阅读本仓库 skills/llm4ad-cloud-package/SKILL.md 及其引用文件。
+   我的任务：[问题描述、优化目标、约束，以及已有代码/数据的路径]。
+   先澄清缺失的需求和真实评估方式，再生成任务。
+   请准备环境，检查初始代码和评估器，并在本地完成真实基准评估。
+   只有验证通过后，才使用 Skill 的打包脚本交付 ZIP 和验证报告。
+   ```
+
+2. 打开[平台](https://llm4ad-next.cn/)，进入或创建项目，选择 **新建任务 → 导入 ZIP**，上传生成的任务包。
+3. 选择平台模型，确认导入的配置，即可**启动进化**。
+
+Agent 需要完整的 Skill 目录，包括引用文档、脚本和示例文件。另见[支持的进化算法](skills/llm4ad-cloud-package/references/algorithms.md)和[导入说明](skills/llm4ad-cloud-package/references/web-import.md)。
 
 ## 教程视频
 
