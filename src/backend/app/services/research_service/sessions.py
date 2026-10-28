@@ -161,6 +161,73 @@ def _seed_template_checkpoint(
             )
 
 
+_ARL_ROLES = ("worker", "validator")
+
+
+def _validate_arl_config(
+    db: Session, arl_config: dict[str, Any], user: models.User
+) -> dict[str, Any]:
+    """Validate an ARL config and return its normalized form.
+
+    Each role must carry ``provider_id`` and ``model_name``, and the provider
+    must be accessible by the user; otherwise another user's API key would be
+    injected into this session's containers.
+
+    Args:
+        db: Database session.
+        arl_config: Raw config, ``{"worker": {...}, "validator": {...}}``.
+        user: Session owner.
+
+    Returns:
+        Config holding only the two roles' ``provider_id`` / ``model_name``.
+
+    Raises:
+        HTTPException: 400 on a malformed config; 404/403 from
+            ``get_provider_with_auth`` when the provider is not usable.
+    """
+    normalized: dict[str, Any] = {}
+    for role in _ARL_ROLES:
+        role_cfg = arl_config.get(role) or {}
+        provider_id = role_cfg.get("provider_id")
+        model_name = str(role_cfg.get("model_name") or "").strip()
+        if not provider_id or not model_name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"arl_config.{role} must contain provider_id and model_name",
+            )
+        try:
+            provider_uuid = uuid.UUID(str(provider_id))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid provider_id: {provider_id!r}",
+            )
+        get_provider_with_auth(db, provider_uuid, user)
+        normalized[role] = {"provider_id": str(provider_uuid), "model_name": model_name}
+    return normalized
+
+
+def _merge_arl_config(
+    current: dict[str, Any] | None, update: dict[str, Any]
+) -> dict[str, Any]:
+    """Overlay new provider/model onto the stored config, keeping other keys.
+
+    Runtime keys such as ``mode_id`` (written back by the WebSocket bridge)
+    and ``small_fast_model`` must survive an edit.
+
+    Args:
+        current: Stored ``arl_config``.
+        update: Output of :func:`_validate_arl_config`.
+
+    Returns:
+        A new dict (JSON columns must be replaced, not mutated in place).
+    """
+    merged = deepcopy(current or {})
+    for role, role_cfg in update.items():
+        merged[role] = {**(merged.get(role) or {}), **role_cfg}
+    return merged
+
+
 def create_session(
     db: Session, request: ResearchSessionCreateRequest, user: models.User
 ) -> ResearchSessionItem:
@@ -224,43 +291,14 @@ def create_session(
         if not topic:
             topic = request.title or "ARL Session"
 
-        # 验证 arl_config 结构
         if not request.arl_config:
             raise HTTPException(
                 status_code=400,
                 detail="arl_config is required for ARL sessions",
             )
-
-        worker = request.arl_config.get("worker", {})
-        validator = request.arl_config.get("validator", {})
-
-        if not worker.get("provider_id") or not worker.get("model_name"):
-            raise HTTPException(
-                status_code=400,
-                detail="arl_config.worker must contain provider_id and model_name",
-            )
-
-        if not validator.get("provider_id") or not validator.get("model_name"):
-            raise HTTPException(
-                status_code=400,
-                detail="arl_config.validator must contain provider_id and model_name",
-            )
-
-        # Reject providers the user cannot access; otherwise another user's
-        # API key would be injected into this session's containers.
-        for role_cfg in (worker, validator):
-            try:
-                provider_uuid = uuid.UUID(str(role_cfg["provider_id"]))
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"invalid provider_id: {role_cfg['provider_id']!r}",
-                )
-            get_provider_with_auth(db, provider_uuid, user)
-
-        # 直接使用前端传来的 arl_config（只包含 provider_id 和 model_name）
-        arl_config_dict = request.arl_config
-
+        arl_config_dict = _merge_arl_config(
+            request.arl_config, _validate_arl_config(db, request.arl_config, user)
+        )
 
     session = ResearchSession(
         user_id=user.id,
@@ -354,6 +392,19 @@ def update_session(
             needs_purge = True
         new_profile = candidate
 
+    new_arl_config: dict[str, Any] | None = None
+    if request.arl_config is not None:
+        if session.session_type != "arl":
+            raise HTTPException(
+                status_code=400,
+                detail="arl_config can only be updated on ARL sessions",
+            )
+        # Changing the models takes effect on next connect: ensure_session sees
+        # a different config fingerprint and recreates the containers.
+        new_arl_config = _merge_arl_config(
+            session.arl_config, _validate_arl_config(db, request.arl_config, user)
+        )
+
     # ---- 校验全过，开始改写字段 ----
     if request.title is not None:
         # 与 create 一致：strip + 截断；strip 后为空则保留原值不覆盖。
@@ -377,6 +428,8 @@ def update_session(
         session.provider_id = request.provider_id
     if request.model_name is not None:
         session.model_name = request.model_name
+    if new_arl_config is not None:
+        session.arl_config = new_arl_config
     session.updated_time = datetime.now(UTC)
     run_dir_snapshot = session.run_dir
     db.add(session)
@@ -667,6 +720,8 @@ def copy_session(
         ended_time=source.ended_time,
         error=source.error,
         analysis_report=source.analysis_report,
+        session_type=source.session_type,
+        arl_config=deepcopy(source.arl_config),
         # 副本是新的生命周期起点：创建/更新时间取当前，避免沿用旧值被当成过期会话清理
         created_time=now,
         updated_time=now,
@@ -794,6 +849,18 @@ def copy_session(
                 logger.opt(exception=True).warning(
                     f"copy_session files failed session={source.id} -> {new_session_id}"
                 )
+
+    # ARL sessions keep their data under the per-session mount root rather
+    # than run_dir; copy the workspaces so the new containers start from them.
+    if source.session_type == "arl":
+        from app.services.arl.runtime import copy_session_workspace
+
+        try:
+            copy_session_workspace(str(source.id), str(new_session_id))
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"copy_session ARL workspace failed session={source.id} -> {new_session_id}"
+            )
 
     return ResearchSessionItem.model_validate(new_session)
 

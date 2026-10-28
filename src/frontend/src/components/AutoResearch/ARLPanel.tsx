@@ -1,4 +1,4 @@
-import { Loader2, RotateCw, WifiOff } from "lucide-react"
+import { ArrowRight, Check, Loader2, RotateCw, WifiOff } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
@@ -7,6 +7,11 @@ import { cn } from "@/lib/utils"
 
 import ARLPane from "./ARLPane"
 import { useARLSession } from "./ARLSessionContext"
+import {
+  canSyncValidation,
+  connectionStatusKey,
+  validationMessageKeys,
+} from "./arlAgentMeta"
 
 /**
  * Left-to-right order of the panes.
@@ -25,7 +30,11 @@ const PANE_ORDER: ARLRole[] = ["validator", "worker"]
  * conversations. A single WebSocket carries both; the backend stamps every
  * frame with a `role`, which is what routes events into the correct pane.
  * The socket itself is owned by {@link ARLSessionProvider}, which the
- * right-hand file panel shares.
+ * right-hand panels share.
+ *
+ * Session-wide status (connection, validation handoff) lives in the right
+ * column's agent status card. This view only surfaces the connection when it
+ * is down, because that is the one state that blocks both panes at once.
  */
 export default function ARLPanel() {
   const { t } = useTranslation()
@@ -35,7 +44,6 @@ export default function ARLPanel() {
     connecting,
     offline,
     panes,
-    systemMessage,
     validation,
     syncValidation,
     commands,
@@ -48,69 +56,58 @@ export default function ARLPanel() {
     reconnect,
   } = useARLSession()
 
-  // The socket being up is only half the story: the backend is not reading
-  // our frames until it has booted both containers and announced
-  // `agents_ready`. Report that phase instead of claiming "connected".
   const agentsReady = ARL_ROLES.every((role) => panes[role].ready)
   const booting = connected && !agentsReady
 
-  const statusLabel =
-    status === "reconnecting"
-      ? t("autoResearch.arl.reconnecting")
-      : status === "connecting"
-        ? t("autoResearch.arl.connecting")
-        : booting
-          ? t("autoResearch.arl.starting")
-          : status === "connected"
-            ? t("autoResearch.arl.connected")
-            : status === "offline"
-              ? t("autoResearch.arl.offline")
-              : t("autoResearch.arl.disconnected")
+  // Handoff button on the seam: Validator → Worker. Same action as the one
+  // in the status card, placed where the user's eyes already are (the
+  // composers) so the cross-pane step is not missed.
+  const synced = !!validation.syncedAt
+  const syncable = canSyncValidation(validation)
+  const syncing = validation.syncing
+  const handoffTitle = syncing
+    ? t("autoResearch.arl.validationSyncing")
+    : syncable
+      ? t(
+          synced
+            ? "autoResearch.arl.validationResync"
+            : "autoResearch.arl.validationSync",
+        )
+      : t(`autoResearch.arl.${validationMessageKeys(validation).title}`)
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Connection strip: the panes render their own per-role status */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-1.5">
-        <span
-          className={cn(
-            "size-2 rounded-full",
-            connected && agentsReady
-              ? "bg-emerald-500"
-              : connecting || booting
-                ? "animate-pulse bg-amber-500"
-                : "bg-muted-foreground/40",
-          )}
-        />
-        <span className="text-[12px] text-muted-foreground">{statusLabel}</span>
-        {(connecting || booting) && (
-          <Loader2 className="size-3 animate-spin text-muted-foreground/70" />
-        )}
-        {!connected && !connecting && (
-          <WifiOff className="size-3 text-muted-foreground/50" />
-        )}
-        {systemMessage && (
-          <span className="ml-1 min-w-0 truncate text-[12px] text-muted-foreground/70">
-            · {systemMessage}
-          </span>
-        )}
-        {/* Automatic retries are capped, so once they run out the only way
-            back used to be a page refresh. Offer the retry inline instead. */}
-        {offline && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={reconnect}
-            className="ml-auto h-6 gap-1 px-1.5 text-[11.5px] font-normal"
-          >
-            <RotateCw className="size-3" />
-            {t("autoResearch.arl.retryConnect")}
-          </Button>
-        )}
-      </div>
+    <div className="relative flex h-full min-h-0 flex-col">
+      {/* Only shown while the socket is down. Automatic retries are capped,
+          so once they run out the retry button is the way back. */}
+      {!connected && (
+        <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border/50 bg-background/85 py-1 pr-1 pl-3 text-[12px] text-muted-foreground shadow-lg backdrop-blur">
+            {connecting ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <WifiOff className="size-3" />
+            )}
+            {t(`autoResearch.arl.${connectionStatusKey(status, booting)}`)}
+            {offline ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={reconnect}
+                className="h-6 gap-1 rounded-full px-2 text-[11.5px] font-normal"
+              >
+                <RotateCw className="size-3" />
+                {t("autoResearch.arl.retryConnect")}
+              </Button>
+            ) : (
+              <span className="pr-2" />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Validator | Worker. `min-h-0` on the row and on each pane is what
           keeps the history regions scrolling instead of growing. */}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {PANE_ORDER.map((role) => (
           <ARLPane
             key={role}
@@ -125,12 +122,51 @@ export default function ARLPanel() {
             onSetMode={setMode}
             onPermission={respondPermission}
             onPermissions={respondPermissions}
-            // Worker only: the Validator is the side that provides the
-            // service, so the strip belongs to the side that consumes it.
-            validation={role === "worker" ? validation : undefined}
-            onSyncValidation={role === "worker" ? syncValidation : undefined}
+            validation={validation}
+            onSyncValidation={syncValidation}
           />
         ))}
+
+        {/* Seam between the panes: a gradient hairline that fades out at
+            both ends, with the handoff button at composer height. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-6 left-1/2 w-px -translate-x-1/2 bg-linear-to-b from-transparent via-border to-transparent"
+        />
+        <button
+          type="button"
+          onClick={syncValidation}
+          disabled={!connected || !syncable || syncing}
+          title={handoffTitle}
+          aria-label={handoffTitle}
+          className={cn(
+            "group absolute bottom-[60px] left-1/2 z-10 grid size-8 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full border bg-background shadow-md transition-[color,border-color,transform,box-shadow]",
+            "enabled:hover:scale-110 enabled:active:scale-95 disabled:cursor-not-allowed",
+            synced
+              ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+              : syncable
+                ? "border-amber-500/50 text-amber-600 shadow-amber-500/20 dark:text-amber-400"
+                : "border-border/70 text-muted-foreground/40 shadow-sm",
+          )}
+        >
+          {syncing ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : synced ? (
+            <>
+              <Check
+                className="size-3.5 group-hover:hidden"
+                strokeWidth={2.5}
+              />
+              <RotateCw className="hidden size-3.5 group-hover:block" />
+            </>
+          ) : (
+            <ArrowRight className="size-3.5" />
+          )}
+          {/* Ready but never synced: ping to pull the eye over. */}
+          {syncable && !synced && !syncing && (
+            <span className="pointer-events-none absolute inset-0 animate-ping rounded-full border border-amber-500/60" />
+          )}
+        </button>
       </div>
     </div>
   )

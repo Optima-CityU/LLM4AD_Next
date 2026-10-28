@@ -108,6 +108,24 @@ export function isArlResearchSession(
 }
 
 /**
+ * Fingerprint of the provider/model each role is configured with.
+ *
+ * Only these two fields decide which credentials the containers are built
+ * with; other `arl_config` keys (e.g. the persisted `mode_id`) are excluded
+ * so that changing them does not force a reconnect.
+ */
+function arlProviderKey(session: ResearchSessionItem | null | undefined) {
+  const config = (session?.arl_config ?? {}) as Record<
+    string,
+    { provider_id?: unknown; model_name?: unknown } | undefined
+  >
+  return ARL_ROLES.map((role) => {
+    const cfg = config[role] ?? {}
+    return `${String(cfg.provider_id ?? "")}/${String(cfg.model_name ?? "")}`
+  }).join("|")
+}
+
+/**
  * ARL WebSocket connector.
  *
  * One socket carries both containers; every backend frame is tagged with a
@@ -396,6 +414,7 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
 
   const isArlSession = isArlResearchSession(session)
   const sessionId = isArlSession ? (session?.id ?? null) : null
+  const providerKey = isArlSession ? arlProviderKey(session) : ""
 
   // The frame handler is rebuilt whenever its reducers change, but the
   // controller must outlive those renders (it owns the socket), so it reads
@@ -704,6 +723,26 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       controller.scheduleTeardown()
     }
   }, [sessionId, controller])
+
+  // Containers are only recreated with new credentials when the backend
+  // attaches, so after the user edits a role's provider/model the live socket
+  // has to be dropped and reopened. Keyed per session: the first value seen
+  // for a session (initial load, or switching sessions) never reconnects, and
+  // a `mode_id` write-back does not touch the key.
+  const providerKeyRef = useRef<{ sessionId: string; key: string } | null>(
+    null,
+  )
+  useEffect(() => {
+    if (!sessionId) {
+      providerKeyRef.current = null
+      return
+    }
+    const prev = providerKeyRef.current
+    providerKeyRef.current = { sessionId, key: providerKey }
+    if (prev && prev.sessionId === sessionId && prev.key !== providerKey) {
+      controller.reconnect()
+    }
+  }, [sessionId, providerKey, controller])
 
   return {
     status,

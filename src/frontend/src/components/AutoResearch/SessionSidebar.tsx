@@ -59,6 +59,7 @@ import {
   useInfiniteFolderSessions,
   useInfiniteSearchSessions,
 } from "@/hooks/useAutoResearch"
+import { isArlResearchSession } from "@/hooks/useARLWebSocket"
 import { cn } from "@/lib/utils"
 
 import { PROFILE_OPTIONS } from "./shared"
@@ -1084,7 +1085,9 @@ function SessionRow({
   const { t } = useTranslation()
   // 区分实验血统：algorithm_evolution=集成 LLM4AD 引擎；其余（ml_vision 等）
   // 走 AutoResearchClaw 原生。用不同色的小徽章在列表上一眼可辨。
-  const isLlm4ad = session.profile === "algorithm_evolution"
+  // ARL 会话不走 profile 流水线，profile 只是建表默认值，标注与切换都不适用。
+  const isArl = isArlResearchSession(session)
+  const isLlm4ad = !isArl && session.profile === "algorithm_evolution"
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: 拖放为指针增强；行内已有 button 承载选择/键盘可达性
     <div
@@ -1148,9 +1151,15 @@ function SessionRow({
               "shrink-0 text-[10px] font-medium leading-none",
               isLlm4ad ? "text-primary/70" : "text-muted-foreground/60",
             )}
-            title={t(`autoResearch.profileDesc.${session.profile}`, "")}
+            title={
+              isArl
+                ? t("autoResearch.sidebar.arlBadgeDesc")
+                : t(`autoResearch.profileDesc.${session.profile}`, "")
+            }
           >
-            {t(`autoResearch.profile.${session.profile}`, session.profile)}
+            {isArl
+              ? t("autoResearch.sidebar.arlBadge")
+              : t(`autoResearch.profile.${session.profile}`, session.profile)}
           </span>
           {/* 时间推到最右：与第一行的 best_objective 竖直对齐成右侧元数据列，扫视更快。 */}
           <span className="ml-auto shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
@@ -1211,23 +1220,25 @@ function SessionRow({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
           <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <Repeat className="size-3.5 text-muted-foreground" />
-              {t("autoResearch.sidebar.switchProfile")}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-44">
-              {PROFILE_OPTIONS.map((p) => (
-                <DropdownMenuItem
-                  key={p}
-                  disabled={p === session.profile}
-                  onSelect={() => onSwitchProfile(session, p)}
-                >
-                  {t(`autoResearch.profile.${p}`)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          {!isArl && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Repeat className="size-3.5 text-muted-foreground" />
+                {t("autoResearch.sidebar.switchProfile")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-44">
+                {PROFILE_OPTIONS.map((p) => (
+                  <DropdownMenuItem
+                    key={p}
+                    disabled={p === session.profile}
+                    onSelect={() => onSwitchProfile(session, p)}
+                  >
+                    {t(`autoResearch.profile.${p}`)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )}
           {/* 危险的删除走 destructive 变体：文字由变体类转红，图标则不再写
               灰色（写灰会盖掉变体的 !text-destructive），跟着一行整体变红。 */}
           <DropdownMenuItem

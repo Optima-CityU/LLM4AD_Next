@@ -602,6 +602,35 @@ class PaseoDaemonClient:
             )
         return payload
 
+    async def set_agent_model(self, agent_id: str, model_id: str) -> dict[str, Any]:
+        """Switch an existing agent to another model.
+
+        A recreated container keeps its agents (``paseo-home`` is a bind
+        mount), and an agent's model is fixed at creation, so a model change
+        has to be pushed to the reused agent explicitly.
+
+        Args:
+            agent_id: Target agent ID.
+            model_id: Model name.
+
+        Returns:
+            Response payload (``accepted`` and an optional ``notice``).
+
+        Raises:
+            RuntimeError: The daemon rejected the change.
+        """
+        logger.info(
+            "🔧 [DaemonClient] 切换模型: agentId={}, modelId={}", agent_id, model_id
+        )
+        payload = await self._rpc_call(
+            "set_agent_model_request", {"agentId": agent_id, "modelId": model_id}
+        )
+        if payload.get("error") or payload.get("accepted") is False:
+            raise RuntimeError(
+                f"切换模型失败: {payload.get('error') or '被 daemon 拒绝'}"
+            )
+        return payload
+
     async def list_commands(self, agent_id: str) -> list[dict[str, Any]]:
         """列出 agent 可用的斜杠命令（内置命令与已安装的 skill）。
 

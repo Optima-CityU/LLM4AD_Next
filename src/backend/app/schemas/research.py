@@ -300,6 +300,11 @@ class ResearchSessionUpdateRequest(BaseModel):
     )
     provider_id: str | None = Field(default=None, max_length=64)
     model_name: str | None = Field(default=None, max_length=255)
+    arl_config: dict[str, Any] | None = Field(
+        default=None,
+        description="ARL 会话的 worker / validator 的 provider_id + model_name；"
+        "仅 ARL 会话可改，未提供不变",
+    )
 
 
 class ResearchSessionItem(BaseModel):
