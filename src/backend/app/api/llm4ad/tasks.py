@@ -73,11 +73,12 @@ def import_task_package(
     file: Annotated[UploadFile, File(description="Cloud task ZIP containing one task folder")],
     name: Annotated[str | None, Form(max_length=255)] = None,
     language: Annotated[Literal["en", "zh"], Form()] = "en",
+    enable_memory: Annotated[bool, Form(description="Enable memory with the current platform settings")] = True,
 ):
     """Import a task ZIP into an existing project without starting evolution."""
     from app.services.project_package_service import import_task_package as import_package
 
-    return import_package(db, current_user, project_id, file.file, name=name, language=language)
+    return import_package(db, current_user, project_id, file.file, name=name, language=language, enable_memory=enable_memory)
 
 
 @router.get("/{task_id}", response_model=schemas.TaskResponse, summary="获取任务详情")

@@ -70,7 +70,9 @@ repo_analyzer:
   include: ["*.py"]
   exclude: ["__pycache__/**", "*.pyc"]
 memory:
-  enabled: false
+  enabled: true
+  auto_extraction:
+    enabled: true
 multimodal:
   enabled: false
   behavior_storage: none

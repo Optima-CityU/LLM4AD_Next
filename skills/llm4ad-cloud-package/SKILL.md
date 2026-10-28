@@ -28,6 +28,9 @@ not require an AutoDiscovery runtime tool or a second model for generation.
 - To select or change an evolution method, read
   [references/algorithms.md](references/algorithms.md). It lists the seven methods
   implemented by the platform, their matching planners, and small starting configs.
+- Read [references/memory.md](references/memory.md) before writing memory settings:
+  enable memory and automatic extraction by default, keep bindings portable, and
+  explain task memory versus long-term memory in the handoff.
 - For delivery, read [references/web-import.md](references/web-import.md). It
   describes **New Task → Import ZIP**, model selection, and the fallback
   directory/YAML route for older deployments.

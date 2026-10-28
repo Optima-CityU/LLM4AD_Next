@@ -14907,6 +14907,12 @@ export const tasks_import_task_packageSchema = {
             enum: ['en', 'zh'],
             title: 'Language',
             default: 'en'
+        },
+        enable_memory: {
+            type: 'boolean',
+            title: 'Enable Memory',
+            description: 'Enable memory with the current platform settings',
+            default: true
         }
     },
     type: 'object',

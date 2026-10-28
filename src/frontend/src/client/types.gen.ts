@@ -4297,6 +4297,10 @@ export type tasks_import_task_package = {
     file: (Blob | File);
     name?: (string | null);
     language?: 'en' | 'zh';
+    /**
+     * Enable memory with the current platform settings
+     */
+    enable_memory?: boolean;
 };
 
 export type tasks_upload_task_data = {

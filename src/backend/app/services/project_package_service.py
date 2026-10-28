@@ -172,6 +172,7 @@ def _import_package(
     description: str | None = None,
     language: str = "en",
     project_id: uuid.UUID | None = None,
+    enable_memory: bool | None = None,
 ) -> ProjectPackageImportResponse:
     """Import a task into an authorized project or create its project.
 
@@ -183,6 +184,7 @@ def _import_package(
         description: Optional project description.
         language: Preferred language for the package description.
         project_id: Existing project receiving the task, when supplied.
+        enable_memory: Apply platform memory defaults when importing a task.
 
     Returns:
         Created project and task identifiers, ready for model selection.
@@ -213,6 +215,21 @@ def _import_package(
         config.pop("description_zh", None)
         if project is None:
             project = models.Project(name=requested_name, description=project_description, user_id=current_user.id)
+        if enable_memory is not None:
+            from app.services.task_service.crud import _apply_memory_defaults
+
+            # Resolve defaults before adding the task: settings initialization
+            # may commit, while task/file creation must remain one transaction.
+            memory = dict(config.get("memory") or {})
+            for field in (
+                "type", "module", "pinned_card_ids", "mindmemos_base_url", "mindmemos_api_key",
+                "mindmemos_user_id", "mindmemos_app_id", "mindmemos_agent_id",
+                "mindmemos_session_id", "mindmemos_project_id",
+            ):
+                memory.pop(field, None)
+            memory["enabled"] = enable_memory
+            config["memory"] = memory
+            config = _apply_memory_defaults(db, config, current_user=current_user, project_id=project.id)
         task = models.Task(
             name=task_name,
             description=project_description,
@@ -272,6 +289,7 @@ def import_task_package(
     *,
     name: str | None = None,
     language: str = "en",
+    enable_memory: bool = True,
 ) -> models.Task:
     """Create a task in an existing authorized project from a portable ZIP.
 
@@ -282,9 +300,12 @@ def import_task_package(
         source: Seekable uploaded ZIP stream.
         name: Optional task name overriding the package configuration.
         language: Preferred language for the task description.
+        enable_memory: Enable memory with the current account/project settings.
 
     Returns:
         The imported task, ready for selection and model configuration.
     """
-    result = _import_package(db, current_user, source, project_id=project_id, name=name, language=language)
+    result = _import_package(
+        db, current_user, source, project_id=project_id, name=name, language=language, enable_memory=enable_memory,
+    )
     return db.get_one(models.Task, result.task_id)

@@ -46,7 +46,8 @@ def environment(monkeypatch):
     """Use an isolated real SQL transaction and an in-memory object store."""
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(
-        engine, tables=[models.User.__table__, models.Project.__table__, models.Task.__table__]
+        engine, tables=[models.User.__table__, models.Project.__table__, models.Task.__table__,
+                        models.UserMemoryConfig.__table__, models.ProjectMemoryConfig.__table__]
     )
     objects = MemoryStorage()
     monkeypatch.setattr(service, "storage", objects)
@@ -274,6 +275,8 @@ def test_task_import_uses_existing_project_and_returns_the_configured_task(envir
     assert task.input_args["providers"] == []
     assert task.input_args["coder"]["context_max_tokens"] == 16384
     assert task.status == models.TaskStatus.UNINITIALIZED
+    assert task.input_args["memory"]["enabled"] is True
+    assert task.input_args["memory"]["type"] == "local_yaml"
     assert db.get(models.Project, project_id).name == "Existing project"
     assert db.get(models.Project, project_id).description == "Keep this description"
     assert len(db.exec(select(models.Project)).all()) == 1
@@ -317,7 +320,8 @@ def test_task_import_checks_target_project_before_reading_archive(environment, m
     assert not db.exec(select(models.Task)).all()
 
 
-def test_task_multipart_route_imports_under_selected_project(environment, entries):
+@pytest.mark.parametrize("enable_memory", [None, "false"])
+def test_task_multipart_route_imports_under_selected_project(environment, entries, enable_memory):
     """The task dialog can select and display the created task from one response."""
     db, user, _ = environment
     project = models.Project(name="Target project", user_id=user.id)
@@ -331,11 +335,60 @@ def test_task_multipart_route_imports_under_selected_project(environment, entrie
     assert client.post(url, files={"file": ("task.zip", archive(entries))}).status_code == 401
     app.dependency_overrides[get_current_user] = lambda: user
     assert client.post(url, files={"file": ("task.zip", archive(entries))}).status_code == 422
-    response = client.post(url, files={"file": ("task.zip", archive(entries))},
-        data={"project_id": str(project.id), "name": "ZIP task", "language": "zh"})
+    form = {"project_id": str(project.id), "name": "ZIP task", "language": "zh"}
+    if enable_memory is not None:
+        form["enable_memory"] = enable_memory
+    response = client.post(url, files={"file": ("task.zip", archive(entries))}, data=form)
     assert response.status_code == 201, response.text
     data = response.json()
     assert data["project_id"] == str(project.id)
     assert data["name"] == data["input_args"]["project_name"] == "ZIP task"
     assert data["input_data_path"]
+    assert data["input_args"]["memory"]["enabled"] is (enable_memory is None)
     assert len(db.exec(select(models.Project)).all()) == 1
+
+
+@pytest.mark.parametrize("bound,valid,available,expected", [
+    (False, True, True, "local_yaml"),
+    (True, True, True, "mindmemos_cloud"),
+    (True, False, True, "local_yaml"),
+    (True, True, False, "local_yaml"),
+])
+def test_task_import_enables_memory_from_platform_settings(environment, entries, monkeypatch, bound, valid, available, expected):
+    """Old offline packages should inherit valid bindings without importing another identity."""
+    from app.services import memory_service
+
+    db, user, _ = environment
+    project = models.Project(name="Memory project", user_id=user.id)
+    db.add(project)
+    db.add(models.UserMemoryConfig(user_id=user.id, mindmemos_binding_id="binding" if bound else None))
+    db.flush()
+    db.add(models.ProjectMemoryConfig(project_id=project.id, include_project_memory=True, project_memory_limit=7))
+    db.commit()
+    monkeypatch.setattr(service.settings, "LLM4AD_MINDMEMOS_ENABLED", available)
+    monkeypatch.setattr(service.settings, "LLM4AD_MINDMEMOS_BASE_URL", "http://memory.test")
+    monkeypatch.setattr(service.settings, "LLM4AD_MINDMEMOS_JWT_SECRET", "test-secret")
+    monkeypatch.setattr(memory_service, "get_mindmemos_provider_binding_error", lambda *_: None if valid else "invalid binding")
+    config = yaml.safe_load(entries["config.yaml"])
+    config["memory"] = {"enabled": False, "type": "mindmemos_cloud", "mindmemos_api_key": "old-key",
+                        "mindmemos_user_id": "another-user",
+                        "auto_extraction": {"enabled": True, "max_cards_per_generation": 2}}
+    entries["config.yaml"] = yaml.safe_dump(config).encode()
+    task = service.import_task_package(db, user, project.id, archive(entries))
+    memory = task.input_args["memory"]
+    assert memory["enabled"] is True and memory["type"] == expected
+    assert memory["auto_extraction"]["enabled"] is True
+    assert memory["auto_extraction"]["max_cards_per_generation"] == 2
+    assert memory["include_project_memory"] is True and memory["project_memory_limit"] == 7
+    assert "mindmemos_api_key" not in memory and "mindmemos_user_id" not in memory
+
+
+def test_task_import_can_explicitly_disable_memory(environment, entries):
+    """An explicit unchecked import option takes precedence over package defaults."""
+    db, user, _ = environment
+    project = models.Project(name="Offline import", user_id=user.id)
+    db.add(project)
+    db.commit()
+    task = service.import_task_package(db, user, project.id, archive(entries), enable_memory=False)
+    assert task.input_args["memory"]["enabled"] is False
+    assert task.input_args["memory"]["type"] == "local_yaml"

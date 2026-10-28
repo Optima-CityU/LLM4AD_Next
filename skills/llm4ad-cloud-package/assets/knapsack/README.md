@@ -21,7 +21,9 @@ the ZIP and report. That command validates the extracted package in a copied
 candidate layout, requires no model key, and does not perform LLM evolution.
 
 `config.yaml` starts with a small Island GA configuration (2 islands, 4
-individuals each, 5 generations), `coder.type: custom`, and memory disabled.
+individuals each, 5 generations), `coder.type: custom`, and memory with automatic
+experience extraction enabled. Baseline validation does not initialize memory or
+make model calls. Extraction during evolution uses the configured model.
 The included data is for a smoke test; add representative data for a real study.
 `providers: []` is intentional: select the model on the cloud platform.
 
@@ -29,6 +31,10 @@ In the web UI, open a project and choose **New Task → Import ZIP**, upload the
 archive, and import it as a new task in that project. Select a platform
 model in the task configuration before running. For older deployments, extract
 and upload the entire task directory, then import its YAML at confirmation.
+ZIP import defaults to memory enabled: it uses a valid long-term binding from the
+current account, or task-local memory otherwise. Configure long-term memory from
+the import form to reuse experience across tasks, or uncheck memory to opt out.
+No memory credentials or account IDs belong in this package.
 
 To optionally run paid local evolution, set `LLM_BASE_URL`, `LLM_API_KEY`, and
 `LLM_MODEL`, then execute `python debug_run.py`. It binds the provider in memory;

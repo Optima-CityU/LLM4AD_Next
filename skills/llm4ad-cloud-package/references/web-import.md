@@ -7,19 +7,28 @@
 2. Select the ZIP produced by `validate_and_pack.py`; no manual extraction is
    needed. Optionally override the task name; otherwise it uses `project_name`
    from `config.yaml`.
-3. Click **Import and create**. The platform checks the single-root archive,
+3. Leave **Enable memory (recommended)** checked to inherit the current account
+   and project's memory settings, even if an older package disables memory.
+   A valid long-term binding uses MindMemOS; otherwise task-local memory is
+   enabled. Use **Configure long-term memory models** when available to bind
+   a chat model and an embedding model without losing the selected ZIP. Uncheck
+   memory only when explicitly choosing a run without it. See [memory.md](memory.md).
+4. Click **Import and create**. The platform checks the single-root archive,
    file paths, task configuration, existing storage quotas, and the file hashes
    in `validation.json` when present. It creates and selects a new task in the
    current project.
-4. In the task configuration, select the platform model for planning/code
+5. In the task configuration, select the platform model for planning/code
    generation. Review the imported method, evaluator, context/output settings
    against the selected model, and any required embedding service.
-5. Start evolution when ready and inspect logs and resulting candidates.
+6. Start evolution when ready and inspect logs and resulting candidates.
 
 The import saves source/data in RustFS under a single task folder and writes
 the parsed configuration into `Task.input_args`. Model bindings are reset for the
 current account; importing never starts evolution or runs uploaded Python. The
-runtime downloads fresh files and strips the single top-level directory, so
+effective task memory settings come from the import choice and platform defaults;
+the uploaded `config.yaml` and validation hashes remain unchanged. Package-specific
+extraction and static-card settings are preserved, while remote bindings are reset.
+The runtime downloads fresh files and strips the single top-level directory, so
 candidate/evaluator/dataset paths remain relative to the package root.
 
 The local report is preserved as a file. Matching hashes confirm that its input

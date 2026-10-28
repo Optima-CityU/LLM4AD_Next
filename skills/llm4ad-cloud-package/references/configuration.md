@@ -90,7 +90,7 @@ source of truth for accepted names and defaults.
 | `evolution` | Registered search method and its own parameters; see `algorithms.md`. |
 | `version_control` | Use `type: git_worktree`, `enabled: true`, `auto_initialize: true`; `local_path` points to the candidate directory. |
 | `repo_analyzer` | Use `evolve_detector`; `include` must match the candidate language (e.g. `['*.py']`). |
-| `memory` | Optional. `enabled: false` gives a self-contained baseline; cloud memory settings can be selected later. Do not package another user's remote memory credentials. |
+| `memory` | Enable memory and automatic extraction by default; see [memory.md](memory.md). Local baseline validation makes no memory/model calls, so it does not require disabling memory. Web import inherits the current account/project settings. Never package remote memory credentials or account identities. |
 | `multimodal` | Optional rendering/behavior configuration. Ordinary text-only tasks can set `enabled: false`, `behavior_storage: none`. |
 | `workspace` | Managed output subdirectories. Usually omit and use platform defaults. These are not input paths. |
 | `logging` | Runtime log settings; generally `level: INFO`. Do not hardcode a local machine's log path. |
