@@ -4222,6 +4222,8 @@
       "deleteSession": "Delete session",
       "editSession": "Edit",
       "copySession": "Copy",
+      "arlBadge": "ARL",
+      "arlBadgeDesc": "Auto research session with Worker and Validator agents",
       "copySessionTitle": "Copy session",
       "copySessionSuccess": "Session “{{title}}” copied",
       "copySessionConfirm": "Copy session \"{{title}}\"? The copy gets its own history, artifacts and evolution state, and its title is suffixed with \"(copy)\".",
@@ -4522,7 +4524,8 @@
       "saving": "Saving...",
       "saved": "Saved",
       "profilePurgeHint": "Switching experiment type wipes artifacts from stage 9 onward; you'll be asked to confirm on save.",
-      "footerHint": "Only the fields you changed are submitted; the rest stay as they are."
+      "footerHint": "Only the fields you changed are submitted; the rest stay as they are.",
+      "arlModelChangeHint": "Saving recreates the containers right away and interrupts any running task; workspace files and chat history are kept."
     },
     "metricDirection": {
       "maximize": "Maximize",
@@ -4803,7 +4806,27 @@
       "validationSync": "Sync task.md",
       "validationSyncing": "Syncing…",
       "validationResync": "Sync again",
-      "validationSynced": "Synced"
+      "validationSynced": "Synced",
+      "agentStatus": "Agent status",
+      "validationTitle": "Validation handoff",
+      "validationWaiting": "Waiting for the Worker container…",
+      "validationStepService": "Service",
+      "validationStepTask": "task.md",
+      "validationStepSync": "Sync",
+      "scrollToLatest": "Jump to latest",
+      "placeholderShort": "Message {{role}}…",
+      "composerHint": "Enter to send · Shift+Enter for newline · / commands",
+      "guide": {
+        "validatorTitle": "Start here",
+        "validatorStep1": "Send /aris-setup to build the validation service",
+        "validatorStep2": "Click {sync} between the two input boxes to sync to the Worker",
+        "workerTitle": "Finish the Validator first",
+        "workerStep1": "Build the validation service in the Validator",
+        "workerStep2": "Click {sync} between the two input boxes to sync",
+        "workerStep3": "Send /aris-setup to start researching",
+        "useCommand": "Click to fill the composer",
+        "allDone": "All set. You can start chatting."
+      }
     },
     "gate": {
       "awaiting": "Awaiting your gate decision",

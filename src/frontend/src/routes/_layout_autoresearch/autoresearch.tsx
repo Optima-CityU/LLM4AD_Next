@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { ResearchSessionItem, ResearchSessionStatus } from "@/client"
+import ARLAgentStatusPanel from "@/components/AutoResearch/ARLAgentStatusPanel"
 import ARLArtifactsPanel from "@/components/AutoResearch/ARLArtifactsPanel"
 import ARLPanel from "@/components/AutoResearch/ARLPanel"
 import { ARLSessionProvider } from "@/components/AutoResearch/ARLSessionContext"
@@ -505,7 +506,13 @@ function AutoResearchPage() {
               {/* ARL 会话产物在容器工作区里，走 WS 文件面板，不触发旧产物查询；
                 按会话 key，切换会话时树状态整体重置 */}
               {isArlSession && activeSession ? (
-                <ARLArtifactsPanel key={activeSession.id} />
+                <>
+                  {/* Agent 状态（连接 / 两个容器 / 验证服务交接）在上，文件面板在下 */}
+                  <ARLAgentStatusPanel />
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <ARLArtifactsPanel key={activeSession.id} />
+                  </div>
+                </>
               ) : (
                 <ArtifactsPanel
                   session={activeSession}

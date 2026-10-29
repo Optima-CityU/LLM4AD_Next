@@ -266,6 +266,18 @@ async def _ensure_agent(
             except Exception as e:
                 # 模式切换失败只影响「是否逐条确认」，不该把会话拖垮
                 logger.warning("⚠️ [{}] 切换权限模式到 {} 失败: {}", role, mode_id, e)
+        # The agent outlives container recreation, so after the user changes
+        # the session's model the reused agent must be switched explicitly.
+        if model and agent_id and agent.get("model") != model:
+            try:
+                await client.set_agent_model(agent_id, model)
+                logger.info(
+                    "🔧 [{}] 已把模型从 {} 切到 {}", role, agent.get("model"), model
+                )
+                agent["model"] = model
+            except Exception as e:
+                # Not fatal: the agent keeps working on its previous model
+                logger.warning("⚠️ [{}] 切换模型到 {} 失败: {}", role, model, e)
         return agent
 
     provider = ROLE_PROVIDERS.get(role, "claude")

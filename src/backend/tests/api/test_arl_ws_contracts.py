@@ -543,3 +543,59 @@ def test_pick_agent_handles_flat_entries() -> None:
 def test_pick_agent_on_empty_directory() -> None:
     """空目录返回 None，让调用方走新建路径。"""
     assert arl_ws._pick_agent_entry([], "worker") is None
+
+
+# ---- agent reuse: align the model after the user changes it ----
+
+
+class _AgentDirectoryClient:
+    """Daemon client stub exposing one existing agent."""
+
+    def __init__(self, agent: dict, *, fail_model: bool = False):
+        self.agent = agent
+        self.fail_model = fail_model
+        self.model_calls: list[tuple[str, str]] = []
+
+    async def fetch_agents(self, subscribe: bool = True):
+        return [{"agent": dict(self.agent)}]
+
+    async def set_agent_mode(self, _agent_id, _mode_id):
+        return {"accepted": True}
+
+    async def set_agent_model(self, agent_id, model_id):
+        self.model_calls.append((agent_id, model_id))
+        if self.fail_model:
+            raise RuntimeError("model boom")
+        return {"accepted": True}
+
+
+@pytest.mark.asyncio
+async def test_ensure_agent_switches_model_on_reuse() -> None:
+    """The agent survives container recreation, so a changed model is pushed to it."""
+    client = _AgentDirectoryClient({"id": "a1", "title": "arl-worker", "model": "old"})
+
+    agent = await arl_ws._ensure_agent(client, "worker", "new")
+
+    assert client.model_calls == [("a1", "new")]
+    assert agent["model"] == "new"
+
+
+@pytest.mark.asyncio
+async def test_ensure_agent_keeps_matching_model() -> None:
+    client = _AgentDirectoryClient({"id": "a1", "title": "arl-worker", "model": "same"})
+
+    await arl_ws._ensure_agent(client, "worker", "same")
+
+    assert client.model_calls == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_agent_model_switch_failure_is_not_fatal() -> None:
+    client = _AgentDirectoryClient(
+        {"id": "a1", "title": "arl-worker", "model": "old"}, fail_model=True
+    )
+
+    agent = await arl_ws._ensure_agent(client, "worker", "new")
+
+    assert agent["id"] == "a1"
+    assert agent["model"] == "old"

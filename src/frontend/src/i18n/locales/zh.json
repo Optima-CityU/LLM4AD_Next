@@ -4092,6 +4092,8 @@
       "deleteSession": "删除会话",
       "editSession": "编辑",
       "copySession": "复制",
+      "arlBadge": "ARL",
+      "arlBadgeDesc": "Worker + Validator 双 agent 自动研究会话",
       "copySessionTitle": "复制会话",
       "copySessionSuccess": "已复制会话「{{title}}」",
       "copySessionConfirm": "确认复制会话「{{title}}」？副本拥有全新的独立运行历史、产物与演化状态，标题会自动加后缀「（副本）」。",
@@ -4392,7 +4394,8 @@
       "saving": "保存中...",
       "saved": "已保存",
       "profilePurgeHint": "切换实验类型会清空第 9 步之后的产物且不可恢复，保存时会先弹出确认。",
-      "footerHint": "只提交改动过的字段，未改动的保持原样。"
+      "footerHint": "只提交改动过的字段，未改动的保持原样。",
+      "arlModelChangeHint": "保存后会自动重建容器，正在运行的任务会被中断，工作区文件与聊天记录保留。"
     },
     "metricDirection": {
       "maximize": "最大化",
@@ -4673,7 +4676,27 @@
       "validationSync": "同步 task.md",
       "validationSyncing": "正在同步…",
       "validationResync": "重新同步",
-      "validationSynced": "已同步"
+      "validationSynced": "已同步",
+      "agentStatus": "Agent 状态",
+      "validationTitle": "验证服务交接",
+      "validationWaiting": "等待 Worker 容器就绪…",
+      "validationStepService": "服务",
+      "validationStepTask": "task.md",
+      "validationStepSync": "同步",
+      "scrollToLatest": "回到最新",
+      "placeholderShort": "给 {{role}} 发消息…",
+      "composerHint": "Enter 发送 · Shift+Enter 换行 · / 命令",
+      "guide": {
+        "validatorTitle": "从这里开始",
+        "validatorStep1": "发送 /aris-setup 生成验证服务",
+        "validatorStep2": "点击两个输入框之间的 {sync} 同步给 Worker",
+        "workerTitle": "先完成左侧 Validator",
+        "workerStep1": "在左侧 Validator 生成验证服务",
+        "workerStep2": "点击两个输入框之间的 {sync} 同步验证服务",
+        "workerStep3": "发送 /aris-setup 开始研究",
+        "useCommand": "点击填入输入框",
+        "allDone": "准备就绪，可以开始对话了。"
+      }
     },
     "gate": {
       "awaiting": "等待你的门控决策",

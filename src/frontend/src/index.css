@@ -1070,3 +1070,76 @@
 .dark .arc-visible-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 150, 255, 0.55);
 }
+
+/* ARL 双智能体：每个角色一套强调色,挂在角色根节点上,子树用 bg-(--arl-accent)/10
+   这类工具类取色。--arl-accent-fg 是可读文字色,深色模式下提亮。 */
+.arl-role-validator {
+  --arl-accent: #8b5cf6;
+  --arl-accent-fg: #6d28d9;
+}
+.arl-role-worker {
+  /* Claude 品牌色 */
+  --arl-accent: #d97757;
+  --arl-accent-fg: #b4532f;
+}
+.dark .arl-role-validator {
+  --arl-accent-fg: #c4b5fd;
+}
+.dark .arl-role-worker {
+  --arl-accent-fg: #f0a586;
+}
+
+/* 面板底纹：极淡点阵,给大面积留白一点质感,不抢内容。 */
+.arl-dot-grid {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--foreground) 7%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 18px 18px;
+}
+
+/* 运行态细线：表头下方一条强调色流光,替代静态分割线。 */
+@keyframes arl-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+.arl-sheen {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--arl-accent),
+    transparent
+  );
+  animation: arl-sheen 1.6s ease-in-out infinite;
+}
+
+/* 头像外圈的光环：启动 / 运行时缓慢呼吸。 */
+@keyframes arl-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--arl-accent) 35%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--arl-accent) 0%, transparent);
+  }
+}
+.arl-halo {
+  animation: arl-halo 2.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arl-sheen {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+  .arl-halo {
+    animation: none;
+  }
+}

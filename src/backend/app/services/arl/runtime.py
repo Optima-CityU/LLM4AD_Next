@@ -277,6 +277,33 @@ def _prepare_host_directories(session_id: str, role: ARLRole) -> tuple[str, str]
     return str(docker_base), str(Path(host_root) / role.value)
 
 
+def copy_session_workspace(source_session_id: str, target_session_id: str) -> None:
+    """Copy each role's ``workspace`` from one ARL session to another.
+
+    Only ``workspace`` is copied; ``paseo-home`` (agent sessions and chat
+    history) is left out, so the copy starts with fresh agents. The install
+    stamp lives inside ``workspace``, which lets the copy's containers skip
+    the installer. A running source may yield partially written files.
+
+    Symlinks are copied as links: the workspace is agent-written, and
+    following links could pull in files from outside it.
+
+    Args:
+        source_session_id: Session to copy from.
+        target_session_id: Newly created session to copy into.
+
+    Raises:
+        OSError: When copying fails (callers treat this as best-effort).
+    """
+    source_root, _ = _session_root(source_session_id)
+    target_root, _ = _session_root(target_session_id)
+    for role in ARLRole:
+        src = Path(source_root) / role.value / "workspace"
+        dst = Path(target_root) / role.value / "workspace"
+        if src.is_dir() and not dst.exists():
+            shutil.copytree(src, dst, symlinks=True)
+
+
 def _install_stamp_path(session_id: str, role: ARLRole) -> str:
     """返回安装完成标记文件在 backend 侧可见的路径。
 

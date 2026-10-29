@@ -11844,6 +11844,19 @@ export const ResearchSessionUpdateRequestSchema = {
                 }
             ],
             title: 'Model Name'
+        },
+        arl_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Arl Config',
+            description: 'ARL 会话的 worker / validator 的 provider_id + model_name；仅 ARL 会话可改，未提供不变'
         }
     },
     type: 'object',
