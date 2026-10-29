@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://llm4ad-next.cn/">Website</a> ·
   <a href="#quick-start">Quickstart</a> ·
+  <a href="#agent-to-platform">Agent → Platform</a> ·
   <a href="docs/en/index.md">Docs</a> ·
   <a href="https://github.com/Optima-CityU/LLM4AD_Next/wiki">Wiki</a> 
 </p>
@@ -180,6 +181,27 @@ See [use_example](skills/algo-design/use_example/) for a complete TSP + EoH exam
   </tr>
 </table>
 
+<a id="agent-to-platform"></a>
+
+### Generate a task package with your agent
+
+Use a coding agent with local file and command access to prepare your task, then run evolution on the platform.
+
+1. Give your agent the complete [Cloud Package Skill directory](skills/llm4ad-cloud-package/) and paste this prompt:
+
+   ```text
+   Read skills/llm4ad-cloud-package/SKILL.md and its referenced files in this repository.
+   My task: [problem, optimization objective, constraints, and paths to existing code/data].
+   Clarify missing requirements and the evaluation method before generating the task.
+   Prepare the environment, check the initial code and evaluator, and run real baseline evaluations locally.
+   Only after validation passes, use the Skill's packaging script to deliver the ZIP and validation report.
+   ```
+
+2. Open the [platform](https://llm4ad-next.cn/), enter or create a project, then choose **New Task → Import ZIP** and upload the generated package.
+3. Select a platform model, review the imported configuration, and **start evolution**.
+
+The agent needs the full Skill directory, including its references, scripts, and example files. See [supported evolution methods](skills/llm4ad-cloud-package/references/algorithms.md) and the [import guide](skills/llm4ad-cloud-package/references/web-import.md).
+
 ## Instruction Video
 
 <div align="center">
@@ -289,6 +311,7 @@ LLM4AD_Next/
 │   ├── autorebuttal/     # Reviewer response and AC summary workflow
 │   ├── document-knowledge-organizer/ # Markdown knowledge organization
 │   ├── llm4ad-task-builder/ # Runnable task-package creation
+│   ├── llm4ad-cloud-package/ # Locally validated ZIP packages for web project import
 │   ├── openair-proposal/ # Staged research proposal writing
 │   ├── research-stage-publication/ # Stage result publication
 │   └── typst-author/    # Typst document authoring

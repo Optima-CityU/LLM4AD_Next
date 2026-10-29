@@ -5,3 +5,6 @@
 [submodule "third_party/CloudCLI"]
 	path = third_party/CloudCLI
 	url = git@github.com:dadastory/claudecodeui.git
+[submodule "third_party/auto-dl-loop"]
+	path = third_party/auto-dl-loop
+	url = git@github.com:y414987863/auto-dl-loop.git

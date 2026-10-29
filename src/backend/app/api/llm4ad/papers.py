@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, Form, Query, Response, UploadFile, status
 
 from app.api.deps import CurrentUser, SessionDep
 from app.schemas import paper as schemas
-from app.services import paper_service
+from app.services import paper_service, paper_task_control
 
 router = APIRouter(prefix="/papers", tags=["llm4ad.papers"])
 
@@ -51,6 +51,108 @@ def get_workspace(
 ):
     """Return the current paper page snapshot."""
     return paper_service.get_workspace_detail(db, current_user, workspace_id)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/stage-artifacts/{stage}",
+    response_model=schemas.PaperStageArtifactResponse,
+)
+def get_stage_artifact(
+    workspace_id: uuid.UUID,
+    stage: schemas.ResearchWorkflowStage,
+    db: SessionDep,
+    current_user: CurrentUser,
+    run_id: uuid.UUID | None = None,
+):
+    """Return an owned stage result or one explicitly requested historical result."""
+    return paper_service.get_stage_artifact(db, current_user.id, workspace_id, stage, run_id=run_id)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/proposals/{proposal_id}/task",
+    response_model=schemas.PaperLinkedTaskSnapshot,
+)
+def get_linked_task(
+    workspace_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID | None = None,
+):
+    """Inspect one linked root or child task without leaving AutoDiscovery."""
+    return paper_task_control.linked_task_snapshot(db, current_user, workspace_id, proposal_id, task_id)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/proposals/{proposal_id}/task/{task_id}/children",
+    response_model=schemas.PaperLinkedTaskChangeResponse,
+)
+def create_linked_child(
+    workspace_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    task_id: uuid.UUID,
+    request: schemas.PaperLinkedTaskChildCreate,
+    db: SessionDep,
+    current_user: CurrentUser,
+):
+    """Create an independent parameter experiment without changing active selection."""
+    child, changes = paper_task_control.create_child(db, current_user, workspace_id, proposal_id, task_id, request)
+    return schemas.PaperLinkedTaskChangeResponse(
+        task=paper_task_control.linked_task_snapshot(db, current_user, workspace_id, proposal_id, child.id),
+        changes=changes,
+    )
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/proposals/{proposal_id}/task/{task_id}/parameters",
+    response_model=schemas.PaperLinkedTaskChangeResponse,
+)
+def patch_linked_child(
+    workspace_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    task_id: uuid.UUID,
+    request: schemas.PaperLinkedTaskPatch,
+    db: SessionDep,
+    current_user: CurrentUser,
+):
+    """Validate and apply an optimistic parameter diff to an unstarted child."""
+    child, changes = paper_task_control.patch_child(db, current_user, workspace_id, proposal_id, task_id, request)
+    return schemas.PaperLinkedTaskChangeResponse(
+        task=paper_task_control.linked_task_snapshot(db, current_user, workspace_id, proposal_id, child.id),
+        changes=changes,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/proposals/{proposal_id}/task/{task_id}/run",
+    response_model=schemas.PaperLinkedTaskSnapshot,
+)
+def run_linked_task(
+    workspace_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    task_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+):
+    """Start a linked evolution task through the existing runner."""
+    paper_task_control.start_linked_task(db, current_user, workspace_id, proposal_id, task_id)
+    return paper_task_control.linked_task_snapshot(db, current_user, workspace_id, proposal_id, task_id)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/proposals/{proposal_id}/task/{task_id}/stop",
+    response_model=schemas.PaperLinkedTaskSnapshot,
+)
+def stop_linked_task(
+    workspace_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    task_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+):
+    """Stop only a pending or running linked task."""
+    paper_task_control.stop_linked_task(db, current_user, workspace_id, proposal_id, task_id)
+    return paper_task_control.linked_task_snapshot(db, current_user, workspace_id, proposal_id, task_id)
 
 
 @router.patch("/workspaces/{workspace_id}", response_model=schemas.PaperWorkspaceSummary)

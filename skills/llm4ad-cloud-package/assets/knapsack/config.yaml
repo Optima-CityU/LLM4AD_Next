@@ -1,0 +1,80 @@
+project_name: knapsack-cloud
+description_zh: "经过本地基线验证的 0/1 背包算法任务"
+description_en: "A locally verifiable 0/1 knapsack algorithm task"
+background: |
+  Evolve solve(instance) for the 0/1 knapsack problem. Input is a JSON object
+  with capacity and items, each containing weight and value. Return a JSON
+  object with selected, a list of unique item indices. Maximize total value
+  without exceeding capacity. The evaluator independently checks the indices,
+  capacity, and value. Preserve the solve function and the JSON CLI interface.
+random_seed: 42
+base_dir: ./runs
+path_resolution: config_dir
+providers: []
+planner:
+  type: llm_evolution
+  provider: default
+  samplers:
+    - name: init_sampler
+      config:
+        max_tokens: 8192
+    - name: mutation_sampler
+      config:
+        max_tokens: 8192
+        parent_context_char_budget: 48000
+    - name: crossover_sampler
+      config:
+        max_tokens: 8192
+coder:
+  type: custom
+  provider: default
+  default_extension: py
+  context_max_tokens: 16384
+  max_gen_tokens: 8192
+  prompt_template: |
+    Improve the knapsack solve(instance) function. Return a feasible list of
+    unique item indices as {"selected": [...]}; maximize their total value.
+    Preserve the function signature and JSON CLI wrapper. Only change the
+    evolvable block:
+    # EVOLVE_START
+    {code}
+    # EVOLVE_END
+evaluator:
+  type: custom
+  module: knapsack_evaluator.py:KnapsackEvaluator
+  timeout: 10
+  parallel: true
+  batch_size: 2
+  metrics: [total_value, total_weight]
+  dataset:
+    mode: glob
+    pattern: data/sample/*.json
+evolution:
+  type: island_ga
+  max_generations: 5
+  num_islands: 2
+  island_population_size: 4
+  elite_ratio: 0.25
+  max_llm_concurrency: 2
+  migration_interval: 3
+  migration_rate: 0.25
+version_control:
+  type: git_worktree
+  enabled: true
+  local_path: algorithm
+  auto_initialize: true
+repo_analyzer:
+  type: evolve_detector
+  context_lines_before: 80
+  context_lines_after: 80
+  include: ["*.py"]
+  exclude: ["__pycache__/**", "*.pyc"]
+memory:
+  enabled: true
+  auto_extraction:
+    enabled: true
+multimodal:
+  enabled: false
+  behavior_storage: none
+logging:
+  level: INFO

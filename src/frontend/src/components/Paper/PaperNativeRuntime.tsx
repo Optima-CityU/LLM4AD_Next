@@ -4,6 +4,7 @@ import {
   FileCheck2,
   Loader2,
   RefreshCw,
+  Search,
   Settings2,
   SlidersHorizontal,
   Upload,
@@ -13,6 +14,7 @@ import { useTranslation } from "react-i18next"
 
 import type { PaperRuntimeSessionCreate, ProposalStageState } from "@/client"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Popover,
   PopoverContent,
@@ -46,6 +48,7 @@ type PaperNativeRuntimeProps = {
   onUploadProjectContext?: () => void
   onSkipProjectContext?: () => void
   onOpenArtifact: (path: string) => void
+  arxivIntake?: boolean
 }
 
 function ProjectContextPrompt({
@@ -123,9 +126,11 @@ export default function PaperNativeRuntime({
   onUploadProjectContext,
   onSkipProjectContext,
   onOpenArtifact,
+  arxivIntake = false,
 }: PaperNativeRuntimeProps) {
   const { t, i18n } = useTranslation()
   const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
+  const [arxivQuery, setArxivQuery] = useState("")
   const frameRef = useRef<HTMLIFrameElement>(null)
   const { mutate: invalidateStage } =
     useInvalidatePaperWorkflowStage(workspaceId)
@@ -136,6 +141,18 @@ export default function PaperNativeRuntime({
     profileKey,
   )
   const frameReady = session.data?.session_id === loadedSessionId
+  const submitArxivQuery = () => {
+    const query = arxivQuery.trim()
+    if (!query || !frameReady) return
+    frameRef.current?.contentWindow?.postMessage(
+      {
+        type: "llm4ad:submit-prompt",
+        prompt: t("paper.source.arxivPrompt", { query }),
+      },
+      window.location.origin,
+    )
+    setArxivQuery("")
+  }
   // 模型网关健康流：会话加载后订阅，上游失败时给出可操作提示。
   const runtimeEvents = useRuntimeEvents(
     workspaceId,
@@ -457,6 +474,42 @@ export default function PaperNativeRuntime({
             <Settings2 className="size-3.5" />
             {t("paper.runtime.changeModel")}
           </Button>
+        </div>
+      )}
+      {arxivIntake && (
+        <div className="shrink-0 border-b bg-card/40 px-5 py-4">
+          <div className="mx-auto max-w-3xl">
+            <div className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                <Search className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-serif text-base font-semibold">
+                  {t("paper.source.arxivTitle")}
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {t("paper.source.arxivDescription")}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Textarea
+                value={arxivQuery}
+                onChange={(event) => setArxivQuery(event.target.value)}
+                placeholder={t("paper.source.arxivPlaceholder")}
+                className="min-h-20 flex-1 resize-y text-sm"
+              />
+              <Button
+                type="button"
+                className="shrink-0"
+                disabled={!frameReady || !arxivQuery.trim()}
+                onClick={submitArxivQuery}
+              >
+                <Search data-icon="inline-start" />
+                {t("paper.source.arxivSearch")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
       <div className="relative min-h-0 flex-1 overflow-hidden">

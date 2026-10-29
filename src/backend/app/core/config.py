@@ -252,6 +252,32 @@ class Settings(BaseSettings):
     KNOWLEDGE_PARSER_CPU_LIMIT: float = 1.0
     KNOWLEDGE_PLAN_QUESTION_TIMEOUT: int = 900
 
+    # ---- ARL (Agent Research Loop) 容器配置 ----
+    ARL_WORKER_IMAGE: str = "llm4ad-arl-worker:latest"  # Worker 容器镜像
+    ARL_VALIDATOR_IMAGE: str = "llm4ad-arl-validator:latest"  # Validator 容器镜像
+    ARL_CONTAINER_MEMORY_LIMIT: str = "4g"  # ARL 容器内存限制
+    ARL_CONTAINER_CPU_LIMIT: float = 2.0  # ARL 容器 CPU 核心数限制
+    ARL_PASEO_PORT: int = 6767  # Paseo daemon 监听端口（容器内）
+    ARL_DAEMON_READY_TIMEOUT: float = 120.0  # 等待 daemon /api/health 就绪的超时（秒）
+    ARL_INSTALL_READY_TIMEOUT: float = 180.0  # 等待 .aris/install.json 出现的超时（秒）
+    ARL_NETWORK: str = ""  # ARL 容器网络名称（空则从 PROJECT_NAME 推导 {项目名}_default）
+    # 复用已在运行的容器时的探活超时（秒）。容器已 running 且 daemon 常驻，正常
+    # 应毫秒级响应；给一个短超时即可区分「daemon 活着」与「容器壳还在但进程死了」，
+    # 不必按冷启动的 ARL_DAEMON_READY_TIMEOUT 等那么久。
+    ARL_DAEMON_RECHECK_TIMEOUT: float = 10.0
+    # ARL 会话空闲回收：容器只在 WS 连接期间被使用，但 workspace 与 paseo-home
+    # 都是 bind mount，停止不丢数据，重连时原地 start 即恢复 agent 会话。
+    # 阈值取 2h，与 paper workspace 一致（同为「一个会话常驻一组容器」的形态）。
+    ARL_SESSION_IDLE_TIMEOUT_SECONDS: int = 2 * 60 * 60
+    ARL_SESSION_CLEANUP_INTERVAL_SECONDS: int = 10 * 60
+    # WS 连接期间刷新活跃时间的心跳间隔（秒）。须远小于空闲阈值，否则长时间
+    # 静默观察 agent 输出的连接会被误判空闲而被停掉。
+    ARL_SESSION_HEARTBEAT_INTERVAL: float = 60.0
+    # 轮询 Validator 验证服务（.aris/validation 下的 token + config.json）的间隔（秒）。
+    # 用户在 Validator 侧完成多轮交互后才会拉起该服务，没有任何事件可订阅，只能轮询。
+    # 探测只是几次 stat + 一次小文件读，开销可忽略；取 5s 让按钮出现得够及时。
+    ARL_VALIDATION_POLL_INTERVAL: float = 5.0
+
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）
     CHAT_TUNE_CONTAINER_MEMORY_LIMIT: str = "1g"      # 调参容器内存限制
@@ -306,6 +332,16 @@ class Settings(BaseSettings):
             and self.MINDMEMOS_EMBED_API_KEY.strip()
             and self.MINDMEMOS_EMBED_DIMENSIONS > 0
         )
+
+    @property
+    def arl_network_name(self) -> str:
+        """ARL 容器所在的 Docker 网络名称。
+
+        优先使用 ARL_NETWORK 配置；为空则推导为 {PROJECT_NAME}_default。
+        """
+        if self.ARL_NETWORK:
+            return self.ARL_NETWORK
+        return f"{self.PROJECT_NAME}_default"
 
     @property
     def mindmemos_rerank_configured(self) -> bool:

@@ -65,6 +65,7 @@ def issue_token(
     timeout: float = 60.0,
     workspace_id: str | uuid.UUID | None = None,
     session_id: str | None = None,
+    token: str | None = None,
 ) -> str:
     """发放一次性代理 token，并把加密后的真实凭据写入 Redis。
 
@@ -81,11 +82,13 @@ def issue_token(
         workspace_id: 科研工作区 ID（可选）。供 llm_proxy 在上游失败时
             上报运行时健康事件与内联通知；其他调用方不传。
         session_id: 科研工作区会话 ID（可选），同上用途。
+        token: 指定 token（可选）。长期存活的调用方（如 ARL 会话）用确定性
+            派生的 token 反复登记以续期；缺省时随机生成。
 
     Returns:
-        生成的代理 token（URL-safe 随机串）。
+        生成的代理 token（URL-safe 随机串，或调用方指定的值）。
     """
-    token = secrets.token_urlsafe(32)
+    token = token or secrets.token_urlsafe(32)
     payload = {
         "type": provider_type,
         "base_url": base_url,

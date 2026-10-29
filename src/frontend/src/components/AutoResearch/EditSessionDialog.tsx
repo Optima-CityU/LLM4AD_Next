@@ -31,6 +31,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { isArlResearchSession } from "@/hooks/useARLWebSocket"
 import { useUpdateResearchSession } from "@/hooks/useAutoResearch"
 import { cn } from "@/lib/utils"
 
@@ -65,6 +66,23 @@ const TOPIC_MAX = 2000
 const TITLE_MAX = 255
 const METRIC_KEY_MAX = 64
 
+type ArlRole = "worker" | "validator"
+
+/** 从 ``arl_config`` 里取某个角色的 provider / model（JSON 列，类型是 unknown）。 */
+function readArlRole(
+  session: ResearchSessionItem,
+  role: ArlRole,
+): { provider: string; model: string } {
+  const cfg = (session.arl_config?.[role] ?? {}) as {
+    provider_id?: unknown
+    model_name?: unknown
+  }
+  return {
+    provider: typeof cfg.provider_id === "string" ? cfg.provider_id : "",
+    model: typeof cfg.model_name === "string" ? cfg.model_name : "",
+  }
+}
+
 /**
  * 编辑会话对话框：与新建弹框同款表单，但没有模板选择、没有「创建并运行」。
  *
@@ -95,6 +113,12 @@ export default function EditSessionDialog({
   const [metricKey, setMetricKey] = useState("")
   const [providerId, setProviderId] = useState("default")
   const [modelName, setModelName] = useState("")
+  // ARL 会话只编辑标题 / 分组 / 两个角色的模型，其余字段对它没有意义。
+  const isArl = isArlResearchSession(session)
+  const [workerProviderId, setWorkerProviderId] = useState("")
+  const [workerModel, setWorkerModel] = useState("")
+  const [validatorProviderId, setValidatorProviderId] = useState("")
+  const [validatorModel, setValidatorModel] = useState("")
   /**
    * 模型候选浮层的挂载节点（DialogContent 内部的绝对定位层）。存 state 而非 ref：
    * 浮层需要「节点出现后」才渲染，ref 变化不会触发重渲染，挂载点会一直是 null。
@@ -121,6 +145,12 @@ export default function EditSessionDialog({
     setMetricKey(session.metric_key ?? "")
     setProviderId(session.provider_id || "default")
     setModelName(session.model_name ?? "")
+    const worker = readArlRole(session, "worker")
+    const validator = readArlRole(session, "validator")
+    setWorkerProviderId(worker.provider)
+    setWorkerModel(worker.model)
+    setValidatorProviderId(validator.provider)
+    setValidatorModel(validator.model)
   }, [open, session])
 
   /** 与打开时快照比对，产出只含变更键的 PATCH 请求体。 */
@@ -131,13 +161,36 @@ export default function EditSessionDialog({
     const nextTitle = title.trim()
     // 后端对 title 的 strip-空值策略是「保留原值」，所以这里也只在非空时提交。
     if (nextTitle && nextTitle !== session.title) body.title = nextTitle
+    // 显式带 folder_id 键（含 null）才表示「移动」；未变则完全不出现该键。
+    if (folderId !== (session.folder_id ?? null)) body.folder_id = folderId
+
+    if (isArl) {
+      // 两个角色整体提交：后端逐角色校验 provider 权限，并保留 mode_id 等运行时键。
+      const worker = readArlRole(session, "worker")
+      const validator = readArlRole(session, "validator")
+      const nextWorkerModel = workerModel.trim()
+      const nextValidatorModel = validatorModel.trim()
+      if (
+        workerProviderId !== worker.provider ||
+        nextWorkerModel !== worker.model ||
+        validatorProviderId !== validator.provider ||
+        nextValidatorModel !== validator.model
+      ) {
+        body.arl_config = {
+          worker: { provider_id: workerProviderId, model_name: nextWorkerModel },
+          validator: {
+            provider_id: validatorProviderId,
+            model_name: nextValidatorModel,
+          },
+        }
+      }
+      return body
+    }
 
     const nextTopic = topic.trim()
     if (nextTopic !== session.topic) body.topic = nextTopic
 
     if (profile !== session.profile) body.profile = profile
-    // 显式带 folder_id 键（含 null）才表示「移动」；未变则完全不出现该键。
-    if (folderId !== (session.folder_id ?? null)) body.folder_id = folderId
     if (mode !== session.mode) body.mode = mode
 
     const nextDirection = metricDirectionToApi(metricDirection)
@@ -164,9 +217,21 @@ export default function EditSessionDialog({
     metricKey,
     providerId,
     modelName,
+    isArl,
+    workerProviderId,
+    workerModel,
+    validatorProviderId,
+    validatorModel,
   ])
 
   const dirty = Object.keys(patch).length > 0
+  // ARL 两个角色都必须选好 provider + model，否则后端会 400。
+  const arlIncomplete =
+    isArl &&
+    (!workerProviderId ||
+      !workerModel.trim() ||
+      !validatorProviderId ||
+      !validatorModel.trim())
   const submitting = updateMut.isPending
 
   const handleSubmit = async () => {
@@ -175,7 +240,7 @@ export default function EditSessionDialog({
     // profile 单独一类：跨类切换由父层走「清空产物」二次确认（带打包下载），
     // 且必须发生在其它字段落库之前——一旦清盘提交失败，用户不该看到一个
     // 「标题改了、产物没了」的半成品状态。
-    if (profile !== session.profile) {
+    if (!isArl && profile !== session.profile) {
       const proceed = await onProfileSwitchRequired(session, profile)
       if (!proceed) return
     }
@@ -199,7 +264,30 @@ export default function EditSessionDialog({
   }
 
   // 标题框有 maxLength 兜底、超不了；主题没有，故只对主题做超限禁用。
-  const topicOver = topic.length > TOPIC_MAX
+  const topicOver = !isArl && topic.length > TOPIC_MAX
+
+  const folderField = (
+    <Field label={t("autoResearch.create.folderLabel")}>
+      <Select
+        value={folderId ?? "__none__"}
+        onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">
+            {t("autoResearch.create.folderNone")}
+          </SelectItem>
+          {folders.map((f) => (
+            <SelectItem key={f.id} value={f.id}>
+              {f.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
 
   return (
     <Dialog open={open} onOpenChange={(v) => !submitting && onOpenChange(v)}>
@@ -243,6 +331,50 @@ export default function EditSessionDialog({
             </div>
           </Field>
 
+          {isArl ? (
+            <>
+              <Field
+                label="Worker"
+                hint={t("autoResearch.create.arlWorkerHint")}
+                required
+              >
+                <ProviderModelPicker
+                  provider={workerProviderId}
+                  model={workerModel}
+                  onChange={(p, m) => {
+                    setWorkerProviderId(p)
+                    setWorkerModel(m)
+                  }}
+                  portalContainer={contentEl}
+                  excludeSpecial
+                />
+              </Field>
+
+              <Field
+                label="Validator"
+                hint={t("autoResearch.create.arlValidatorHint")}
+                required
+              >
+                <ProviderModelPicker
+                  provider={validatorProviderId}
+                  model={validatorModel}
+                  onChange={(p, m) => {
+                    setValidatorProviderId(p)
+                    setValidatorModel(m)
+                  }}
+                  portalContainer={contentEl}
+                  excludeSpecial
+                />
+              </Field>
+
+              <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+                {t("autoResearch.edit.arlModelChangeHint")}
+              </p>
+
+              {folderField}
+            </>
+          ) : (
+            <>
           <Field label={t("autoResearch.create.topicLabel")} required>
             <div className="relative">
               <textarea
@@ -393,26 +525,7 @@ export default function EditSessionDialog({
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label={t("autoResearch.create.folderLabel")}>
-              <Select
-                value={folderId ?? "__none__"}
-                onValueChange={(v) => setFolderId(v === "__none__" ? null : v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">
-                    {t("autoResearch.create.folderNone")}
-                  </SelectItem>
-                  {folders.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+            {folderField}
 
             <Field label={t("autoResearch.create.modeLabel")}>
               <Select
@@ -447,6 +560,8 @@ export default function EditSessionDialog({
               portalContainer={contentEl}
             />
           </Field>
+            </>
+          )}
         </div>
 
         <DialogFooter className="items-center sm:justify-between">
@@ -464,7 +579,7 @@ export default function EditSessionDialog({
             </Button>
             <Button
               onClick={() => void handleSubmit()}
-              disabled={!dirty || submitting || topicOver}
+              disabled={!dirty || submitting || topicOver || arlIncomplete}
             >
               {submitting && <Loader2 className="size-4 animate-spin" />}
               {submitting ? t("autoResearch.edit.saving") : t("common.save")}

@@ -61,7 +61,7 @@ import {
   MARKDOWN_REMARK_PLUGINS,
   makeMarkdownComponents,
 } from "@/components/markdown/markdownComponents"
-import AlgorithmDiscoveryPanel from "@/components/Paper/AlgorithmDiscoveryPanel"
+import AlgorithmStagePanel from "@/components/Paper/AlgorithmStagePanel"
 import PaperNativeRuntime from "@/components/Paper/PaperNativeRuntime"
 import type { ProposalResultStage } from "@/components/Paper/ProposalResultsDock"
 import ProposalResultsDock from "@/components/Paper/ProposalResultsDock"
@@ -187,6 +187,9 @@ type PaperTool =
   | "rebuttal_baseline"
   | "autorebuttal"
   | "ac_summary"
+  | "discovery_baseline"
+  | "discovery_candidates"
+  | "discovery_evaluation"
   | "discovery"
   | "reviews"
   | "boundary"
@@ -206,6 +209,13 @@ type ProposalStage = Extract<
 type RebuttalStage = Extract<
   PaperTool,
   "rebuttal_baseline" | "autorebuttal" | "ac_summary"
+>
+type DiscoveryStage = Extract<
+  PaperTool,
+  | "discovery_baseline"
+  | "discovery_candidates"
+  | "discovery_evaluation"
+  | "discovery"
 >
 const RESEARCH_WORKSPACE_MODE_ICONS: Record<
   ResearchWorkspaceMode,
@@ -228,6 +238,9 @@ const PAPER_WORKFLOW_STEPS = [
   { key: "rebuttal_baseline", icon: ScanSearch },
   { key: "autorebuttal", icon: MessagesSquare },
   { key: "ac_summary", icon: PenLine },
+  { key: "discovery_baseline", icon: BookOpen },
+  { key: "discovery_candidates", icon: GitBranch },
+  { key: "discovery_evaluation", icon: Microscope },
   { key: "discovery", icon: GitBranch },
   { key: "reviews", icon: MessagesSquare },
   { key: "boundary", icon: ScanSearch },
@@ -270,6 +283,12 @@ const REBUTTAL_STAGE_PREREQUISITES: Record<RebuttalStage, RebuttalStage[]> = {
   rebuttal_baseline: [],
   autorebuttal: ["rebuttal_baseline"],
   ac_summary: ["autorebuttal"],
+}
+const DISCOVERY_STAGE_PREREQUISITES: Record<DiscoveryStage, DiscoveryStage[]> = {
+  discovery_baseline: [],
+  discovery_candidates: ["discovery_baseline"],
+  discovery_evaluation: ["discovery_candidates"],
+  discovery: ["discovery_evaluation"],
 }
 const PAPER_DIRECTORY_MARKER = ".llm4ad-directory"
 const CREATABLE_PAPER_FILE_SUFFIXES = [
@@ -2027,6 +2046,7 @@ export function PaperWorkbench({
     `paper:${workspaceId}:tool`,
     "formatting",
   )
+  const [algorithmTab, setAlgorithmTab] = useState("algorithms")
   const [selectedPath, setSelectedPath] = usePersistentState<string | null>(
     `paper:${workspaceId}:selected-path`,
     null,
@@ -2037,6 +2057,10 @@ export function PaperWorkbench({
   >("source")
   const [projectContextSkipped, setProjectContextSkipped] = usePersistentState(
     `paper:${workspaceId}:project-context-skipped`,
+    false,
+  )
+  const [algorithmIntakeOpen, setAlgorithmIntakeOpen] = usePersistentState(
+    `paper:${workspaceId}:algorithm-intake-open`,
     false,
   )
   const [proposalEditorState, setProposalEditorState] = useState({
@@ -2230,12 +2254,17 @@ export function PaperWorkbench({
       files: state
         ? candidateFiles.filter((path) => activeSource?.manifest.includes(path))
         : [],
+      foundationBlocks:
+        stage === "formatting" && state
+          ? (workspace?.proposal_foundation?.blocks ?? [])
+          : [],
     }
   }, [
     activeSource?.manifest,
     nativeStage,
     proposalEntryPath,
     t,
+    workspace?.proposal_foundation?.blocks,
     workspace?.proposal_stage_states,
   ])
   const nativeArtifactPaths = useMemo(() => {
@@ -2276,6 +2305,10 @@ export function PaperWorkbench({
     activeStage in REBUTTAL_STAGE_PREREQUISITES
       ? (activeStage as RebuttalStage)
       : null
+  const discoveryActiveStage =
+    activeStage in DISCOVERY_STAGE_PREREQUISITES
+      ? (activeStage as DiscoveryStage)
+      : null
   const selectedPathEditable = Boolean(
     selectedPath &&
       EDITABLE_SUFFIXES.some((suffix) =>
@@ -2298,7 +2331,11 @@ export function PaperWorkbench({
         return rebuttalActiveStage === "ac_summary" && stage === "autorebuttal"
           ? status === "ready" || status === "needs_revision"
           : status === "ready"
-      }))
+      })) &&
+    (!discoveryActiveStage ||
+      DISCOVERY_STAGE_PREREQUISITES[discoveryActiveStage].every(
+        (stage) => workspace?.proposal_stage_states?.[stage]?.status === "ready",
+      ))
   const modelReady = Boolean(
     workspace?.analysis_provider_id &&
       workspace.analysis_model_name &&
@@ -2568,7 +2605,54 @@ export function PaperWorkbench({
         }
       />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {!activeSource ? (
+        {workspace.mode === "algorithm" && algorithmIntakeOpen &&
+        !workspace.proposal_stage_states?.discovery_baseline ? (
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
+            <section className="flex min-h-0 min-w-0 flex-col border-r bg-muted/[0.07]">
+              <PaperNativeRuntime
+                workspaceId={workspace.id}
+                stage="discovery_baseline"
+                modelReady={modelReady}
+                prerequisiteReady
+                artifactPaths={[]}
+                modelName={workspace.analysis_model_name}
+                onConfigureModel={openModelSettings}
+                onConfigurePreferences={openPreferences}
+                onOpenArtifact={() => {}}
+                arxivIntake={!activeSource}
+                profileKey={[
+                  workspace.analysis_provider_id,
+                  workspace.analysis_model_name,
+                  workspace.analysis_context_window_tokens,
+                  workspace.analysis_max_output_tokens,
+                  JSON.stringify(workspace.conversation_preferences ?? {}),
+                ].join(":")}
+              />
+            </section>
+            <aside className="flex min-h-0 min-w-0 flex-col justify-center overflow-y-auto bg-card/30 px-6 py-8 sm:px-10">
+              <div className="mx-auto max-w-lg">
+                <span className="font-serif text-sm text-primary">01 / AutoDiscovery</span>
+                <h2 className="mt-3 font-serif text-2xl font-semibold tracking-tight">
+                  {t(activeSource ? "paper.source.arxivImportedTitle" : "paper.source.arxivPendingTitle")}
+                </h2>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                  {t(activeSource ? "paper.source.arxivImportedDescription" : "paper.source.arxivPendingDescription")}
+                </p>
+                {!activeSource && <div className="mt-6 border-t pt-5">
+                  <p className="text-sm font-medium">{t("paper.source.arxivManualTitle")}</p>
+                  <Button
+                    className="mt-3"
+                    variant="outline"
+                    onClick={openSourceUpload}
+                  >
+                    <Upload data-icon="inline-start" />
+                    {t("paper.source.upload")}
+                  </Button>
+                </div>}
+              </div>
+            </aside>
+          </div>
+        ) : !activeSource ? (
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 sm:py-12">
             <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center">
               <div className="mb-5">
@@ -2579,7 +2663,9 @@ export function PaperWorkbench({
                   {t(
                     workspace.mode === "proposal"
                       ? "paper.source.prepareProposalDescription"
-                      : "paper.source.prepareDescription",
+                      : workspace.mode === "algorithm"
+                        ? "paper.source.prepareAlgorithmDescription"
+                        : "paper.source.prepareDescription",
                   )}
                 </p>
               </div>
@@ -2718,14 +2804,18 @@ export function PaperWorkbench({
                     aria-hidden="true"
                     className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
                   >
-                    {workspace.mode === "proposal" ? "04" : "03"}
+                    {workspace.mode === "proposal" ? "04" : workspace.mode === "algorithm" ? "02" : "03"}
                   </span>
                   <div className="min-w-0 flex-1">
                     <h3 className="font-serif text-lg font-semibold">
                       {t("paper.source.dropTitle")}
                     </h3>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      {t("paper.source.dropDescription")}
+                      {t(
+                        workspace.mode === "algorithm"
+                          ? "paper.source.algorithmDropDescription"
+                          : "paper.source.dropDescription",
+                      )}
                     </p>
                   </div>
                   <Button
@@ -2738,14 +2828,39 @@ export function PaperWorkbench({
                     {t("paper.source.upload")}
                   </Button>
                 </section>
+                {workspace.mode === "algorithm" && (
+                  <section className="flex flex-col gap-4 border-t bg-primary/[0.03] p-4 sm:flex-row sm:items-center sm:p-5">
+                    <span
+                      aria-hidden="true"
+                      className="grid size-10 shrink-0 place-items-center border border-primary/25 bg-primary/5 font-serif text-lg text-primary"
+                    >
+                      {t("paper.source.alternative")}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-serif text-lg font-semibold">
+                        {t("paper.source.arxivTitle")}
+                      </h3>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {t("paper.source.arxivDescription")}
+                      </p>
+                    </div>
+                    <Button
+                      className="w-full shrink-0 sm:w-auto"
+                      disabled={!modelReady}
+                      onClick={() => setAlgorithmIntakeOpen(true)}
+                    >
+                      <Search data-icon="inline-start" />
+                      {t("paper.source.arxivSearch")}
+                    </Button>
+                  </section>
+                )}
               </div>
             </div>
           </div>
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]">
             <section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">
-              {workspace.workflow_available &&
-                workspace.mode !== "algorithm" && (
+              {workspace.workflow_available && (
                   <PaperWorkflowStepper
                     stages={workflowStages}
                     activeStage={nativeStage}
@@ -2902,7 +3017,8 @@ export function PaperWorkbench({
             ) : workspace.mode === "algorithm" ? (
               <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background lg:flex">
                 <Tabs
-                  defaultValue="algorithms"
+                  value={algorithmTab}
+                  onValueChange={setAlgorithmTab}
                   className="flex min-h-0 flex-1 flex-col"
                 >
                   <div className="shrink-0 border-b px-3 py-2">
@@ -2919,15 +3035,16 @@ export function PaperWorkbench({
                     value="algorithms"
                     className="mt-0 min-h-0 flex-1 overflow-hidden"
                   >
-                    <AlgorithmDiscoveryPanel
+                    <AlgorithmStagePanel
                       workspaceId={workspace.id}
                       sourceVersionId={activeSource.id}
-                      proposals={
-                        workspace.proposal_stage_states?.discovery?.status ===
-                        "ready"
-                          ? (workspace.proposals ?? [])
-                          : []
-                      }
+                      stage={nativeStage as DiscoveryStage}
+                      stageState={workspace.proposal_stage_states?.[nativeStage]}
+                      onOpenSource={(path) => {
+                        setSelectedPath(path)
+                        setAlgorithmTab("source")
+                      }}
+                      proposals={workspace.proposals ?? []}
                     />
                   </TabsContent>
                   <TabsContent
@@ -3159,6 +3276,9 @@ export function PaperWorkbench({
                 ? projectContextUploads(pendingFiles)
                 : pendingFiles,
             )
+            if (workspace.mode === "algorithm" && uploadPurpose === "source") {
+              setAlgorithmIntakeOpen(false)
+            }
             setPendingFiles([])
             setUploadOpen(false)
             toast.success(

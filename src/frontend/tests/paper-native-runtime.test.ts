@@ -24,6 +24,15 @@ const autoResearchLayoutSource = await Bun.file(
 const nativeRuntimeSource = await Bun.file(
   new URL("../src/components/Paper/PaperNativeRuntime.tsx", import.meta.url),
 ).text()
+
+test("AutoDiscovery can begin with arXiv intake before a source upload", () => {
+  expect(paperRouteSource).toContain("algorithmIntakeOpen")
+  expect(paperRouteSource).toContain('stage="discovery_baseline"')
+  expect(nativeRuntimeSource).toContain("llm4ad:submit-prompt")
+  expect(runtimeApiSource).toContain('"/runtime/arxiv-import"')
+  expect(en.paper.source.arxivPrompt).toContain("arXiv")
+  expect(zh.paper.source.arxivPrompt).toContain("arXiv")
+})
 const paperHooksSource = await Bun.file(
   new URL("../src/hooks/usePapers.ts", import.meta.url),
 ).text()
@@ -414,15 +423,21 @@ test("embedded research tool records cannot navigate the iframe", () => {
   )
 })
 
-test("autodiscovery builds validated tasks before project import", () => {
-  expect(workflowSource).toContain('stages=("discovery",)')
+test("autodiscovery separates research decisions from the final runnable task", () => {
+  expect(workflowSource).toContain('"discovery_baseline", "discovery_candidates", "discovery_evaluation", "discovery"')
   expect(workflowSource).toContain('"algorithm-discovery"')
   expect(workflowSource).toContain('"llm4ad-task-builder"')
+  expect(workflowSource).toContain('"discovery-baseline"')
+  expect(workflowSource).toContain('"discovery-candidates"')
+  expect(workflowSource).toContain('"discovery-evaluation"')
   expect(taskDockerfileSource).toContain(
     "skills/autodiscovery/algorithm-discovery",
   )
-  expect(paperRouteSource).toContain('workspace.mode !== "algorithm"')
-  expect(paperRouteSource).toContain("<AlgorithmDiscoveryPanel")
+  expect(taskDockerfileSource).toContain("skills/autodiscovery/discovery-baseline")
+  expect(taskDockerfileSource).toContain("skills/autodiscovery/discovery-candidates")
+  expect(taskDockerfileSource).toContain("skills/autodiscovery/discovery-evaluation")
+  expect(paperRouteSource).toContain("<PaperWorkflowStepper")
+  expect(paperRouteSource).toContain("<AlgorithmStagePanel")
   expect(discoveryPanelSource).toContain("useCreatePaperProposalTasks")
   expect(discoveryPanelSource).toContain("proposal_ids: [proposal.id]")
   expect(discoveryPanelSource).toContain(
@@ -430,7 +445,8 @@ test("autodiscovery builds validated tasks before project import", () => {
   )
   expect(discoveryPanelSource).toContain("proposal.package_manifest")
   expect(runtimeApiSource).toContain("mcp__llm4ad_stage__build_algorithm_task")
-  expect(workflowSource).toContain("complete runnable task package")
+  expect(runtimeApiSource).toContain('request.workflow_stage == "discovery"')
+  expect(runtimeApiSource).toContain("mcp__llm4ad_stage__list_algorithm_proposals")
   expect(discoveryPanelSource).toContain('to: "/evolution"')
   expect(zh.paper.workflow.stage.discoveryExamples).toHaveLength(3)
   expect(en.paper.workflow.stage.discoveryExamples).toHaveLength(3)

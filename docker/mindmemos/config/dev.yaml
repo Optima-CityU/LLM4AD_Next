@@ -73,9 +73,8 @@ algo_config:
         coverage_validation_enabled: true
         max_coverage_items: 12
       dedup:
-        # Detailed source artifacts can embed below a shorter historical
-        # summary even when both describe the same card. Keep those candidates
-        # eligible for the bounded relation classifier.
+        # Keep detailed source artifacts eligible for relation classification
+        # when their embedding differs from a shorter historical summary.
         create_below: 0.70
     schema:
       entity_modeling_path: config/mindmemos/presets/llm4ad_memory_card.json

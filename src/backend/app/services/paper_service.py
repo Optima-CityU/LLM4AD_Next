@@ -872,6 +872,64 @@ def _create_source_version(
     return source
 
 
+def import_arxiv_source_version(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    paper_id: str,
+) -> models.PaperSourceVersion:
+    """Import a locally downloaded arXiv paper as the first durable source.
+
+    Args:
+        db: Active database session.
+        workspace: Owned AutoDiscovery workspace.
+        paper_id: arXiv identifier already downloaded by the workspace MCP.
+
+    Returns:
+        Newly active paper source version.
+
+    Raises:
+        HTTPException: If the paper is missing, unsafe, or already imported.
+    """
+    if workspace.mode != models.ResearchWorkspaceMode.ALGORITHM.value:
+        raise HTTPException(status_code=409, detail="arXiv intake is only available in AutoDiscovery")
+    if workspace.active_source_version_id is not None:
+        raise HTTPException(status_code=409, detail="A paper source is already active")
+    identifier = paper_id.strip()
+    if not re.fullmatch(r"(?:\d{4}\.\d{4,5}|[A-Za-z-]+(?:/[A-Za-z-]+)?/\d{7})(?:v\d+)?", identifier):
+        raise HTTPException(status_code=400, detail="Invalid arXiv paper ID")
+    bare_id = re.sub(r"v\d+$", "", identifier)
+    project_root = paper_workspace_root(workspace.user_id, workspace.id)
+    research_root = project_root / ".research"
+    arxiv_root = research_root / "arxiv"
+    if research_root.is_symlink() or arxiv_root.is_symlink():
+        raise HTTPException(status_code=400, detail="Unsafe arXiv storage path")
+    source_path = arxiv_root / f"{bare_id.replace('/', '__')}.md"
+    if source_path.is_symlink() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Download the arXiv paper before importing it")
+    try:
+        source_path.resolve().relative_to(project_root.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unsafe arXiv paper path") from exc
+    with source_path.open("rb") as stream:
+        data = stream.read(MAX_PAPER_SOURCE_BYTES + 1)
+    if len(data) > MAX_PAPER_SOURCE_BYTES:
+        raise HTTPException(status_code=413, detail="arXiv paper exceeds the source size limit")
+    try:
+        content = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Downloaded arXiv paper is not Markdown") from exc
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Downloaded arXiv paper is empty")
+    imported = f"Source: https://arxiv.org/abs/{bare_id}\n\n{content}".encode()
+    source = _create_source_version(
+        db,
+        workspace,
+        [("paper.md", imported)],
+        change_summary=f"Imported arXiv paper {bare_id}",
+    )
+    return source
+
+
 def create_workspace(
     db: Session,
     current_user: models.User,
@@ -1000,7 +1058,7 @@ async def upload_source_version(
         elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
             _stale_proposal_stages(workspace, "rebuttal_baseline")
         elif workspace.mode == models.ResearchWorkspaceMode.ALGORITHM.value:
-            _stale_proposal_stages(workspace, "discovery")
+            _stale_proposal_stages(workspace, "discovery_baseline")
         return _persist_source_entries(
             db,
             workspace,
@@ -1257,7 +1315,7 @@ def delete_source_path(
     elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
         _stale_proposal_stages(workspace, "rebuttal_baseline")
     elif workspace.mode == models.ResearchWorkspaceMode.ALGORITHM.value:
-        _stale_proposal_stages(workspace, "discovery")
+        _stale_proposal_stages(workspace, "discovery_baseline")
     if not retained:
         object_keys = [source.object_key]
         source_runs = list(
@@ -1385,7 +1443,7 @@ def update_source_file(
     elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
         _stale_proposal_stages(workspace, "rebuttal_baseline")
     elif workspace.mode == models.ResearchWorkspaceMode.ALGORITHM.value:
-        _stale_proposal_stages(workspace, "discovery")
+        _stale_proposal_stages(workspace, "discovery_baseline")
     return _persist_source_entries(
         db,
         workspace,
@@ -2175,6 +2233,63 @@ def accept_revision_candidate(
     db.add(candidate)
     db.commit()
     return schemas.PaperRevisionApplyResponse(candidate_id=candidate.id, source_version=accepted)
+
+
+def get_stage_artifact(
+    db: Session,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    stage: schemas.ResearchWorkflowStage,
+    *,
+    run_id: uuid.UUID | None = None,
+) -> schemas.PaperStageArtifactResponse:
+    """Read an owned stage artifact, including an explicitly selected prior run.
+
+    Args:
+        db: Database session.
+        user_id: Owner of the research workspace.
+        workspace_id: Workspace containing the published run.
+        stage: Workflow stage to read.
+        run_id: Optional historical run identifier.
+
+    Returns:
+        The persisted JSON artifact and source revision metadata.
+    """
+    workspace = _owned_workspace(db, user_id, workspace_id)
+    workflow = paper_workflow.get_research_workflow(workspace.mode)
+    run_kind = workflow.run_kind_by_stage.get(stage)
+    if run_kind is None:
+        raise HTTPException(status_code=404, detail="Research stage is unavailable")
+    stage_state = (workspace.proposal_stage_states or {}).get(stage) or {}
+    current_run_id = stage_state.get("run_id")
+    requested_run_id = run_id or (uuid.UUID(str(current_run_id)) if current_run_id else None)
+    if requested_run_id is None:
+        raise HTTPException(status_code=404, detail="Research stage has no published artifact")
+    run = db.get(models.PaperAgentRun, requested_run_id)
+    if (
+        run is None
+        or run.workspace_id != workspace_id
+        or run.run_kind != run_kind
+        or run.status != models.PaperAgentRunStatus.READY.value
+        or not run.artifact_object_key
+    ):
+        raise HTTPException(status_code=404, detail="Research stage artifact not found")
+    try:
+        artifact = json.loads(_storage().download(run.artifact_object_key))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail="Research stage artifact is unavailable") from exc
+    if not isinstance(artifact, dict):
+        raise HTTPException(status_code=503, detail="Research stage artifact is invalid")
+    status = str(stage_state.get("status") or "superseded") if str(run.id) == current_run_id else "superseded"
+    if run.source_version_id != workspace.active_source_version_id and status == "ready":
+        status = "stale"
+    return schemas.PaperStageArtifactResponse(
+        workflow_stage=stage,
+        run_id=run.id,
+        source_version_id=run.source_version_id,
+        status=status,
+        artifact=artifact,
+    )
 
 
 def get_workspace_detail(

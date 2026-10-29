@@ -1,5 +1,7 @@
 import { useNavigate } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Activity,
   ArrowUpRight,
   CheckCircle2,
   ChevronDown,
@@ -8,15 +10,19 @@ import {
   GitBranch,
   Loader2,
   PackageCheck,
-  Rocket,
+  Play,
   Send,
+  Square,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import ReactMarkdown from "react-markdown"
 import { toast } from "sonner"
 
-import type { PaperAlgorithmProposalResponse } from "@/client"
+import {
+  Llm4AdPapersService,
+  type PaperAlgorithmProposalResponse,
+} from "@/client"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -31,7 +37,260 @@ import { cn } from "@/lib/utils"
 type AlgorithmDiscoveryPanelProps = {
   workspaceId: string
   sourceVersionId: string
+  currentRunId?: string
   proposals: PaperAlgorithmProposalResponse[]
+}
+
+function LinkedEvolutionPanel({
+  workspaceId,
+  proposal,
+}: {
+  workspaceId: string
+  proposal: PaperAlgorithmProposalResponse
+}) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(true)
+  const [selectedTaskId, setSelectedTaskId] = useState(proposal.task_id ?? "")
+  const queryKey = [
+    "paper-linked-task",
+    workspaceId,
+    proposal.id,
+    selectedTaskId,
+  ]
+  const linkedTask = useQuery({
+    queryKey,
+    queryFn: () =>
+      Llm4AdPapersService.getLinkedTask({
+        workspaceId,
+        proposalId: proposal.id,
+        taskId: selectedTaskId || undefined,
+      }),
+    enabled: open && Boolean(proposal.task_id),
+    refetchInterval: 5000,
+  })
+  const action = useMutation({
+    mutationFn: async (kind: "run" | "stop" | "child") => {
+      const taskId = selectedTaskId || proposal.task_id
+      if (!taskId) throw new Error(t("paper.discovery.taskUnavailable"))
+      if (kind === "run") {
+        return Llm4AdPapersService.runLinkedTask({
+          workspaceId,
+          proposalId: proposal.id,
+          taskId,
+        })
+      }
+      if (kind === "stop") {
+        return Llm4AdPapersService.stopLinkedTask({
+          workspaceId,
+          proposalId: proposal.id,
+          taskId,
+        })
+      }
+      const task = linkedTask.data?.tasks?.find((item) => item.id === taskId)
+      if (typeof task?.version_time !== "string")
+        throw new Error(t("paper.discovery.taskUnavailable"))
+      const created = await Llm4AdPapersService.createLinkedChild({
+        workspaceId,
+        proposalId: proposal.id,
+        taskId,
+        requestBody: { expected_version_time: task.version_time },
+      })
+      setSelectedTaskId(created.task.selected_task_id)
+      return created
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["paper-linked-task", workspaceId, proposal.id],
+      })
+    },
+    onError: (error) =>
+      toast.error(proposalError(error, t("paper.discovery.actionFailed"))),
+  })
+  const snapshot = linkedTask.data
+  const running =
+    snapshot?.status === "running" || snapshot?.status === "pending"
+  const canStart = snapshot && !running
+  const logMessages = (snapshot?.recent_logs ?? [])
+    .slice(-8)
+    .map((entry) =>
+      String(entry.message ?? entry.error_message ?? entry.type ?? ""),
+    )
+    .filter(Boolean)
+  return (
+    <section className="border-t bg-background">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/40"
+      >
+        <Activity className="size-4 text-primary" />
+        <span className="flex-1">{t("paper.discovery.evolutionTitle")}</span>
+        {snapshot && (
+          <Badge variant="secondary">
+            {snapshot.stopped_by_user
+              ? t("paper.discovery.stopped")
+              : t(`paper.discovery.taskStatus.${snapshot.status}`, {
+                  defaultValue: snapshot.status,
+                })}
+          </Badge>
+        )}
+        {open ? (
+          <ChevronDown className="size-4" />
+        ) : (
+          <ChevronRight className="size-4" />
+        )}
+      </button>
+      {open && (
+        <div className="space-y-4 border-t px-4 py-4">
+          {linkedTask.isLoading && (
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          )}
+          {linkedTask.isError && (
+            <p className="text-sm text-destructive">
+              {t("paper.discovery.taskLoadFailed")}
+            </p>
+          )}
+          {snapshot && (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {(snapshot.tasks ?? []).map((task, index) => (
+                  <Button
+                    key={String(task.id)}
+                    size="sm"
+                    variant={
+                      task.id === snapshot.selected_task_id
+                        ? "default"
+                        : "outline"
+                    }
+                    onClick={() => setSelectedTaskId(String(task.id))}
+                  >
+                    {index === 0
+                      ? t("paper.discovery.rootVersion")
+                      : `${t("paper.discovery.childVersion")} ${index}`}
+                  </Button>
+                ))}
+              </div>
+              <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("paper.discovery.status")}
+                  </p>
+                  <p className="mt-1 font-medium">
+                    {snapshot.stopped_by_user
+                      ? t("paper.discovery.stopped")
+                      : t(`paper.discovery.taskStatus.${snapshot.status}`, {
+                          defaultValue: snapshot.status,
+                        })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("paper.discovery.solutions")}
+                  </p>
+                  <p className="mt-1 font-medium tabular-nums">
+                    {snapshot.solution_count ?? 0}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("paper.discovery.bestScore")}
+                  </p>
+                  <p className="mt-1 font-medium tabular-nums">
+                    {snapshot.max_score ?? "—"}
+                  </p>
+                </div>
+              </div>
+              {Object.entries(snapshot.parameter_diff ?? {}).length > 0 && (
+                <div className="rounded-lg border p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {t("paper.discovery.parameterDiff")}
+                  </p>
+                  <div className="space-y-1.5 text-sm">
+                    {Object.entries(snapshot.parameter_diff ?? {}).map(
+                      ([key, values]) => (
+                        <div
+                          key={key}
+                          className="flex flex-wrap items-center justify-between gap-2"
+                        >
+                          <code className="text-xs">{key}</code>
+                          <span className="tabular-nums text-muted-foreground">
+                            {String(values.before)} →{" "}
+                            <span className="font-medium text-foreground">
+                              {String(values.after)}
+                            </span>
+                          </span>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  disabled={!canStart || action.isPending}
+                  onClick={() => action.mutate("run")}
+                >
+                  <Play className="size-4" />
+                  {t("paper.discovery.start")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!running || action.isPending}
+                  onClick={() => action.mutate("stop")}
+                >
+                  <Square className="size-3" />
+                  {t("paper.discovery.stop")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={action.isPending}
+                  onClick={() => action.mutate("child")}
+                >
+                  {t("paper.discovery.createChild")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    void navigate({
+                      to: "/evolution",
+                      search: { projectId: proposal.task_project_id! },
+                    })
+                  }
+                >
+                  {t("paper.discovery.openEvolution")}
+                  <ArrowUpRight className="size-3" />
+                </Button>
+              </div>
+              {logMessages.length > 0 && (
+                <div className="rounded-lg border p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {t("paper.discovery.recentActivity")}
+                  </p>
+                  <ul className="space-y-1.5 text-xs leading-5 text-foreground/75">
+                    {logMessages.map((message, index) => (
+                      <li key={`${index}-${message}`} className="break-words">
+                        {message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t("paper.discovery.closeHint")}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  )
 }
 
 function proposalError(error: unknown, fallback: string) {
@@ -57,15 +316,20 @@ function ProposalMarkdown({ content, id }: { content: string; id: string }) {
 export default function AlgorithmDiscoveryPanel({
   workspaceId,
   sourceVersionId,
+  currentRunId,
   proposals,
 }: AlgorithmDiscoveryPanelProps) {
   const { t, i18n } = useTranslation()
-  const navigate = useNavigate()
   const createTasks = useCreatePaperProposalTasks(workspaceId)
   const currentProposals = useMemo(
     () =>
-      proposals.filter((item) => item.source_version_id === sourceVersionId),
-    [proposals, sourceVersionId],
+      proposals.filter(
+        (item) =>
+          (item.source_version_id === sourceVersionId &&
+            item.run_id === currentRunId) ||
+          Boolean(item.task_id),
+      ),
+    [proposals, sourceVersionId, currentRunId],
   )
   const [expandedId, setExpandedId] = useState<string | null>(
     currentProposals[0]?.id ?? null,
@@ -96,10 +360,6 @@ export default function AlgorithmDiscoveryPanel({
     } finally {
       setSendingId(null)
     }
-  }
-
-  const openEvolution = (projectId: string) => {
-    void navigate({ to: "/evolution", search: { projectId } })
   }
 
   return (
@@ -151,6 +411,9 @@ export default function AlgorithmDiscoveryPanel({
               const packageValidated =
                 proposal.validation_report?.status === "passed" &&
                 (proposal.package_manifest?.length ?? 0) > 0
+              const superseded =
+                proposal.source_version_id !== sourceVersionId ||
+                proposal.run_id !== currentRunId
               return (
                 <article
                   key={proposal.id}
@@ -181,6 +444,11 @@ export default function AlgorithmDiscoveryPanel({
                           >
                             <CheckCircle2 className="mr-1 size-3" />
                             {t("paper.discovery.inProject")}
+                          </Badge>
+                        )}
+                        {superseded && (
+                          <Badge variant="secondary">
+                            {t("paper.discovery.previousSource")}
                           </Badge>
                         )}
                         {packageValidated && !linked && (
@@ -308,18 +576,7 @@ export default function AlgorithmDiscoveryPanel({
                             ? t("paper.discovery.linkedHint")
                             : t("paper.discovery.sendHint")}
                         </p>
-                        {proposal.task_project_id ? (
-                          <Button
-                            size="sm"
-                            onClick={() =>
-                              openEvolution(proposal.task_project_id as string)
-                            }
-                          >
-                            <Rocket className="size-3.5" />
-                            {t("paper.discovery.openEvolution")}
-                            <ArrowUpRight className="size-3.5" />
-                          </Button>
-                        ) : (
+                        {!proposal.task_project_id && (
                           <Button
                             size="sm"
                             disabled={sending || !packageValidated}
@@ -336,6 +593,12 @@ export default function AlgorithmDiscoveryPanel({
                           </Button>
                         )}
                       </footer>
+                      {proposal.task_id && (
+                        <LinkedEvolutionPanel
+                          workspaceId={workspaceId}
+                          proposal={proposal}
+                        />
+                      )}
                     </div>
                   )}
                 </article>

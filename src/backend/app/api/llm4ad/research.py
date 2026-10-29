@@ -910,6 +910,56 @@ def stream_artifacts_archive(
 
 
 @router.post(
+    "/sessions/{session_id}/arl/workspace/archive/ticket",
+    summary="换取 ARL 工作区打包下载票据",
+)
+def create_arl_workspace_archive_ticket(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    current_user: CurrentUser,
+    role: str = Query("all", description="worker / validator / all"),
+):
+    """ARL 版的 :func:`create_artifacts_archive_ticket`：先校验再发票据。
+
+    会话类型、范围与工作区是否存在都在这一步校验，失败是正常的 4xx，
+    不会等到浏览器导航过去才拿到半截 zip。
+    """
+    filename, _ = research_service.open_arl_workspace_archive(
+        db, session_id, current_user, role
+    )
+    return {
+        "ticket": research_service.issue_archive_ticket(current_user),
+        "filename": filename,
+    }
+
+
+@router.get(
+    "/sessions/{session_id}/arl/workspace/archive/stream",
+    summary="打包下载 ARL 工作区（zip，票据鉴权 + 流式）",
+)
+def stream_arl_workspace_archive(
+    session_id: uuid.UUID,
+    db: SessionDep,
+    ticket: str = Query(..., description="由 .../archive/ticket 换取的短时票据"),
+    role: str = Query("all", description="worker / validator / all"),
+):
+    """凭票据把 ARL 容器工作区以 zip 流式下载。
+
+    ``all`` 时 zip 顶层按角色分 ``validator/`` 与 ``worker/`` 两个目录。
+    鉴权与流式取舍同 :func:`stream_artifacts_archive`。
+    """
+    user = research_service.verify_archive_ticket(db, ticket)
+    filename, stream = research_service.open_arl_workspace_archive(
+        db, session_id, user, role
+    )
+    return StreamingResponse(
+        stream,
+        media_type="application/zip",
+        headers={"Content-Disposition": research_service.archive_disposition(filename)},
+    )
+
+
+@router.post(
     "/sessions/{session_id}/artifacts/import",
     response_model=ResearchArtifactImportResponse,
     summary="上传 zip 解压并覆盖到产物目录（单个条目失败不中断）",

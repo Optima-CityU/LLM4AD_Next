@@ -108,6 +108,57 @@ def test_research_workspace_mode_is_persisted_at_creation(db: Session) -> None:
     assert workspace.mode == "algorithm"
 
 
+def test_autodiscovery_imports_downloaded_arxiv_markdown_as_source(
+    db: Session,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make arXiv intake durable without asking the user to upload a file."""
+    user = create_random_user(db)
+    workspace = paper_service.create_workspace(
+        db,
+        user,
+        paper_schemas.PaperWorkspaceCreate(title="arXiv intake", mode="algorithm"),
+    )
+    monkeypatch.setattr(paper_service.settings, "DOCKER_PROJECT_HOME", str(tmp_path))
+    storage = _MemoryStorage({})
+    monkeypatch.setattr(paper_service, "_storage", lambda: storage)
+    cache = paper_service.paper_workspace_root(user.id, workspace.id) / ".research" / "arxiv"
+    cache.mkdir(parents=True)
+    (cache / "2401.00001.md").write_text("# A paper\n\nAn algorithm.", encoding="utf-8")
+
+    source = paper_service.import_arxiv_source_version(db, workspace, "2401.00001v2")
+
+    assert workspace.active_source_version_id == source.id
+    assert source.manifest == ["paper.md"]
+    assert b"https://arxiv.org/abs/2401.00001" in storage.objects[source.object_key]
+    assert (paper_service.paper_workspace_source_dir(user.id, workspace.id) / "paper.md").is_file()
+    with pytest.raises(HTTPException) as missing:
+        paper_service.import_arxiv_source_version(db, workspace, "2401.00002")
+    assert missing.value.status_code == 409
+
+
+def test_autodiscovery_arxiv_import_requires_local_download(
+    db: Session,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not import a search result or arbitrary path as a paper source."""
+    user = create_random_user(db)
+    workspace = paper_service.create_workspace(
+        db,
+        user,
+        paper_schemas.PaperWorkspaceCreate(title="No download", mode="algorithm"),
+    )
+    monkeypatch.setattr(paper_service.settings, "DOCKER_PROJECT_HOME", str(tmp_path))
+    with pytest.raises(HTTPException) as invalid:
+        paper_service.import_arxiv_source_version(db, workspace, "../../outside")
+    assert invalid.value.status_code == 400
+    with pytest.raises(HTTPException) as missing:
+        paper_service.import_arxiv_source_version(db, workspace, "2401.00001")
+    assert missing.value.status_code == 404
+
+
 def test_conversation_preferences_are_saved_without_changing_proposal_brief(db: Session) -> None:
     """Persist explanatory preferences independently of source context."""
     user = create_random_user(db)
@@ -312,6 +363,14 @@ providers: []
         == package_files["config.yaml"]
     )
     assert not hasattr(workspace, "project_id")
+    [repeated_link] = paper_service.create_proposal_tasks(
+        db,
+        user,
+        workspace.id,
+        paper_schemas.PaperProposalTaskCreateRequest(proposal_ids=[proposal.id], language="en"),
+    )
+    assert repeated_link.task_id == link.task_id
+    assert len(db.exec(select(models.Project).where(models.Project.user_id == user.id)).all()) == 1
 
 
 def test_proposal_workspace_starts_with_an_editable_typst_document(
@@ -717,20 +776,38 @@ def test_proposal_workflow_defines_eight_isolated_stages() -> None:
     assert "Read other sections" not in definition.prompt_preamble
 
 
-def test_algorithm_workflow_is_one_conversational_discovery_stage() -> None:
-    """Inject discovery and project-building guidance without a visible pipeline."""
+def test_algorithm_workflow_has_four_scoped_stages() -> None:
+    """Keep discovery as the legacy final key while separating research decisions."""
     definition = paper_workflow.get_research_workflow("algorithm")
 
     assert definition.available is True
-    assert definition.stages == ("discovery",)
+    assert definition.stages == (
+        "discovery_baseline",
+        "discovery_candidates",
+        "discovery_evaluation",
+        "discovery",
+    )
+    assert definition.skills_by_run_kind["discovery_baseline"] == (
+        "discovery-baseline",
+        "research-stage-publication",
+    )
+    assert definition.skills_by_run_kind["discovery_candidates"] == (
+        "discovery-candidates",
+        "research-stage-publication",
+    )
+    assert definition.skills_by_run_kind["discovery_evaluation"] == (
+        "discovery-evaluation",
+        "research-stage-publication",
+    )
     assert definition.skills_by_run_kind["algorithm_discovery"] == (
         "algorithm-discovery",
         "llm4ad-task-builder",
         "research-stage-publication",
     )
-    assert definition.prerequisites_by_run_kind["algorithm_discovery"] == ()
+    assert definition.prerequisites_by_run_kind["algorithm_discovery"] == ("discovery_evaluation",)
+    assert definition.dependent_stages("discovery_candidates") == ("discovery_evaluation", "discovery")
     assert definition.writable_paths_by_run_kind["algorithm_discovery"] == ()
-    assert "single conversational AutoDiscovery workspace" in definition.prompt_preamble
+    assert "Only the final discovery stage" in definition.prompt_preamble
 
 
 def test_editing_a_paper_file_updates_the_current_source_in_place(
@@ -757,6 +834,49 @@ def test_editing_a_paper_file_updates_the_current_source_in_place(
     assert updated.id == source.id
     assert [item.id for item in sources] == [source.id]
     assert storage.objects[source.object_key] == b"# Updated working paper\n"
+
+
+def test_discovery_source_edit_stales_stages_without_deleting_linked_task(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep an existing evolution task independent from later paper revisions."""
+    user, workspace, source = _paper_source(db)
+    workspace.mode = models.ResearchWorkspaceMode.ALGORITHM.value
+    stages = paper_workflow.get_research_workflow("algorithm").stages
+    workspace.proposal_stage_states = {stage: {"status": "ready"} for stage in stages}
+    project = project_service.create_project(db, "Discovery source revision", "", user.id)
+    task = models.Task(name="Linked evolution", project_id=project.id, input_args={})
+    proposal = models.PaperAlgorithmProposal(
+        workspace_id=workspace.id,
+        source_version_id=source.id,
+        title="Selected direction",
+        problem_statement="Optimize a baseline.",
+        algorithm_design="Evolve the candidate.",
+        status="confirmed",
+    )
+    db.add(workspace)
+    db.add(task)
+    db.add(proposal)
+    db.flush()
+    link = models.PaperTaskLink(workspace_id=workspace.id, proposal_id=proposal.id, task_id=task.id)
+    db.add(link)
+    db.commit()
+    storage = _MemoryStorage({source.object_key: b"draft"})
+    monkeypatch.setattr(paper_service, "_storage", lambda: storage)
+
+    paper_service.update_source_file(
+        db,
+        user,
+        source.id,
+        paper_schemas.PaperSourceFileUpdateRequest(path="paper.md", content="# Revised method\n"),
+    )
+
+    db.refresh(workspace)
+    assert all(workspace.proposal_stage_states[stage]["status"] == "stale" for stage in stages)
+    assert db.get(models.PaperTaskLink, link.id) is not None
+    assert db.get(models.Task, task.id) is not None
+    assert db.get(models.PaperAlgorithmProposal, proposal.id).status == "confirmed"
 
 
 def test_deleting_the_last_paper_file_clears_the_current_source(

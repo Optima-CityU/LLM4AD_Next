@@ -14,6 +14,7 @@ import {
   Circle,
   Clock,
   Copy,
+  FileArchive,
   FolderOpen,
   Layers3,
   Loader2,
@@ -74,6 +75,7 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
+import ImportTaskForm from "./ImportTaskForm"
 import {
   Select,
   SelectContent,
@@ -93,7 +95,7 @@ import { DEMO_TASK, isDemoProjectId } from "@/data/demoFixtures"
 import useCustomToast from "@/hooks/useCustomToast"
 import { getDemoState, setDemoPhase, useDemoState } from "@/hooks/useDemoMode"
 import { useEvolution } from "@/hooks/useEvolution"
-import { formatDateTime } from "@/lib/utils"
+import { cn, formatDateTime } from "@/lib/utils"
 import { handleError } from "@/utils"
 
 import {
@@ -235,9 +237,10 @@ export function CreateTaskDialog({
   const isDemo = isDemoProjectId(projectId)
   const [isOpen, setIsOpen] = useState(false)
   const [confirmNoTemplateOpen, setConfirmNoTemplateOpen] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   // In the demo, default the dialog to AI build so the walkthrough lands on
   // the path it actually simulates. Real projects keep manual as default.
-  const [buildMode, setBuildMode] = useState<"ai" | "manual">(
+  const [buildMode, setBuildMode] = useState<"ai" | "manual" | "import">(
     isDemo ? "ai" : "manual",
   )
   const queryClient = useQueryClient()
@@ -384,7 +387,7 @@ export function CreateTaskDialog({
     }
   }, [effectiveConfigName, selectedConfigName, form])
 
-  const handleBuildModeChange = (mode: "ai" | "manual") => {
+  const handleBuildModeChange = (mode: "ai" | "manual" | "import") => {
     setBuildMode(mode)
     if (mode === "ai") {
       form.setValue("template_name", undefined)
@@ -453,10 +456,100 @@ export function CreateTaskDialog({
     submitTask(data)
   }
 
+  const buildModeSelector = (
+    <fieldset className="flex min-w-0 flex-col gap-2">
+      <legend className="mb-2 text-sm font-medium leading-none">
+        {t("evolution.buildModeLabel")}
+      </legend>
+      <div className="grid grid-cols-2 gap-3">
+        {(
+          [
+            {
+              mode: "manual",
+              icon: Settings2,
+              title: "buildModeManual",
+              description: "buildModeManualDesc",
+            },
+            {
+              mode: "ai",
+              icon: Bot,
+              title: "buildModeAi",
+              description: "buildModeAiDesc",
+            },
+            ...(!isDemo
+              ? [
+                  {
+                    mode: "import" as const,
+                    icon: FileArchive,
+                    title: "buildModeImport",
+                    description: "buildModeImportDesc",
+                  },
+                ]
+              : []),
+          ] as const
+        ).map(({ mode, icon: Icon, title, description }) => {
+          const selected = buildMode === mode
+          return (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={selected}
+              disabled={isImporting || mutation.isPending}
+              onClick={() => handleBuildModeChange(mode)}
+              className={cn(
+                "relative flex min-w-0 flex-col items-start gap-1.5 rounded-lg border-2 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                mode === "import" &&
+                  "col-span-2 flex-row items-center gap-3 pr-8",
+                selected
+                  ? "border-primary bg-primary/5 shadow-sm shadow-primary/10"
+                  : "border-border/60 hover:border-primary/40 hover:bg-accent/30",
+              )}
+            >
+              <div
+                className={cn(
+                  "flex items-center gap-2 pr-5",
+                  mode === "import" && "shrink-0 pr-0",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-md",
+                    selected
+                      ? "bg-primary/15 text-primary"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                </span>
+                <span
+                  className={cn(
+                    "text-sm font-medium",
+                    selected ? "text-primary" : "text-foreground",
+                  )}
+                >
+                  {t(`evolution.${title}`)}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                {t(`evolution.${description}`)}
+              </p>
+              {selected && (
+                <span className="absolute right-2 top-2 flex size-4 items-center justify-center rounded-full bg-primary">
+                  <CheckCircle2 className="size-3 text-primary-foreground" />
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </fieldset>
+  )
+
   return (
     <Dialog
       open={isOpen}
       onOpenChange={(open) => {
+        if (isImporting || mutation.isPending) return
         setIsOpen(open)
         if (!open) {
           form.reset()
@@ -504,312 +597,269 @@ export function CreateTaskDialog({
       </DialogTrigger>
       <DialogContent
         data-tour="create-task-dialog"
-        className="sm:max-w-lg"
+        className={cn(
+          "max-h-[90dvh] sm:max-w-lg",
+          buildMode === "import"
+            ? "flex flex-col overflow-hidden"
+            : "overflow-y-auto",
+        )}
         preventOutsideClose
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t("evolution.createTaskTitle")}</DialogTitle>
           <DialogDescription>
             {t("evolution.createTaskDescription")}
           </DialogDescription>
         </DialogHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)}>
-            <div className="grid gap-4 py-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>
-                      {t("evolution.taskName")}{" "}
-                      <span className="text-destructive">*</span>
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder={t("evolution.taskNamePlaceholder")}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+        {buildMode === "import" ? (
+          <ImportTaskForm
+            projectId={projectId}
+            name={form.watch("name")}
+            onNameChange={(name) =>
+              form.setValue("name", name, { shouldDirty: true })
+            }
+            buildModeSelector={buildModeSelector}
+            onPendingChange={setIsImporting}
+            onClose={() => {
+              setIsOpen(false)
+              setBuildMode("manual")
+              form.reset()
+            }}
+            onImported={(task) => {
+              queryClient.invalidateQueries({
+                queryKey: getTasksQueryKey(projectId),
+              })
+              setIsOpen(false)
+              setBuildMode("manual")
+              form.reset()
+              onCreated(task)
+            }}
+          />
+        ) : (
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)}>
+              <div className="grid gap-4 py-4">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t("evolution.taskName")}{" "}
+                        <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder={t("evolution.taskNamePlaceholder")}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-              {/* Build mode selector */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium leading-none">
-                  {t("evolution.buildModeLabel")}
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleBuildModeChange("manual")}
-                    className={`relative flex flex-col items-start gap-1.5 rounded-lg border-2 p-3 text-left transition-all
-                      ${
-                        !isAiMode
-                          ? "border-primary bg-primary/5 shadow-sm shadow-primary/10"
-                          : "border-border/60 hover:border-primary/40 hover:bg-accent/30"
-                      }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`flex items-center justify-center size-6 rounded-md
-                        ${
-                          !isAiMode
-                            ? "bg-primary/15 text-primary"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        <Settings2 className="size-3.5" />
-                      </div>
-                      <span
-                        className={`text-sm font-medium ${!isAiMode ? "text-primary" : "text-foreground"}`}
-                      >
-                        {t("evolution.buildModeManual")}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      {t("evolution.buildModeManualDesc")}
-                    </p>
-                    {!isAiMode && (
-                      <div className="absolute top-2 right-2 size-4 rounded-full bg-primary flex items-center justify-center">
-                        <CheckCircle2 className="size-3 text-primary-foreground" />
-                      </div>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleBuildModeChange("ai")}
-                    className={`relative flex flex-col items-start gap-1.5 rounded-lg border-2 p-3 text-left transition-all
-                      ${
-                        isAiMode
-                          ? "border-primary bg-primary/5 shadow-sm shadow-primary/10"
-                          : "border-border/60 hover:border-primary/40 hover:bg-accent/30"
-                      }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div
-                        className={`flex items-center justify-center size-6 rounded-md
-                        ${
-                          isAiMode
-                            ? "bg-primary/15 text-primary"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        <Bot className="size-3.5" />
-                      </div>
-                      <span
-                        className={`text-sm font-medium ${isAiMode ? "text-primary" : "text-foreground"}`}
-                      >
-                        {t("evolution.buildModeAi")}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      {t("evolution.buildModeAiDesc")}
-                    </p>
-                    {isAiMode && (
-                      <div className="absolute top-2 right-2 size-4 rounded-full bg-primary flex items-center justify-center">
-                        <CheckCircle2 className="size-3 text-primary-foreground" />
-                      </div>
-                    )}
-                  </button>
-                </div>
-              </div>
+                {buildModeSelector}
 
-              {/* Template/Config — only for manual mode */}
-              {isAiMode ? (
-                <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
-                  <Bot className="size-4 text-primary shrink-0" />
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {t("evolution.buildModeAiTemplateHint")}
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <FormField
-                    control={form.control}
-                    name="template_name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t("evolution.templateLabel")}</FormLabel>
-                        <Select
-                          value={field.value ?? ""}
-                          onValueChange={(v) => {
-                            const value = v || undefined
-                            field.onChange(value)
-                            const tpl = value
-                              ? templateList?.templates?.find(
-                                  (t) => t.name === value,
-                                )
-                              : undefined
-                            const firstCfg =
-                              tpl?.configs?.[0]?.name ?? undefined
-                            form.setValue("config_name", firstCfg, {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                            })
-                          }}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full overflow-hidden [&_[data-slot=select-value]]:flex-1 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
-                              <SelectValue
-                                placeholder={t("evolution.selectTemplate")}
-                              />
-                              {field.value && (
-                                <button
-                                  type="button"
-                                  className="shrink-0 -mr-1.5 p-0.5 rounded-sm pointer-events-auto
-                                    text-muted-foreground/60 hover:text-foreground transition-colors"
-                                  title={t("evolution.clearTemplate")}
-                                  onPointerDown={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    field.onChange(undefined)
-                                    form.setValue("config_name", undefined, {
-                                      shouldDirty: true,
-                                      shouldTouch: true,
-                                    })
-                                  }}
-                                >
-                                  <X className="size-3.5" />
-                                </button>
-                              )}
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent className="w-[min(32rem,calc(100vw-2rem))]">
-                            {templateBuckets.groups.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel className="flex items-center gap-2 py-2 font-medium text-foreground/70">
-                                  <Layers3 className="size-3.5 text-primary" />
-                                  {t("evolution.templateGroupLabel")}
-                                </SelectLabel>
-                                {templateBuckets.groups.map((template, index) =>
-                                  renderTemplateOption(template, index, true),
-                                )}
-                              </SelectGroup>
-                            )}
-                            {templateBuckets.groups.length > 0 &&
-                              templateBuckets.standalone.length > 0 && (
-                                <SelectSeparator />
-                              )}
-                            {templateBuckets.standalone.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel className="py-2 font-medium text-foreground/70">
-                                  {t("evolution.standaloneTemplateLabel")}
-                                </SelectLabel>
-                                {templateBuckets.standalone.map(
-                                  (template, index) =>
-                                    renderTemplateOption(
-                                      template,
-                                      index,
-                                      false,
-                                    ),
-                                )}
-                              </SelectGroup>
-                            )}
-                          </SelectContent>
-                        </Select>
-                        {!field.value && (
-                          <p className="text-xs text-muted-foreground">
-                            {t("evolution.noTemplateHint")}
-                          </p>
-                        )}
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  {selectedTemplateName && configOptions.length > 0 && (
+                {/* Template/Config — only for manual mode */}
+                {isAiMode ? (
+                  <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
+                    <Bot className="size-4 text-primary shrink-0" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {t("evolution.buildModeAiTemplateHint")}
+                    </p>
+                  </div>
+                ) : (
+                  <>
                     <FormField
                       control={form.control}
-                      name="config_name"
+                      name="template_name"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>
-                            {selectedTemplateIsGroup
-                              ? t("evolution.caseLabel")
-                              : t("evolution.configLabel")}
-                          </FormLabel>
+                          <FormLabel>{t("evolution.templateLabel")}</FormLabel>
                           <Select
-                            value={effectiveConfigName ?? ""}
-                            onValueChange={(v) => field.onChange(v)}
+                            value={field.value ?? ""}
+                            onValueChange={(v) => {
+                              const value = v || undefined
+                              field.onChange(value)
+                              const tpl = value
+                                ? templateList?.templates?.find(
+                                    (t) => t.name === value,
+                                  )
+                                : undefined
+                              const firstCfg =
+                                tpl?.configs?.[0]?.name ?? undefined
+                              form.setValue("config_name", firstCfg, {
+                                shouldDirty: true,
+                                shouldTouch: true,
+                              })
+                            }}
                           >
                             <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue>
-                                  {effectiveConfigItem
-                                    ? configDisplayName(
-                                        selectedTemplateName,
-                                        effectiveConfigItem,
-                                      )
-                                    : undefined}
-                                </SelectValue>
+                              <SelectTrigger className="w-full overflow-hidden [&_[data-slot=select-value]]:flex-1 [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate">
+                                <SelectValue
+                                  placeholder={t("evolution.selectTemplate")}
+                                />
+                                {field.value && (
+                                  <button
+                                    type="button"
+                                    className="shrink-0 -mr-1.5 p-0.5 rounded-sm pointer-events-auto
+                                    text-muted-foreground/60 hover:text-foreground transition-colors"
+                                    title={t("evolution.clearTemplate")}
+                                    onPointerDown={(e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      field.onChange(undefined)
+                                      form.setValue("config_name", undefined, {
+                                        shouldDirty: true,
+                                        shouldTouch: true,
+                                      })
+                                    }}
+                                  >
+                                    <X className="size-3.5" />
+                                  </button>
+                                )}
                               </SelectTrigger>
                             </FormControl>
-                            <SelectContent>
-                              {configOptions.map((cfg) => {
-                                const desc = isZh
-                                  ? (cfg.description_zh ?? cfg.description_en)
-                                  : (cfg.description_en ?? cfg.description_zh)
-                                return desc ? (
-                                  <Tooltip key={cfg.name}>
-                                    <TooltipTrigger asChild>
-                                      <SelectItem value={cfg.name}>
-                                        {configDisplayName(
-                                          selectedTemplateName,
-                                          cfg,
-                                        )}
-                                      </SelectItem>
-                                    </TooltipTrigger>
-                                    <TooltipContent
-                                      side="right"
-                                      sideOffset={8}
-                                      className="max-w-xs"
-                                    >
-                                      {desc}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : (
-                                  <SelectItem key={cfg.name} value={cfg.name}>
-                                    {configDisplayName(
-                                      selectedTemplateName,
-                                      cfg,
-                                    )}
-                                  </SelectItem>
-                                )
-                              })}
+                            <SelectContent className="w-[min(32rem,calc(100vw-2rem))]">
+                              {templateBuckets.groups.length > 0 && (
+                                <SelectGroup>
+                                  <SelectLabel className="flex items-center gap-2 py-2 font-medium text-foreground/70">
+                                    <Layers3 className="size-3.5 text-primary" />
+                                    {t("evolution.templateGroupLabel")}
+                                  </SelectLabel>
+                                  {templateBuckets.groups.map(
+                                    (template, index) =>
+                                      renderTemplateOption(
+                                        template,
+                                        index,
+                                        true,
+                                      ),
+                                  )}
+                                </SelectGroup>
+                              )}
+                              {templateBuckets.groups.length > 0 &&
+                                templateBuckets.standalone.length > 0 && (
+                                  <SelectSeparator />
+                                )}
+                              {templateBuckets.standalone.length > 0 && (
+                                <SelectGroup>
+                                  <SelectLabel className="py-2 font-medium text-foreground/70">
+                                    {t("evolution.standaloneTemplateLabel")}
+                                  </SelectLabel>
+                                  {templateBuckets.standalone.map(
+                                    (template, index) =>
+                                      renderTemplateOption(
+                                        template,
+                                        index,
+                                        false,
+                                      ),
+                                  )}
+                                </SelectGroup>
+                              )}
                             </SelectContent>
                           </Select>
-                          {effectiveConfigDesc && (
+                          {!field.value && (
                             <p className="text-xs text-muted-foreground">
-                              {effectiveConfigDesc}
+                              {t("evolution.noTemplateHint")}
                             </p>
                           )}
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                  )}
-                </>
-              )}
-            </div>
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button variant="outline" disabled={mutation.isPending}>
-                  {t("common.cancel")}
-                </Button>
-              </DialogClose>
-              <LoadingButton
-                type="submit"
-                data-tour="create-task-submit"
-                loading={mutation.isPending}
-                className="bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30"
-              >
-                {t("common.create")}
-              </LoadingButton>
-            </DialogFooter>
-          </form>
-        </Form>
+                    {selectedTemplateName && configOptions.length > 0 && (
+                      <FormField
+                        control={form.control}
+                        name="config_name"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>
+                              {selectedTemplateIsGroup
+                                ? t("evolution.caseLabel")
+                                : t("evolution.configLabel")}
+                            </FormLabel>
+                            <Select
+                              value={effectiveConfigName ?? ""}
+                              onValueChange={(v) => field.onChange(v)}
+                            >
+                              <FormControl>
+                                <SelectTrigger className="w-full">
+                                  <SelectValue>
+                                    {effectiveConfigItem
+                                      ? configDisplayName(
+                                          selectedTemplateName,
+                                          effectiveConfigItem,
+                                        )
+                                      : undefined}
+                                  </SelectValue>
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {configOptions.map((cfg) => {
+                                  const desc = isZh
+                                    ? (cfg.description_zh ?? cfg.description_en)
+                                    : (cfg.description_en ?? cfg.description_zh)
+                                  return desc ? (
+                                    <Tooltip key={cfg.name}>
+                                      <TooltipTrigger asChild>
+                                        <SelectItem value={cfg.name}>
+                                          {configDisplayName(
+                                            selectedTemplateName,
+                                            cfg,
+                                          )}
+                                        </SelectItem>
+                                      </TooltipTrigger>
+                                      <TooltipContent
+                                        side="right"
+                                        sideOffset={8}
+                                        className="max-w-xs"
+                                      >
+                                        {desc}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  ) : (
+                                    <SelectItem key={cfg.name} value={cfg.name}>
+                                      {configDisplayName(
+                                        selectedTemplateName,
+                                        cfg,
+                                      )}
+                                    </SelectItem>
+                                  )
+                                })}
+                              </SelectContent>
+                            </Select>
+                            {effectiveConfigDesc && (
+                              <p className="text-xs text-muted-foreground">
+                                {effectiveConfigDesc}
+                              </p>
+                            )}
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button variant="outline" disabled={mutation.isPending}>
+                    {t("common.cancel")}
+                  </Button>
+                </DialogClose>
+                <LoadingButton
+                  type="submit"
+                  data-tour="create-task-submit"
+                  loading={mutation.isPending}
+                  className="bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30"
+                >
+                  {t("common.create")}
+                </LoadingButton>
+              </DialogFooter>
+            </form>
+          </Form>
+        )}
       </DialogContent>
 
       <AlertDialog

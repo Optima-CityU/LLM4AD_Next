@@ -21,7 +21,7 @@ import re
 import tempfile
 import uuid
 import zipfile
-from collections.abc import Generator
+from collections.abc import Generator, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -447,6 +447,33 @@ def iter_artifacts_archive(
     if not root or not root.is_dir():
         raise HTTPException(status_code=404, detail="run_dir not initialized")
 
+    def entries() -> Iterator[tuple[str, Path]]:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = str(path.relative_to(root)).replace("\\", "/")
+            if any(part.startswith(".") for part in rel.split("/")):
+                continue
+            if _is_useless_cache(rel):
+                continue  # __pycache__/ .pyc 等缓存，不进下载包
+            yield rel, path
+
+    yield from stream_zip(entries())
+
+
+def stream_zip(entries: Iterable[tuple[str, Path]]) -> Generator[bytes, None, None]:
+    """把 ``(zip 内路径, 磁盘文件)`` 序列边读边打包成 zip 字节流。
+
+    条目一律 ``ZIP_STORED`` 且用固定时间戳（理由见 :func:`iter_artifacts_archive`）。
+    单个条目读失败只记日志并跳过，不拖垮整包。
+
+    Args:
+        entries: 待打包条目，惰性迭代；``arcname`` 用 ``/`` 分隔。
+
+    Yields:
+        zip 字节分块，按序拼接即为完整 zip。
+    """
+
     class _ChunkSink(io.RawIOBase):
         """把 ZipFile 写出的连续字节攒成块，便于按块 yield 给响应。"""
 
@@ -464,14 +491,7 @@ def iter_artifacts_archive(
     # ZipFile 支持非 seek 流：此时它会为每个条目自动补写 data descriptor（本地头里
     # CRC / 大小先写 0，真值落在尾部的中央目录），文件列表与大小仍然准确。
     with zipfile.ZipFile(sink, "w") as zf:
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            rel = str(path.relative_to(root)).replace("\\", "/")
-            if any(part.startswith(".") for part in rel.split("/")):
-                continue
-            if _is_useless_cache(rel):
-                continue  # __pycache__/ .pyc 等缓存，不进下载包
+        for rel, path in entries:
             info = zipfile.ZipInfo(rel, date_time=_ARCHIVE_ZIP_DATE_TIME)
             info.compress_type = zipfile.ZIP_STORED
             # external_attr 保住 unix 权限位（0o644 常规文件），否则解压出来可能不可读。
@@ -490,7 +510,7 @@ def iter_artifacts_archive(
                 # 单个条目读不动（被容器改着写 / 权限变动）不拖垮整包，跳过继续。
                 logger.opt(exception=True).warning(f"skip zip entry: {rel}")
                 sink.chunks.clear()
-    # 退出 with 时 ZipFile 写出中央目录与 EOCD；无产物时整包内容也全在这里。
+    # 退出 with 时 ZipFile 写出中央目录与 EOCD；无条目时整包内容也全在这里。
     if sink.chunks:
         yield b"".join(sink.chunks)
         sink.chunks.clear()

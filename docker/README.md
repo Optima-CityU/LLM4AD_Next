@@ -61,6 +61,10 @@ Copy-Item .env.develop.local.example .env
 
 其余变量（端口、镜像名、SMTP、APT/PyPI 镜像源等）可沿用示例文件中的默认值，完整说明见 `.env.develop.local.example`。
 
+本地构建默认使用 Docker Hub、GitHub 和 PyPI 官方来源。需要加速时，可在 `.env` 中设置 `DOCKERHUB_REGISTRY`（镜像站前缀，必须以 `/` 结尾）、`APT_MIRROR`、`UV_INDEX_URL` / `UV_DEFAULT_INDEX`、`GITHUB_PROXY_URL`、`CC_SWITCH_RELEASE_BASE` 和 `OPENCODE_RELEASE_BASE`。`DOCKERHUB_REGISTRY` 控制 Compose 中的基础镜像和基础设施镜像；它不修改 Docker daemon 的 `/etc/docker/daemon.json`。如果 daemon 仍配置了不可用的 `registry-mirrors`，留空的官方镜像引用仍可能被 daemon 转发到该镜像站。
+
+使用 GitHub 下载代理时，可在 `.env` 分别设置 `GITHUB_PROXY_URL=https://gh-proxy.org`（Git 依赖）、`CC_SWITCH_RELEASE_BASE=https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download` 和 `OPENCODE_RELEASE_BASE=https://gh-proxy.org/https://github.com/anomalyco/opencode/releases/download`（二进制发行包）。只影响构建阶段，下载后的发行包仍会经过 Dockerfile 中固定的 SHA-256 校验。
+
 知识库解析、AutoProposal 和 AutoRebuttal 共用任务镜像内固定版本的 `cc-switch-cli`：Claude Code 与 Skill 始终使用 Anthropic Messages 协议；选择 OpenAI/OpenAI-compatible 供应商时，由每个任务或工作区独立的本地适配器转换为 OpenAI Chat Completions。适配器只接收短期网关令牌，不会把供应商真实密钥写入任务工作区，并统一禁用 Claude 的全局 `WebSearch` / `WebFetch` 工具。
 
 AutoRebuttal 的审稿意见可直接粘贴到左侧对话，由 Agent 整理问题基准；也可在右侧按审稿人手工录入 Markdown 或纯文本。OpenReview 页面不会由系统自动抓取，请粘贴其中的评审原文，而非仅提供链接。
@@ -152,7 +156,7 @@ TAG=v1.0.0 ./start.sh start
 - 使用指定镜像仓库或加速地址
 ```shell
 ./start.sh start --mirrors docker.io/noah2012
-./start.sh start --mirrors docker.1ms.run/noah2012
+./start.sh start --mirrors registry.example.com/noah2012
 ```
 
 - 停止服务和后端动态容器

@@ -5518,7 +5518,7 @@ export const PaperAgentRunResponseSchema = {
         },
         run_kind: {
             type: 'string',
-            enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
+            enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
             title: 'Run Kind'
         },
         status: {
@@ -6207,6 +6207,224 @@ export const PaperJudgeResultResponseSchema = {
     required: ['id', 'candidate_id', 'provider_id', 'model_name', 'judge_index', 'baseline_scores', 'optional_scores', 'rationale', 'citations', 'created_time'],
     title: 'PaperJudgeResultResponse',
     description: 'One persisted Judge response.'
+} as const;
+
+export const PaperLinkedTaskChangeResponseSchema = {
+    properties: {
+        task: {
+            '$ref': '#/components/schemas/PaperLinkedTaskSnapshot'
+        },
+        changes: {
+            additionalProperties: {
+                additionalProperties: {
+                    anyOf: [
+                        {
+                            type: 'integer'
+                        },
+                        {
+                            type: 'number'
+                        },
+                        {
+                            type: 'boolean'
+                        }
+                    ]
+                },
+                type: 'object'
+            },
+            type: 'object',
+            title: 'Changes'
+        }
+    },
+    type: 'object',
+    required: ['task'],
+    title: 'PaperLinkedTaskChangeResponse',
+    description: 'Result of a child creation or parameter update.'
+} as const;
+
+export const PaperLinkedTaskChildCreateSchema = {
+    properties: {
+        expected_version_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expected Version Time'
+        },
+        parameters: {
+            additionalProperties: {
+                anyOf: [
+                    {
+                        type: 'integer'
+                    },
+                    {
+                        type: 'number'
+                    },
+                    {
+                        type: 'boolean'
+                    }
+                ]
+            },
+            type: 'object',
+            title: 'Parameters'
+        }
+    },
+    type: 'object',
+    required: ['expected_version_time'],
+    title: 'PaperLinkedTaskChildCreate',
+    description: 'Create a non-activating child to test an evolution-parameter change.'
+} as const;
+
+export const PaperLinkedTaskPatchSchema = {
+    properties: {
+        expected_version_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Expected Version Time'
+        },
+        parameters: {
+            additionalProperties: {
+                anyOf: [
+                    {
+                        type: 'integer'
+                    },
+                    {
+                        type: 'number'
+                    },
+                    {
+                        type: 'boolean'
+                    }
+                ]
+            },
+            type: 'object',
+            minProperties: 1,
+            title: 'Parameters'
+        }
+    },
+    type: 'object',
+    required: ['expected_version_time', 'parameters'],
+    title: 'PaperLinkedTaskPatch',
+    description: 'Optimistic evolution-parameter update for an unstarted child version.'
+} as const;
+
+export const PaperLinkedTaskSnapshotSchema = {
+    properties: {
+        proposal_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Proposal Id'
+        },
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        root_task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Root Task Id'
+        },
+        active_task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Active Task Id'
+        },
+        tasks: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Tasks'
+        },
+        selected_task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Selected Task Id'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        stopped_by_user: {
+            type: 'boolean',
+            title: 'Stopped By User',
+            default: false
+        },
+        solution_count: {
+            type: 'integer',
+            title: 'Solution Count',
+            default: 0
+        },
+        avg_score: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Avg Score'
+        },
+        max_score: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Max Score'
+        },
+        recent_logs: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Recent Logs'
+        },
+        result: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Result'
+        },
+        evolution_parameters: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Evolution Parameters'
+        },
+        parameter_diff: {
+            additionalProperties: {
+                additionalProperties: {
+                    anyOf: [
+                        {
+                            type: 'integer'
+                        },
+                        {
+                            type: 'number'
+                        },
+                        {
+                            type: 'boolean'
+                        }
+                    ]
+                },
+                type: 'object'
+            },
+            type: 'object',
+            title: 'Parameter Diff'
+        }
+    },
+    type: 'object',
+    required: ['proposal_id', 'project_id', 'root_task_id', 'active_task_id', 'selected_task_id', 'status'],
+    title: 'PaperLinkedTaskSnapshot',
+    description: 'Bounded public task state for an AutoDiscovery proposal family.'
 } as const;
 
 export const PaperMetricDraftSchema = {
@@ -7069,7 +7287,7 @@ export const PaperRuntimeSessionCreateSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
-            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
+            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
         }
     },
@@ -7135,7 +7353,7 @@ export const PaperSourceFileUpdateRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
+                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
                 },
                 {
                     type: 'null'
@@ -7162,7 +7380,7 @@ export const PaperSourcePathDeleteRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
+                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
                 },
                 {
                     type: 'null'
@@ -7256,11 +7474,44 @@ export const PaperSourceVersionResponseSchema = {
     description: 'Metadata for the stored working paper source.'
 } as const;
 
+export const PaperStageArtifactResponseSchema = {
+    properties: {
+        workflow_stage: {
+            type: 'string',
+            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
+            title: 'Workflow Stage'
+        },
+        run_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Run Id'
+        },
+        source_version_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Version Id'
+        },
+        status: {
+            type: 'string',
+            title: 'Status'
+        },
+        artifact: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Artifact'
+        }
+    },
+    type: 'object',
+    required: ['workflow_stage', 'run_id', 'source_version_id', 'status', 'artifact'],
+    title: 'PaperStageArtifactResponse',
+    description: 'Published result and revision metadata for one research stage.'
+} as const;
+
 export const PaperStageInvalidateRequestSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
-            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
+            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
         },
         expected_iteration: {
@@ -7573,7 +7824,7 @@ export const PaperWorkspaceDetailSchema = {
         workflow_stages: {
             items: {
                 type: 'string',
-                enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
+                enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
             },
             type: 'array',
             title: 'Workflow Stages'
@@ -7581,7 +7832,7 @@ export const PaperWorkspaceDetailSchema = {
         available_run_kinds: {
             items: {
                 type: 'string',
-                enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
+                enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
             },
             type: 'array',
             title: 'Available Run Kinds'
@@ -8191,6 +8442,37 @@ export const ProjectMemoryConfigResponseSchema = {
     required: ['id', 'created_time', 'updated_time', 'enabled', 'include_user_memory', 'include_project_memory', 'include_task_memory', 'user_memory_limit', 'project_memory_limit', 'task_memory_limit', 'mindmemos_search_strategy', 'mindmemos_rerank', 'mindmemos_score_threshold', 'mindmemos_fail_open', 'project_id'],
     title: 'ProjectMemoryConfigResponse',
     description: 'Project-level memory defaults response.'
+} as const;
+
+export const ProjectPackageImportResponseSchema = {
+    properties: {
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        task_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Task Id'
+        },
+        task_name: {
+            type: 'string',
+            title: 'Task Name'
+        },
+        evolution_type: {
+            type: 'string',
+            title: 'Evolution Type'
+        },
+        file_count: {
+            type: 'integer',
+            title: 'File Count'
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'task_id', 'task_name', 'evolution_type', 'file_count'],
+    title: 'ProjectPackageImportResponse',
+    description: 'Identifiers of a newly imported project and its configured first task.'
 } as const;
 
 export const ProjectResponseSchema = {
@@ -11134,6 +11416,26 @@ export const ResearchSessionCreateRequestSchema = {
                 }
             ],
             description: 'LLM4AD workspace 引用；缺省时首轮会引导用户补齐'
+        },
+        session_type: {
+            type: 'string',
+            enum: ['research', 'arl'],
+            title: 'Session Type',
+            description: "会话类型：'research'(默认) | 'arl'",
+            default: 'research'
+        },
+        arl_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Arl Config',
+            description: 'ARL 容器配置（worker 和 validator 的 provider_id + model_name）'
         }
     },
     type: 'object',
@@ -11358,6 +11660,23 @@ export const ResearchSessionItemSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Updated Time'
+        },
+        session_type: {
+            type: 'string',
+            title: 'Session Type',
+            default: 'research'
+        },
+        arl_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Arl Config'
         }
     },
     type: 'object',
@@ -11525,6 +11844,19 @@ export const ResearchSessionUpdateRequestSchema = {
                 }
             ],
             title: 'Model Name'
+        },
+        arl_config: {
+            anyOf: [
+                {
+                    additionalProperties: true,
+                    type: 'object'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Arl Config',
+            description: 'ARL 会话的 worker / validator 的 provider_id + model_name；仅 ARL 会话可改，未提供不变'
         }
     },
     type: 'object',
@@ -14500,6 +14832,50 @@ export const papers_upload_sourceSchema = {
     title: 'Body_llm4ad.papers-upload_source'
 } as const;
 
+export const projects_import_project_packageSchema = {
+    properties: {
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File',
+            description: 'Cloud task ZIP containing one project folder'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        language: {
+            type: 'string',
+            enum: ['en', 'zh'],
+            title: 'Language',
+            default: 'en'
+        }
+    },
+    type: 'object',
+    required: ['file'],
+    title: 'Body_llm4ad.projects-import_project_package'
+} as const;
+
 export const research_import_artifacts_zipSchema = {
     properties: {
         file: {
@@ -14512,6 +14888,49 @@ export const research_import_artifacts_zipSchema = {
     type: 'object',
     required: ['file'],
     title: 'Body_llm4ad.research-import_artifacts_zip'
+} as const;
+
+export const tasks_import_task_packageSchema = {
+    properties: {
+        project_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Project Id'
+        },
+        file: {
+            type: 'string',
+            format: 'binary',
+            title: 'File',
+            description: 'Cloud task ZIP containing one task folder'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        language: {
+            type: 'string',
+            enum: ['en', 'zh'],
+            title: 'Language',
+            default: 'en'
+        },
+        enable_memory: {
+            type: 'boolean',
+            title: 'Enable Memory',
+            description: 'Enable memory with the current platform settings',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['project_id', 'file'],
+    title: 'Body_llm4ad.tasks-import_task_package'
 } as const;
 
 export const tasks_upload_task_dataSchema = {

@@ -43,6 +43,9 @@ class PaperAgentRunKind(StrEnum):
     AC_SUMMARY = "ac_summary"
     BOUNDARY_ANALYSIS = "boundary_analysis"
     ISSUE_EXTRACTION = "issue_extraction"
+    DISCOVERY_BASELINE = "discovery_baseline"
+    DISCOVERY_CANDIDATES = "discovery_candidates"
+    DISCOVERY_EVALUATION = "discovery_evaluation"
     ALGORITHM_DISCOVERY = "algorithm_discovery"
     METRIC_SUGGESTION = "metric_suggestion"
     PAPER_REVISION = "paper_revision"
@@ -232,7 +235,8 @@ class PaperAgentRun(SQLModel, TimeMixin, table=True):
         ondelete="CASCADE",
         index=True,
     )
-    source_version_id: uuid.UUID = Field(
+    source_version_id: uuid.UUID | None = Field(
+        default=None,
         foreign_key="paper_source_version.id",
         ondelete="CASCADE",
         index=True,

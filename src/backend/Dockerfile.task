@@ -9,19 +9,17 @@
 # 故装 research extra（researchclaw，公开 git 依赖；git 由 bookworm 基础镜像自带）。
 
 # ---------- 知识文档解析协议代理 ----------
-ARG CC_SWITCH_DOWNLOAD_IMAGE=docker.1ms.run/curlimages/curl:8.16.0
+ARG DOCKERHUB_REGISTRY=""
 ARG APT_MIRROR=""
-ARG NODE_BASE_IMAGE=docker.1ms.run/library/node:22-bookworm-slim
-ARG PYTHON_BASE_IMAGE=docker.1ms.run/library/python:3.12-bookworm
 # cc-switch runs per Claude-driven job or workspace. Claude always speaks
 # Anthropic Messages locally; the adapter converts to OpenAI Chat Completions
 # only when the selected upstream requires it. Pin and verify the release.
-FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS cc-switch-runtime
+FROM ${DOCKERHUB_REGISTRY}curlimages/curl:8.16.0 AS cc-switch-runtime
 
 USER root
 ARG TARGETARCH=amd64
 ARG CC_SWITCH_VERSION=5.10.1
-ARG CC_SWITCH_RELEASE_BASE=https://gh-proxy.org/https://github.com/SaladDay/cc-switch-cli/releases/download
+ARG CC_SWITCH_RELEASE_BASE=https://github.com/SaladDay/cc-switch-cli/releases/download
 RUN case "${TARGETARCH}" in \
       amd64) CC_SWITCH_ARCH=x64; CC_SWITCH_SHA256=be6836eb42cf6747b3830b15d87902fc6a1331c35263aa7590ed0a37a4430790 ;; \
       arm64) CC_SWITCH_ARCH=arm64; CC_SWITCH_SHA256=10277f9e7aa76125ab4035e08ac15a52bc43d2c485f677b5ffec2055436d59e5 ;; \
@@ -37,14 +35,14 @@ RUN case "${TARGETARCH}" in \
 
 # ---------- OpenCode CLI ----------
 # opencode 是 Bun 编译的独立二进制（release 资产为单个可执行文件），运行时不需 Node。
-# 走 gh-proxy 镜像下载，固定版本 + SHA256 校验，避免 latest 漂移。策略与 cc-switch 一致。
-FROM ${CC_SWITCH_DOWNLOAD_IMAGE} AS opencode-runtime
+# Download from the configured release base and verify its pinned SHA256.
+FROM ${DOCKERHUB_REGISTRY}curlimages/curl:8.16.0 AS opencode-runtime
 
 USER root
 ARG TARGETARCH=amd64
 ARG OPENCODE_VERSION=1.18.25
-# 用与 cc-switch 相同的 gh-proxy 前缀；官方仓库已迁移至 anomalyco/opencode。
-ARG OPENCODE_RELEASE_BASE=https://gh-proxy.org/https://github.com/anomalyco/opencode/releases/download
+# Use the configured release base; the upstream repository is anomalyco/opencode.
+ARG OPENCODE_RELEASE_BASE=https://github.com/anomalyco/opencode/releases/download
 RUN case "${TARGETARCH}" in \
       amd64) OPENCODE_ARCH=x64; OPENCODE_SHA256=58a3729a6f3432dd6d2917fcc4a949788891a035818646ad480e12c947f56e78 ;; \
       arm64) OPENCODE_ARCH=arm64; OPENCODE_SHA256=35ef77897425e41b5183a2c21ac4fb1d4d944d82a94e3c920f57b5490af11ac5 ;; \
@@ -59,7 +57,7 @@ RUN case "${TARGETARCH}" in \
     && install -m 0755 /tmp/opencode /usr/local/bin/opencode
 
 # ---------- CloudCLI research workspace runtime ----------
-FROM ${NODE_BASE_IMAGE} AS cloudcli-builder
+FROM ${DOCKERHUB_REGISTRY}library/node:22-bookworm-slim AS cloudcli-builder
 
 ARG APT_MIRROR
 WORKDIR /build/cloudcli
@@ -85,7 +83,7 @@ RUN node scripts/fix-node-pty.js \
     && npm prune --omit=dev
 
 # ---------- 基础镜像 ----------
-FROM ${PYTHON_BASE_IMAGE}
+FROM ${DOCKERHUB_REGISTRY}library/python:3.12-bookworm
 
 # 禁用 Python 输出缓冲，保证日志实时输出
 ENV PYTHONUNBUFFERED=1
@@ -139,15 +137,17 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 # ---------- 安装依赖（含 research extra，不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
-ARG GITHUB_PROXY_URL=https://gh-proxy.org
+ARG GITHUB_PROXY_URL=""
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=pyproject.toml,target=/pyproject.toml \
     --mount=type=bind,source=README.md,target=/README.md \
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
-    GIT_CONFIG_VALUE_0="https://github.com/" \
+    if [ -n "$GITHUB_PROXY_URL" ]; then \
+      export GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL%/}/https://github.com/.insteadOf" \
+        GIT_CONFIG_VALUE_0="https://github.com/"; \
+    fi && \
     uv sync --no-install-workspace --extra research
 
 # ---------- 复制应用代码 ----------
@@ -165,9 +165,11 @@ COPY ./README.md          /README.md
 # ---------- 安装工作区包（含 research extra）----------
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
-    GIT_CONFIG_VALUE_0="https://github.com/" \
+    if [ -n "$GITHUB_PROXY_URL" ]; then \
+      export GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL%/}/https://github.com/.insteadOf" \
+        GIT_CONFIG_VALUE_0="https://github.com/"; \
+    fi && \
     uv sync --extra research
 
 # Python Claude Agent SDK 由 uv 安装并自带 Claude Code CLI，无需额外 Node 运行时。
@@ -203,6 +205,9 @@ COPY --chmod=0755 ./docker/paper-agent/workspace-entrypoint.sh /app/paper-agent/
 COPY ./skills/llm4ad-task-builder                             /app/skills/llm4ad-task-builder
 COPY ./skills/research-stage-publication                      /app/skills/research-stage-publication
 COPY ./skills/autodiscovery/algorithm-discovery               /app/skills/algorithm-discovery
+COPY ./skills/autodiscovery/discovery-baseline                 /app/skills/discovery-baseline
+COPY ./skills/autodiscovery/discovery-candidates               /app/skills/discovery-candidates
+COPY ./skills/autodiscovery/discovery-evaluation               /app/skills/discovery-evaluation
 COPY ./skills/typst-author                                    /app/skills/typst-author
 COPY ./skills/openair-proposal/ATTRIBUTION.md                 /app/skills/ATTRIBUTION.md
 COPY ./skills/openair-proposal/proposal-foundation-layout     /app/skills/proposal-foundation-layout

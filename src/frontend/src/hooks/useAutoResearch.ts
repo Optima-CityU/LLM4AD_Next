@@ -19,9 +19,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   Llm4AdResearchService,
-  type ResearchCollabStartRequest,
   type ResearchArtifactTranslateRequest,
   type ResearchArtifactTranslateResponse,
+  type ResearchCollabStartRequest,
   type ResearchCollabStartResponse,
   type ResearchFolderCreateRequest,
   type ResearchFolderListResponse,
@@ -161,7 +161,8 @@ export function useResearchTemplates(
 ) {
   return useQuery({
     queryKey: researchKeys.templates(domain),
-    queryFn: () => Llm4AdResearchService.listTemplates({ domain: domain ?? undefined }),
+    queryFn: () =>
+      Llm4AdResearchService.listTemplates({ domain: domain ?? undefined }),
     staleTime: 30 * 60_000,
     ...opts,
   })
@@ -964,13 +965,7 @@ export function useImportResearchArtifacts() {
   const qc = useQueryClient()
   const inv = useInvalidator()
   return useMutation({
-    mutationFn: ({
-      sessionId,
-      file,
-    }: {
-      sessionId: string
-      file: File
-    }) =>
+    mutationFn: ({ sessionId, file }: { sessionId: string; file: File }) =>
       Llm4AdResearchService.importArtifactsZip({
         sessionId,
         formData: { file },
@@ -1063,8 +1058,7 @@ function dispatchBrowserDownload(url: string) {
  * ``authFetch`` 命中 401 会自行刷新令牌并重试一次，这里不再重复处理。拿到票据后
  * 就不再需要认证头，包体可以交给浏览器自己拉。
  */
-async function requestArchiveTicket(sessionId: string): Promise<string> {
-  const url = `${API_BASE}/sessions/${sessionId}/artifacts/archive/ticket`
+async function requestArchiveTicket(url: string): Promise<string> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ARCHIVE_TICKET_TIMEOUT_MS)
   try {
@@ -1073,8 +1067,13 @@ async function requestArchiveTicket(sessionId: string): Promise<string> {
       signal: controller.signal,
     })
     if (!resp.ok) {
-      // 404 多为「run_dir 尚未初始化」或会话不属于当前用户。
-      throw new Error(`HTTP ${resp.status}`)
+      // 404 多为「run_dir / 工作区尚未初始化」或会话不属于当前用户。
+      const body = (await resp.json().catch(() => null)) as {
+        detail?: unknown
+      } | null
+      throw new Error(
+        typeof body?.detail === "string" ? body.detail : `HTTP ${resp.status}`,
+      )
     }
     const data = (await resp.json()) as { ticket?: string }
     if (!data?.ticket) throw new Error("empty ticket")
@@ -1107,10 +1106,33 @@ async function requestArchiveTicket(sessionId: string): Promise<string> {
  *   sessionId: 会话 id。
  */
 export async function downloadResearchArtifactsArchive(sessionId: string) {
-  const ticket = await requestArchiveTicket(sessionId)
+  const ticket = await requestArchiveTicket(
+    `${API_BASE}/sessions/${sessionId}/artifacts/archive/ticket`,
+  )
   const params = new URLSearchParams({ ticket })
   dispatchBrowserDownload(
     `${API_BASE}/sessions/${sessionId}/artifacts/archive/stream?${params}`,
+  )
+}
+
+/**
+ * 打包下载 ARL 会话的容器工作区（zip），流程同 {@link downloadResearchArtifactsArchive}。
+ *
+ * Args:
+ *   sessionId: 会话 id。
+ *   role: ``worker`` / ``validator`` 只打一个容器；``all`` 两个都打，zip 顶层按
+ *     角色分目录。
+ */
+export async function downloadARLWorkspaceArchive(
+  sessionId: string,
+  role: "worker" | "validator" | "all",
+) {
+  const base = `${API_BASE}/sessions/${sessionId}/arl/workspace/archive`
+  const ticket = await requestArchiveTicket(
+    `${base}/ticket?${new URLSearchParams({ role })}`,
+  )
+  dispatchBrowserDownload(
+    `${base}/stream?${new URLSearchParams({ ticket, role })}`,
   )
 }
 

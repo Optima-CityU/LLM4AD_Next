@@ -1,0 +1,4 @@
+interface:
+  display_name: "LLM4AD Cloud Package"
+  short_description: "Build and validate project ZIPs for LLM4AD cloud"
+  default_prompt: "Use $llm4ad-cloud-package to build and locally verify an algorithm task ZIP for import into LLM4AD_Next."

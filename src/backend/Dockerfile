@@ -3,7 +3,8 @@
 # ============================================================
 
 # ---------- 基础镜像 ----------
-FROM python:3.12-bookworm
+ARG DOCKERHUB_REGISTRY=""
+FROM ${DOCKERHUB_REGISTRY}library/python:3.12-bookworm
 
 # 禁用 Python 输出缓冲，保证日志实时输出
 ENV PYTHONUNBUFFERED=1
@@ -24,15 +25,17 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 
 # ---------- 安装依赖（不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
-ARG GITHUB_PROXY_URL=https://gh-proxy.org
+ARG GITHUB_PROXY_URL=""
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=pyproject.toml,target=/pyproject.toml \
     --mount=type=bind,source=README.md,target=/README.md \
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
-    GIT_CONFIG_VALUE_0="https://github.com/" \
+    if [ -n "$GITHUB_PROXY_URL" ]; then \
+      export GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL%/}/https://github.com/.insteadOf" \
+        GIT_CONFIG_VALUE_0="https://github.com/"; \
+    fi && \
     uv sync --no-install-workspace --extra arc-templates
 
 # ---------- 复制应用代码 ----------
@@ -52,9 +55,11 @@ COPY ./README.md          /README.md
 # 模板并在建会话时落 stage-07/08/09 产物。刻意不含 torch —— 那是任务容器的 extra。
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
-    GIT_CONFIG_VALUE_0="https://github.com/" \
+    if [ -n "$GITHUB_PROXY_URL" ]; then \
+      export GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL%/}/https://github.com/.insteadOf" \
+        GIT_CONFIG_VALUE_0="https://github.com/"; \
+    fi && \
     uv sync --extra arc-templates
 
 # ---------- 启动服务 ----------
