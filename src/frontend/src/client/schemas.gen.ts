@@ -8770,6 +8770,7 @@ export const ProviderCreateSchema = {
 
 export const ProviderResponseSchema = {
     properties: {
+        is_local_codex: {type: 'boolean', default: false},
         id: {
             type: 'string',
             format: 'uuid',

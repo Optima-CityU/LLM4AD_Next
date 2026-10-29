@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     # ---- 服务器配置 ----
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
+    LOCAL_CODEX_BRIDGE_URL: str = ""
+    LOCAL_CODEX_BRIDGE_TOKEN: str = ""
 
     # ---- 项目信息 ----
     PROJECT_NAME: str
