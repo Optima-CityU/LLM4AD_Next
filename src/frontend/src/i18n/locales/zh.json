@@ -4139,12 +4139,12 @@
       "learning": "教学模式"
     },
     "profile": {
-      "algorithm_evolution": "llm4ad",
-      "ml_vision": "autoresearch"
+      "algorithm_evolution": "LLM4AD",
+      "ml_vision": "AutoResearch"
     },
     "profileDesc": {
-      "algorithm_evolution": "实验设计与执行接入 llm4ad 算法演化引擎，边跑边迭代算法",
-      "ml_vision": "未集成 llm4ad 的原生 AutoResearchClaw 流程"
+      "algorithm_evolution": "实验设计与执行接入 LLM4AD 算法演化引擎，边跑边迭代算法",
+      "ml_vision": "未集成 LLM4AD 的原生 AutoResearchClaw 流程"
     },
     "provider": {
       "inherit": "跟随会话默认",
@@ -4347,8 +4347,8 @@
       "sessionTypeLabel": "会话类型",
       "sessionTypeNormal": "常规会话",
       "sessionTypeNormalDesc": "标准的研究对话模式",
-      "sessionTypeArl": "ARL 会话",
-      "sessionTypeArlDesc": "双 Agent 协作模式（实验性）",
+      "sessionTypeArl": "AutoResearch Loop",
+      "sessionTypeArlDesc": "AI2AI 全自动工作流，研究员只需指定研究方向和可用资源，其他交给 AutoResearch Loop 自动完成",
       "arlTitleRequired": "ARL 会话需要标题",
       "arlWorkerHint": "执行研究任务的 LLM Agent（推荐 Claude）",
       "arlValidatorHint": "验证研究结果的 LLM Agent（推荐 GPT/Codex）",
@@ -4551,8 +4551,8 @@
       "title": "ARL 双智能体",
       "worker": "Worker",
       "validator": "Validator",
-      "workerHint": "Worker 容器中的 Claude Code",
-      "validatorHint": "Validator 容器中的 Codex",
+      "workerHint": "基于 Claude Code，自动实现研究方案并提交验证",
+      "validatorHint": "基于 Codex，搭建验证服务并生成任务说明",
       "connecting": "正在连接 ARL 会话…",
       "connected": "ARL 已连接",
       "disconnected": "ARL 未连接",
@@ -4664,6 +4664,28 @@
       "commandsEmpty": "没有匹配的命令",
       "commandKindSkill": "技能",
       "commandKindCommand": "命令",
+      "loadOlder": "加载更早的消息",
+      "loadingOlder": "正在加载更早的消息…",
+      "statusSubagentsRunning": "子任务运行中",
+      "subagentsRunning": "子任务 {{running}}/{{total}} 运行中",
+      "subagentsTotal": "子任务 {{total}}",
+      "subagentsCollapse": "收起",
+      "subagentUntitled": "未命名子任务",
+      "subagentEmpty": "这个子任务还没有消息",
+      "subagentLive": "仍在运行，状态变化时自动刷新",
+      "subagentStatus": {
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "canceled": "已取消"
+      },
+      "commandKindClient": "界面",
+      "clearCommandDesc": "归档当前对话并开始新对话（工作区文件保留）",
+      "clearTitle": "清空 {{role}} 的对话？",
+      "clearDesc": "当前对话会被归档，Agent 将从空白上下文重新开始。容器和工作区文件不受影响。正在运行的回合会被中断。",
+      "clearConfirm": "清空并新建",
+      "clearCancel": "取消",
+      "resetting": "正在新建对话…",
       "reconnecting": "正在重连 ARL 会话…",
       "offline": "ARL 连接已中断",
       "retryConnect": "重新连接",
@@ -4680,6 +4702,9 @@
       "agentStatus": "Agent 状态",
       "validationTitle": "验证服务交接",
       "validationWaiting": "等待 Worker 容器就绪…",
+      "validationLabel": "验证服务",
+      "validationOk": "状态正常",
+      "validationNotReady": "未就绪",
       "validationStepService": "服务",
       "validationStepTask": "task.md",
       "validationStepSync": "同步",
@@ -4687,6 +4712,10 @@
       "placeholderShort": "给 {{role}} 发消息…",
       "composerHint": "Enter 发送 · Shift+Enter 换行 · / 命令",
       "guide": {
+        "validatorStart": "开始搭建验证服务",
+        "workerStart": "开始自动研究",
+        "workerWait": "请先在左侧 Validator 点击「开始搭建验证服务」",
+        "workerWaitBusy": "验证服务尚未就绪，请在左侧 Validator 对话中完成搭建",
         "validatorTitle": "从这里开始",
         "validatorStep1": "发送 /aris-setup 生成验证服务",
         "validatorStep2": "点击两个输入框之间的 {sync} 同步给 Worker",

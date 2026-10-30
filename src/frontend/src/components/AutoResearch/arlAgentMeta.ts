@@ -90,6 +90,11 @@ export function describeAgent(
   const ready = connected && state.ready
   const booting = (connected || connecting) && !state.ready
   const running = state.turnStatus === "running"
+  // The main turn can end while subagents it spawned keep going (e.g. ones
+  // created through MCP). Shown as its own status rather than "idle", but
+  // `running` stays tied to the main turn: that is what the stop button
+  // interrupts, same as the native client.
+  const subagentsRunning = state.subagents.some((s) => s.status === "running")
 
   const statusKey = booting
     ? "booting"
@@ -99,17 +104,19 @@ export function describeAgent(
         ? "statusRunning"
         : state.turnStatus === "failed"
           ? "statusFailed"
-          : state.turnStatus === "canceled"
-            ? "statusCanceled"
-            : state.turnStatus === "completed"
-              ? "statusCompleted"
-              : state.agentStatus === "running"
-                ? "statusRunning"
-                : "statusIdle"
+          : subagentsRunning
+            ? "statusSubagentsRunning"
+            : state.turnStatus === "canceled"
+              ? "statusCanceled"
+              : state.turnStatus === "completed"
+                ? "statusCompleted"
+                : state.agentStatus === "running"
+                  ? "statusRunning"
+                  : "statusIdle"
 
   const tone: ARLAgentTone = booting
     ? "booting"
-    : running || state.agentStatus === "running"
+    : running || subagentsRunning || state.agentStatus === "running"
       ? "running"
       : state.turnStatus === "failed"
         ? "failed"
@@ -165,4 +172,20 @@ export function validationMessageKeys(state: ARLValidationState): {
   if (!state.hasTask)
     return { title: "validationNoTask", hint: "validationNoTaskHint" }
   return { title: "validationReady", hint: "validationReadyHint" }
+}
+
+/**
+ * i18n key of the hint shown while the validation service is not ready.
+ *
+ * Before the Validator conversation starts the hint points at its start
+ * button; once it has started that button is gone, so the hint says to
+ * finish the setup in the conversation instead.
+ *
+ * @param validatorStarted - Whether the Validator pane has any messages.
+ * @returns Full i18n key.
+ */
+export function workerWaitKey(validatorStarted: boolean): string {
+  return validatorStarted
+    ? "autoResearch.arl.guide.workerWaitBusy"
+    : "autoResearch.arl.guide.workerWait"
 }

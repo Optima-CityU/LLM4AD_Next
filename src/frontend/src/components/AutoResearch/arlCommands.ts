@@ -104,3 +104,50 @@ export function filterCommands(
 export function applyCommand(command: ARLCommand): string {
   return `/${command.name} `
 }
+
+/**
+ * Commands the composer handles itself instead of sending to the agent.
+ *
+ * Mirrors the native Paseo client (`client-slash-commands`): `/clear` is not
+ * a provider command, so the daemon never lists it. The client archives the
+ * agent and starts a fresh one in the same container.
+ */
+export const CLIENT_COMMANDS: readonly ARLCommand[] = [
+  {
+    name: "clear",
+    description: "",
+    argumentHint: "",
+    kind: "client",
+  },
+]
+
+/** Alternate names that resolve to a client command. */
+const CLIENT_COMMAND_ALIASES: Record<string, string> = { new: "clear" }
+
+/**
+ * Put the client commands in front of the daemon list.
+ *
+ * A daemon command of the same name is dropped: the client one is what runs
+ * when the user sends it (see {@link resolveClientCommand}), so listing both
+ * would show a row that can never execute.
+ */
+export function withClientCommands(commands: ARLCommand[]): ARLCommand[] {
+  const names = new Set(CLIENT_COMMANDS.map((command) => command.name))
+  return [
+    ...CLIENT_COMMANDS,
+    ...commands.filter((command) => !names.has(command.name)),
+  ]
+}
+
+/**
+ * The client command a composer text invokes, or `null`.
+ *
+ * Only an exact `/name` (or alias) with no arguments counts, matching the
+ * native client: `/clear something` is sent to the agent as typed.
+ */
+export function resolveClientCommand(input: string): ARLCommand | null {
+  const match = /^\/(\S+)$/.exec(input.trim())
+  if (!match) return null
+  const name = CLIENT_COMMAND_ALIASES[match[1]] ?? match[1]
+  return CLIENT_COMMANDS.find((command) => command.name === name) ?? null
+}

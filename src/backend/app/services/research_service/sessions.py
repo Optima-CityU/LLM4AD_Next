@@ -169,9 +169,10 @@ def _validate_arl_config(
 ) -> dict[str, Any]:
     """Validate an ARL config and return its normalized form.
 
-    Each role must carry ``provider_id`` and ``model_name``, and the provider
-    must be accessible by the user; otherwise another user's API key would be
-    injected into this session's containers.
+    Each role must carry a ``provider_id`` the user can access; otherwise
+    another user's API key would be injected into this session's containers.
+    ``model_name`` is optional: an empty value is stored as ``""`` and
+    :func:`resolve_provider_for_arc` falls back to the provider's default model.
 
     Args:
         db: Database session.
@@ -179,7 +180,8 @@ def _validate_arl_config(
         user: Session owner.
 
     Returns:
-        Config holding only the two roles' ``provider_id`` / ``model_name``.
+        Config holding only the two roles' ``provider_id`` / ``model_name``
+        (``model_name`` may be empty).
 
     Raises:
         HTTPException: 400 on a malformed config; 404/403 from
@@ -190,10 +192,10 @@ def _validate_arl_config(
         role_cfg = arl_config.get(role) or {}
         provider_id = role_cfg.get("provider_id")
         model_name = str(role_cfg.get("model_name") or "").strip()
-        if not provider_id or not model_name:
+        if not provider_id:
             raise HTTPException(
                 status_code=400,
-                detail=f"arl_config.{role} must contain provider_id and model_name",
+                detail=f"arl_config.{role} must contain provider_id",
             )
         try:
             provider_uuid = uuid.UUID(str(provider_id))

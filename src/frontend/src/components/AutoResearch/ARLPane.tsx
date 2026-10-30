@@ -1,20 +1,37 @@
 import {
   ArrowDown,
-  ArrowRight,
   ArrowUp,
   Check,
   ChevronDown,
-  CornerDownLeft,
   Loader2,
+  Play,
   Shield,
   ShieldAlert,
   ShieldCheck,
   Square,
+  TriangleAlert,
   Zap,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useTranslation } from "react-i18next"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -30,6 +47,7 @@ import type {
   ARLPermissionRequest,
   ARLRole,
   ARLRoleState,
+  ARLStreamItem,
   ARLValidationState,
 } from "@/hooks/useARLWebSocket"
 import { isUnattendedMode } from "@/hooks/useARLWebSocket"
@@ -37,20 +55,32 @@ import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { cn } from "@/lib/utils"
 
 import ARLMessageItem from "./ARLMessageItem"
+import ARLSubagentStrip from "./ARLSubagentStrip"
 import {
   ARL_ROLE_LOGO,
   ARL_TONE_DOT,
   ARL_TONE_PILL,
   arlRoleClass,
+  canSyncValidation,
   describeAgent,
+  workerWaitKey,
 } from "./arlAgentMeta"
-import { applyCommand, filterCommands, slashQuery } from "./arlCommands"
+import {
+  applyCommand,
+  filterCommands,
+  resolveClientCommand,
+  slashQuery,
+  withClientCommands,
+} from "./arlCommands"
 
 /** Slash command that bootstraps either container for the ARL flow. */
 const SETUP_COMMAND = "/aris-setup"
 
 /** Distance from the bottom (px) within which new content auto-scrolls. */
 const NEAR_BOTTOM_THRESHOLD = 120
+
+/** Distance from the top (px) within which older history is requested. */
+const HISTORY_START_THRESHOLD = 96
 
 interface Props {
   role: ARLRole
@@ -75,10 +105,21 @@ interface Props {
     requestIds: string[],
     response: Record<string, unknown>,
   ) => boolean
-  /** Validation handoff state; drives the step guide on an empty pane. */
+  /** Validation handoff state; gates the Worker's start button. */
   validation: ARLValidationState
-  /** Run the Validator → Worker sync (offered inline by the guide). */
-  onSyncValidation: () => void
+  /** Run the Validator → Worker sync; false when nothing went out. */
+  onSyncValidation: () => boolean
+  /** The Validator conversation has begun, so its start button is gone. */
+  validatorStarted: boolean
+  /** Request one page of older history; false when nothing went out. */
+  onLoadOlder: (role: ARLRole) => boolean
+  /** Fetch one subagent's transcript for the subagent sheet. */
+  onFetchSubagentTimeline: (
+    role: ARLRole,
+    subagentId: string,
+  ) => Promise<ARLStreamItem[]>
+  /** `/clear`: archive the agent and start a fresh conversation. */
+  onReset: (role: ARLRole) => boolean
 }
 
 /**
@@ -103,6 +144,10 @@ export default function ARLPane({
   onPermissions,
   validation,
   onSyncValidation,
+  validatorStarted,
+  onLoadOlder,
+  onFetchSubagentTimeline,
+  onReset,
 }: Props) {
   const { t } = useTranslation()
   // Highlight.js theme is ref-counted and shared: register it once per pane
@@ -116,6 +161,11 @@ export default function ARLPane({
   const [activeCommand, setActiveCommand] = useState(0)
   const [menuDismissed, setMenuDismissed] = useState(false)
   const commandList = useRef<HTMLDivElement | null>(null)
+  // `/clear` asks first: it archives the conversation the agent is in.
+  const [confirmClear, setConfirmClear] = useState(false)
+  // Scroll geometry captured when an older page was requested, so the view
+  // stays on the same row once the page is prepended above it.
+  const restoreScroll = useRef<{ height: number; top: number } | null>(null)
 
   const scrollBox = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -128,12 +178,25 @@ export default function ARLPane({
   // composer stays locked and says so.
   const agent = describeAgent(state, connected, connecting)
   const { ready, booting, running } = agent
+  // Locked while `/clear` swaps the agent: frames sent now would reach the
+  // archived one.
+  const canType = ready && !state.resetting
   const lastItem = state.items[state.items.length - 1]
   const lastItemLength =
     lastItem &&
     (lastItem.kind === "assistant_message" || lastItem.kind === "thought")
       ? lastItem.text.length
       : 0
+
+  /** Ask for the page before the oldest loaded row, remembering the scroll. */
+  const requestOlder = useCallback(() => {
+    const box = scrollBox.current
+    // One page at a time; the hook also guards, but its view of the pane
+    // only catches up on the next render.
+    if (!box || restoreScroll.current) return
+    if (!onLoadOlder(role)) return
+    restoreScroll.current = { height: box.scrollHeight, top: box.scrollTop }
+  }, [onLoadOlder, role])
 
   const handleScroll = useCallback(() => {
     const box = scrollBox.current
@@ -142,7 +205,21 @@ export default function ARLPane({
     const near = distance <= NEAR_BOTTOM_THRESHOLD
     stickToBottom.current = near
     setAtBottom(near)
-  }, [])
+    // Same trigger as the native client: nearing the top loads more.
+    if (box.scrollTop <= HISTORY_START_THRESHOLD) requestOlder()
+  }, [requestOlder])
+
+  // Once the older page lands (or the request ends), keep the rows the user
+  // was reading in place: the prepended content grows the box above them.
+  const firstItemId = state.items[0]?.id
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the first row id is the change trigger for a prepend
+  useLayoutEffect(() => {
+    const pending = restoreScroll.current
+    const box = scrollBox.current
+    if (!pending || state.loadingOlder) return
+    restoreScroll.current = null
+    if (box) box.scrollTop = box.scrollHeight - pending.height + pending.top
+  }, [firstItemId, state.loadingOlder])
 
   // Follow new content only while the user is already near the bottom, so
   // scrolling back through history is not yanked away. Scheduled on a rAF so
@@ -197,7 +274,10 @@ export default function ARLPane({
   const query = ready ? slashQuery(input) : null
   const menuOpen = query !== null && !menuDismissed
   const matches = useMemo(
-    () => (query === null ? [] : filterCommands(commands.commands, query)),
+    () =>
+      query === null
+        ? []
+        : filterCommands(withClientCommands(commands.commands), query),
     [commands.commands, query],
   )
 
@@ -232,9 +312,51 @@ export default function ARLPane({
       box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight
   }, [activeCommand, menuOpen])
 
-  /** Write the chosen command into the box; sending stays on Enter. */
-  const pickCommand = (command: ARLCommand) =>
+  // Worker start waits for its sync: `syncedAt` seen at click time, or
+  // undefined when no start is pending.
+  const pendingStart = useRef<string | null | undefined>(undefined)
+
+  const sendSetup = () => {
+    onSend(role, SETUP_COMMAND)
+    stickToBottom.current = true
+  }
+
+  /**
+   * Empty-pane start button: send the setup command right away.
+   *
+   * The Worker needs the validation service synced first, so on an unsynced
+   * Worker this runs the sync and sends once it has succeeded.
+   */
+  const handleStart = () => {
+    if (role === "worker" && !validation.syncedAt) {
+      if (onSyncValidation()) pendingStart.current = validation.syncedAt
+      return
+    }
+    sendSetup()
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fires on sync completion only
+  useEffect(() => {
+    if (pendingStart.current === undefined || validation.syncing) return
+    const succeeded = validation.syncedAt !== pendingStart.current
+    pendingStart.current = undefined
+    if (succeeded) sendSetup()
+  }, [validation.syncing, validation.syncedAt])
+
+  /**
+   * Write the chosen command into the box; sending stays on Enter.
+   *
+   * Client commands take no arguments and run on pick, like the native
+   * client (here that means opening the confirmation).
+   */
+  const pickCommand = (command: ARLCommand) => {
+    if (command.kind === "client") {
+      setInput("")
+      setConfirmClear(true)
+      return
+    }
     fillComposer(applyCommand(command))
+  }
 
   /** Replace the composer text, focus it and park the caret at the end. */
   const fillComposer = (text: string) => {
@@ -282,7 +404,12 @@ export default function ARLPane({
 
   const submit = () => {
     const text = input.trim()
-    if (!text || !ready) return
+    if (!text || !canType) return
+    if (resolveClientCommand(text)?.name === "clear") {
+      setInput("")
+      setConfirmClear(true)
+      return
+    }
     onSend(role, text)
     setInput("")
     stickToBottom.current = true
@@ -293,7 +420,9 @@ export default function ARLPane({
   const statusLabel = t(`autoResearch.arl.${agent.statusKey}`)
   // Booting and running are the two "something is happening" phases; both
   // get the breathing halo on the avatar.
-  const busy = booting || running || state.agentStatus === "running"
+  const subagentsRunning = state.subagents.some((s) => s.status === "running")
+  const busy =
+    booting || running || state.agentStatus === "running" || subagentsRunning
 
   // Permission mode: the container's own list, as reported by its provider.
   const autoMode = isUnattendedMode(state.modeId)
@@ -448,15 +577,38 @@ export default function ARLPane({
                 role={role}
                 booting={booting}
                 loadingHistory={!booting && connected && !state.historyLoaded}
-                ready={ready}
+                ready={ready && !state.resetting}
                 validation={validation}
-                onUseCommand={() => fillComposer(`${SETUP_COMMAND} `)}
-                onSync={connected ? onSyncValidation : undefined}
+                onStart={handleStart}
+                validatorStarted={validatorStarted}
               />
             ) : (
-              state.items.map((item) => (
-                <ARLMessageItem key={item.id} item={item} />
-              ))
+              <>
+                {(state.hasOlder || state.loadingOlder) && (
+                  <div className="flex justify-center pb-3">
+                    {state.loadingOlder ? (
+                      <span className="inline-flex h-7 items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                        <Loader2 className="size-3 animate-spin" />
+                        {t("autoResearch.arl.loadingOlder")}
+                      </span>
+                    ) : (
+                      // Fallback for when the history is too short to
+                      // scroll, so the top threshold can never be crossed.
+                      <button
+                        type="button"
+                        onClick={requestOlder}
+                        disabled={!ready}
+                        className="h-7 rounded-full border border-border/60 bg-background/70 px-3 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                      >
+                        {t("autoResearch.arl.loadOlder")}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {state.items.map((item) => (
+                  <ARLMessageItem key={item.id} item={item} />
+                ))}
+              </>
             )}
             <div ref={anchor} />
           </div>
@@ -546,6 +698,13 @@ export default function ARLPane({
 
       {/* Composer: a floating card, no divider above it. */}
       <div className="shrink-0 px-5 pt-1 pb-4">
+        <div className="mx-auto w-full max-w-[820px]">
+          <ARLSubagentStrip
+            role={role}
+            subagents={state.subagents}
+            onFetchTimeline={onFetchSubagentTimeline}
+          />
+        </div>
         <div className="relative mx-auto w-full max-w-[820px]">
           {/* Slash-command menu. Rows take `onMouseDown` + preventDefault so
               clicking one does not blur the textarea (blur closes the menu). */}
@@ -567,7 +726,10 @@ export default function ARLPane({
                   {t("autoResearch.arl.commandsKeyHint")}
                 </span>
               </div>
-              <div ref={commandList} className="max-h-64 overflow-y-auto p-1">
+              <div
+                ref={commandList}
+                className="max-h-64 overflow-x-hidden overflow-y-auto p-1"
+              >
                 {matches.length > 0 ? (
                   matches.map((command, index) => (
                     <div
@@ -583,33 +745,49 @@ export default function ARLPane({
                       }}
                       onMouseEnter={() => setActiveCommand(index)}
                       className={cn(
-                        "flex cursor-pointer items-baseline gap-2 rounded-lg px-2.5 py-1.5",
+                        "flex min-w-0 cursor-pointer items-baseline gap-2 rounded-lg px-2.5 py-1.5",
                         index === activeCommand && "bg-(--arl-accent)/10",
                       )}
                     >
+                      {/* Every text part may shrink and ends in an ellipsis;
+                          the full text stays available as a tooltip. */}
                       <span
                         className={cn(
-                          "shrink-0 font-mono text-[12.5px] font-medium",
+                          "max-w-[45%] shrink-0 truncate font-mono text-[12.5px] font-medium",
                           index === activeCommand && "text-(--arl-accent-fg)",
                         )}
+                        title={`/${command.name}`}
                       >
                         /{command.name}
                       </span>
                       {command.argumentHint && (
-                        <span className="shrink-0 font-mono text-[11px] text-muted-foreground/70">
+                        <span
+                          className="min-w-0 max-w-[30%] truncate font-mono text-[11px] text-muted-foreground/70"
+                          title={command.argumentHint}
+                        >
                           {command.argumentHint}
                         </span>
                       )}
-                      <span
-                        className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground"
-                        title={command.description}
-                      >
-                        {command.description}
-                      </span>
+                      {(() => {
+                        const description =
+                          command.kind === "client"
+                            ? t("autoResearch.arl.clearCommandDesc")
+                            : command.description
+                        return (
+                          <span
+                            className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground"
+                            title={description}
+                          >
+                            {description}
+                          </span>
+                        )
+                      })()}
                       <span className="shrink-0 rounded-md bg-muted px-1.5 text-[10px] text-muted-foreground/80">
                         {command.kind === "skill"
                           ? t("autoResearch.arl.commandKindSkill")
-                          : t("autoResearch.arl.commandKindCommand")}
+                          : command.kind === "client"
+                            ? t("autoResearch.arl.commandKindClient")
+                            : t("autoResearch.arl.commandKindCommand")}
                       </span>
                     </div>
                   ))
@@ -629,14 +807,14 @@ export default function ARLPane({
             className={cn(
               "rounded-2xl border border-border/60 bg-background/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.12)] backdrop-blur transition-[border-color,box-shadow] dark:bg-background/50",
               "focus-within:border-(--arl-accent)/45 focus-within:shadow-[0_0_0_4px_color-mix(in_srgb,var(--arl-accent)_12%,transparent),0_8px_24px_-12px_rgba(0,0,0,0.18)]",
-              !ready && "opacity-80",
+              !canType && "opacity-80",
             )}
           >
             <textarea
               ref={textareaRef}
               rows={1}
               value={input}
-              disabled={!ready}
+              disabled={!canType}
               onChange={(e) => {
                 setInput(e.target.value)
                 // Typing again re-arms a menu dismissed with Esc.
@@ -660,7 +838,9 @@ export default function ARLPane({
               placeholder={
                 booting
                   ? t("autoResearch.arl.bootingPlaceholder")
-                  : t("autoResearch.arl.placeholderShort", { role: roleLabel })
+                  : state.resetting
+                    ? t("autoResearch.arl.resetting")
+                    : t("autoResearch.arl.placeholderShort", { role: roleLabel })
               }
               className="block max-h-40 min-h-[48px] w-full resize-none bg-transparent px-4 pt-3 text-[14.5px] leading-[21px] outline-none placeholder:text-muted-foreground/50 disabled:cursor-not-allowed"
             />
@@ -692,7 +872,7 @@ export default function ARLPane({
               ) : (
                 <button
                   type="button"
-                  disabled={!ready || !input.trim()}
+                  disabled={!canType || !input.trim()}
                   onClick={submit}
                   aria-label={t("autoResearch.arl.send")}
                   title={
@@ -702,7 +882,7 @@ export default function ARLPane({
                   }
                   className="grid size-8 place-items-center rounded-full bg-(--arl-accent) text-white shadow-[0_4px_12px_-4px_var(--arl-accent)] transition-[transform,opacity,box-shadow] hover:brightness-110 active:scale-95 disabled:bg-muted disabled:text-muted-foreground/60 disabled:shadow-none"
                 >
-                  {booting ? (
+                  {booting || state.resetting ? (
                     <Loader2 className="size-3.5 animate-spin" />
                   ) : (
                     <ArrowUp className="size-4" strokeWidth={2.25} />
@@ -713,71 +893,37 @@ export default function ARLPane({
           </div>
         </div>
       </div>
+
+      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("autoResearch.arl.clearTitle", { role: roleLabel })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("autoResearch.arl.clearDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("autoResearch.arl.clearCancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => onReset(role)}>
+              {t("autoResearch.arl.clearConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }
 
-/** Progress of one guide step. */
-type GuideStepState = "done" | "current" | "todo"
-
-/** One step of the empty-pane guide. */
-interface GuideStep {
-  key: string
-  state: GuideStepState
-  /** Offer the setup-command chip under this step while it is current. */
-  command?: boolean
-}
-
 /**
- * Steps shown on an empty pane, derived from the live handoff state so the
- * highlighted step always matches what the user has to do next.
+ * Placeholder for an empty history: one start button, nothing else.
  *
- * Validator: run the setup command, which produces the validation service and
- * `task.md`, then hand over to the Worker. Worker: wait for that service, sync
- * it across, then run the same setup command here.
- *
- * @param role - Container role.
- * @param validation - Validation handoff state.
- * @returns Ordered steps; the first unfinished one is `current`.
- */
-function guideSteps(
-  role: ARLRole,
-  validation: ARLValidationState,
-): GuideStep[] {
-  const serviceReady = validation.configured && validation.hasTask
-  const synced = !!validation.syncedAt
-  const raw: { key: string; done: boolean; command?: boolean }[] =
-    role === "validator"
-      ? [
-          { key: "validatorStep1", done: serviceReady, command: true },
-          { key: "validatorStep2", done: synced },
-        ]
-      : [
-          { key: "workerStep1", done: serviceReady },
-          { key: "workerStep2", done: synced },
-          { key: "workerStep3", done: false, command: true },
-        ]
-  const current = raw.findIndex((step) => !step.done)
-  return raw.map((step, index) => ({
-    key: step.key,
-    command: step.command,
-    state: step.done ? "done" : index === current ? "current" : "todo",
-  }))
-}
-
-/**
- * Placeholder for an empty history: a step-by-step guide for the ARL flow.
- *
- * A fresh session otherwise opens on two blank chats with no hint that the
- * Validator has to go first, so the guide is deliberately prominent: an
- * accent card, numbered steps with the next one highlighted, and the setup
- * command as a one-click chip that fills the composer.
- *
- * The guide also shows while the container boots, so the user can read it
- * during the wait. Only the history backfill gets a bare spinner, since
- * messages may be about to appear. The hook resolves `historyLoaded` on
- * `agents_ready` even when the backend skipped the backfill, so that spinner
- * cannot hang on a frame that never arrives.
+ * The Validator always offers it; the Worker only once the Validator has
+ * produced the validation service and `task.md`, and shows a one-line
+ * warning until then. While the container boots the button stays disabled with a
+ * spinner, and the history backfill gets a bare spinner since messages may be
+ * about to appear.
  */
 function EmptyState({
   role,
@@ -785,18 +931,17 @@ function EmptyState({
   loadingHistory,
   ready,
   validation,
-  onUseCommand,
-  onSync,
+  onStart,
+  validatorStarted,
 }: {
   role: ARLRole
   booting: boolean
   loadingHistory: boolean
-  /** Agent is up: the command chip can fill the composer. */
+  /** Agent is up and can take the setup command. */
   ready: boolean
   validation: ARLValidationState
-  onUseCommand: () => void
-  /** Run the validation sync; absent while the socket is down. */
-  onSync?: () => void
+  onStart: () => void
+  validatorStarted: boolean
 }) {
   const { t } = useTranslation()
 
@@ -811,211 +956,45 @@ function EmptyState({
     )
   }
 
-  const steps = guideSteps(role, validation)
-  const allDone = steps.every((step) => step.state === "done")
-
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center py-8">
-      <div className="w-full max-w-[340px]">
-        {/* Title only: the pane header already carries the engine logo */}
-        <p className="mb-3.5 text-center text-[15px] font-semibold tracking-tight text-foreground">
-          {t(`autoResearch.arl.guide.${role}Title`)}
+  if (role === "worker" && !canSyncValidation(validation)) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-16">
+        {/* Warning tone: the validation service is not ready yet */}
+        <p
+          role="status"
+          className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-[13px] text-amber-700 dark:text-amber-400"
+        >
+          <TriangleAlert className="size-4 shrink-0" />
+          {t(workerWaitKey(validatorStarted))}
         </p>
-
-        {/* Steps card: one short line per step, the next one highlighted */}
-        <div className="rounded-2xl border border-(--arl-accent)/30 bg-background/85 px-4 py-3.5 shadow-[0_14px_36px_-18px_color-mix(in_srgb,var(--arl-accent)_55%,transparent)] backdrop-blur dark:bg-background/55">
-          <ol>
-            {steps.map((step, index) => (
-              <li
-                key={step.key}
-                className="relative flex items-start gap-3 pb-3.5 last:pb-0"
-                aria-current={step.state === "current" ? "step" : undefined}
-              >
-                {/* Connector to the next step */}
-                {index < steps.length - 1 && (
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "absolute top-7 bottom-0.5 left-[11.5px] w-px",
-                      step.state === "done" ? "bg-emerald-500/45" : "bg-border",
-                    )}
-                  />
-                )}
-                <span
-                  className={cn(
-                    "relative z-10 grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold tabular-nums",
-                    step.state === "done" && "bg-emerald-500 text-white",
-                    step.state === "current" &&
-                      "bg-(--arl-accent) text-white shadow-[0_0_0_4px_color-mix(in_srgb,var(--arl-accent)_20%,transparent)]",
-                    step.state === "todo" &&
-                      "bg-muted text-muted-foreground ring-1 ring-border ring-inset",
-                  )}
-                >
-                  {step.state === "done" ? (
-                    <Check className="size-3.5" strokeWidth={3} />
-                  ) : (
-                    index + 1
-                  )}
-                </span>
-                <StepText
-                  text={t(`autoResearch.arl.guide.${step.key}`)}
-                  state={step.state}
-                  // Only this pane's own command step fills the composer; a
-                  // command mentioned for the other pane stays plain code.
-                  onUseCommand={
-                    step.command && step.state === "current"
-                      ? onUseCommand
-                      : undefined
-                  }
-                  commandReady={ready}
-                  // The sync step is only ever current once the service and
-                  // task.md exist, i.e. exactly when syncing is possible.
-                  onSync={step.state === "current" ? onSync : undefined}
-                  syncBusy={validation.syncing}
-                />
-              </li>
-            ))}
-          </ol>
-          {/* Footer: boot progress, or the all-set note */}
-          {(booting || allDone) && (
-            <div className="-mx-4 mt-3.5 -mb-3.5 flex items-center justify-center gap-1.5 border-t border-border/50 px-4 py-2 text-[11.5px] text-muted-foreground">
-              {booting ? (
-                <>
-                  <Loader2 className="size-3 animate-spin" />
-                  {t("autoResearch.arl.bootingHint")}
-                </>
-              ) : (
-                <>
-                  <Check className="size-3 text-emerald-500" />
-                  {t("autoResearch.arl.guide.allDone")}
-                </>
-              )}
-            </div>
-          )}
-        </div>
       </div>
-    </div>
-  )
-}
-
-/** Placeholder in guide strings for the inline sync-button replica. */
-const SYNC_TOKEN = "{sync}"
-
-/** Splits a guide string around the setup command and the sync token. */
-const STEP_TOKEN_PATTERN = new RegExp(
-  `(${SETUP_COMMAND}|${SYNC_TOKEN.replace(/[{}]/g, "\\$&")})`,
-)
-
-/**
- * One guide step's label, with inline chips for the tokens it mentions.
- *
- * - `/aris-setup` renders as a command chip; with `onUseCommand` set it is a
- *   button that fills the composer.
- * - `{sync}` renders as a small replica of the round sync button that sits
- *   between the two composers, so the text can point at it by appearance
- *   instead of a vague "the button in the middle". With `onSync` set the
- *   replica runs the sync.
- *
- * Keeping these inside the sentence (instead of a hint line plus a button
- * below it) is what lets each step fit on one line.
- */
-function StepText({
-  text,
-  state,
-  onUseCommand,
-  commandReady,
-  onSync,
-  syncBusy,
-}: {
-  text: string
-  state: GuideStepState
-  onUseCommand?: () => void
-  /** Agent is up, so the chip may fill the composer. */
-  commandReady: boolean
-  onSync?: () => void
-  syncBusy: boolean
-}) {
-  const { t } = useTranslation()
-
-  const chipBase =
-    "mx-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-px align-baseline font-mono text-[12px] font-semibold"
-  // Same shape and colours as the sync button between the composers,
-  // shrunk to text size.
-  const syncBase =
-    "mx-0.5 inline-grid size-[18px] place-items-center rounded-full border bg-background align-[-4px] shadow-sm"
-
-  const renderToken = (part: string, index: number) => {
-    if (part === SETUP_COMMAND) {
-      return onUseCommand ? (
-        <button
-          key={index}
-          type="button"
-          onClick={onUseCommand}
-          disabled={!commandReady}
-          title={
-            commandReady
-              ? t("autoResearch.arl.guide.useCommand")
-              : t("autoResearch.arl.bootingHint")
-          }
-          className={cn(
-            chipBase,
-            "border border-(--arl-accent)/40 bg-(--arl-accent)/10 text-(--arl-accent-fg) transition-colors enabled:hover:border-(--arl-accent)/70 enabled:hover:bg-(--arl-accent)/18 disabled:cursor-not-allowed disabled:opacity-60",
-          )}
-        >
-          {SETUP_COMMAND}
-          <CornerDownLeft className="size-3 opacity-70" />
-        </button>
-      ) : (
-        <code key={index} className={cn(chipBase, "bg-muted font-medium")}>
-          {SETUP_COMMAND}
-        </code>
-      )
-    }
-    if (part === SYNC_TOKEN) {
-      return onSync ? (
-        <button
-          key={index}
-          type="button"
-          onClick={onSync}
-          disabled={syncBusy}
-          title={t("autoResearch.arl.validationSync")}
-          aria-label={t("autoResearch.arl.validationSync")}
-          className={cn(
-            syncBase,
-            "border-amber-500/60 text-amber-600 transition-transform enabled:hover:scale-110 disabled:cursor-wait dark:text-amber-400",
-          )}
-        >
-          {syncBusy ? (
-            <Loader2 className="size-2.5 animate-spin" />
-          ) : (
-            <ArrowRight className="size-2.5" strokeWidth={2.5} />
-          )}
-        </button>
-      ) : (
-        <span
-          key={index}
-          aria-hidden
-          className={cn(syncBase, "border-border text-muted-foreground")}
-        >
-          <ArrowRight className="size-2.5" strokeWidth={2.5} />
-        </span>
-      )
-    }
-    return part
+    )
   }
 
+  const busy = booting || validation.syncing
   return (
-    <p
-      className={cn(
-        "min-w-0 flex-1 pt-[3px] text-[13px] leading-[20px]",
-        state === "current" && "font-medium text-foreground",
-        state === "done" &&
-          "text-muted-foreground/70 line-through decoration-muted-foreground/40",
-        state === "todo" && "text-muted-foreground",
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16">
+      {/* Same look as the normal session's start-research button (ChatPanel) */}
+      <button
+        type="button"
+        onClick={onStart}
+        disabled={!ready || validation.syncing}
+        className="group relative inline-flex items-center gap-2.5 rounded-xl border-2 border-primary/40 bg-gradient-to-br from-primary to-primary/80 px-8 py-3.5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 hover:scale-105 disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
+      >
+        {busy ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : (
+          <Play className="size-5 transition-transform group-hover:scale-110" />
+        )}
+        {t(`autoResearch.arl.guide.${role}Start`)}
+        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 blur-sm transition-opacity group-hover:opacity-100" />
+      </button>
+      {booting && (
+        <p className="text-xs text-muted-foreground/60">
+          {t("autoResearch.arl.bootingHint")}
+        </p>
       )}
-    >
-      {text.split(STEP_TOKEN_PATTERN).map(renderToken)}
-    </p>
+    </div>
   )
 }
 

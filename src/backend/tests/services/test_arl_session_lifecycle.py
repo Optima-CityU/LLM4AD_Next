@@ -492,3 +492,33 @@ def test_reconcile_keeps_everything_when_db_lookup_fails(env, monkeypatch) -> No
 
     assert runtime.reconcile_arl_containers() == 0
     assert not any(c.removed for c in containers.values())
+
+
+async def test_stop_session_keeps_going_when_one_container_fails(env, monkeypatch) -> None:
+    """一个容器停失败不能让另一个被跳过，且会话要放回活跃集合等下一轮重试。"""
+    from docker.errors import APIError
+
+    session_id = "s11"
+    containers = {
+        runtime.container_name(session_id, role): _FakeContainer(
+            runtime.container_name(session_id, role)
+        )
+        for role in ARLRole
+    }
+    worker = containers[runtime.container_name(session_id, ARLRole.WORKER)]
+    validator = containers[runtime.container_name(session_id, ARLRole.VALIDATOR)]
+
+    def _boom(**_kwargs):
+        raise APIError("stop failed")
+
+    worker.stop = _boom
+    _install_docker(env, _FakeDocker(containers))
+    touched: list[tuple] = []
+    monkeypatch.setattr(
+        runtime, "touch_arl_session_active", lambda sid, ts=None: touched.append((sid, ts))
+    )
+    service = runtime.ARLRuntimeService()
+
+    assert await service.stop_session(session_id) is True
+    assert validator.stopped is True
+    assert touched == [(session_id, 0.0)]

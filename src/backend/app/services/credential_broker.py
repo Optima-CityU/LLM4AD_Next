@@ -147,6 +147,43 @@ def resolve_token(token: str) -> dict | None:
         return None
 
 
+def extend_task_tokens(
+    task_id: str | uuid.UUID, ttl: int, *, user_id: str | uuid.UUID | None = None
+) -> int:
+    """把某任务已发放的全部代理 token 的有效期重置为 ``ttl``。
+
+    供长期存活的调用方（ARL 会话）在仍被使用时续期：token 值不变，只刷新
+    Redis 里映射记录的过期时间，持有 token 的容器无需重启。已经过期或被吊销
+    的 token 不会被复活（``EXPIRE`` 对不存在的 key 无效）。
+
+    Args:
+        task_id: 业务任务 ID。
+        ttl: 新的有效期（秒），从现在起算。
+        user_id: 归属用户 ID（可选）。传入时一并续期按用户归集的反向索引，
+            避免索引先过期导致删除账号时漏吊销。
+
+    Returns:
+        成功续期的 token 数量。
+    """
+    try:
+        r = get_sync_redis()
+        task_key = _task_tokens_key(task_id)
+        tokens = r.smembers(task_key)
+        if not tokens:
+            return 0
+        pipe = r.pipeline()
+        for token in tokens:
+            pipe.expire(_token_key(token), ttl)
+        pipe.expire(task_key, ttl)
+        if user_id is not None:
+            pipe.expire(_user_tokens_key(user_id), ttl)
+        results = pipe.execute()
+        return sum(1 for ok in results[: len(tokens)] if ok)
+    except Exception:
+        logger.warning(f"续期任务 {task_id} 的代理 token 失败", exc_info=True)
+        return 0
+
+
 def revoke_task_tokens(task_id: str | uuid.UUID) -> int:
     """吊销某任务发放的全部代理 token。
 

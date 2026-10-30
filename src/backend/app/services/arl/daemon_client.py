@@ -133,6 +133,8 @@ class PaseoDaemonClient:
         self._receive_task: asyncio.Task | None = None
         self._rpc_futures: dict[str, asyncio.Future] = {}
         self._timeline_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        # open_event_queue 注册的回调，按队列 id 记下以便释放
+        self._queue_callbacks: dict[int, Callable[[dict[str, Any]], None]] = {}
 
     async def _open_socket(self) -> websockets.WebSocketClientProtocol:
         """建立底层 WS 连接，容忍 daemon 的「HTTP 已就绪但 WS 未就绪」窗口。
@@ -213,9 +215,31 @@ class PaseoDaemonClient:
                 "protocolVersion": 1,
                 "auth": {"kind": "password", "password": self.password},
                 "appVersion": "0.1.0",
-                # 声明该能力后，daemon 会在拒绝时先回 hello.rejected，
-                # 带上具体 reason，而不是只给一个 close code。
-                "capabilities": {"hello_rejection": True},
+                # hello_rejection：拒绝时先回 hello.rejected，带上具体 reason，
+                # 而不是只给一个 close code。
+                # provider_subagents / projected_subagent_timeline：不声明的话
+                # daemon 既不推 ``agent.provider_subagents.update``，子 agent
+                # 时间线接口也只回一条「请升级客户端」的占位消息。
+                # timeline_notifications / plugin_timeline_items：不声明的话
+                # daemon 会把这两类条目从推送和历史里滤掉，而它们照样占用
+                # seq，上层按 seq 对账时会误判为缺口。
+                # timeline_replacement_invalidation：时间线重建时只发一条
+                # ``agent.timeline.replacement``，而不是把整段对话当新事件
+                # 重放一遍（会在前端叠出重复消息）。
+                # reasoning_merge_enum：只影响历史条目 ``collapsed`` 数组里是否
+                # 保留 ``reasoning_merge`` 标签，思考片段的合并本身不受影响；
+                # 我们不读这个字段，声明只是与原生客户端保持一致。
+                # 未声明 selective_agent_timeline / explicit_event_subscriptions：
+                # 声明后 daemon 只推显式订阅过的 agent，需要额外的订阅流程。
+                "capabilities": {
+                    "hello_rejection": True,
+                    "reasoning_merge_enum": True,
+                    "provider_subagents": True,
+                    "projected_subagent_timeline": True,
+                    "timeline_notifications": True,
+                    "plugin_timeline_items": True,
+                    "timeline_replacement_invalidation": True,
+                },
             }
 
             logger.info(
@@ -957,30 +981,34 @@ class PaseoDaemonClient:
         limit: int = 200,
         direction: str = "tail",
         projection: str = "projected",
+        cursor: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """拉取某个 agent 的历史时间线。
 
-        前端刷新/重连后靠它回填聊天记录，否则面板会是空的。
+        前端刷新/重连后靠它回填聊天记录（``tail``），向上翻页时用
+        ``before`` + 当前最早一条的游标继续往前取。
 
         Args:
             agent_id: 目标 agent ID
             limit: 最多返回多少条（daemon 侧上限 200）
             direction: ``tail`` 取最近 limit 条；``before`` / ``after`` 需配合 cursor
             projection: daemon 侧投影模式，只能是 ``projected`` 或 ``canonical``
+            cursor: ``{"epoch": str, "seq": int}``，``before`` / ``after`` 时必填
 
         Returns:
             响应 payload，``entries`` 是已在上游折叠好的时间线条目：
             ``{provider, item, timestamp, seqStart, seqEnd, turnId, collapsed}``。
         """
+        params: dict[str, Any] = {
+            "agentId": agent_id,
+            "direction": direction,
+            "limit": limit,
+            "projection": projection,
+        }
+        if cursor is not None:
+            params["cursor"] = cursor
         payload = await self._rpc_call(
-            "fetch_agent_timeline_request",
-            {
-                "agentId": agent_id,
-                "direction": direction,
-                "limit": limit,
-                "projection": projection,
-            },
-            timeout=30.0,
+            "fetch_agent_timeline_request", params, timeout=30.0
         )
         if payload.get("error"):
             raise RuntimeError(f"拉取 agent 历史失败: {payload['error']}")
@@ -994,6 +1022,107 @@ class PaseoDaemonClient:
         )
         return payload
 
+    async def refresh_agent(self, agent_id: str) -> dict[str, Any]:
+        """从持久化记录重新加载一个 agent（``refresh_agent_request``）。
+
+        daemon 重启后，磁盘上的 agent 先以 ``closed`` 状态出现在目录里，
+        要等 provider 会话恢复成功才变成可用。本调用触发这次恢复并等待结果。
+
+        Args:
+            agent_id: 目标 agent ID
+
+        Returns:
+            响应 payload（``status: agent_refreshed``）。
+
+        Raises:
+            RuntimeError: 恢复失败，例如 codex 找不到线程的 rollout 文件。
+        """
+        logger.info("🔄 [DaemonClient] 重新加载 agent: agentId={}", agent_id)
+        return await self._rpc_call(
+            "refresh_agent_request", {"agentId": agent_id}, timeout=60.0
+        )
+
+    async def archive_agent(self, agent_id: str) -> dict[str, Any]:
+        """归档一个 agent（原生 UI 的 ``/clear`` 第一步）。
+
+        归档后 agent 从默认目录里消失，其由 MCP 创建的子 agent 也会被级联
+        归档；工作区文件不受影响。
+
+        Args:
+            agent_id: 目标 agent ID
+
+        Returns:
+            响应 payload（``agent_archived``：``agentId`` / ``archivedAt``）。
+
+        Raises:
+            RuntimeError: daemon 拒绝归档。
+        """
+        logger.info("🗄️ [DaemonClient] 归档 agent: agentId={}", agent_id)
+        payload = await self._rpc_call(
+            "archive_agent_request", {"agentId": agent_id}, timeout=60.0
+        )
+        if payload.get("error"):
+            raise RuntimeError(f"归档 agent 失败: {payload['error']}")
+        return payload
+
+    async def list_provider_subagents(self, parent_agent_id: str) -> list[dict[str, Any]]:
+        """列出某个 agent 名下由 provider 派生的子 agent（如 Claude 的 Task）。
+
+        Args:
+            parent_agent_id: 父 agent ID
+
+        Returns:
+            子 agent 描述列表（``id`` / ``title`` / ``description`` / ``status`` ...）。
+
+        Raises:
+            RuntimeError: daemon 返回错误。
+        """
+        payload = await self._rpc_call(
+            "agent.provider_subagents.list.request",
+            {"parentAgentId": parent_agent_id},
+        )
+        if payload.get("error"):
+            raise RuntimeError(f"列出子 agent 失败: {payload['error']}")
+        return list(payload.get("subagents") or [])
+
+    async def fetch_subagent_timeline(
+        self,
+        parent_agent_id: str,
+        subagent_id: str,
+        limit: int = 200,
+        direction: str = "tail",
+        cursor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """拉取某个子 agent 的时间线（前端点开子任务卡片时按需加载）。
+
+        Args:
+            parent_agent_id: 父 agent ID
+            subagent_id: 子 agent ID
+            limit: 最多返回多少条
+            direction: ``tail`` / ``before`` / ``after``
+            cursor: ``{"epoch": str, "seq": int}``，``before`` / ``after`` 时必填
+
+        Returns:
+            响应 payload，``rows`` 为 ``{item, timestamp, seq, ...}`` 列表。
+
+        Raises:
+            RuntimeError: daemon 返回错误。
+        """
+        params: dict[str, Any] = {
+            "parentAgentId": parent_agent_id,
+            "subagentId": subagent_id,
+            "direction": direction,
+            "limit": limit,
+        }
+        if cursor is not None:
+            params["cursor"] = cursor
+        payload = await self._rpc_call(
+            "agent.provider_subagents.timeline.get.request", params, timeout=30.0
+        )
+        if payload.get("error"):
+            raise RuntimeError(f"拉取子 agent 时间线失败: {payload['error']}")
+        return payload
+
     def subscribe_timeline(self, callback: Callable[[dict[str, Any]], None]):
         """订阅 agent 事件。
 
@@ -1002,39 +1131,68 @@ class PaseoDaemonClient:
         """
         self._timeline_callbacks.append(callback)
 
-    async def subscribe_timeline_async(self):
-        """订阅 agent 事件（异步生成器模式）。
+    def open_event_queue(self) -> asyncio.Queue:
+        """立即开始缓存 daemon 推送的事件，返回缓存队列。
 
-        用于 async for 循环。内部使用队列转发事件。
+        必须在 ``fetch_agents(subscribe=True)`` 之前调用：订阅一建立 daemon
+        就开始推送，而上层还要先拉历史、广播 ``agents_ready``，之后才轮到
+        转发任务消费。原先回调要等转发任务启动才注册，这段窗口里的推送
+        因为没有任何回调而被直接丢弃——刷新时正在跑的回合会丢消息、丢
+        ``turn_completed``（界面卡在「工作中」）、丢权限请求。
+
+        队列不设上限：窗口只有几秒，丢事件的代价远大于多占的那点内存。
+
+        Returns:
+            事件队列，用 :meth:`iter_event_queue` 消费，用
+            :meth:`close_event_queue` 释放。
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+        callback = queue.put_nowait
+        self._queue_callbacks[id(queue)] = callback
+        self.subscribe_timeline(callback)
+        return queue
+
+    def close_event_queue(self, queue: asyncio.Queue) -> None:
+        """停止向 :meth:`open_event_queue` 返回的队列写入事件。
+
+        Args:
+            queue: 要释放的队列
+        """
+        callback = self._queue_callbacks.pop(id(queue), None)
+        if callback is not None:
+            self.unsubscribe_timeline(callback)
+
+    async def iter_event_queue(self, queue: asyncio.Queue):
+        """逐个取出队列里的事件，连接断开后结束。
+
+        Args:
+            queue: :meth:`open_event_queue` 返回的队列
 
         Yields:
             dict: session 内层消息（含 ``type`` 与 ``payload``）
         """
-        # 创建队列来存储事件
-        queue: asyncio.Queue = asyncio.Queue()
-
-        def callback(event: dict[str, Any]):
-            """回调函数：将事件放入队列"""
+        while self._connected:
             try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.warning("Timeline event queue full, dropping event")
+                yield await asyncio.wait_for(queue.get(), timeout=1.0)
+            except TimeoutError:
+                # 超时只为定期检查连接状态
+                continue
 
-        # 注册回调
-        self.subscribe_timeline(callback)
+    async def subscribe_timeline_async(self):
+        """订阅 agent 事件（异步生成器模式）。
 
+        从调用这一刻起才开始缓存；需要覆盖更早窗口的调用方应改用
+        :meth:`open_event_queue` + :meth:`iter_event_queue`。
+
+        Yields:
+            dict: session 内层消息（含 ``type`` 与 ``payload``）
+        """
+        queue = self.open_event_queue()
         try:
-            # 持续从队列中取出事件并 yield
-            while self._connected:
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    yield event
-                except TimeoutError:
-                    # 超时后继续循环，检查连接状态
-                    continue
+            async for event in self.iter_event_queue(queue):
+                yield event
         finally:
-            # 清理：取消订阅
-            self.unsubscribe_timeline(callback)
+            self.close_event_queue(queue)
 
     def unsubscribe_timeline(self, callback: Callable[[dict[str, Any]], None]):
         """取消订阅 timeline 事件。

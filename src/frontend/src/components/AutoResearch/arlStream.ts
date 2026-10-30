@@ -132,6 +132,27 @@ export function isUnattendedMode(modeId: string | null | undefined): boolean {
   return !!modeId && UNATTENDED_MODE_IDS.has(modeId)
 }
 
+/** Position in a daemon timeline, used to page further back. */
+export interface ARLTimelineCursor {
+  epoch: string
+  seq: number
+}
+
+/** Lifecycle of a provider-owned subagent (e.g. a Claude `Task`). */
+export type ARLSubagentStatus = "running" | "completed" | "failed" | "canceled"
+
+/** A subagent spawned by a container's main agent. */
+export interface ARLSubagent {
+  id: string
+  title: string | null
+  description: string | null
+  /** Provider-formatted context line (model, usage...); display only. */
+  subtitle: string | null
+  status: ARLSubagentStatus
+  createdAt: string
+  updatedAt: string
+}
+
 /** Everything the left/right pane needs for one container. */
 export interface ARLRoleState {
   agentId: string | null
@@ -148,6 +169,16 @@ export interface ARLRoleState {
   permissions: ARLPermissionRequest[]
   /** True once the daemon history backfill for this role has landed. */
   historyLoaded: boolean
+  /** Cursor of the oldest loaded row; `null` until history lands. */
+  historyCursor: ARLTimelineCursor | null
+  /** The daemon has rows older than `historyCursor`. */
+  hasOlder: boolean
+  /** A `timeline_fetch_older` request is in flight. */
+  loadingOlder: boolean
+  /** Subagents of the current main agent, oldest first. */
+  subagents: ARLSubagent[]
+  /** True between confirming `/clear` and the backend's reset result. */
+  resetting: boolean
   /**
    * True once `agents_ready` has arrived for this container.
    *
@@ -235,6 +266,11 @@ export function emptyRoleState(): ARLRoleState {
     items: [],
     permissions: [],
     historyLoaded: false,
+    historyCursor: null,
+    hasOlder: false,
+    loadingOlder: false,
+    subagents: [],
+    resetting: false,
     ready: false,
   }
 }
@@ -666,4 +702,201 @@ export function applyAgentSnapshot(
   }
 
   return next
+}
+
+/**
+ * Turn daemon timeline entries (history backfill or an older page) into rows.
+ *
+ * History keeps both halves of a compaction (loading, then completed); they
+ * are folded into one row like the live stream does.
+ */
+export function itemsFromEntries(entries: unknown): ARLStreamItem[] {
+  if (!Array.isArray(entries)) return []
+  let items: ARLStreamItem[] = []
+  for (const entry of entries) {
+    const item = normalizeItem(entry?.item, entry?.timestamp)
+    if (!item) continue
+    if (item.kind === "compaction") items = appendItem(items, item)
+    else items.push(item)
+  }
+  return items
+}
+
+/** Validate a cursor coming off the wire. */
+function parseCursor(raw: any): ARLTimelineCursor | null {
+  if (!raw || typeof raw.epoch !== "string" || !raw.epoch) return null
+  if (typeof raw.seq !== "number" || raw.seq < 0) return null
+  return { epoch: raw.epoch, seq: raw.seq }
+}
+
+/**
+ * Fold a `timeline_history` frame (the tail backfill) into a pane.
+ *
+ * History is authoritative for everything already committed: replace, do not
+ * append, so a reconnect cannot duplicate rows. The cursor of its first row
+ * is what the next "load older" request pages back from.
+ *
+ * The backend also re-sends history mid-session when the live stream has a
+ * gap. If a turn is still in flight, the newest text row is reopened for
+ * streaming: the next live chunk continues that same message, and appending
+ * it to a closed row would split one paragraph into two.
+ */
+export function applyHistory(state: ARLRoleState, data: any): ARLRoleState {
+  const historyCursor = parseCursor(data?.start_cursor)
+  let items = itemsFromEntries(data?.entries)
+  const last = items[items.length - 1]
+  if (
+    data?.active_turn &&
+    (last?.kind === "assistant_message" || last?.kind === "thought")
+  ) {
+    items = [...items.slice(0, -1), { ...last, streaming: true }]
+  }
+  return {
+    ...state,
+    items,
+    historyLoaded: true,
+    historyCursor,
+    hasOlder: Boolean(data?.has_older) && historyCursor !== null,
+    loadingOlder: false,
+  }
+}
+
+/**
+ * Fold a `timeline_older` frame (one page before the oldest loaded row) into
+ * a pane by prepending it.
+ *
+ * A page is dropped when the daemon flags the cursor as stale (the timeline
+ * was rebuilt) or when it was requested from a cursor that is no longer ours
+ * (a reconnect replaced history in the meantime): splicing either in would
+ * duplicate or reorder rows. Paging stops in both cases; the next tail
+ * backfill re-arms it.
+ *
+ * @param state - Current pane state.
+ * @param data - The frame data.
+ * @param requestedFrom - Cursor the request was sent with.
+ */
+export function applyOlderPage(
+  state: ARLRoleState,
+  data: any,
+  requestedFrom: ARLTimelineCursor | null,
+): ARLRoleState {
+  const released = { ...state, loadingOlder: false }
+  if (!data?.ok) return released
+  const current = state.historyCursor
+  const sameOrigin =
+    !!current &&
+    !!requestedFrom &&
+    current.epoch === requestedFrom.epoch &&
+    current.seq === requestedFrom.seq
+  if (data.stale || !sameOrigin) return { ...released, hasOlder: false }
+  const older = itemsFromEntries(data.entries)
+  const historyCursor = parseCursor(data.start_cursor)
+  return {
+    ...released,
+    items: older.length ? [...older, ...state.items] : state.items,
+    historyCursor: historyCursor ?? current,
+    // An empty page means there is nothing further back, whatever the flag.
+    hasOlder:
+      Boolean(data.has_older) && older.length > 0 && historyCursor !== null,
+  }
+}
+
+const SUBAGENT_STATUSES = new Set<string>([
+  "running",
+  "completed",
+  "failed",
+  "canceled",
+])
+
+/** Coerce a daemon subagent descriptor; `null` when it has no id. */
+export function normalizeSubagent(raw: any): ARLSubagent | null {
+  if (!raw || typeof raw.id !== "string" || !raw.id) return null
+  const str = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value : null
+  return {
+    id: raw.id,
+    title: str(raw.title),
+    description: str(raw.description),
+    subtitle: str(raw.subtitle),
+    status: SUBAGENT_STATUSES.has(raw.status)
+      ? (raw.status as ARLSubagentStatus)
+      : "running",
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+  }
+}
+
+/** Replace a pane's subagent list with a `subagent_list` snapshot. */
+export function applySubagentList(
+  state: ARLRoleState,
+  data: any,
+): ARLRoleState {
+  // A snapshot for an agent we have already replaced (`/clear`) is stale.
+  if (state.agentId && data?.agent_id && data.agent_id !== state.agentId)
+    return state
+  const raw: unknown[] = Array.isArray(data?.subagents) ? data.subagents : []
+  const subagents = raw
+    .map(normalizeSubagent)
+    .filter((subagent): subagent is ARLSubagent => subagent !== null)
+  return { ...state, subagents }
+}
+
+/**
+ * Fold an `agent.provider_subagents.update` upsert/remove into a pane.
+ *
+ * Updates for another parent (an archived agent, a user-created one) are
+ * ignored. `timeline` updates are not part of the pane state; the subagent
+ * detail view fetches its own transcript.
+ */
+export function applySubagentUpdate(
+  state: ARLRoleState,
+  payload: any,
+): ARLRoleState {
+  if (payload?.kind === "upsert") {
+    const parent = payload.subagent?.parentAgentId
+    if (state.agentId && parent && parent !== state.agentId) return state
+    const subagent = normalizeSubagent(payload.subagent)
+    if (!subagent) return state
+    const index = state.subagents.findIndex((s) => s.id === subagent.id)
+    const subagents =
+      index < 0
+        ? [...state.subagents, subagent]
+        : state.subagents.map((s, i) => (i === index ? subagent : s))
+    return { ...state, subagents }
+  }
+  if (payload?.kind === "remove") {
+    if (state.agentId && payload.parentAgentId !== state.agentId) return state
+    const subagents = state.subagents.filter((s) => s.id !== payload.subagentId)
+    return subagents.length === state.subagents.length
+      ? state
+      : { ...state, subagents }
+  }
+  return state
+}
+
+/** Number of subagents still running in a pane. */
+export function runningSubagents(state: ARLRoleState): number {
+  return state.subagents.filter((s) => s.status === "running").length
+}
+
+/**
+ * Fold an `agent_reset_result` frame (`/clear`) into a pane.
+ *
+ * On success the pane starts over on the new agent: transcript, approvals,
+ * subagents and paging all belonged to the archived one. Readiness is kept,
+ * since the backend is still reading our frames.
+ */
+export function applyAgentReset(state: ARLRoleState, data: any): ARLRoleState {
+  if (!data?.ok) return { ...state, resetting: false }
+  const info = data.agent ?? {}
+  const fresh = applyAgentSnapshot(
+    { ...emptyRoleState(), modes: state.modes, modeId: state.modeId },
+    {
+      id: info.agent_id,
+      status: info.status,
+      currentModeId: info.mode_id,
+      availableModes: info.modes,
+    },
+  )
+  return { ...fresh, historyLoaded: true, ready: state.ready }
 }

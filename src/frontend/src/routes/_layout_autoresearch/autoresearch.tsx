@@ -507,7 +507,7 @@ function AutoResearchPage() {
                 按会话 key，切换会话时树状态整体重置 */}
               {isArlSession && activeSession ? (
                 <>
-                  {/* Agent 状态（连接 / 两个容器 / 验证服务交接）在上，文件面板在下 */}
+                  {/* 验证服务状态（一行）在上，文件面板在下 */}
                   <ARLAgentStatusPanel />
                   <div className="flex min-h-0 flex-1 flex-col">
                     <ARLArtifactsPanel key={activeSession.id} />

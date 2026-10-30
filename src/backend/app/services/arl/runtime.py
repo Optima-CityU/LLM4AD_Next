@@ -28,6 +28,7 @@ import contextlib
 import hashlib
 import hmac
 import os
+import posixpath
 import secrets
 import shutil
 import time
@@ -48,6 +49,7 @@ from app.core.redis import (
     acquire_arl_session_lock,
     forget_arl_session_active,
     get_arl_session_last_active,
+    list_arl_session_last_active,
     pop_idle_arl_sessions,
     release_arl_session_lock,
     touch_arl_session_active,
@@ -1463,28 +1465,39 @@ class ARLRuntimeService:
         Args:
             session_id: 会话 ID
 
+        两个容器各自停止、互不影响：一个停失败不能让另一个跳过。任一失败时
+        把会话以最早的时间戳放回活跃集合，下一轮扫描（而不是再等一整个空闲
+        阈值）重试，避免只停掉一半、另一半一直跑着没人管。
+
         Returns:
             True 表示至少停了一个容器
         """
 
-        def _stop() -> bool:
-            stopped = False
+        def _stop() -> tuple[bool, bool]:
+            stopped = failed = False
             for role in ARLRole:
-                container = self._get_container_sync(container_name(session_id, role))
-                if container is None:
-                    continue
-                container.reload()
-                if container.status != "running":
-                    continue
-                container.stop(timeout=10)
-                stopped = True
-            return stopped
+                name = container_name(session_id, role)
+                try:
+                    container = self._get_container_sync(name)
+                    if container is None:
+                        continue
+                    container.reload()
+                    if container.status != "running":
+                        continue
+                    container.stop(timeout=10)
+                    stopped = True
+                    logger.debug("ARL 空闲回收 [{}] 已停止 {} 容器 {}", session_id, role.value, name)
+                except DockerException:
+                    failed = True
+                    logger.opt(exception=True).warning(
+                        "ARL 空闲回收 [{}] 停止 {} 容器 {} 失败", session_id, role.value, name
+                    )
+            return stopped, failed
 
-        try:
-            stopped = await asyncio.to_thread(_stop)
-        except DockerException:
-            logger.opt(exception=True).warning("停止 ARL 会话 {} 容器失败", session_id)
-            return False
+        stopped, failed = await asyncio.to_thread(_stop)
+        if failed:
+            touch_arl_session_active(session_id, ts=0.0)
+            logger.warning("ARL 空闲回收 [{}] 有容器没停掉，下一轮扫描重试", session_id)
         if stopped:
             logger.info("已停止空闲 ARL 会话 {} 的容器", session_id)
         return stopped
@@ -1641,17 +1654,195 @@ async def _has_running_turn(session: ARLSession) -> bool:
                 client.fetch_agents(subscribe=False), timeout=15.0
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("ARL session {} agent status check failed: {}", session.session_id, exc)
+            logger.warning(
+                "ARL 空闲回收 [{}] {} agent 状态查询失败，按不在跑回合处理: {}",
+                session.session_id,
+                role.value,
+                exc,
+            )
             continue
         finally:
             if client is not None:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
+        statuses = []
+        running = False
         for entry in entries:
             agent = entry.get("agent") if isinstance(entry.get("agent"), dict) else entry
-            if agent.get("status") == "running" and not agent.get("pendingPermissions"):
-                return True
+            pending = bool(agent.get("pendingPermissions"))
+            statuses.append(
+                f"{agent.get('id')}={agent.get('status')}{'(待授权)' if pending else ''}"
+            )
+            if agent.get("status") == "running" and not pending:
+                running = True
+        logger.debug(
+            "ARL 空闲回收 [{}] {} agent 状态: {}", session.session_id, role.value, statuses
+        )
+        if running:
+            return True
     return False
+
+
+#: 按进程名（命令行首个词的文件名，即 argv[0]）判定的常驻进程。不用 ``ps``
+#: 的 comm 列：它截断到 15 字符，且 Paseo 改写的进程名带空格，会把
+#: ``docker top`` 的列拆乱。也不按安装路径匹配，换安装位置不受影响。
+#:
+#: - 容器与 Paseo：``tini``、``Paseo``（Supervisor / Daemon 改写后的名字）、
+#:   ``esbuild``（插件编译服务）；
+#: - agent 本体：``claude``、``codex`` 及其辅助进程 ``codex-code-mode-host``；
+#: - 只看不干活的交互工具：留在终端里没关（如 ``top``、``tail -f log``）
+#:   会让容器永远回收不掉，而真正的任务另有自己的进程。
+_RESIDENT_NAMES = frozenset(
+    {
+        "tini",
+        "paseo",
+        "esbuild",
+        "claude",
+        "codex",
+        "codex-code-mode-host",
+        "top",
+        "htop",
+        "less",
+        "more",
+        "man",
+        "vi",
+        "vim",
+        "nvim",
+        "nano",
+        "watch",
+        "tail",
+    }
+)
+#: 进程名是 ``node`` 时看它跑的脚本名：Paseo 终端 worker、codex 的 node
+#: 启动壳、validator 的验证服务（paseo.json 里的 service 脚本，起过一次就
+#: 一直在，不能让它单独保活）。
+_RESIDENT_NODE_SCRIPTS = frozenset(
+    {"terminal-worker-process.js", "codex", "validation-cli.js"}
+)
+#: 不带参数时视为空闲的 shell：Paseo 终端里空着的提示符，或 ``docker exec``
+#: 进来的会话。带参数（``sh -c ...``、``bash run.sh``）则是在跑东西。
+_SHELL_NAMES = frozenset({"sh", "bash", "-sh", "-bash"})
+#: 镜像 HEALTHCHECK 每 30s 起一次 ``/bin/sh -c node -e "...'/api/health'..."``，
+#: 只活几毫秒，但扫描恰好撞上时不能把它当成后台任务。
+_HEALTHCHECK_MARKER = "/api/health"
+
+
+def _is_resident_process(command: str) -> bool:
+    """判断一条进程是否属于容器常驻进程（不代表有任务在跑）。
+
+    按进程名判定，只有解释器（``node``、shell）才多看一个参数。进程名与
+    脚本名都不区分大小写（如 Paseo 把自己改写成 ``Paseo Daemon``），白名单
+    里统一写小写。
+
+    Args:
+        command: ``docker top`` 给出的完整命令行。
+
+    Returns:
+        True 表示常驻进程或已退出的僵尸进程；False 表示 agent 起的后台任务。
+    """
+    command = command.strip()
+    if not command or command.endswith("<defunct>"):
+        return True
+    argv = command.split()
+    name = posixpath.basename(argv[0]).lower()
+    if name in _RESIDENT_NAMES:
+        return True
+    if name in _SHELL_NAMES:
+        return len(argv) == 1 or _HEALTHCHECK_MARKER in command
+    if name == "node":
+        if _HEALTHCHECK_MARKER in command:
+            return True
+        script = next((arg for arg in argv[1:] if not arg.startswith("-")), "")
+        return posixpath.basename(script).lower() in _RESIDENT_NODE_SCRIPTS
+    return False
+
+
+def _background_processes_sync(session_id: str) -> list[str]:
+    """列出会话容器里 agent 起的后台进程（同步，供 to_thread 调用）。
+
+    agent 用 ``nohup`` / ``&`` 起训练后回合就结束了，daemon 里 agent 回到
+    idle，但训练还要跑很久——这是 :func:`_has_running_turn` 看不到的。
+    Paseo 协议里没有后台进程信息，CPU / 网络 / 日志又都有与负载无关的底噪，
+    故直接看进程表：除常驻进程外还有别的进程，就说明有任务在跑。
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        非常驻进程的命令行列表；容器未运行或读取失败时为空列表（保持原有
+        回收行为，不因探测失败把容器永久留住）。
+    """
+    client = get_docker_client()
+    found: list[str] = []
+    for role in ARLRole:
+        try:
+            container = client.containers.get(container_name(session_id, role))
+            container.reload()
+            if container.status != "running":
+                continue
+            table = container.top()
+        except DockerException as exc:
+            logger.warning("ARL session {} process list failed: {}", session_id, exc)
+            continue
+        titles = table.get("Titles") or []
+        column = next(
+            (i for i, title in enumerate(titles) if title in ("CMD", "COMMAND")),
+            len(titles) - 1,
+        )
+        resident: list[str] = []
+        background: list[str] = []
+        for row in table.get("Processes") or []:
+            if column < 0 or column >= len(row):
+                continue
+            command = row[column]
+            (resident if _is_resident_process(command) else background).append(command)
+        # 常驻进程只在补白名单时有用，放 DEBUG；后台进程会出现在保活日志里
+        logger.debug(
+            "ARL 空闲回收 [{}] {} 常驻 {} 个: {}，后台 {} 个: {}",
+            session_id,
+            role.value,
+            len(resident),
+            [command[:120] for command in resident],
+            len(background),
+            [command[:200] for command in background],
+        )
+        found.extend(background)
+    return found
+
+
+def _keep_session_alive(session: ARLSession) -> None:
+    """为仍在干活的会话刷新活跃时间，并给代理 token 续期（同步）。
+
+    token 只在用户连接时由 ``ensure_session`` 重新登记；无人连接时跑满
+    ``LLM_PROXY_TOKEN_TTL`` 的实验会在中途 401。这里随保活一起续期：token
+    值不变，只刷新 Redis 过期时间，容器无需重启。
+
+    Args:
+        session: 会话快照
+    """
+    touch_arl_session_active(session.session_id)
+    if not settings.LLM_PROXY_ENABLE:
+        return
+    from app.services import credential_broker
+
+    extended = credential_broker.extend_task_tokens(
+        session.session_id,
+        settings.LLM_PROXY_TOKEN_TTL,
+        user_id=session.user_id or None,
+    )
+    if extended:
+        logger.debug(
+            "ARL 空闲回收 [{}] 续期 {} 个代理 token（{}s）",
+            session.session_id,
+            extended,
+            settings.LLM_PROXY_TOKEN_TTL,
+        )
+    else:
+        # Redis 记录已丢（过期或 Redis 重启），续期救不回来，要等用户下次连接重新登记
+        logger.warning(
+            "ARL 空闲回收 [{}] 已刷新活跃时间，但没有可续期的代理 token，用户重连前调模型会 401",
+            session.session_id,
+        )
 
 
 async def stop_idle_arl_sessions() -> int:
@@ -1661,30 +1852,64 @@ async def stop_idle_arl_sessions() -> int:
     使用，而连接断开并不意味着会话结束——用户刷新页面或改天继续都要复用
     同一对容器。故不能在断连时删容器，只能靠空闲阈值回收。
 
+    超过阈值的会话在停止前再确认两件事，任一成立就保活并续期 token：
+
+    - agent 正在跑回合（:func:`_has_running_turn`，卡在授权上的不算）；
+    - 容器里有 agent 起的后台进程（:func:`_background_processes_sync`）。
+
     停止而非删除的理由见 :meth:`ARLRuntimeService.stop_session`。
 
     Returns:
         被停止的会话数
     """
-    threshold = time.time() - settings.ARL_SESSION_IDLE_TIMEOUT_SECONDS
+    now = time.time()
+    timeout = settings.ARL_SESSION_IDLE_TIMEOUT_SECONDS
+    threshold = now - timeout
     try:
+        tracked = await asyncio.to_thread(list_arl_session_last_active)
         idle = await asyncio.to_thread(pop_idle_arl_sessions, threshold)
     except Exception:
         logger.opt(exception=True).warning("ARL 空闲回收失败：无法读取活跃时间")
+        return 0
+
+    # 没到阈值的会话不进入检查；排查「为什么没回收」时打开 DEBUG 看离阈值还差多久
+    for session_id, last_active in sorted(tracked.items(), key=lambda kv: kv[1]):
+        if session_id not in idle:
+            idle_for = int(now - last_active)
+            logger.debug(
+                "ARL 空闲回收 [{}] 未到阈值：已空闲 {}s，还差 {}s",
+                session_id,
+                idle_for,
+                max(timeout - idle_for, 0),
+            )
+    if not idle:
+        logger.debug("ARL 空闲回收：跟踪 {} 个会话，没有超过 {}s 的", len(tracked), timeout)
         return 0
 
     runtime = get_arl_runtime()
     stopped = 0
     for session_id in idle:
         session = await runtime.get_session(session_id)
-        if session is not None and await _has_running_turn(session):
-            # Agent is still working without a browser attached; keep it and
-            # re-check after another idle period.
-            logger.info("ARL session {} has a running agent turn, skip idle stop", session_id)
-            touch_arl_session_active(session_id)
-            continue
+        if session is not None:
+            # Still working without a browser attached: keep it and re-check
+            # after another idle period.
+            if await _has_running_turn(session):
+                logger.info("ARL 空闲回收 [{}] 保活：agent 正在跑回合", session_id)
+                await asyncio.to_thread(_keep_session_alive, session)
+                continue
+            background = await asyncio.to_thread(_background_processes_sync, session_id)
+            if background:
+                logger.info(
+                    "ARL 空闲回收 [{}] 保活：有后台进程 {}",
+                    session_id,
+                    [command[:120] for command in background[:5]],
+                )
+                await asyncio.to_thread(_keep_session_alive, session)
+                continue
+        # 没停的原因（重新活跃 / 加锁失败）由 _stop_if_still_idle 自己记日志
         if await _stop_if_still_idle(runtime, session_id):
             stopped += 1
+    logger.info("ARL 空闲回收：超时 {} 个，停止 {} 个", len(idle), stopped)
     return stopped
 
 

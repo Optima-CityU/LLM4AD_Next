@@ -85,6 +85,9 @@ const INDENT_PER_DEPTH = 12
 /** Same left-to-right order as the chat panes. */
 const ROLE_ORDER: ARLRole[] = ["validator", "worker"]
 
+/** Re-list the visible tree this often, to pick up files written outside turns. */
+const AUTO_REFRESH_MS = 12_000
+
 /** Tree state of one container's workspace. */
 interface RoleTree {
   directories: Map<string, ARLFsDirectory>
@@ -260,6 +263,21 @@ export default function ARLArtifactsPanel() {
       prevRef.current[r] = { ready: ready[r], running }
     }
   }, [ready, turnStatus, loadDirs, refresh])
+
+  // Files also change outside of turns (background training jobs, subagents
+  // still running after the main turn ended), so the visible tree is re-listed
+  // on a timer too. Only while the tab is visible and nothing is loading, so an
+  // idle tab does not keep the daemon busy.
+  useEffect(() => {
+    if (!ready[role]) return
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return
+      const tree = treesRef.current[role]
+      if (!tree.directories.has(".") || tree.loading.size > 0) return
+      void refresh(role)
+    }, AUTO_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [ready, role, refresh])
 
   const toggleDir = useCallback(
     (path: string) => {

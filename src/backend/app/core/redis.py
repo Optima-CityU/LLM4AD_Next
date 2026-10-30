@@ -778,6 +778,21 @@ def get_arl_session_last_active(session_id: str | uuid.UUID) -> float | None:
     return float(score) if score is not None else None
 
 
+def list_arl_session_last_active() -> dict[str, float]:
+    """Return every tracked ARL session with its last active timestamp.
+
+    Only used for diagnostics logging in the idle cleanup loop.
+
+    Returns:
+        Mapping of session ID to Unix timestamp in seconds.
+    """
+    rows = get_sync_redis().zrange(ARL_SESSION_ACTIVE_KEY, 0, -1, withscores=True)
+    return {
+        (member.decode() if isinstance(member, bytes) else str(member)): float(score)
+        for member, score in rows
+    }
+
+
 def pop_idle_arl_sessions(threshold_ts: float) -> list[str]:
     """原子取出并移除最后活跃时间早于阈值的 ARL 会话。
 

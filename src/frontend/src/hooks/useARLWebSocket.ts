@@ -21,18 +21,25 @@ import type {
   ARLRole,
   ARLRoleState,
   ARLStreamItem,
+  ARLTimelineCursor,
   ARLTurnStatus,
   ARLValidationState,
 } from "@/components/AutoResearch/arlStream"
 import {
   ARL_ROLES,
   appendItem,
+  applyAgentReset,
   applyAgentSnapshot,
   applyAgentsReady,
+  applyHistory,
+  applyOlderPage,
+  applySubagentList,
+  applySubagentUpdate,
   applyValidationStatus,
   emptyPanes,
   emptyValidationState,
   finalizeStreaming,
+  itemsFromEntries,
   nextItemId,
   normalizeItem,
   upsertPermission,
@@ -51,6 +58,8 @@ export type {
   ARLRole,
   ARLRoleState,
   ARLStreamItem,
+  ARLSubagent,
+  ARLSubagentStatus,
   ARLTurnStatus,
   ARLValidationState,
 } from "@/components/AutoResearch/arlStream"
@@ -60,6 +69,26 @@ export {
   ARL_ROLES,
   isUnattendedMode,
 } from "@/components/AutoResearch/arlStream"
+
+/** How long to wait for a subagent transcript before giving up. */
+const SUBAGENT_TIMELINE_TIMEOUT_MS = 30_000
+
+/** A `subagent_timeline` request waiting for its reply. */
+interface PendingSubagentRequest {
+  resolve: (items: ARLStreamItem[]) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+/** True when a daemon message belongs to an agent other than the pane's. */
+function isForeignAgent(state: ARLRoleState, agentId: unknown): boolean {
+  return (
+    !!state.agentId &&
+    typeof agentId === "string" &&
+    !!agentId &&
+    agentId !== state.agentId
+  )
+}
 
 function emptyCommands(): Record<ARLRole, ARLCommandsState> {
   return { worker: emptyCommandsState(), validator: emptyCommandsState() }
@@ -154,6 +183,14 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   const fsRequestsRef = useRef<ARLFsRequests | null>(null)
   if (!fsRequestsRef.current) fsRequestsRef.current = new ARLFsRequests()
   const fsRequests = fsRequestsRef.current
+  // Cursor each in-flight "load older" request was sent from, so a reply
+  // that lands after history was replaced (reconnect) can be recognized.
+  const olderFromRef = useRef<Record<ARLRole, ARLTimelineCursor | null>>({
+    worker: null,
+    validator: null,
+  })
+  // Subagent transcripts, fetched on demand when the user opens one.
+  const subagentRequestsRef = useRef(new Map<string, PendingSubagentRequest>())
 
   const updateRole = useCallback(
     (role: ARLRole, updater: (state: ARLRoleState) => ARLRoleState) => {
@@ -168,7 +205,17 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       const type = message?.type
       const payload = message?.payload ?? {}
 
+      if (type === "agent.provider_subagents.update") {
+        updateRole(role, (state) => applySubagentUpdate(state, payload))
+        return
+      }
+
       if (type === "agent_stream") {
+        // Only the pane's own agent drives its transcript. The daemon also
+        // streams other agents in the container (one archived by `/clear`,
+        // children an agent created through MCP), which would otherwise be
+        // spliced into this conversation.
+        if (isForeignAgent(panesRef.current[role], payload.agentId)) return
         const event = payload.event ?? {}
         const timestamp = new Date(
           payload.timestamp ?? Date.now(),
@@ -228,7 +275,11 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
 
       if (type === "agent_update") {
         if (payload.kind === "upsert") {
-          updateRole(role, (state) => applyAgentSnapshot(state, payload.agent))
+          updateRole(role, (state) =>
+            isForeignAgent(state, payload.agent?.id)
+              ? state
+              : applyAgentSnapshot(state, payload.agent),
+          )
         }
         return
       }
@@ -255,13 +306,28 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       }
 
       if (type === "agent.timeline.replacement") {
-        // The daemon re-based the timeline for this agent: drop local items.
-        updateRole(role, (state) => ({ ...state, items: [] }))
+        // The daemon re-based the timeline for this agent: drop local items,
+        // and the paging cursor with them (it points into the old epoch).
+        updateRole(role, (state) =>
+          isForeignAgent(state, payload.agentId)
+            ? state
+            : {
+                ...state,
+                items: [],
+                historyCursor: null,
+                hasOlder: false,
+                loadingOlder: false,
+              },
+        )
         return
       }
 
       if (type === "agent_deleted" || type === "agent_archived") {
-        updateRole(role, (state) => ({ ...state, agentStatus: "deleted" }))
+        updateRole(role, (state) =>
+          isForeignAgent(state, payload.agentId)
+            ? state
+            : { ...state, agentStatus: "deleted" },
+        )
         return
       }
 
@@ -298,23 +364,61 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
         case "timeline_history": {
           const role = frame.role
           if (!role) return
-          const entries: any[] = frame.data?.entries ?? []
-          let items: ARLStreamItem[] = []
-          for (const entry of entries) {
-            const item = normalizeItem(entry?.item, entry?.timestamp)
-            if (!item) continue
-            // History keeps both halves of a compaction (loading, then
-            // completed); fold them into one row like the live stream does.
-            if (item.kind === "compaction") items = appendItem(items, item)
-            else items.push(item)
+          olderFromRef.current[role] = null
+          updateRole(role, (state) => applyHistory(state, frame.data))
+          return
+        }
+
+        case "timeline_older": {
+          const role = frame.role
+          if (!role) return
+          const requestedFrom = olderFromRef.current[role]
+          olderFromRef.current[role] = null
+          updateRole(role, (state) =>
+            applyOlderPage(state, frame.data, requestedFrom),
+          )
+          if (!frame.data?.ok) {
+            toast.error(frame.data?.message || "Failed to load older messages")
           }
-          updateRole(role, (state) => ({
-            ...state,
-            // History is authoritative for everything already committed:
-            // replace, don't append, so a reconnect cannot duplicate rows.
-            items,
-            historyLoaded: true,
-          }))
+          return
+        }
+
+        case "subagent_list": {
+          const role = frame.role
+          if (!role) return
+          updateRole(role, (state) => applySubagentList(state, frame.data))
+          return
+        }
+
+        case "subagent_timeline": {
+          const role = frame.role
+          if (!role) return
+          const key = `${role}:${frame.data?.subagent_id ?? ""}`
+          const pending = subagentRequestsRef.current.get(key)
+          if (!pending) return
+          subagentRequestsRef.current.delete(key)
+          clearTimeout(pending.timer)
+          if (frame.data?.ok) {
+            const rows: any[] = frame.data?.rows ?? []
+            pending.resolve(itemsFromEntries(rows))
+          } else {
+            pending.reject(
+              new Error(
+                frame.data?.message || "Failed to load the subagent transcript",
+              ),
+            )
+          }
+          return
+        }
+
+        case "agent_reset_result": {
+          const role = frame.role
+          if (!role) return
+          olderFromRef.current[role] = null
+          updateRole(role, (state) => applyAgentReset(state, frame.data))
+          if (!frame.data?.ok) {
+            toast.error(frame.data?.message || "Failed to clear the conversation")
+          }
           return
         }
 
@@ -512,6 +616,95 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   )
 
   /**
+   * Load one page of history older than what the pane holds.
+   *
+   * No-op while a page is in flight or when the daemon has nothing older.
+   * Sent quietly: the top-of-list spinner is the feedback, and a dropped
+   * socket is already reported by the connection strip.
+   *
+   * @returns Whether a request went out.
+   */
+  const loadOlder = useCallback(
+    (role: ARLRole) => {
+      const state = panesRef.current[role]
+      const cursor = state.historyCursor
+      if (!state.ready || !state.hasOlder || state.loadingOlder || !cursor)
+        return false
+      if (
+        !sendRaw(
+          { type: "timeline_fetch_older", role, payload: { cursor } },
+          { quiet: true },
+        )
+      )
+        return false
+      olderFromRef.current[role] = cursor
+      updateRole(role, (prev) => ({ ...prev, loadingOlder: true }))
+      return true
+    },
+    [sendRaw, updateRole],
+  )
+
+  /**
+   * Fetch the transcript of one subagent (opened from the subagent strip).
+   *
+   * Resolves with renderable rows, rejects with the daemon's message, a
+   * timeout, or a dropped socket. A second request for the same subagent
+   * supersedes the first.
+   */
+  const fetchSubagentTimeline = useCallback(
+    (role: ARLRole, subagentId: string): Promise<ARLStreamItem[]> => {
+      const key = `${role}:${subagentId}`
+      const requests = subagentRequestsRef.current
+      const previous = requests.get(key)
+      if (previous) {
+        clearTimeout(previous.timer)
+        requests.delete(key)
+        previous.reject(new Error("Superseded"))
+      }
+      return new Promise<ARLStreamItem[]>((resolve, reject) => {
+        const sent = sendRaw(
+          {
+            type: "subagent_timeline",
+            role,
+            payload: { subagent_id: subagentId },
+          },
+          { quiet: true },
+        )
+        if (!sent) {
+          reject(new Error("Not connected to the ARL session"))
+          return
+        }
+        const timer = setTimeout(() => {
+          if (requests.get(key)?.timer !== timer) return
+          requests.delete(key)
+          reject(new Error("Request timed out"))
+        }, SUBAGENT_TIMELINE_TIMEOUT_MS)
+        requests.set(key, { resolve, reject, timer })
+      })
+    },
+    [sendRaw],
+  )
+
+  /**
+   * `/clear`: archive the container's agent and start a fresh one.
+   *
+   * Mirrors the native client command. The workspace is left alone; only the
+   * conversation context starts over.
+   *
+   * @returns Whether the request made it onto the wire.
+   */
+  const resetAgent = useCallback(
+    (role: ARLRole) => {
+      const state = panesRef.current[role]
+      if (!state.ready || state.resetting) return false
+      if (!sendRaw({ type: "agent_reset", role, payload: {} })) return false
+      updateRole(role, (prev) => ({ ...prev, resetting: true }))
+      return true
+    },
+    [sendRaw, updateRole],
+  )
+
+  /**
    * Switch a container's permission mode (e.g. into an auto/bypass mode).
    *
    * @returns Whether the request made it onto the wire.
@@ -667,13 +860,28 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   useEffect(() => {
     if (status === "connected") return
     setPanes((prev) => {
-      if (!ARL_ROLES.some((role) => prev[role].ready)) return prev
+      const stale = (role: ARLRole) =>
+        prev[role].ready || prev[role].loadingOlder || prev[role].resetting
+      if (!ARL_ROLES.some(stale)) return prev
       const next = { ...prev }
       for (const role of ARL_ROLES) {
-        if (next[role].ready) next[role] = { ...next[role], ready: false }
+        // Replies to in-flight requests cannot arrive on a dead socket.
+        if (stale(role))
+          next[role] = {
+            ...next[role],
+            ready: false,
+            loadingOlder: false,
+            resetting: false,
+          }
       }
       return next
     })
+    olderFromRef.current = { worker: null, validator: null }
+    for (const pending of subagentRequestsRef.current.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error("Disconnected from the ARL session"))
+    }
+    subagentRequestsRef.current.clear()
     // Same for file-panel requests: reject them now instead of at timeout.
     fsRequests.failAll("Disconnected from the ARL session")
     // A `list_commands` reply cannot arrive on a dead socket; release the
@@ -765,6 +973,12 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
     setMode,
     respondPermission,
     respondPermissions,
+    /** Page further back through a pane's history. */
+    loadOlder,
+    /** On-demand transcript of one subagent. */
+    fetchSubagentTimeline,
+    /** `/clear`: archive the agent and start a fresh conversation. */
+    resetAgent,
     /** File-panel operations, paired with their `fs_result` by request id. */
     fsRequest,
     connect,

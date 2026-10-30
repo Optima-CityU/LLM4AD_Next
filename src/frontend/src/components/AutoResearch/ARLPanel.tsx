@@ -53,6 +53,9 @@ export default function ARLPanel() {
     setMode,
     respondPermission,
     respondPermissions,
+    loadOlder,
+    fetchSubagentTimeline,
+    resetAgent,
     reconnect,
   } = useARLSession()
 
@@ -124,6 +127,10 @@ export default function ARLPanel() {
             onPermissions={respondPermissions}
             validation={validation}
             onSyncValidation={syncValidation}
+            validatorStarted={panes.validator.items.length > 0}
+            onLoadOlder={loadOlder}
+            onFetchSubagentTimeline={fetchSubagentTimeline}
+            onReset={resetAgent}
           />
         ))}
 

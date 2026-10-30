@@ -225,13 +225,8 @@ export default function EditSessionDialog({
   ])
 
   const dirty = Object.keys(patch).length > 0
-  // ARL 两个角色都必须选好 provider + model，否则后端会 400。
-  const arlIncomplete =
-    isArl &&
-    (!workerProviderId ||
-      !workerModel.trim() ||
-      !validatorProviderId ||
-      !validatorModel.trim())
+  // ARL 两个角色都必须选好 provider，否则后端会 400；模型可留空（用供应商默认模型）。
+  const arlIncomplete = isArl && (!workerProviderId || !validatorProviderId)
   const submitting = updateMut.isPending
 
   const handleSubmit = async () => {
@@ -316,6 +311,80 @@ export default function EditSessionDialog({
         </DialogHeader>
 
         <div className="-mx-1 space-y-2.5 overflow-y-auto px-1 py-2">
+          {/* 实验类型放最上面，与新建弹框的字段顺序一致。ARL 会话不能切换实验类型，
+              所以只在常规会话里显示。 */}
+          {!isArl && (
+            <Field label={t("autoResearch.create.profileLabel")}>
+              <div className="grid grid-cols-2 gap-3">
+                {PROFILE_OPTIONS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setProfile(p as ResearchProfile)}
+                    className={cn(
+                      "group relative rounded-lg px-3 py-2.5 text-left transition-all",
+                      "border-l border-r border-border/60",
+                      profile === p
+                        ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
+                        : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div
+                        className={cn(
+                          "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
+                          profile === p
+                            ? "border-primary bg-primary"
+                            : "border-muted-foreground/40 bg-background",
+                        )}
+                      >
+                        {profile === p && (
+                          <div className="size-full flex items-center justify-center">
+                            <div className="size-1.5 rounded-full bg-primary-foreground" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "text-sm font-medium transition-colors",
+                              profile === p
+                                ? "text-foreground"
+                                : "text-foreground/80 group-hover:text-foreground",
+                            )}
+                          >
+                            {t(`autoResearch.profile.${p}`)}
+                          </span>
+                          {/* 与新建弹框一致：llm4ad（sandbox）是主推路径，标一枚推荐。 */}
+                          {p === "algorithm_evolution" && (
+                            <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                              {t("autoResearch.create.recommendedMark")}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs leading-snug text-muted-foreground">
+                          {t(`autoResearch.profileDesc.${p}`)}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {/* 跨类切换会清空产物，提前在表单里示警，别让用户保存后才发现。
+                  用与模板提示同款的琥珀告警盒（带边框），比裸文字更像「警告」。 */}
+              {session &&
+                profile !== session.profile &&
+                isCrossTypeProfile(session.profile, profile) && (
+                  <div className="mt-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5">
+                    <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+                      {t("autoResearch.edit.profilePurgeHint")}
+                    </p>
+                  </div>
+                )}
+            </Field>
+          )}
+
           <Field label={t("autoResearch.create.titleLabel")}>
             <div className="relative">
               <Input
@@ -391,76 +460,6 @@ export default function EditSessionDialog({
               />
               <Counter current={topic.length} max={TOPIC_MAX} />
             </div>
-          </Field>
-
-          <Field label={t("autoResearch.create.profileLabel")}>
-            <div className="grid grid-cols-2 gap-3">
-              {PROFILE_OPTIONS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setProfile(p as ResearchProfile)}
-                  className={cn(
-                    "group relative rounded-lg px-3 py-2.5 text-left transition-all",
-                    "border-l border-r border-border/60",
-                    profile === p
-                      ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
-                      : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
-                  )}
-                >
-                  <div className="flex items-start gap-2">
-                    <div
-                      className={cn(
-                        "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
-                        profile === p
-                          ? "border-primary bg-primary"
-                          : "border-muted-foreground/40 bg-background",
-                      )}
-                    >
-                      {profile === p && (
-                        <div className="size-full flex items-center justify-center">
-                          <div className="size-1.5 rounded-full bg-primary-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={cn(
-                            "text-sm font-medium transition-colors",
-                            profile === p
-                              ? "text-foreground"
-                              : "text-foreground/80 group-hover:text-foreground",
-                          )}
-                        >
-                          {t(`autoResearch.profile.${p}`)}
-                        </span>
-                        {/* 与新建弹框一致：llm4ad（sandbox）是主推路径，标一枚推荐。 */}
-                        {p === "algorithm_evolution" && (
-                          <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                            {t("autoResearch.create.recommendedMark")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs leading-snug text-muted-foreground">
-                        {t(`autoResearch.profileDesc.${p}`)}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-            {/* 跨类切换会清空产物，提前在表单里示警，别让用户保存后才发现。
-                用与模板提示同款的琥珀告警盒（带边框），比裸文字更像「警告」。 */}
-            {session &&
-              profile !== session.profile &&
-              isCrossTypeProfile(session.profile, profile) && (
-                <div className="mt-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5">
-                  <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-400">
-                    {t("autoResearch.edit.profilePurgeHint")}
-                  </p>
-                </div>
-              )}
           </Field>
 
           {/* 指标名与优化方向合成一行，与新建弹框同一套版式：左边填名字，右边用

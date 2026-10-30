@@ -4269,12 +4269,12 @@
       "learning": "Learning"
     },
     "profile": {
-      "algorithm_evolution": "llm4ad",
-      "ml_vision": "autoresearch"
+      "algorithm_evolution": "LLM4AD",
+      "ml_vision": "AutoResearch"
     },
     "profileDesc": {
-      "algorithm_evolution": "Wires llm4ad's algorithm-evolution engine into experiment design and execution, iterating the algorithm as it runs",
-      "ml_vision": "Native AutoResearchClaw pipeline, without llm4ad integration"
+      "algorithm_evolution": "Wires LLM4AD's algorithm-evolution engine into experiment design and execution, iterating the algorithm as it runs",
+      "ml_vision": "Native AutoResearchClaw pipeline, without LLM4AD integration"
     },
     "provider": {
       "inherit": "Session default",
@@ -4477,8 +4477,8 @@
       "sessionTypeLabel": "Session type",
       "sessionTypeNormal": "Standard session",
       "sessionTypeNormalDesc": "Standard research chat mode",
-      "sessionTypeArl": "ARL session",
-      "sessionTypeArlDesc": "Dual-agent collaboration (experimental)",
+      "sessionTypeArl": "AutoResearch Loop",
+      "sessionTypeArlDesc": "AI2AI fully automated workflow: researchers only set the research direction and available resources, and AutoResearch Loop handles the rest",
       "arlTitleRequired": "ARL sessions need a title",
       "arlWorkerHint": "LLM agent that carries out the research (Claude recommended)",
       "arlValidatorHint": "LLM agent that verifies the results (GPT/Codex recommended)",
@@ -4681,8 +4681,8 @@
       "title": "ARL dual agent",
       "worker": "Worker",
       "validator": "Validator",
-      "workerHint": "Claude Code in the worker container",
-      "validatorHint": "Codex in the validator container",
+      "workerHint": "Built on Claude Code: implements the research and submits it for validation",
+      "validatorHint": "Built on Codex: sets up the validation service and task spec",
       "connecting": "Connecting to the ARL session…",
       "connected": "ARL connected",
       "disconnected": "ARL disconnected",
@@ -4794,6 +4794,28 @@
       "commandsEmpty": "No matching commands",
       "commandKindSkill": "skill",
       "commandKindCommand": "command",
+      "loadOlder": "Load earlier messages",
+      "loadingOlder": "Loading earlier messages…",
+      "statusSubagentsRunning": "Subtasks running",
+      "subagentsRunning": "Subtasks {{running}}/{{total}} running",
+      "subagentsTotal": "Subtasks {{total}}",
+      "subagentsCollapse": "Collapse",
+      "subagentUntitled": "Untitled subtask",
+      "subagentEmpty": "This subtask has no messages yet",
+      "subagentLive": "Still running; refreshes when its status changes",
+      "subagentStatus": {
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "canceled": "Canceled"
+      },
+      "commandKindClient": "client",
+      "clearCommandDesc": "Archive this conversation and start a new one (workspace files are kept)",
+      "clearTitle": "Clear the {{role}} conversation?",
+      "clearDesc": "The current conversation is archived and the agent starts over with an empty context. The container and workspace files are not affected. A running turn will be interrupted.",
+      "clearConfirm": "Clear and start new",
+      "clearCancel": "Cancel",
+      "resetting": "Starting a new conversation…",
       "reconnecting": "Reconnecting to the ARL session…",
       "offline": "ARL connection lost",
       "retryConnect": "Reconnect",
@@ -4810,6 +4832,9 @@
       "agentStatus": "Agent status",
       "validationTitle": "Validation handoff",
       "validationWaiting": "Waiting for the Worker container…",
+      "validationLabel": "Validation service",
+      "validationOk": "Healthy",
+      "validationNotReady": "Not ready",
       "validationStepService": "Service",
       "validationStepTask": "task.md",
       "validationStepSync": "Sync",
@@ -4817,6 +4842,10 @@
       "placeholderShort": "Message {{role}}…",
       "composerHint": "Enter to send · Shift+Enter for newline · / commands",
       "guide": {
+        "validatorStart": "Build validation service",
+        "workerStart": "Start auto research",
+        "workerWait": "Click \"Build validation service\" in the Validator on the left first",
+        "workerWaitBusy": "The validation service is not ready yet. Finish setting it up in the Validator conversation on the left",
         "validatorTitle": "Start here",
         "validatorStep1": "Send /aris-setup to build the validation service",
         "validatorStep2": "Click {sync} between the two input boxes to sync to the Worker",

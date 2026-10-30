@@ -56,8 +56,9 @@ class _FakeDaemonClient:
         if name in self.fail:
             raise RuntimeError(f"{name} boom")
 
-    async def send_agent_message(self, **_kwargs):
+    async def send_agent_message(self, **kwargs):
         await self._maybe_fail("send_agent_message")
+        self.sent_to = kwargs.get("agent_id")
 
     async def read_file(self, path, cwd=None):
         await self._maybe_fail("read_file")
@@ -113,6 +114,30 @@ class _FakeDaemonClient:
 
     async def delete_entry(self, path):
         await self._maybe_fail("delete_entry")
+
+    async def fetch_agent_timeline(self, agent_id, **kwargs):
+        await self._maybe_fail("fetch_agent_timeline")
+        self.last_timeline = (agent_id, kwargs)
+        return {
+            "epoch": "e1",
+            "hasOlder": True,
+            "startCursor": {"epoch": "e1", "seq": 40},
+            "entries": [{"item": {"type": "user_message", "text": "hi"}, "seqStart": 40}],
+        }
+
+    async def fetch_subagent_timeline(self, parent_agent_id, subagent_id, **_kwargs):
+        await self._maybe_fail("fetch_subagent_timeline")
+        return {"rows": [{"item": {"type": "assistant_message", "text": "x"}}], "hasOlder": False}
+
+    async def archive_agent(self, agent_id):
+        await self._maybe_fail("archive_agent")
+        self.archived = agent_id
+
+    async def create_agent(self, **kwargs):
+        await self._maybe_fail("create_agent")
+        self.created = kwargs
+        return {"id": "new-agent", "status": "idle", "currentModeId": kwargs.get("mode_id")}
+
 
     async def close(self):
         self.closed = True
@@ -599,3 +624,210 @@ async def test_ensure_agent_model_switch_failure_is_not_fatal() -> None:
 
     assert agent["id"] == "a1"
     assert agent["model"] == "old"
+
+
+# ---- closed agent recovery after a container restart ----
+
+
+class _ClosedAgentClient:
+    """Directory with one ``closed`` agent; refresh succeeds or fails."""
+
+    def __init__(self, *, refresh_ok: bool):
+        self.refresh_ok = refresh_ok
+        self.status = "closed"
+        self.calls: list[str] = []
+
+    async def fetch_agents(self, subscribe: bool = True):
+        return [{"agent": {"id": "v1", "title": "arl-validator", "status": self.status}}]
+
+    async def refresh_agent(self, agent_id):
+        self.calls.append(f"refresh:{agent_id}")
+        if not self.refresh_ok:
+            raise RuntimeError("RPC 失败(None): no rollout found for thread id t1")
+        self.status = "idle"
+        return {"status": "agent_refreshed"}
+
+    async def archive_agent(self, agent_id):
+        self.calls.append(f"archive:{agent_id}")
+        return {}
+
+    async def create_agent(self, **kwargs):
+        self.calls.append(f"create:{kwargs['title']}")
+        return {"id": "v2", "status": "idle"}
+
+    async def set_agent_mode(self, _agent_id, _mode_id):
+        return {}
+
+    async def set_agent_model(self, _agent_id, _model_id):
+        return {}
+
+
+@pytest.mark.asyncio
+async def test_closed_agent_is_refreshed_and_reused() -> None:
+    client = _ClosedAgentClient(refresh_ok=True)
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v1"
+    assert agent["status"] == "idle"
+    assert client.calls == ["refresh:v1"]
+
+
+@pytest.mark.asyncio
+async def test_unrecoverable_closed_agent_is_archived_and_replaced() -> None:
+    """Codex never wrote a rollout for an unused thread: resume can never work."""
+    client = _ClosedAgentClient(refresh_ok=False)
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v2"
+    assert client.calls == ["refresh:v1", "archive:v1", "create:arl-validator"]
+
+
+@pytest.mark.asyncio
+async def test_transient_refresh_failure_keeps_the_agent() -> None:
+    """A timeout may clear up later: never archive a conversation that might resume."""
+    client = _ClosedAgentClient(refresh_ok=True)
+
+    async def _timeout(agent_id):
+        client.calls.append(f"refresh:{agent_id}")
+        raise TimeoutError("RPC 调用超时: refresh_agent_request")
+
+    client.refresh_agent = _timeout
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v1"
+    assert client.calls == ["refresh:v1"]
+
+
+@pytest.mark.asyncio
+async def test_live_agent_is_not_refreshed() -> None:
+    client = _ClosedAgentClient(refresh_ok=False)
+    client.status = "idle"
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v1"
+    assert client.calls == []
+
+
+# ---- 历史翻页 / 子 agent / 重置 ----
+
+
+@pytest.mark.asyncio
+async def test_fetch_older_uses_before_cursor_and_returns_page() -> None:
+    """向上翻页带着前端的游标走 direction=before，结果帧带新的 start_cursor。"""
+    websocket, worker = await _run_messages(
+        [
+            {
+                "type": "timeline_fetch_older",
+                "role": "worker",
+                "payload": {"cursor": {"epoch": "e1", "seq": 100}},
+            }
+        ]
+    )
+
+    agent_id, kwargs = worker.last_timeline
+    assert agent_id == "wa"
+    assert kwargs["direction"] == "before"
+    assert kwargs["cursor"] == {"epoch": "e1", "seq": 100}
+    frames = websocket.frames("timeline_older")
+    assert len(frames) == 1
+    data = frames[0]["data"]
+    assert data["ok"] is True
+    assert data["stale"] is False
+    assert data["has_older"] is True
+    assert data["start_cursor"] == {"epoch": "e1", "seq": 40}
+    assert len(data["entries"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_older_rejects_bad_cursor_with_result_frame() -> None:
+    """游标不合法时回 timeline_older(ok=False)，不调 daemon、不推通用 error。"""
+    websocket, worker = await _run_messages(
+        [
+            {
+                "type": "timeline_fetch_older",
+                "role": "worker",
+                "payload": {"cursor": {"epoch": "e1", "seq": True}},
+            }
+        ]
+    )
+
+    assert "fetch_agent_timeline" not in worker.calls
+    frames = websocket.frames("timeline_older")
+    assert frames[0]["data"]["ok"] is False
+    assert websocket.frames("error") == []
+
+
+def test_timeline_page_derives_cursor_from_first_entry() -> None:
+    """daemon 没给 startCursor 时，用首条的 seqStart 拼出游标。"""
+    page = arl_ws._timeline_page(
+        "a1", {"epoch": "e2", "entries": [{"seqStart": 7}, {"seqStart": 9}]}
+    )
+    assert page["start_cursor"] == {"epoch": "e2", "seq": 7}
+    assert arl_ws._timeline_page("a1", {"epoch": "e2", "entries": []})["start_cursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_subagent_timeline_requires_id_and_replies() -> None:
+    websocket, _ = await _run_messages(
+        [
+            {"type": "subagent_timeline", "role": "worker", "payload": {}},
+            {"type": "subagent_timeline", "role": "worker", "payload": {"subagent_id": "s1"}},
+        ]
+    )
+
+    frames = websocket.frames("subagent_timeline")
+    assert [f["data"]["ok"] for f in frames] == [False, True]
+    assert frames[1]["data"]["subagent_id"] == "s1"
+    assert len(frames[1]["data"]["rows"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_reset_switches_target_agent(monkeypatch) -> None:
+    """重置后旧 agent 被归档，后续消息投给新 agent。"""
+    monkeypatch.setattr(arl_ws, "_load_role_mode", lambda _sid, _role: "bypassPermissions")
+    websocket = _FakeWebSocket(
+        [
+            {"type": "agent_reset", "role": "worker", "payload": {}},
+            {"type": "agent_send", "role": "worker", "payload": {"content": "hi"}},
+        ]
+    )
+    worker = _FakeDaemonClient()
+    validator = _FakeDaemonClient()
+
+    await arl_ws._forward_from_frontend(
+        websocket, uuid.uuid4(), worker, validator, "wa", "va",
+        agent_models={"worker": "m1", "validator": None},
+    )
+
+    assert worker.archived == "wa"
+    assert worker.created["model"] == "m1"
+    assert worker.created["mode_id"] == "bypassPermissions"
+    frames = websocket.frames("agent_reset_result")
+    assert frames[0]["data"]["ok"] is True
+    assert frames[0]["data"]["agent"]["agent_id"] == "new-agent"
+    assert worker.sent_to == "new-agent"
+
+
+@pytest.mark.asyncio
+async def test_agent_reset_archive_failure_keeps_old_agent(monkeypatch) -> None:
+    """归档失败时不新建 agent，后续消息仍投给旧 agent。"""
+    monkeypatch.setattr(arl_ws, "_load_role_mode", lambda _sid, _role: "bypassPermissions")
+    websocket = _FakeWebSocket(
+        [
+            {"type": "agent_reset", "role": "worker", "payload": {}},
+            {"type": "agent_send", "role": "worker", "payload": {"content": "hi"}},
+        ]
+    )
+    worker = _FakeDaemonClient(fail={"archive_agent"})
+
+    await arl_ws._forward_from_frontend(
+        websocket, uuid.uuid4(), worker, _FakeDaemonClient(), "wa", "va"
+    )
+
+    assert "create_agent" not in worker.calls
+    assert websocket.frames("agent_reset_result")[0]["data"]["ok"] is False
+    assert worker.sent_to == "wa"
