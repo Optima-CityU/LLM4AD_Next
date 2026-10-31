@@ -4649,6 +4649,44 @@
       "stopping": "正在停止…",
       "modeTitle": "权限模式",
       "modeUnknown": "模式",
+      "modes": {
+        "claude": {
+          "plan": {
+            "label": "计划模式",
+            "description": "只分析代码，不执行工具、不改文件"
+          },
+          "default": {
+            "label": "每次询问",
+            "description": "每种工具首次使用时请求授权"
+          },
+          "acceptEdits": {
+            "label": "自动接受编辑",
+            "description": "文件编辑类工具自动放行，无需确认"
+          },
+          "auto": {
+            "label": "自动模式",
+            "description": "由模型分类器自动审核授权请求"
+          },
+          "bypassPermissions": {
+            "label": "跳过授权",
+            "description": "跳过所有授权确认（谨慎使用）"
+          }
+        },
+        "codex": {
+          "auto": {
+            "label": "默认权限",
+            "description": "按 Codex 默认审批流程编辑文件、执行命令"
+          },
+          "auto-review": {
+            "label": "自动审核",
+            "description": "与默认权限相同的工作区写权限，但可审批的请求交给自动审核子 agent 处理"
+          },
+          "full-access": {
+            "label": "完全访问",
+            "description": "编辑文件、执行命令和访问网络都无需额外确认"
+          }
+        }
+      },
       "systemTitle": "系统",
       "statusIdle": "空闲",
       "statusRunning": "工作中",

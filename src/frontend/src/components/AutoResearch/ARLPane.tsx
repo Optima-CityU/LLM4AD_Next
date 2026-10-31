@@ -63,6 +63,7 @@ import {
   arlRoleClass,
   canSyncValidation,
   describeAgent,
+  modeText,
   workerWaitKey,
 } from "./arlAgentMeta"
 import {
@@ -427,8 +428,9 @@ export default function ARLPane({
   // Permission mode: the container's own list, as reported by its provider.
   const autoMode = isUnattendedMode(state.modeId)
   const currentMode = state.modes.find((mode) => mode.id === state.modeId)
+  const currentModeText = currentMode && modeText(t, role, currentMode)
   const modeLabel =
-    currentMode?.label ?? state.modeId ?? t("autoResearch.arl.modeUnknown")
+    currentModeText?.label ?? state.modeId ?? t("autoResearch.arl.modeUnknown")
   const unattended = state.modes.find((mode) => isUnattendedMode(mode.id))
 
   const pendingIds = state.permissions.map((request) => request.id)
@@ -509,7 +511,7 @@ export default function ARLPane({
                 autoMode &&
                   "border-emerald-500/30 text-emerald-700 dark:text-emerald-400",
               )}
-              title={currentMode?.description ?? modeLabel}
+              title={currentModeText?.description ?? modeLabel}
             >
               {autoMode ? (
                 <ShieldCheck className="size-3.5" />
@@ -525,30 +527,33 @@ export default function ARLPane({
               {t("autoResearch.arl.modeTitle")}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {state.modes.map((mode) => (
-              <DropdownMenuItem
-                key={mode.id}
-                onSelect={() => onSetMode(role, mode.id)}
-                className="flex flex-col items-start gap-0.5"
-              >
-                <span className="flex w-full items-center gap-1.5 text-[12.5px] font-medium">
-                  {mode.id === state.modeId ? (
-                    <Check className="size-3.5 text-primary" />
-                  ) : (
-                    <span className="size-3.5" />
-                  )}
-                  {mode.label}
-                  {isUnattendedMode(mode.id) && (
-                    <Zap className="size-3 text-amber-500" />
-                  )}
-                </span>
-                {mode.description && (
-                  <span className="pl-5 text-[11px] leading-snug text-muted-foreground">
-                    {mode.description}
+            {state.modes.map((mode) => {
+              const text = modeText(t, role, mode)
+              return (
+                <DropdownMenuItem
+                  key={mode.id}
+                  onSelect={() => onSetMode(role, mode.id)}
+                  className="flex flex-col items-start gap-0.5"
+                >
+                  <span className="flex w-full items-center gap-1.5 text-[12.5px] font-medium">
+                    {mode.id === state.modeId ? (
+                      <Check className="size-3.5 text-primary" />
+                    ) : (
+                      <span className="size-3.5" />
+                    )}
+                    {text.label}
+                    {isUnattendedMode(mode.id) && (
+                      <Zap className="size-3 text-amber-500" />
+                    )}
                   </span>
-                )}
-              </DropdownMenuItem>
-            ))}
+                  {text.description && (
+                    <span className="pl-5 text-[11px] leading-snug text-muted-foreground">
+                      {text.description}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              )
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -652,7 +657,7 @@ export default function ARLPane({
                     if (!onSetMode(role, unattended.id)) return
                     onPermissions(role, pendingIds, { behavior: "allow" })
                   }}
-                  title={unattended.description}
+                  title={modeText(t, role, unattended).description}
                 >
                   <Zap className="size-3" />
                   {t("autoResearch.arl.permissionStopAsking")}

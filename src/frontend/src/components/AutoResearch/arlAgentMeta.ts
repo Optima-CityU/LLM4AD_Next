@@ -1,7 +1,9 @@
+import type { TFunction } from "i18next"
 import type { IconType } from "react-icons"
 import { SiClaude, SiOpenai } from "react-icons/si"
 
 import type {
+  ARLAgentMode,
   ARLRole,
   ARLRoleState,
   ARLValidationState,
@@ -188,4 +190,39 @@ export function workerWaitKey(validatorStarted: boolean): string {
   return validatorStarted
     ? "autoResearch.arl.guide.workerWaitBusy"
     : "autoResearch.arl.guide.workerWait"
+}
+
+/**
+ * Paseo provider per role. Mode IDs are only unique within a provider (both
+ * Claude and Codex have an `auto` mode), so translations are keyed by it.
+ */
+const ARL_ROLE_PROVIDER: Record<ARLRole, string> = {
+  validator: "codex",
+  worker: "claude",
+}
+
+/**
+ * Localized label and description of a permission mode.
+ *
+ * The daemon only ships English text from Paseo's provider manifest. Known
+ * modes are translated by provider + mode ID; unknown ones (e.g. a mode a
+ * newer Paseo adds) fall back to the daemon's text.
+ *
+ * @param t - i18next translate function.
+ * @param role - Container role, which determines the provider.
+ * @param mode - Mode as reported by the daemon.
+ * @returns Display-ready label and optional description.
+ */
+export function modeText(
+  t: TFunction,
+  role: ARLRole,
+  mode: ARLAgentMode,
+): { label: string; description?: string } {
+  const base = `autoResearch.arl.modes.${ARL_ROLE_PROVIDER[role]}.${mode.id}`
+  return {
+    label: t(`${base}.label`, { defaultValue: mode.label }),
+    description: mode.description
+      ? t(`${base}.description`, { defaultValue: mode.description })
+      : undefined,
+  }
 }
