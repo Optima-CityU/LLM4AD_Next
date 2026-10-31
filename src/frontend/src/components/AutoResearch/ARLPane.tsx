@@ -119,6 +119,11 @@ interface Props {
     role: ARLRole,
     subagentId: string,
   ) => Promise<ARLStreamItem[]>
+  /** Fetch one peer agent's transcript for the same sheet. */
+  onFetchPeerTimeline: (
+    role: ARLRole,
+    peerId: string,
+  ) => Promise<ARLStreamItem[]>
   /** `/clear`: archive the agent and start a fresh conversation. */
   onReset: (role: ARLRole) => boolean
 }
@@ -148,6 +153,7 @@ export default function ARLPane({
   validatorStarted,
   onLoadOlder,
   onFetchSubagentTimeline,
+  onFetchPeerTimeline,
   onReset,
 }: Props) {
   const { t } = useTranslation()
@@ -707,7 +713,9 @@ export default function ARLPane({
           <ARLSubagentStrip
             role={role}
             subagents={state.subagents}
+            peers={state.peers}
             onFetchTimeline={onFetchSubagentTimeline}
+            onFetchPeerTimeline={onFetchPeerTimeline}
           />
         </div>
         <div className="relative mx-auto w-full max-w-[820px]">

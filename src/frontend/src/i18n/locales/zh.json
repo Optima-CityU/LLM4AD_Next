@@ -4711,6 +4711,9 @@
       "subagentUntitled": "未命名子任务",
       "subagentEmpty": "这个子任务还没有消息",
       "subagentLive": "仍在运行，状态变化时自动刷新",
+      "peerBadge": "同级",
+      "peerClosed": "agent 已结束，容器重启后无法查看对话",
+      "peerUntitled": "未命名验证任务",
       "subagentStatus": {
         "running": "运行中",
         "completed": "已完成",

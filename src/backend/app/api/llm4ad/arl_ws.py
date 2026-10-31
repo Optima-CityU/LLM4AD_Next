@@ -80,6 +80,7 @@ KNOWN_MESSAGE_TYPES = frozenset(
         "fs_request",
         "timeline_fetch_older",
         "subagent_timeline",
+        "peer_timeline",
         "agent_reset",
     }
 )
@@ -205,14 +206,15 @@ def _pick_agent_entry(
 
     刻意不做严格的状态过滤：daemon 对归档/状态字段的全部取值尚未确认，
     过滤写窄了会导致每次连接都新建 agent，容器里越堆越多。故匹配不到标题
-    时仍回落到首个条目，与原行为一致。
+    时仍回落到首个条目，与原行为一致。唯一的例外是带 :data:`PEER_AGENT_LABEL`
+    的 agent：它们是验证流程派生的同级 agent，绝不能被当成主 agent 复用。
 
     Args:
         entries: ``fetch_agents`` 返回的目录条目
         role: 容器角色（worker / validator）
 
     Returns:
-        该复用的条目；目录为空时返回 None。
+        该复用的条目；目录为空（或只剩同级 agent）时返回 None。
     """
     if not entries:
         return None
@@ -222,13 +224,78 @@ def _pick_agent_entry(
         if _agent_snapshot(entry).get("title") == expected:
             return entry
 
+    candidates = [e for e in entries if not _has_peer_label(_agent_snapshot(e))]
+    if not candidates:
+        logger.info(
+            "ℹ️ [{}] agent 目录里只有 {} 个同级 agent，新建主 agent", role, len(entries)
+        )
+        return None
     logger.warning(
         "⚠️ [{}] agent 目录里没有标题为 {} 的条目（共 {} 个），回落到首个",
         role,
         expected,
         len(entries),
     )
-    return entries[0]
+    return candidates[0]
+
+
+#: ARIS 验证流程用 ``paseo run --label aris.role=...`` 派生的 agent 带这个标签。
+#: 它们与主 agent 同级（``parentAgentId`` 为空），不会出现在 provider 子 agent
+#: 列表里，只能从 agent 目录里按标签挑出来。
+PEER_AGENT_LABEL = "aris.role"
+
+
+def _has_peer_label(agent: dict[str, Any]) -> bool:
+    """agent 是否带 :data:`PEER_AGENT_LABEL` 标签。
+
+    Args:
+        agent: agent 快照
+
+    Returns:
+        True 表示由验证流程派生
+    """
+    labels = agent.get("labels")
+    return isinstance(labels, dict) and bool(labels.get(PEER_AGENT_LABEL))
+
+
+def _is_peer_agent(agent: dict[str, Any], main_agent_id: str | None) -> bool:
+    """agent 是否应作为同级 agent 展示在子任务栏里。
+
+    Args:
+        agent: agent 快照
+        main_agent_id: 该角色当前的主 agent ID
+
+    Returns:
+        带标签、不是主 agent、未归档且非 daemon 内部 agent 时为 True
+    """
+    return (
+        _has_peer_label(agent)
+        and agent.get("id") != main_agent_id
+        and not agent.get("archivedAt")
+        and not agent.get("internal")
+    )
+
+
+def _peer_summary(agent: dict[str, Any]) -> dict[str, Any]:
+    """把同级 agent 快照压成子任务栏需要的字段（沿用 daemon 的字段名）。
+
+    前端用同一个归一化函数处理这里的摘要和 ``agent_update`` 里的完整快照，
+    故字段名保持 daemon 原样。
+
+    Args:
+        agent: agent 快照
+
+    Returns:
+        ``peer_agent_list`` 帧里的单个条目
+    """
+    return {
+        "id": agent.get("id"),
+        "title": agent.get("title"),
+        "status": agent.get("status"),
+        "labels": agent.get("labels") or {},
+        "createdAt": agent.get("createdAt"),
+        "updatedAt": agent.get("updatedAt"),
+    }
 
 
 #: codex 找不到线程 rollout 文件时的报错片段：线程从没收到过消息就不会落盘，
@@ -710,6 +777,79 @@ async def _push_subagents(
     )
 
 
+async def _push_peer_agents(
+    websocket: WebSocket,
+    client: PaseoDaemonClient,
+    role: str,
+    agent_id: str,
+) -> None:
+    """把容器里的同级 agent 列表推给前端（见 :data:`PEER_AGENT_LABEL`）。
+
+    之后的状态变化由已订阅的 ``agent_update`` 推送，经 ``timeline_event``
+    原样转发，前端据此增量更新。拉取失败只记日志：这是辅助信息，不该拦住
+    主对话。
+
+    Args:
+        websocket: 前端连接
+        client: 已握手的 daemon 客户端
+        role: 容器角色（worker / validator）
+        agent_id: 该角色的主 agent ID（排除用）
+    """
+    try:
+        entries = await client.fetch_agents(subscribe=False)
+    except Exception as e:
+        logger.warning(f"⚠️ [{role}] 拉取同级 agent 列表失败，跳过: {e}")
+        return
+    peers = [
+        _peer_summary(agent)
+        for agent in (_agent_snapshot(entry) for entry in entries)
+        if _is_peer_agent(agent, agent_id)
+    ]
+    await _push(
+        websocket,
+        "peer_agent_list",
+        {"agent_id": agent_id, "peers": peers},
+        role=role,
+    )
+
+
+async def _fetch_peer_timeline(
+    client: PaseoDaemonClient, main_agent_id: str, peer_id: str
+) -> dict[str, Any]:
+    """拉一个同级 agent 的 tail 历史，只允许已加载在内存里的 agent。
+
+    daemon 处理 ``fetch_agent_timeline_request`` 时会先 ``ensureAgentLoaded``：
+    不在内存里的 agent（容器重启后显示为 ``closed``）会被从磁盘恢复、重新
+    拉起一个 provider 进程。仅为查看就唤醒它不划算，故先查目录确认状态。
+    前端也会置灰 ``closed`` 卡片，这里是兜底，防止过期状态或手工构造的帧。
+
+    Args:
+        client: 该角色的 daemon 客户端
+        main_agent_id: 该角色的主 agent ID
+        peer_id: 要查看的同级 agent ID
+
+    Returns:
+        daemon 的 ``fetch_agent_timeline_response`` payload
+
+    Raises:
+        ValueError: 目标不是同级 agent，或已不在内存里。
+    """
+    entries = await client.fetch_agents(subscribe=False)
+    agent = next(
+        (
+            snapshot
+            for snapshot in (_agent_snapshot(entry) for entry in entries)
+            if snapshot.get("id") == peer_id
+        ),
+        None,
+    )
+    if agent is None or not _is_peer_agent(agent, main_agent_id):
+        raise ValueError(f"not a peer agent: {peer_id}")
+    if agent.get("status") == "closed":
+        raise ValueError("agent is closed; its transcript is unavailable")
+    return await client.fetch_agent_timeline(peer_id, limit=HISTORY_LIMIT)
+
+
 def _load_role_mode(session_id: uuid.UUID, role: str) -> str:
     """读出会话里该角色当前的权限模式（阻塞，供 ``to_thread`` 调用）。
 
@@ -926,7 +1066,7 @@ async def arl_websocket(
       "type": "agent_send" | "agent_cancel" | "set_agent_mode"
             | "file_read" | "file_write" | "file_list" | "permission_response"
             | "list_commands" | "fs_request" | "timeline_fetch_older"
-            | "subagent_timeline" | "agent_reset",
+            | "subagent_timeline" | "peer_timeline" | "agent_reset",
       "role": "worker" | "validator",
       "payload": { ... }
     }
@@ -939,6 +1079,7 @@ async def arl_websocket(
             | "agent_cancel_result" | "agent_mode_result" | "command_list"
             | "fs_result" | "timeline_older" | "subagent_list"
             | "subagent_timeline" | "agent_reset_result"
+            | "peer_agent_list" | "peer_timeline"
             | "file_content" | "file_list" | "error" | "system",
       "role": "worker" | "validator",
       "data": { ... }
@@ -1139,6 +1280,9 @@ async def arl_websocket(
         # 子任务栏的初始列表，增量随后经 timeline_event 到达
         await _push_subagents(websocket, worker_client, "worker", worker_agent_id)
         await _push_subagents(websocket, validator_client, "validator", validator_agent_id)
+        # 验证流程派生的同级 agent，同样进子任务栏
+        await _push_peer_agents(websocket, worker_client, "worker", worker_agent_id)
+        await _push_peer_agents(websocket, validator_client, "validator", validator_agent_id)
 
         logger.info(f"✅ [Session {session_id}] All daemons connected, starting message forwarding...")
 
@@ -1661,6 +1805,34 @@ async def _handle_frontend_message(
                     "subagent_id": subagent_id,
                     "message": str(e),
                 },
+                role=role,
+            )
+
+    elif msg_type == "peer_timeline":
+        # 前端点开某个同级 agent 时按需拉它的对话。复用 subagent_timeline 的
+        # 结果帧结构（rows），失败就地处理。
+        peer_id = payload.get("peer_id")
+        try:
+            if not isinstance(peer_id, str) or not peer_id:
+                raise ValueError("peer_id is required")
+            page = await _fetch_peer_timeline(client, agent_id, peer_id)
+            await _push(
+                websocket,
+                "peer_timeline",
+                {
+                    "ok": True,
+                    "peer_id": peer_id,
+                    "rows": page.get("entries") or [],
+                    "has_older": bool(page.get("hasOlder")),
+                },
+                role=role,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [Backend → {target_name}] Fetch peer timeline failed: {e}")
+            await _push(
+                websocket,
+                "peer_timeline",
+                {"ok": False, "peer_id": peer_id, "message": str(e)},
                 role=role,
             )
 

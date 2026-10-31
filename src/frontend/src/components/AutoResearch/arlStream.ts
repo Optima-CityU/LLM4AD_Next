@@ -153,6 +153,24 @@ export interface ARLSubagent {
   updatedAt: string
 }
 
+/**
+ * A top-level agent in the same container that the validation flow spawned
+ * (`paseo run --label aris.role=...`). Unlike a subagent it has no parent, so
+ * it only shows up in the agent directory.
+ */
+export interface ARLPeerAgent {
+  id: string
+  title: string | null
+  /** `aris.role` label, e.g. `validator` / `leak-review`. */
+  peerRole: string
+  /** `aris.submission` label, e.g. `s001`. */
+  submission: string | null
+  /** Daemon lifecycle status: initializing / idle / running / error / closed. */
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
 /** Everything the left/right pane needs for one container. */
 export interface ARLRoleState {
   agentId: string | null
@@ -177,6 +195,8 @@ export interface ARLRoleState {
   loadingOlder: boolean
   /** Subagents of the current main agent, oldest first. */
   subagents: ARLSubagent[]
+  /** Peer agents the validation flow spawned in this container. */
+  peers: ARLPeerAgent[]
   /** True between confirming `/clear` and the backend's reset result. */
   resetting: boolean
   /**
@@ -270,6 +290,7 @@ export function emptyRoleState(): ARLRoleState {
     hasOlder: false,
     loadingOlder: false,
     subagents: [],
+    peers: [],
     resetting: false,
     ready: false,
   }
@@ -874,6 +895,102 @@ export function applySubagentUpdate(
   return state
 }
 
+/** Label the validation flow puts on the peer agents it spawns. */
+export const PEER_AGENT_LABEL = "aris.role"
+
+/** True when a daemon agent snapshot carries the peer label. */
+export function hasPeerLabel(raw: any): boolean {
+  const value = raw?.labels?.[PEER_AGENT_LABEL]
+  return typeof value === "string" && value.length > 0
+}
+
+/**
+ * Coerce a daemon agent snapshot into a peer agent.
+ *
+ * @param raw - Full snapshot (`agent_update`) or backend summary (`peer_agent_list`).
+ * @param mainAgentId - The pane's main agent, which is never a peer.
+ * @returns The peer, or `null` when the agent is not one (no label, the main
+ *   agent, archived, or daemon-internal).
+ */
+export function normalizePeer(
+  raw: any,
+  mainAgentId: string | null,
+): ARLPeerAgent | null {
+  if (!raw || typeof raw.id !== "string" || !raw.id) return null
+  if (raw.id === mainAgentId || raw.archivedAt || raw.internal) return null
+  const labels = raw.labels && typeof raw.labels === "object" ? raw.labels : {}
+  const peerRole = labels[PEER_AGENT_LABEL]
+  if (typeof peerRole !== "string" || !peerRole) return null
+  const submission = labels["aris.submission"]
+  return {
+    id: raw.id,
+    title: typeof raw.title === "string" && raw.title.trim() ? raw.title : null,
+    peerRole,
+    submission:
+      typeof submission === "string" && submission ? submission : null,
+    status: typeof raw.status === "string" ? raw.status : "idle",
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+  }
+}
+
+/** Replace a pane's peer list with a `peer_agent_list` snapshot. */
+export function applyPeerList(state: ARLRoleState, data: any): ARLRoleState {
+  const raw: unknown[] = Array.isArray(data?.peers) ? data.peers : []
+  const peers = raw
+    .map((peer) => normalizePeer(peer, state.agentId))
+    .filter((peer): peer is ARLPeerAgent => peer !== null)
+  return { ...state, peers }
+}
+
+/**
+ * Fold an `agent_update` for an agent other than the pane's main one.
+ *
+ * Upserts of a peer replace or add it; an upsert that no longer qualifies
+ * (archived) or a `remove` drops it. Updates for unrelated agents leave the
+ * state untouched, so callers can route every foreign update here.
+ */
+export function applyPeerUpdate(
+  state: ARLRoleState,
+  payload: any,
+): ARLRoleState {
+  const drop = (id: unknown) => {
+    const peers = state.peers.filter((peer) => peer.id !== id)
+    return peers.length === state.peers.length ? state : { ...state, peers }
+  }
+  if (payload?.kind === "remove") return drop(payload.agentId)
+  if (payload?.kind !== "upsert") return state
+  const peer = normalizePeer(payload.agent, state.agentId)
+  if (!peer) return drop(payload.agent?.id)
+  const index = state.peers.findIndex((p) => p.id === peer.id)
+  const peers =
+    index < 0
+      ? [...state.peers, peer]
+      : state.peers.map((p, i) => (i === index ? peer : p))
+  return { ...state, peers }
+}
+
+/**
+ * Map a peer's daemon status onto the strip's status icons.
+ *
+ * `idle` means its turn finished, which for a one-shot validation run is
+ * "completed". `closed` (not loaded after a container restart) shows as
+ * canceled; the strip also greys it out.
+ */
+export function peerDisplayStatus(peer: ARLPeerAgent): ARLSubagentStatus {
+  switch (peer.status) {
+    case "running":
+    case "initializing":
+      return "running"
+    case "error":
+      return "failed"
+    case "closed":
+      return "canceled"
+    default:
+      return "completed"
+  }
+}
+
 /** Number of subagents still running in a pane. */
 export function runningSubagents(state: ARLRoleState): number {
   return state.subagents.filter((s) => s.status === "running").length
@@ -898,5 +1015,11 @@ export function applyAgentReset(state: ARLRoleState, data: any): ARLRoleState {
       availableModes: info.modes,
     },
   )
-  return { ...fresh, historyLoaded: true, ready: state.ready }
+  // Peers belong to the container, not to the archived agent: keep them.
+  return {
+    ...fresh,
+    historyLoaded: true,
+    ready: state.ready,
+    peers: state.peers,
+  }
 }

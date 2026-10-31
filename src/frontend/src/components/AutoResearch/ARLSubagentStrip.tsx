@@ -17,6 +17,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import type {
+  ARLPeerAgent,
   ARLRole,
   ARLStreamItem,
   ARLSubagent,
@@ -25,18 +26,37 @@ import type {
 import { cn } from "@/lib/utils"
 
 import ARLMessageItem from "./ARLMessageItem"
+import { peerDisplayStatus } from "./arlStream"
 
 /** Collapsed strip shows at most this many chips; the rest fold into "+N". */
 const MAX_VISIBLE_CHIPS = 4
 
+type FetchTimeline = (role: ARLRole, id: string) => Promise<ARLStreamItem[]>
+
 interface Props {
   role: ARLRole
   subagents: ARLSubagent[]
+  /** Peer agents the validation flow spawned in the same container. */
+  peers: ARLPeerAgent[]
   /** Fetch one subagent's transcript (resolves with renderable rows). */
-  onFetchTimeline: (
-    role: ARLRole,
-    subagentId: string,
-  ) => Promise<ARLStreamItem[]>
+  onFetchTimeline: FetchTimeline
+  /** Fetch one peer agent's transcript. */
+  onFetchPeerTimeline: FetchTimeline
+}
+
+/** One chip in the strip: a provider subagent or a peer agent. */
+interface StripEntry {
+  key: string
+  id: string
+  kind: "subagent" | "peer"
+  label: string
+  /** Extra line for the tooltip and the sheet header. */
+  subtitle: string | null
+  status: ARLSubagentStatus
+  /** Peer not loaded in the daemon (`closed`): viewing it would resume it. */
+  unavailable: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 /** Status icon per subagent lifecycle state. */
@@ -59,43 +79,79 @@ function SubagentStatusIcon({ status }: { status: ARLSubagentStatus }) {
   }
 }
 
-/** Display label: the task description names siblings in a fan-out best. */
-function subagentLabel(subagent: ARLSubagent, fallback: string): string {
-  return subagent.description ?? subagent.title ?? fallback
+function subagentEntry(subagent: ARLSubagent, fallback: string): StripEntry {
+  return {
+    key: `subagent:${subagent.id}`,
+    id: subagent.id,
+    kind: "subagent",
+    // The task description names siblings in a fan-out best.
+    label: subagent.description ?? subagent.title ?? fallback,
+    subtitle: subagent.subtitle,
+    status: subagent.status,
+    unavailable: false,
+    createdAt: subagent.createdAt,
+    updatedAt: subagent.updatedAt,
+  }
+}
+
+function peerEntry(peer: ARLPeerAgent, fallback: string): StripEntry {
+  return {
+    key: `peer:${peer.id}`,
+    id: peer.id,
+    kind: "peer",
+    label: peer.title ?? peer.submission ?? fallback,
+    subtitle: [peer.peerRole, peer.submission].filter(Boolean).join(" · "),
+    status: peerDisplayStatus(peer),
+    unavailable: peer.status === "closed",
+    createdAt: peer.createdAt,
+    updatedAt: peer.updatedAt,
+  }
 }
 
 /**
- * Subagents of a container's main agent, shown above the composer.
+ * Subagents and peer agents of a container, shown above the composer.
  *
- * Mirrors the native Paseo subagent track: subagent transcripts are kept out
- * of the main conversation (which already carries a `sub_agent` tool row per
- * spawn), and only their status is shown inline. Clicking a chip opens the
- * transcript in a side sheet, fetched on demand.
+ * Mirrors the native Paseo subagent track: their transcripts are kept out of
+ * the main conversation and only their status is shown inline. Clicking a
+ * chip opens the transcript in a side sheet, fetched on demand.
  *
- * Renders nothing while the agent has no subagents.
+ * Peers are top-level agents the validation flow spawned (`paseo run`), not
+ * children of the main agent; a small badge tells them apart. A `closed` peer
+ * is greyed out and cannot be opened, because fetching its timeline would
+ * make the daemon resume its provider process.
+ *
+ * Renders nothing while there is neither.
  */
 export default function ARLSubagentStrip({
   role,
   subagents,
+  peers,
   onFetchTimeline,
+  onFetchPeerTimeline,
 }: Props) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [openKey, setOpenKey] = useState<string | null>(null)
 
-  if (subagents.length === 0) return null
+  if (subagents.length === 0 && peers.length === 0) return null
 
-  const running = subagents.filter((s) => s.status === "running").length
+  const subagentFallback = t("autoResearch.arl.subagentUntitled")
+  const peerFallback = t("autoResearch.arl.peerUntitled")
+  const entries = [
+    ...subagents.map((s) => subagentEntry(s, subagentFallback)),
+    ...peers.map((p) => peerEntry(p, peerFallback)),
+  ]
+
+  const running = entries.filter((e) => e.status === "running").length
   // Running ones first, newest first within each group: the strip is about
   // what is happening now.
-  const ordered = [...subagents].sort((a, b) => {
-    const rank = (s: ARLSubagent) => (s.status === "running" ? 0 : 1)
+  const ordered = [...entries].sort((a, b) => {
+    const rank = (e: StripEntry) => (e.status === "running" ? 0 : 1)
     return rank(a) - rank(b) || b.createdAt.localeCompare(a.createdAt)
   })
   const visible = expanded ? ordered : ordered.slice(0, MAX_VISIBLE_CHIPS)
   const hidden = ordered.length - visible.length
-  const open = subagents.find((s) => s.id === openId) ?? null
-  const fallback = t("autoResearch.arl.subagentUntitled")
+  const open = entries.find((e) => e.key === openKey && !e.unavailable) ?? null
 
   return (
     <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
@@ -104,27 +160,37 @@ export default function ARLSubagentStrip({
         {running > 0
           ? t("autoResearch.arl.subagentsRunning", {
               running,
-              total: subagents.length,
+              total: entries.length,
             })
-          : t("autoResearch.arl.subagentsTotal", { total: subagents.length })}
+          : t("autoResearch.arl.subagentsTotal", { total: entries.length })}
       </span>
-      {visible.map((subagent) => {
-        const label = subagentLabel(subagent, fallback)
+      {visible.map((entry) => {
+        const tooltip = entry.unavailable
+          ? `${entry.label}\n${t("autoResearch.arl.peerClosed")}`
+          : entry.subtitle
+            ? `${entry.label}\n${entry.subtitle}`
+            : entry.label
         return (
           <button
-            key={subagent.id}
+            key={entry.key}
             type="button"
-            onClick={() => setOpenId(subagent.id)}
-            title={subagent.subtitle ? `${label}\n${subagent.subtitle}` : label}
+            onClick={() => setOpenKey(entry.key)}
+            disabled={entry.unavailable}
+            title={tooltip}
             className={cn(
-              "inline-flex h-6 max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border px-2 text-[11.5px] transition-colors",
-              subagent.status === "running"
+              "inline-flex h-6 max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border px-2 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              entry.status === "running"
                 ? "border-(--arl-accent)/35 bg-(--arl-accent)/8 text-foreground hover:border-(--arl-accent)/60"
-                : "border-border/60 bg-background/60 text-muted-foreground hover:text-foreground",
+                : "border-border/60 bg-background/60 text-muted-foreground enabled:hover:text-foreground",
             )}
           >
-            <SubagentStatusIcon status={subagent.status} />
-            <span className="min-w-0 truncate">{label}</span>
+            <SubagentStatusIcon status={entry.status} />
+            <span className="min-w-0 truncate">{entry.label}</span>
+            {entry.kind === "peer" && (
+              <span className="shrink-0 rounded-sm bg-muted px-1 text-[10px] leading-4 text-muted-foreground">
+                {t("autoResearch.arl.peerBadge")}
+              </span>
+            )}
           </button>
         )
       })}
@@ -140,16 +206,17 @@ export default function ARLSubagentStrip({
 
       <Sheet
         open={open !== null}
-        onOpenChange={(value) => !value && setOpenId(null)}
+        onOpenChange={(value) => !value && setOpenKey(null)}
       >
         <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-xl">
           {open && (
             <SubagentTranscript
-              key={open.id}
+              key={open.key}
               role={role}
-              subagent={open}
-              label={subagentLabel(open, fallback)}
-              onFetchTimeline={onFetchTimeline}
+              entry={open}
+              onFetchTimeline={
+                open.kind === "peer" ? onFetchPeerTimeline : onFetchTimeline
+              }
             />
           )}
         </SheetContent>
@@ -158,30 +225,28 @@ export default function ARLSubagentStrip({
   )
 }
 
-/** Sheet body: header plus the subagent's transcript, refreshed on status change. */
+/** Sheet body: header plus the transcript, refreshed on status change. */
 function SubagentTranscript({
   role,
-  subagent,
-  label,
+  entry,
   onFetchTimeline,
 }: {
   role: ARLRole
-  subagent: ARLSubagent
-  label: string
-  onFetchTimeline: Props["onFetchTimeline"]
+  entry: StripEntry
+  onFetchTimeline: FetchTimeline
 }) {
   const { t } = useTranslation()
   const [items, setItems] = useState<ARLStreamItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Refetch whenever the subagent's status or update time moves, so an open
-  // sheet follows a running subagent to completion without streaming its
-  // timeline into the pane state.
+  // Refetch whenever the status or update time moves, so an open sheet
+  // follows a running agent to completion without streaming its timeline
+  // into the pane state.
   // biome-ignore lint/correctness/useExhaustiveDependencies: status and update time are the refresh triggers
   useEffect(() => {
     let alive = true
     setError(null)
-    onFetchTimeline(role, subagent.id).then(
+    onFetchTimeline(role, entry.id).then(
       (rows) => alive && setItems(rows),
       (err: Error) => {
         if (alive && err.message !== "Superseded") setError(err.message)
@@ -190,19 +255,20 @@ function SubagentTranscript({
     return () => {
       alive = false
     }
-  }, [role, subagent.id, subagent.status, subagent.updatedAt, onFetchTimeline])
+  }, [role, entry.id, entry.status, entry.updatedAt, onFetchTimeline])
 
   return (
     <>
       <SheetHeader className="border-b border-border/60 px-5 py-4 pr-12">
         <SheetTitle className="flex min-w-0 items-center gap-2 text-[14px]">
-          <SubagentStatusIcon status={subagent.status} />
-          <span className="min-w-0 truncate">{label}</span>
+          <SubagentStatusIcon status={entry.status} />
+          <span className="min-w-0 truncate">{entry.label}</span>
         </SheetTitle>
         <SheetDescription className="truncate text-[11.5px]">
           {[
-            t(`autoResearch.arl.subagentStatus.${subagent.status}`),
-            subagent.subtitle,
+            t(`autoResearch.arl.subagentStatus.${entry.status}`),
+            entry.kind === "peer" ? t("autoResearch.arl.peerBadge") : null,
+            entry.subtitle,
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -225,7 +291,7 @@ function SubagentTranscript({
         ) : (
           items.map((item) => <ARLMessageItem key={item.id} item={item} />)
         )}
-        {subagent.status === "running" && items !== null && (
+        {entry.status === "running" && items !== null && (
           <p className="flex items-center gap-1.5 py-2 text-[11.5px] text-muted-foreground">
             <ChevronRight className="size-3" />
             {t("autoResearch.arl.subagentLive")}

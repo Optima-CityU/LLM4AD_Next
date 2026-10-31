@@ -9,9 +9,13 @@ import {
   applyAgentReset,
   applyHistory,
   applyOlderPage,
+  applyPeerList,
+  applyPeerUpdate,
   applySubagentList,
   applySubagentUpdate,
   emptyRoleState,
+  normalizePeer,
+  peerDisplayStatus,
   runningSubagents,
 } from "../src/components/AutoResearch/arlStream.ts"
 
@@ -317,4 +321,89 @@ test("history re-sent mid-turn reopens the newest text row for streaming", () =>
   const idle = applyHistory(emptyRoleState(), { ...data, active_turn: false })
   const idleLast = idle.items[idle.items.length - 1]
   assert.equal(idleLast.kind === "assistant_message" && idleLast.streaming, false)
+})
+
+const peer = (id: string, status = "running", extra: object = {}) => ({
+  id,
+  title: `ARIS validation ${id}`,
+  status,
+  labels: { "aris.role": "validator", "aris.submission": id },
+  createdAt: TS,
+  updatedAt: TS,
+  ...extra,
+})
+
+test("peer list keeps only labelled, live agents other than the main one", () => {
+  const state = { ...emptyRoleState(), agentId: "main" }
+  const next = applyPeerList(state, {
+    peers: [
+      peer("s001"),
+      peer("main"),
+      { ...peer("old"), archivedAt: TS },
+      { id: "plain", title: "user agent", status: "idle", labels: {} },
+    ],
+  })
+  assert.deepEqual(
+    next.peers.map((p) => [p.id, p.submission]),
+    [["s001", "s001"]],
+  )
+})
+
+test("peer updates upsert, drop on archive and on remove", () => {
+  let state = { ...emptyRoleState(), agentId: "main" }
+  state = applyPeerUpdate(state, { kind: "upsert", agent: peer("s001") })
+  state = applyPeerUpdate(state, { kind: "upsert", agent: peer("s002") })
+  state = applyPeerUpdate(state, {
+    kind: "upsert",
+    agent: peer("s001", "idle"),
+  })
+  assert.deepEqual(
+    state.peers.map((p) => [p.id, p.status]),
+    [
+      ["s001", "idle"],
+      ["s002", "running"],
+    ],
+  )
+  state = applyPeerUpdate(state, {
+    kind: "upsert",
+    agent: peer("s002", "idle", { archivedAt: TS }),
+  })
+  assert.deepEqual(
+    state.peers.map((p) => p.id),
+    ["s001"],
+  )
+  state = applyPeerUpdate(state, { kind: "remove", agentId: "s001" })
+  assert.equal(state.peers.length, 0)
+})
+
+test("unrelated agent updates leave the peer list untouched", () => {
+  const state = { ...emptyRoleState(), agentId: "main", peers: [] }
+  const next = applyPeerUpdate(state, {
+    kind: "upsert",
+    agent: { id: "plain", status: "idle", labels: {} },
+  })
+  assert.equal(next, state)
+})
+
+test("peer status maps onto strip icons; closed reads as canceled", () => {
+  const status = (s: string) =>
+    peerDisplayStatus(normalizePeer(peer("x", s), null)!)
+  assert.equal(status("running"), "running")
+  assert.equal(status("initializing"), "running")
+  assert.equal(status("idle"), "completed")
+  assert.equal(status("error"), "failed")
+  assert.equal(status("closed"), "canceled")
+})
+
+test("clearing the main agent keeps the container's peers", () => {
+  const state = {
+    ...emptyRoleState(),
+    agentId: "main",
+    peers: [normalizePeer(peer("s001"), "main")!],
+  }
+  const next = applyAgentReset(state, { ok: true, agent: { agent_id: "new" } })
+  assert.deepEqual(
+    next.peers.map((p) => p.id),
+    ["s001"],
+  )
 })

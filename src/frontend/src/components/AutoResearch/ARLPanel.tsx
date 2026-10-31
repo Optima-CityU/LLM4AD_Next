@@ -55,6 +55,7 @@ export default function ARLPanel() {
     respondPermissions,
     loadOlder,
     fetchSubagentTimeline,
+    fetchPeerTimeline,
     resetAgent,
     reconnect,
   } = useARLSession()
@@ -130,6 +131,7 @@ export default function ARLPanel() {
             validatorStarted={panes.validator.items.length > 0}
             onLoadOlder={loadOlder}
             onFetchSubagentTimeline={fetchSubagentTimeline}
+            onFetchPeerTimeline={fetchPeerTimeline}
             onReset={resetAgent}
           />
         ))}

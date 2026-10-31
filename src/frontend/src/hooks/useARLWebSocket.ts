@@ -33,12 +33,15 @@ import {
   applyAgentsReady,
   applyHistory,
   applyOlderPage,
+  applyPeerList,
+  applyPeerUpdate,
   applySubagentList,
   applySubagentUpdate,
   applyValidationStatus,
   emptyPanes,
   emptyValidationState,
   finalizeStreaming,
+  hasPeerLabel,
   itemsFromEntries,
   nextItemId,
   normalizeItem,
@@ -53,6 +56,7 @@ export type {
 export type { ARLConnectionStatus } from "@/components/AutoResearch/arlSocket"
 export type {
   ARLAgentMode,
+  ARLPeerAgent,
   ARLPermissionAction,
   ARLPermissionRequest,
   ARLRole,
@@ -274,10 +278,18 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       }
 
       if (type === "agent_update") {
+        // Peer agents (validation runs spawned with an `aris.role` label) go
+        // to the peer list. Checked by label first, so a peer can never be
+        // mistaken for the main agent even before `agents_ready` sets its id.
+        if (payload.kind === "remove") {
+          updateRole(role, (state) => applyPeerUpdate(state, payload))
+          return
+        }
         if (payload.kind === "upsert") {
           updateRole(role, (state) =>
+            hasPeerLabel(payload.agent) ||
             isForeignAgent(state, payload.agent?.id)
-              ? state
+              ? applyPeerUpdate(state, payload)
               : applyAgentSnapshot(state, payload.agent),
           )
         }
@@ -390,10 +402,22 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
           return
         }
 
+        case "peer_agent_list": {
+          const role = frame.role
+          if (!role) return
+          updateRole(role, (state) => applyPeerList(state, frame.data))
+          return
+        }
+
+        case "peer_timeline":
         case "subagent_timeline": {
           const role = frame.role
           if (!role) return
-          const key = `${role}:${frame.data?.subagent_id ?? ""}`
+          // Peers and subagents share the pending map, keyed apart by prefix
+          const key =
+            frame.type === "peer_timeline"
+              ? `${role}:peer:${frame.data?.peer_id ?? ""}`
+              : `${role}:${frame.data?.subagent_id ?? ""}`
           const pending = subagentRequestsRef.current.get(key)
           if (!pending) return
           subagentRequestsRef.current.delete(key)
@@ -651,9 +675,11 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
    * timeout, or a dropped socket. A second request for the same subagent
    * supersedes the first.
    */
-  const fetchSubagentTimeline = useCallback(
-    (role: ARLRole, subagentId: string): Promise<ARLStreamItem[]> => {
-      const key = `${role}:${subagentId}`
+  const requestTranscript = useCallback(
+    (
+      key: string,
+      frame: { type: string; role: ARLRole; payload: Record<string, unknown> },
+    ): Promise<ARLStreamItem[]> => {
       const requests = subagentRequestsRef.current
       const previous = requests.get(key)
       if (previous) {
@@ -662,14 +688,7 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
         previous.reject(new Error("Superseded"))
       }
       return new Promise<ARLStreamItem[]>((resolve, reject) => {
-        const sent = sendRaw(
-          {
-            type: "subagent_timeline",
-            role,
-            payload: { subagent_id: subagentId },
-          },
-          { quiet: true },
-        )
+        const sent = sendRaw(frame, { quiet: true })
         if (!sent) {
           reject(new Error("Not connected to the ARL session"))
           return
@@ -683,6 +702,32 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       })
     },
     [sendRaw],
+  )
+
+  const fetchSubagentTimeline = useCallback(
+    (role: ARLRole, subagentId: string) =>
+      requestTranscript(`${role}:${subagentId}`, {
+        type: "subagent_timeline",
+        role,
+        payload: { subagent_id: subagentId },
+      }),
+    [requestTranscript],
+  )
+
+  /**
+   * Fetch the transcript of one peer agent (opened from the subagent strip).
+   *
+   * Same contract as {@link fetchSubagentTimeline}. The backend refuses
+   * `closed` peers so that viewing one never resumes its provider process.
+   */
+  const fetchPeerTimeline = useCallback(
+    (role: ARLRole, peerId: string) =>
+      requestTranscript(`${role}:peer:${peerId}`, {
+        type: "peer_timeline",
+        role,
+        payload: { peer_id: peerId },
+      }),
+    [requestTranscript],
   )
 
   /**
@@ -977,6 +1022,8 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
     loadOlder,
     /** On-demand transcript of one subagent. */
     fetchSubagentTimeline,
+    /** On-demand transcript of one peer agent. */
+    fetchPeerTimeline,
     /** `/clear`: archive the agent and start a fresh conversation. */
     resetAgent,
     /** File-panel operations, paired with their `fs_result` by request id. */

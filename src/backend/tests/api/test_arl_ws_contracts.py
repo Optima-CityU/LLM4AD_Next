@@ -138,6 +138,12 @@ class _FakeDaemonClient:
         self.created = kwargs
         return {"id": "new-agent", "status": "idle", "currentModeId": kwargs.get("mode_id")}
 
+    #: Agent directory returned by fetch_agents; tests override per case
+    directory: list[dict] = []
+
+    async def fetch_agents(self, subscribe: bool = True):
+        await self._maybe_fail("fetch_agents")
+        return [{"agent": dict(agent)} for agent in self.directory]
 
     async def close(self):
         self.closed = True
@@ -831,3 +837,98 @@ async def test_agent_reset_archive_failure_keeps_old_agent(monkeypatch) -> None:
     assert "create_agent" not in worker.calls
     assert websocket.frames("agent_reset_result")[0]["data"]["ok"] is False
     assert worker.sent_to == "wa"
+
+
+# ---- peer agents (validation runs spawned with an aris.role label) ----
+
+
+def _peer(agent_id: str, **extra) -> dict:
+    """Build a peer agent snapshot as the daemon directory returns it."""
+    return {
+        "id": agent_id,
+        "title": f"ARIS validation {agent_id}",
+        "status": "idle",
+        "labels": {"aris.role": "validator", "aris.submission": agent_id},
+        **extra,
+    }
+
+
+def test_pick_agent_fallback_skips_peer_agents() -> None:
+    """The fallback must never reuse a peer agent as the main agent."""
+    entries = [{"agent": _peer("s001")}, {"agent": {"id": "legacy", "title": None}}]
+
+    picked = arl_ws._pick_agent_entry(entries, "validator")
+
+    assert arl_ws._agent_snapshot(picked)["id"] == "legacy"
+
+
+def test_pick_agent_only_peers_creates_new() -> None:
+    """A directory holding only peers yields None so a main agent is created."""
+    assert arl_ws._pick_agent_entry([{"agent": _peer("s001")}], "validator") is None
+
+
+def test_is_peer_agent_filters() -> None:
+    """Only labelled, non-main, non-archived, non-internal agents are peers."""
+    assert arl_ws._is_peer_agent(_peer("p"), "main")
+    assert not arl_ws._is_peer_agent(_peer("main"), "main")
+    assert not arl_ws._is_peer_agent(_peer("p", archivedAt="2026-01-01"), "main")
+    assert not arl_ws._is_peer_agent(_peer("p", internal=True), "main")
+    assert not arl_ws._is_peer_agent({"id": "u", "labels": {}}, "main")
+
+
+@pytest.mark.asyncio
+async def test_push_peer_agents_lists_only_peers() -> None:
+    websocket = _FakeWebSocket([])
+    client = _FakeDaemonClient()
+    client.directory = [
+        {"id": "va", "title": "arl-validator", "labels": {}},
+        _peer("s001"),
+        {"id": "manual", "title": "mine", "labels": {}},
+    ]
+
+    await arl_ws._push_peer_agents(websocket, client, "validator", "va")
+
+    frame = websocket.frames("peer_agent_list")[0]
+    assert [p["id"] for p in frame["data"]["peers"]] == ["s001"]
+    assert frame["data"]["peers"][0]["labels"]["aris.submission"] == "s001"
+
+
+@pytest.mark.asyncio
+async def test_push_peer_agents_failure_is_silent() -> None:
+    websocket = _FakeWebSocket([])
+    client = _FakeDaemonClient(fail={"fetch_agents"})
+
+    await arl_ws._push_peer_agents(websocket, client, "validator", "va")
+
+    assert websocket.frames("peer_agent_list") == []
+
+
+@pytest.mark.asyncio
+async def test_peer_timeline_replies_and_refuses_closed_or_foreign() -> None:
+    """Live peers return rows; closed or non-peer ids are refused without loading."""
+    websocket = _FakeWebSocket(
+        [
+            {"type": "peer_timeline", "role": "worker", "payload": {}},
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "live"}},
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "dead"}},
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "wa"}},
+        ]
+    )
+    worker = _FakeDaemonClient()
+    worker.directory = [
+        {"id": "wa", "title": "arl-worker", "labels": {}},
+        _peer("live"),
+        _peer("dead", status="closed"),
+    ]
+
+    await arl_ws._forward_from_frontend(
+        websocket, uuid.uuid4(), worker, _FakeDaemonClient(), "wa", "va"
+    )
+
+    frames = websocket.frames("peer_timeline")
+    assert [f["data"]["ok"] for f in frames] == [False, True, False, False]
+    assert frames[1]["data"]["peer_id"] == "live"
+    assert len(frames[1]["data"]["rows"]) == 1
+    # Only the live peer's timeline was fetched: viewing never resumes a closed one
+    assert worker.calls.count("fetch_agent_timeline") == 1
+    assert worker.last_timeline[0] == "live"

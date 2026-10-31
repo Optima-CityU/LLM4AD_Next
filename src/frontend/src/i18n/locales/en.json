@@ -4841,6 +4841,9 @@
       "subagentUntitled": "Untitled subtask",
       "subagentEmpty": "This subtask has no messages yet",
       "subagentLive": "Still running; refreshes when its status changes",
+      "peerBadge": "Peer",
+      "peerClosed": "This agent has ended; its transcript is unavailable after a container restart",
+      "peerUntitled": "Untitled validation run",
       "subagentStatus": {
         "running": "Running",
         "completed": "Completed",
