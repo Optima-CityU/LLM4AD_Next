@@ -901,7 +901,6 @@ async def test_chat_with_schema_retry_exhausted(provider):
 @pytest.mark.asyncio
 async def test_chat_with_list_schema(provider):
     """Test chat with schema that returns a list."""
-
     class Item(BaseModel):
         id: int
         name: str
@@ -938,3 +937,149 @@ async def test_chat_with_list_schema(provider):
     assert len(result.parsed.items) == 2
     assert result.parsed.items[0].name == "A"
     assert result.parsed.items[1].name == "B"
+
+
+def _mock_completion(model: str) -> ChatCompletion:
+    """Build a minimal successful ChatCompletion for request-shape tests."""
+    return ChatCompletion(
+        id="shape-id",
+        created=1234567890,
+        model=model,
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content="ok"),
+            )
+        ],
+        usage={"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        object="chat.completion",
+    )
+
+
+def _provider_for_model(provider_config, model: str) -> OpenAICompatibleProvider:
+    """Create a provider for ``model`` with a mocked client."""
+    provider = OpenAICompatibleProvider({**provider_config, "model": model})
+    provider.client = AsyncMock()
+    provider.client.chat.completions.create.return_value = _mock_completion(model)
+    return provider
+
+
+@pytest.mark.asyncio
+async def test_chat_reasoning_model_renames_max_tokens(provider_config):
+    """Reasoning models get max_completion_tokens instead of max_tokens.
+
+    GPT-5.x reasoning models reject max_tokens; the budget must be
+    renamed to max_completion_tokens while temperature stays.
+    """
+    provider = _provider_for_model(provider_config, "gpt-5.4-mini")
+
+    await provider.chat(
+        [ChatMessage(role="user", content="sort numbers")],
+        max_tokens=4096,
+        temperature=0.7,
+    )
+
+    call_kwargs = provider.client.chat.completions.create.call_args.kwargs
+    assert "max_tokens" not in call_kwargs
+    assert call_kwargs["max_completion_tokens"] == 4096
+    assert call_kwargs["temperature"] == 0.7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["o3", "o4-mini", "gpt-5", "gpt-5-mini", "gpt-5-nano"])
+async def test_chat_fixed_temperature_models_drop_temperature(provider_config, model):
+    """Fixed-temperature models drop a non-default temperature.
+
+    The o-series and the original GPT-5 generation reject a temperature
+    other than 1, so it must be dropped along with the max_tokens rename.
+    """
+    provider = _provider_for_model(provider_config, model)
+
+    await provider.chat(
+        [ChatMessage(role="user", content="sort numbers")],
+        max_tokens=4096,
+        temperature=0.7,
+    )
+
+    call_kwargs = provider.client.chat.completions.create.call_args.kwargs
+    assert "max_tokens" not in call_kwargs
+    assert call_kwargs["max_completion_tokens"] == 4096
+    assert "temperature" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_chat_fixed_temperature_model_keeps_default_temperature(provider_config):
+    """A temperature of exactly 1 is the models' own default and is kept."""
+    provider = _provider_for_model(provider_config, "gpt-5")
+
+    await provider.chat(
+        [ChatMessage(role="user", content="sort numbers")],
+        max_tokens=100,
+        temperature=1,
+    )
+
+    call_kwargs = provider.client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["temperature"] == 1
+    assert call_kwargs["max_completion_tokens"] == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["gpt-4o", "gpt-5-chat-latest", "deepseek-chat"])
+async def test_chat_non_reasoning_models_keep_request_shape(provider_config, model):
+    """Non-reasoning models keep the caller's request shape.
+
+    Models outside the reasoning families keep the caller's kwargs
+    exactly: max_tokens and temperature pass through unchanged.
+    """
+    provider = _provider_for_model(provider_config, model)
+
+    await provider.chat(
+        [ChatMessage(role="user", content="sort numbers")],
+        max_tokens=4096,
+        temperature=0.7,
+    )
+
+    call_kwargs = provider.client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["max_tokens"] == 4096
+    assert call_kwargs["temperature"] == 0.7
+    assert "max_completion_tokens" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_reasoning_model_renames_max_tokens(provider_config):
+    """The streaming path applies the same parameter normalization."""
+    provider = _provider_for_model(provider_config, "gpt-5.4-mini")
+    chunks = [
+        ChatCompletionChunk(
+            id="stream-shape",
+            created=1234567890,
+            model="gpt-5.4-mini",
+            choices=[ChunkChoice(delta={"content": "ok"}, index=0, finish_reason=None)],
+            object="chat.completion.chunk",
+        ),
+    ]
+
+    async def mock_stream(*args, **kwargs):
+        for chunk in chunks:
+            yield chunk
+
+    captured = {}
+
+    async def mock_create(*args, **kwargs):
+        captured.update(kwargs)
+        return mock_stream()
+
+    provider.client.chat.completions.create = mock_create
+
+    stream = await provider.chat_stream(
+        [ChatMessage(role="user", content="sort numbers")],
+        max_tokens=4096,
+        temperature=0.7,
+    )
+    async for _ in stream:
+        pass
+
+    assert "max_tokens" not in captured
+    assert captured["max_completion_tokens"] == 4096
+    assert captured["temperature"] == 0.7

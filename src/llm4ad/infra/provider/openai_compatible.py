@@ -6,6 +6,7 @@ including local models run with vLLM, Ollama, Llama.cpp, Text Generation WebUI, 
 
 import asyncio
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -78,6 +79,60 @@ class OpenAICompatibleProvider(BaseProvider):
             or "deepseek" in base_url
             or model.startswith("deepseek")
         )
+
+    def _bare_model_name(self) -> str:
+        """Return the configured model id without any provider path prefix."""
+        return (self.model or "").rsplit("/", 1)[-1].lower()
+
+    def _is_reasoning_model(self) -> bool:
+        """Return whether the model rejects ``max_tokens`` on Chat Completions.
+
+        OpenAI's GPT-5 family and o-series only accept
+        ``max_completion_tokens``; the ``gpt-5-chat`` variants are plain
+        chat models and keep accepting ``max_tokens``.
+        """
+        name = self._bare_model_name()
+        if name.startswith("gpt-5-chat"):
+            return False
+        return name.startswith("gpt-5") or bool(re.match(r"^o\d", name))
+
+    def _rejects_non_default_temperature(self) -> bool:
+        """Return whether the model only accepts the default temperature.
+
+        The o-series and the original GPT-5 generation (``gpt-5``,
+        ``gpt-5-mini``, ``gpt-5-nano``, including dated snapshots) reject
+        any temperature other than 1; later GPT-5.x models accept it.
+        """
+        name = self._bare_model_name()
+        if re.match(r"^o\d", name):
+            return True
+        return bool(re.match(r"^gpt-5(?:-(?:mini|nano))?(?:-\d|$)", name))
+
+    def _normalize_request_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Adapt caller kwargs to the parameters the configured model accepts.
+
+        Reasoning models get their token budget under
+        ``max_completion_tokens`` instead of the rejected ``max_tokens``,
+        and models pinned to the default temperature have a non-default
+        ``temperature`` dropped so the request is not rejected on the
+        next parameter. Every other model keeps the caller's kwargs
+        exactly as passed.
+
+        Args:
+            kwargs: Generation parameters supplied by the caller.
+
+        Returns:
+            The kwargs to hand to the OpenAI client.
+        """
+        normalized = dict(kwargs)
+        if self._is_reasoning_model() and "max_tokens" in normalized:
+            budget = normalized.pop("max_tokens")
+            normalized.setdefault("max_completion_tokens", budget)
+        if self._rejects_non_default_temperature():
+            temperature = normalized.get("temperature")
+            if temperature is not None and temperature != 1:
+                normalized.pop("temperature")
+        return normalized
 
     @classmethod
     def _build_schema_instruction(cls, schema_json: dict[str, Any]) -> str:
@@ -385,6 +440,9 @@ class OpenAICompatibleProvider(BaseProvider):
         # Pop LLM4AD-internal kwargs that must not reach the OpenAI SDK
         request_stage = kwargs.pop("request_stage", "")
 
+        # Rename/drop parameters the configured model would reject
+        kwargs = self._normalize_request_kwargs(kwargs)
+
         # Convert internal ChatMessage format to OpenAI format
         openai_messages = self._convert_messages(messages)
 
@@ -610,6 +668,9 @@ class OpenAICompatibleProvider(BaseProvider):
         Returns:
             StreamResponse that yields text chunks and captures tool calls.
         """
+        # Rename/drop parameters the configured model would reject
+        kwargs = self._normalize_request_kwargs(kwargs)
+
         openai_messages = self._convert_messages(messages)
 
         create_kwargs: dict[str, Any] = {
