@@ -165,6 +165,31 @@ async def _push(
     await websocket.send_json(frame)
 
 
+async def _fail_and_close(
+    websocket: WebSocket, session_id: uuid.UUID, message: str
+) -> None:
+    """Report a setup failure to the frontend, then close the socket.
+
+    The frontend may already be gone (e.g. a page refresh during a container
+    cold start). Starlette raises ``WebSocketDisconnect`` on the first send to
+    a dead peer and ``RuntimeError`` on every send after that, so both are
+    expected here and must not escape to the ASGI layer.
+
+    Args:
+        websocket: Frontend connection.
+        session_id: Session the socket belongs to, for logging.
+        message: Error text shown to the user.
+    """
+    try:
+        await _push(websocket, "error", {"message": message})
+        await websocket.close()
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        logger.info(
+            f"🔌 [Session {session_id}] Frontend already gone, "
+            f"dropped error {message!r}: {exc!r}"
+        )
+
+
 def _agent_title(role: str) -> str:
     """本角色创建的 agent 使用的标题。
 
@@ -1131,20 +1156,18 @@ async def arl_websocket(
     #    停着就原地拉起、在跑就复用，返回前一定按真实可达路径探活过。
     if not arl_config:
         logger.error(f"❌ [Session {session_id}] ARL config not found in database")
-        await _push(websocket, "error", {"message": "ARL config not found"})
-        await websocket.close()
+        await _fail_and_close(websocket, session_id, "ARL config not found")
         return
 
     # 没有可用凭证时容器起来也调不通大模型，提前失败
     missing = [role for role in ROLES if not _credential(role_providers[role])]
     if missing:
         logger.error(f"❌ [Session {session_id}] No usable credential for: {missing}")
-        await _push(
+        await _fail_and_close(
             websocket,
-            "error",
-            {"message": f"Incomplete ARL config: no credential for {', '.join(missing)}"},
+            session_id,
+            f"Incomplete ARL config: no credential for {', '.join(missing)}",
         )
-        await websocket.close()
         return
 
     runtime = get_arl_runtime()
@@ -1178,10 +1201,14 @@ async def arl_websocket(
             folder_id=folder_id,
         )
         await _push(websocket, "system", {"message": "ARL session ready"})
+    except WebSocketDisconnect:
+        # Expected on a refresh during cold start: the containers stay up and
+        # the replacement connection, queued on the session lock, reuses them.
+        logger.info(f"🔌 [Session {session_id}] Frontend left during session setup")
+        return
     except Exception as e:
         logger.error(f"❌ [Session {session_id}] Failed to prepare ARL session: {e}")
-        await _push(websocket, "error", {"message": f"Failed to start: {e}"})
-        await websocket.close()
+        await _fail_and_close(websocket, session_id, f"Failed to start: {e}")
         return
 
     # 4. 连接两个 daemon

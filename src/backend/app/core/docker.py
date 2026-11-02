@@ -4,9 +4,9 @@
 同时支持本地 socket 与远程连接（例如 ``ssh://user@host``）。
 """
 
-import docker
 from loguru import logger
 
+import docker
 from app.core.config import settings
 
 _client: docker.DockerClient | None = None

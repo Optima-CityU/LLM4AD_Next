@@ -932,3 +932,118 @@ async def test_peer_timeline_replies_and_refuses_closed_or_foreign() -> None:
     # Only the live peer's timeline was fetched: viewing never resumes a closed one
     assert worker.calls.count("fetch_agent_timeline") == 1
     assert worker.last_timeline[0] == "live"
+
+
+# ---- frontend disconnects while containers are being prepared ----
+
+
+class _SetupWebSocket:
+    """Frontend socket mimicking Starlette's behaviour after a disconnect.
+
+    Args:
+        gone_after: Frames accepted before the peer is gone; ``None`` keeps the
+            socket alive. The first send to a gone peer raises
+            ``WebSocketDisconnect``, later ones raise ``RuntimeError``.
+    """
+
+    def __init__(self, gone_after: int | None = None):
+        self.gone_after = gone_after
+        self.sent: list[dict] = []
+        self.closed = False
+        self._marked_disconnected = False
+
+    async def accept(self):
+        return None
+
+    async def send_json(self, frame: dict):
+        if self._marked_disconnected:
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+        if self.gone_after is not None and len(self.sent) >= self.gone_after:
+            self._marked_disconnected = True
+            raise WebSocketDisconnect(code=1006)
+        self.sent.append(frame)
+
+    async def close(self, code: int = 1000, reason: str | None = None):
+        if self._marked_disconnected:
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+        self.closed = True
+
+
+class _SetupRuntime:
+    """Runtime whose ``ensure_session`` optionally fails."""
+
+    def __init__(self, error: Exception | None = None):
+        self.error = error
+        self.calls = 0
+
+    async def ensure_session(self, **kwargs):
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return object()
+
+
+def _patch_setup(monkeypatch, runtime: _SetupRuntime) -> None:
+    """Stub everything ``arl_websocket`` touches before it dials the daemons."""
+    provider = {
+        "provider": "openai",
+        "base_url": "https://example.test/v1",
+        "primary_model": "model",
+        "api_key": "key",
+    }
+    config = {"worker": {}, "validator": {}}
+    monkeypatch.setattr(
+        arl_ws,
+        "_load_session_context",
+        lambda token, session_id: (uuid.uuid4(), "user@example.test", None, config),
+    )
+    monkeypatch.setattr(
+        arl_ws,
+        "_resolve_role_providers",
+        lambda arl_config, user_id: dict.fromkeys(arl_ws.ROLES, provider),
+    )
+    monkeypatch.setattr(arl_ws, "get_arl_runtime", lambda: runtime)
+
+    def _no_daemon(*_args, **_kwargs):
+        raise AssertionError("must not dial daemons for a gone frontend")
+
+    monkeypatch.setattr(arl_ws, "PaseoDaemonClient", _no_daemon)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_setup_returns_quietly(monkeypatch) -> None:
+    """A refresh mid cold start must not surface as an ASGI crash."""
+    runtime = _SetupRuntime()
+    _patch_setup(monkeypatch, runtime)
+    websocket = _SetupWebSocket(gone_after=1)
+
+    await arl_ws.arl_websocket(websocket, uuid.uuid4(), token="t")
+
+    assert runtime.calls == 1
+    assert [f["data"]["message"] for f in websocket.sent] == [
+        "Preparing ARL containers..."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_after_disconnect_returns_quietly(monkeypatch) -> None:
+    """A real setup failure must not crash when nobody is left to tell."""
+    _patch_setup(monkeypatch, _SetupRuntime(error=RuntimeError("docker down")))
+    websocket = _SetupWebSocket(gone_after=1)
+
+    await arl_ws.arl_websocket(websocket, uuid.uuid4(), token="t")
+
+    assert not websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_is_reported_to_live_frontend(monkeypatch) -> None:
+    """The error frame and close still reach a frontend that is listening."""
+    _patch_setup(monkeypatch, _SetupRuntime(error=RuntimeError("docker down")))
+    websocket = _SetupWebSocket()
+
+    await arl_ws.arl_websocket(websocket, uuid.uuid4(), token="t")
+
+    errors = [f for f in websocket.sent if f["type"] == "error"]
+    assert [f["data"]["message"] for f in errors] == ["Failed to start: docker down"]
+    assert websocket.closed
