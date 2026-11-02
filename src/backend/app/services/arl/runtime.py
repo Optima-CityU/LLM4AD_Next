@@ -16,7 +16,7 @@ ARL 运行时服务：容器生命周期管理。
 职责：
 - 按需启动/恢复一个会话的两个容器（worker + validator）
 - 等待 daemon 就绪（HTTP ``/api/health``，走 backend 真实可达路径）与
-  安装器完成（``.aris/install.json``）
+  安装器完成（``.contrejour/install.json``）
 - 凭据变更 / 镜像更新时重建容器
 - 空闲回收、启动期对账、会话删除时清理
 """
@@ -61,6 +61,7 @@ from app.services.arl.types import (
     ARLSession,
     ARLSessionStatus,
 )
+from app.services.arl.validation import validator_env, write_worker_guide
 
 # 会话标签，用于 Docker 容器过滤
 SESSION_LABEL = "llm4ad.arl.session_id"
@@ -82,6 +83,8 @@ V1_SUFFIX = "/v1"
 #: 同槽碰撞概率极低，不值得为此维护端口池。
 _PORT_BASE = 16000
 _PORT_SLOTS = 5000
+#: 宿主机模式下验证服务端口的区间，紧接 daemon 端口区间之后，每会话 1 个
+_VALIDATION_PORT_BASE = _PORT_BASE + _PORT_SLOTS * 2
 
 #: 探活轮询间隔（秒）
 _PROBE_INTERVAL = 1.0
@@ -162,10 +165,36 @@ def _allocate_port(session_id: str, role: ARLRole) -> int:
     Returns:
         宿主机端口
     """
-    digest = hashlib.sha256(session_id.encode()).digest()
-    slot = int.from_bytes(digest[:4], "big") % _PORT_SLOTS
     offset = 0 if role == ARLRole.WORKER else 1
-    return _PORT_BASE + slot * 2 + offset
+    return _PORT_BASE + _port_slot(session_id) * 2 + offset
+
+
+def validation_host_port(session_id: str) -> int:
+    """返回验证服务发布到宿主机的端口（仅宿主机模式使用）。
+
+    与 daemon 端口同槽位、不同区间，确定性派生：backend 探测时直接算出，
+    不必每轮查容器的端口绑定。
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        宿主机端口
+    """
+    return _VALIDATION_PORT_BASE + _port_slot(session_id)
+
+
+def _port_slot(session_id: str) -> int:
+    """按 session_id 的哈希取宿主机端口槽位。
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        ``[0, _PORT_SLOTS)`` 内的槽位
+    """
+    digest = hashlib.sha256(session_id.encode()).digest()
+    return int.from_bytes(digest[:4], "big") % _PORT_SLOTS
 
 
 def daemon_endpoints(info: ARLContainerInfo) -> tuple[str, str]:
@@ -232,6 +261,9 @@ def _config_fingerprint(daemon_config: ARLDaemonConfig) -> str:
         # 代理开关也要入指纹：开/关会改变容器里的 base_url 指向。
         # 带版本号：早期容器里是随机 token，需重建一次换成确定性 token
         "proxy-v2" if settings.LLM_PROXY_ENABLE else "direct",
+        # 验证服务环境变量（CONTREJOUR_*）同样固化在容器里：早期容器没有它们，
+        # 改端口也需重建。v2：宿主机模式下 Validator 额外发布验证服务端口
+        f"contrejour-v2:{settings.ARL_VALIDATION_PORT}",
     ]
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:16]
 
@@ -311,7 +343,7 @@ def _install_stamp_path(session_id: str, role: ARLRole) -> str:
 
     容器把 ARL 角色装进 ``/workspace/<role>``，而 ``/workspace`` 挂的是
     ``<role>/workspace``，故标记文件落在
-    ``<role>/workspace/<role>/.aris/install.json``。因为是 bind mount，
+    ``<role>/workspace/<role>/.contrejour/install.json``。因为是 bind mount，
     backend 直接 stat 文件即可，无需 ``docker exec``（省掉每轮在容器里起
     一个进程的开销）。
 
@@ -324,7 +356,7 @@ def _install_stamp_path(session_id: str, role: ARLRole) -> str:
     """
     docker_root, _ = _session_root(session_id)
     return str(
-        Path(docker_root) / role.value / "workspace" / role.value / ".aris" / "install.json"
+        Path(docker_root) / role.value / "workspace" / role.value / ".contrejour" / "install.json"
     )
 
 
@@ -540,6 +572,8 @@ def _build_container_env(
             "OPENAI_API_KEY": api_key,
             "OPENAI_MODEL": daemon_config.validator_model or "gpt-5.5",
         })
+        # 验证服务的地址与 token 由 backend 事先约定，Worker 侧写进 CLAUDE.md
+        env.update(validator_env(session.session_id))
 
     # PASEO_HOSTNAMES：让两个容器能互相通信（validator 调 worker 的 script RPC）
     env["PASEO_HOSTNAMES"] = (
@@ -872,6 +906,7 @@ class ARLRuntimeService:
             ):
                 logger.info("♻️ ARL 会话 {} 复用运行中的容器", session_id)
                 touch_arl_session_active(session_id)
+                await self._ensure_worker_guide(session_id)
                 return session
 
             created_fresh = await self._reconcile_containers(
@@ -899,8 +934,24 @@ class ARLRuntimeService:
 
             session.status = ARLSessionStatus.READY
             touch_arl_session_active(session_id)
+            await self._ensure_worker_guide(session_id)
             logger.info("✅ ARL 会话 {} 就绪", session_id)
             return session
+
+    async def _ensure_worker_guide(self, session_id: str) -> None:
+        """把验证服务连接段落写进 Worker 的 ``CLAUDE.md``。
+
+        放在安装器完成之后：安装器会写 CLAUDE.md 的角色段，先写的话可能被它
+        当成一份已有文件处理。失败只记日志——它不影响容器可用，下次连接重试。
+
+        Args:
+            session_id: 会话 ID
+        """
+        try:
+            await asyncio.to_thread(write_worker_guide, session_id)
+        # UnicodeError：CLAUDE.md 也会被 agent 改写，万一不是合法 UTF-8 也只记日志
+        except (OSError, UnicodeError) as exc:
+            logger.warning("ARL 会话 {} 写入 Worker CLAUDE.md 失败: {}", session_id, exc)
 
     async def _config_matches(self, session_id: str, fingerprint: str) -> bool:
         """判断容器上的配置指纹与镜像是否仍与当前配置一致。
@@ -1078,12 +1129,20 @@ class ARLRuntimeService:
         # 既无必要，也会在同槽会话间引入宿主端口冲突。
         network_kwargs: dict = {"network": settings.arl_network_name}
         if not use_container_network():
-            network_kwargs["ports"] = {
+            ports = {
                 f"{settings.ARL_PASEO_PORT}/tcp": (
                     "127.0.0.1",
                     _allocate_port(session.session_id, role),
                 )
             }
+            # 验证服务也要发布：宿主机上的 backend 解析不了容器名，只能经
+            # 映射端口探 /health
+            if role == ARLRole.VALIDATOR:
+                ports[f"{settings.ARL_VALIDATION_PORT}/tcp"] = (
+                    "127.0.0.1",
+                    validation_host_port(session.session_id),
+                )
+            network_kwargs["ports"] = ports
 
         labels = {
             SESSION_LABEL: session.session_id,
@@ -1150,7 +1209,7 @@ class ARLRuntimeService:
 
         Args:
             session: 会话快照
-            wait_installer: 是否等待 ``.aris/install.json``。仅新建容器需要；
+            wait_installer: 是否等待 ``.contrejour/install.json``。仅新建容器需要；
                 复用已有容器时安装早已完成（标记文件在 bind mount 里持久化），
                 再等一遍纯属浪费。
 
@@ -1293,7 +1352,7 @@ class ARLRuntimeService:
     async def _wait_for_installer(
         self, session_id: str, role: ARLRole, timeout: float
     ) -> bool:
-        """等待 ARL 角色安装器完成（``.aris/install.json`` 出现）。
+        """等待 ARL 角色安装器完成（``.contrejour/install.json`` 出现）。
 
         安装目标是容器里的 ``/workspace/<role>``，而 ``/workspace`` 是 bind
         mount，故 backend 直接 stat 宿主侧文件即可——不必每轮 ``docker exec``

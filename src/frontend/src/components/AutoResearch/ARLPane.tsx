@@ -61,7 +61,7 @@ import {
   ARL_TONE_DOT,
   ARL_TONE_PILL,
   arlRoleClass,
-  canSyncValidation,
+  isValidationReady,
   describeAgent,
   modeText,
   workerWaitKey,
@@ -74,8 +74,11 @@ import {
   withClientCommands,
 } from "./arlCommands"
 
-/** Slash command that bootstraps either container for the ARL flow. */
-const SETUP_COMMAND = "/aris-setup"
+/** Slash command that bootstraps each role's container for the ARL flow. */
+const SETUP_COMMAND: Record<ARLRole, string> = {
+  validator: "/validator-setup",
+  worker: "/worker-setup",
+}
 
 /** Distance from the bottom (px) within which new content auto-scrolls. */
 const NEAR_BOTTOM_THRESHOLD = 120
@@ -106,10 +109,8 @@ interface Props {
     requestIds: string[],
     response: Record<string, unknown>,
   ) => boolean
-  /** Validation handoff state; gates the Worker's start button. */
+  /** Validation service state; gates the Worker's start button. */
   validation: ARLValidationState
-  /** Run the Validator → Worker sync; false when nothing went out. */
-  onSyncValidation: () => boolean
   /** The Validator conversation has begun, so its start button is gone. */
   validatorStarted: boolean
   /** Request one page of older history; false when nothing went out. */
@@ -149,7 +150,6 @@ export default function ARLPane({
   onPermission,
   onPermissions,
   validation,
-  onSyncValidation,
   validatorStarted,
   onLoadOlder,
   onFetchSubagentTimeline,
@@ -319,36 +319,10 @@ export default function ARLPane({
       box.scrollTop = row.offsetTop + row.offsetHeight - box.clientHeight
   }, [activeCommand, menuOpen])
 
-  // Worker start waits for its sync: `syncedAt` seen at click time, or
-  // undefined when no start is pending.
-  const pendingStart = useRef<string | null | undefined>(undefined)
-
   const sendSetup = () => {
-    onSend(role, SETUP_COMMAND)
+    onSend(role, SETUP_COMMAND[role])
     stickToBottom.current = true
   }
-
-  /**
-   * Empty-pane start button: send the setup command right away.
-   *
-   * The Worker needs the validation service synced first, so on an unsynced
-   * Worker this runs the sync and sends once it has succeeded.
-   */
-  const handleStart = () => {
-    if (role === "worker" && !validation.syncedAt) {
-      if (onSyncValidation()) pendingStart.current = validation.syncedAt
-      return
-    }
-    sendSetup()
-  }
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fires on sync completion only
-  useEffect(() => {
-    if (pendingStart.current === undefined || validation.syncing) return
-    const succeeded = validation.syncedAt !== pendingStart.current
-    pendingStart.current = undefined
-    if (succeeded) sendSetup()
-  }, [validation.syncing, validation.syncedAt])
 
   /**
    * Write the chosen command into the box; sending stays on Enter.
@@ -590,7 +564,7 @@ export default function ARLPane({
                 loadingHistory={!booting && connected && !state.historyLoaded}
                 ready={ready && !state.resetting}
                 validation={validation}
-                onStart={handleStart}
+                onStart={sendSetup}
                 validatorStarted={validatorStarted}
               />
             ) : (
@@ -932,11 +906,9 @@ export default function ARLPane({
 /**
  * Placeholder for an empty history: one start button, nothing else.
  *
- * The Validator always offers it; the Worker only once the Validator has
- * produced the validation service and `task.md`, and shows a one-line
- * warning until then. While the container boots the button stays disabled with a
- * spinner, and the history backfill gets a bare spinner since messages may be
- * about to appear.
+ * The Validator always gets it; the Worker only once the validation service
+ * is up, with a warning until then. Booting disables it with a spinner;
+ * history backfill shows a bare spinner.
  */
 function EmptyState({
   role,
@@ -969,7 +941,7 @@ function EmptyState({
     )
   }
 
-  if (role === "worker" && !canSyncValidation(validation)) {
+  if (role === "worker" && !isValidationReady(validation)) {
     return (
       <div className="flex flex-1 items-center justify-center py-16">
         {/* Warning tone: the validation service is not ready yet */}
@@ -984,17 +956,16 @@ function EmptyState({
     )
   }
 
-  const busy = booting || validation.syncing
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16">
       {/* Same look as the normal session's start-research button (ChatPanel) */}
       <button
         type="button"
         onClick={onStart}
-        disabled={!ready || validation.syncing}
+        disabled={!ready}
         className="group relative inline-flex items-center gap-2.5 rounded-xl border-2 border-primary/40 bg-gradient-to-br from-primary to-primary/80 px-8 py-3.5 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 hover:scale-105 disabled:opacity-60 disabled:hover:scale-100 disabled:cursor-not-allowed"
       >
-        {busy ? (
+        {booting ? (
           <Loader2 className="size-5 animate-spin" />
         ) : (
           <Play className="size-5 transition-transform group-hover:scale-110" />

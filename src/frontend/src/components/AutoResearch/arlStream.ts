@@ -222,44 +222,20 @@ export interface ARLRoleState {
  * this state whenever it changes.
  */
 export interface ARLValidationState {
-  /** True once the service address *and* its token are both readable. */
+  /** True once the service answers its health check. */
   configured: boolean
   /** Worker-reachable address, `http://<validator container>:<port>`. */
   url: string | null
-  /**
-   * Whether a token was found. The token itself never crosses to the browser:
-   * the caller is the agent inside the container, which receives it through a
-   * generated `CLAUDE.md`, and WS frames end up in the devtools console.
-   */
-  hasToken: boolean
-  /** Whether the Validator has written `task.md` yet. */
-  hasTask: boolean
   /** Why it is not usable yet, phrased for display. */
   reason: string | null
-  /** True between pressing sync and the backend confirming it. */
-  syncing: boolean
-  /** Set once a sync has completed, so the UI can show it already ran. */
-  syncedAt: string | null
 }
 
 export function emptyValidationState(): ARLValidationState {
-  return {
-    configured: false,
-    url: null,
-    hasToken: false,
-    hasTask: false,
-    reason: null,
-    syncing: false,
-    syncedAt: null,
-  }
+  return { configured: false, url: null, reason: null }
 }
 
 /**
  * Fold a `validation_status` frame into local state.
- *
- * `syncing` and `syncedAt` are client-only and must survive the merge: status
- * frames arrive every time the poller sees a change, and dropping `syncing`
- * here would release the button's spinner before the sync result lands.
  */
 export function applyValidationStatus(
   prev: ARLValidationState,
@@ -269,8 +245,6 @@ export function applyValidationStatus(
     ...prev,
     configured: Boolean(data?.configured),
     url: data?.url ?? null,
-    hasToken: Boolean(data?.has_token),
-    hasTask: Boolean(data?.has_task),
     reason: data?.reason ?? null,
   }
 }

@@ -509,22 +509,6 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
           setValidation((prev) => applyValidationStatus(prev, frame.data))
           return
 
-        case "validation_sync_result": {
-          // Always release the spinner: this frame is the only thing that ends
-          // the button's loading state, success or not.
-          setValidation((prev) => ({
-            ...prev,
-            syncing: false,
-            syncedAt: frame.data?.ok ? new Date().toISOString() : prev.syncedAt,
-          }))
-          if (frame.data?.ok) {
-            toast.success("task.md synced to the Worker workspace")
-          } else {
-            toast.error(frame.data?.message || "Failed to sync task.md")
-          }
-          return
-        }
-
         case "fs_result":
           fsRequests.settle(frame.data)
           return
@@ -828,24 +812,6 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   )
 
   /**
-   * Copy the Validator's `task.md` and service credentials to the Worker.
-   *
-   * The backend re-probes before writing anything, so this does not pass the
-   * cached status along — by the time the click lands the Validator may have
-   * stopped its service, and a stale address written into `CLAUDE.md` would
-   * send the Worker through a whole turn against an unreachable endpoint.
-   *
-   * @returns Whether the request made it onto the wire.
-   */
-  const syncValidation = useCallback(() => {
-    if (!sendRaw({ type: "sync_validation", role: "worker", payload: {} })) {
-      return false
-    }
-    setValidation((prev) => ({ ...prev, syncing: true }))
-    return true
-  }, [sendRaw])
-
-  /**
    * Fetch the slash commands a container's agent offers.
    *
    * Sent quietly: the composer calls this as the user types `/`, and a
@@ -939,8 +905,6 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       }
       return next
     })
-    // A `validation_sync_result` cannot arrive on a dead socket either.
-    setValidation((prev) => (prev.syncing ? { ...prev, syncing: false } : prev))
   }, [status, fsRequests])
 
   // Connect once per session; release on session change or unmount. Panes and
@@ -1009,7 +973,6 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
     systemMessage,
     /** State of the validation service the Validator exposes to the Worker. */
     validation,
-    syncValidation,
     /** Slash commands per container, fetched on demand via `listCommands`. */
     commands,
     listCommands,

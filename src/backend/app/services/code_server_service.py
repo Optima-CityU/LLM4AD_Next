@@ -11,12 +11,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import docker
 from docker.errors import NotFound
 from docker.models.containers import Container
 from fastapi import HTTPException
 from loguru import logger
 
-import docker
 from app.core.config import settings
 from app.core.constants import (
     CODE_SERVER_CPU_LIMIT,

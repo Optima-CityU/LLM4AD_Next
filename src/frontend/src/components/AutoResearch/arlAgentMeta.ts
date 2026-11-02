@@ -146,34 +146,15 @@ export function connectionStatusKey(status: string, booting: boolean): string {
 }
 
 /**
- * Whether the validation handoff can run: it needs both an address to write
- * into the Worker's `CLAUDE.md` and a `task.md` to copy.
+ * Whether the Worker can start: the Validator's validation service answers
+ * its health check. The connection details are already in the Worker's
+ * `CLAUDE.md`, so there is nothing to hand over.
  *
- * @param state - Validation handoff state.
- * @returns True when the sync action is meaningful.
+ * @param state - Validation service state.
+ * @returns True when the service is up.
  */
-export function canSyncValidation(state: ARLValidationState): boolean {
-  return state.configured && state.hasTask
-}
-
-/**
- * i18n keys (under `autoResearch.arl.`) for the handoff headline and hint.
- *
- * The two halves land at different times, so each missing piece gets its own
- * message.
- *
- * @param state - Validation handoff state.
- * @returns The title and hint keys.
- */
-export function validationMessageKeys(state: ARLValidationState): {
-  title: string
-  hint: string
-} {
-  if (!state.configured)
-    return { title: "validationMissing", hint: "validationMissingHint" }
-  if (!state.hasTask)
-    return { title: "validationNoTask", hint: "validationNoTaskHint" }
-  return { title: "validationReady", hint: "validationReadyHint" }
+export function isValidationReady(state: ARLValidationState): boolean {
+  return state.configured
 }
 
 /**

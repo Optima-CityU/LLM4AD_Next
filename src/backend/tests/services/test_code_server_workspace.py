@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
+import docker
 import pytest
 from fastapi import HTTPException
 
-import docker
 from app.core.config import settings
 from app.services import code_server_service
 

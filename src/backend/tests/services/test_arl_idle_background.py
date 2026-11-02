@@ -27,7 +27,7 @@ RESIDENT = [
     "/usr/local/bin/claude --output-format stream-json --verbose --input-format stream-json --model glm-5.3-flash",
     "node /usr/local/bin/codex app-server --enable goals",
     "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex app-server",
-    "node .aris/dist/tools/validation-cli.js serve --project .",
+    "node .contrejour/dist/tools/validation-cli.js serve --project .",
     "/bin/sh",
     "bash",
     "[python] <defunct>",

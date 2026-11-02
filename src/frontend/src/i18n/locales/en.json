@@ -4273,7 +4273,7 @@
       "ml_vision": "AutoResearch"
     },
     "profileDesc": {
-      "algorithm_evolution": "Wires LLM4AD's algorithm-evolution engine into experiment design and execution, iterating the algorithm as it runs",
+      "algorithm_evolution": "Built on the AutoResearchClaw pipeline, with LLM4AD's algorithm-evolution engine wired into experiment design and execution",
       "ml_vision": "Native AutoResearchClaw pipeline, without LLM4AD integration"
     },
     "provider": {
@@ -4860,25 +4860,11 @@
       "reconnecting": "Reconnecting to the ARL session…",
       "offline": "ARL connection lost",
       "retryConnect": "Reconnect",
-      "validationReady": "Validation service is ready",
-      "validationReadyHint": "Copy the Validator's task.md and the service credentials into this container's workspace; the Worker picks them up on its next turn.",
-      "validationNoTask": "Validation service is ready, but the Validator has not written task.md yet",
-      "validationNoTaskHint": "Ask the Validator on the left to generate task.md, then sync.",
-      "validationMissing": "No validation service detected yet",
-      "validationMissingHint": "Set up and start the validation MCP service in the Validator container on the left; this pane detects it automatically.",
-      "validationSync": "Sync task.md",
-      "validationSyncing": "Syncing…",
-      "validationResync": "Sync again",
-      "validationSynced": "Synced",
       "agentStatus": "Agent status",
-      "validationTitle": "Validation handoff",
       "validationWaiting": "Waiting for the Worker container…",
       "validationLabel": "Validation service",
       "validationOk": "Healthy",
       "validationNotReady": "Not ready",
-      "validationStepService": "Service",
-      "validationStepTask": "task.md",
-      "validationStepSync": "Sync",
       "scrollToLatest": "Jump to latest",
       "placeholderShort": "Message {{role}}…",
       "composerHint": "Enter to send · Shift+Enter for newline · / commands",
@@ -4886,16 +4872,7 @@
         "validatorStart": "Build validation service",
         "workerStart": "Start auto research",
         "workerWait": "Click \"Build validation service\" in the Validator on the left first",
-        "workerWaitBusy": "The validation service is not ready yet. Finish setting it up in the Validator conversation on the left",
-        "validatorTitle": "Start here",
-        "validatorStep1": "Send /aris-setup to build the validation service",
-        "validatorStep2": "Click {sync} between the two input boxes to sync to the Worker",
-        "workerTitle": "Finish the Validator first",
-        "workerStep1": "Build the validation service in the Validator",
-        "workerStep2": "Click {sync} between the two input boxes to sync",
-        "workerStep3": "Send /aris-setup to start researching",
-        "useCommand": "Click to fill the composer",
-        "allDone": "All set. You can start chatting."
+        "workerWaitBusy": "The validation service is not ready yet. Finish setting it up in the Validator conversation on the left"
       }
     },
     "gate": {

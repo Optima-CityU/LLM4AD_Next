@@ -4,15 +4,15 @@ import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 
 import { useARLSession } from "./ARLSessionContext"
-import { canSyncValidation, workerWaitKey } from "./arlAgentMeta"
+import { isValidationReady, workerWaitKey } from "./arlAgentMeta"
 
 /**
  * Right-column validation status line for ARL sessions, above the file panel.
  *
  * Deliberately minimal: one line saying whether the Validator's validation
  * service is usable, plus a hint pointing to the Validator conversation when
- * it is not. Connection state, the reconnect button and the sync action live
- * in the center panel, so they are not repeated here.
+ * it is not. Connection state and the reconnect button live in the center
+ * panel, so they are not repeated here.
  *
  * The backend polls for the validation service and pushes its state, so this
  * is a pure view.
@@ -24,7 +24,7 @@ export default function ARLAgentStatusPanel() {
   // Held back until the Worker is up: during startup "not ready" is true but
   // useless, since nothing can act on it yet.
   const workerReady = connected && panes.worker.ready
-  const ready = canSyncValidation(validation)
+  const ready = isValidationReady(validation)
 
   return (
     <section className="shrink-0 border-b border-border/40 px-3 py-2">

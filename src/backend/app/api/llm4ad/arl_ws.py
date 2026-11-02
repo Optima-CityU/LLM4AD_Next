@@ -34,11 +34,7 @@ from app.models.user import User
 from app.services.arl.daemon_client import PaseoDaemonClient
 from app.services.arl.runtime import daemon_endpoints, get_arl_runtime
 from app.services.arl.types import ARLDaemonConfig
-from app.services.arl.validation import (
-    ValidationStatus,
-    probe_validation,
-    sync_to_worker,
-)
+from app.services.arl.validation import ValidationStatus, probe_validation
 from app.tasks.research_runner.config_builder import resolve_provider_for_arc
 
 router = APIRouter(prefix="/research")
@@ -75,7 +71,6 @@ KNOWN_MESSAGE_TYPES = frozenset(
         "file_write",
         "file_list",
         "permission_response",
-        "sync_validation",
         "list_commands",
         "fs_request",
         "timeline_fetch_older",
@@ -1003,10 +998,10 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
     """轮询 Validator 的验证服务状态，变化时推给前端的 worker 角色。
 
     验证服务是用户在 Validator 侧交互后由 agent 自行拉起的，daemon 不感知，
-    没有事件可订阅，只能轮询文件（见 :mod:`app.services.arl.validation`）。
+    没有事件可订阅，只能轮询它的 ``/health``（见 :mod:`app.services.arl.validation`）。
 
     只在**前端可见状态发生变化**时推帧：每轮都推会把前端的消息处理和日志
-    刷满，而用户关心的只有「按钮该不该出现」。首轮无论如何推一次，让界面
+    刷满，而用户关心的只有「Worker 能不能开始」。首轮无论如何推一次，让界面
     在连接建立后立刻有确定状态，而不是空着等第一次变化。
 
     探测异常只记日志不外抛：这是个辅助功能，它失败不该把整条会话拆掉
@@ -1022,11 +1017,10 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
             status = await asyncio.to_thread(probe_validation, str(session_id))
             if not status.same_state_as(last):
                 logger.info(
-                    "🔎 [Session {}] 验证服务状态变化: configured={}, url={}, has_task={}, reason={}",
+                    "🔎 [Session {}] 验证服务状态变化: configured={}, url={}, reason={}",
                     session_id,
                     status.configured,
                     status.url,
-                    status.has_task,
                     status.reason,
                 )
                 if status.detail:
@@ -1661,63 +1655,6 @@ async def _handle_frontend_message(
                 "agent_cancel_result",
                 {"ok": False, "message": str(e)},
                 role=role,
-            )
-
-    elif msg_type == "sync_validation":
-        # 把 Validator 的 task.md 与验证服务凭据同步到 Worker 工作目录。
-        # 有专门的结果帧，失败就地处理——前端靠它解开按钮 loading 状态。
-        logger.info(f"📤 [Backend → {target_name}] 同步验证产物到 Worker")
-        try:
-            # 现场重新探测，不信前端传来的状态：用户可能在按钮出现后
-            # 又把 Validator 的服务停了，拿旧状态写进连接信息文件会让
-            # Worker 带着一个连不上的地址干跑一整轮
-            status_now = await asyncio.to_thread(probe_validation, str(session_id))
-            if not status_now.configured:
-                await _push(
-                    websocket,
-                    "validation_sync_result",
-                    {
-                        "ok": False,
-                        "message": status_now.reason or "验证服务尚未就绪",
-                    },
-                    role="worker",
-                )
-                # 顺带把最新状态推回去，让界面与实际一致
-                await _push(
-                    websocket,
-                    "validation_status",
-                    status_now.to_payload(),
-                    role="worker",
-                )
-                return
-            if not status_now.has_task:
-                await _push(
-                    websocket,
-                    "validation_sync_result",
-                    {"ok": False, "message": "Validator 尚未生成 task.md"},
-                    role="worker",
-                )
-                return
-
-            result = await asyncio.to_thread(
-                sync_to_worker, str(session_id), status_now
-            )
-            await _push(
-                websocket,
-                "validation_sync_result",
-                {"ok": True, **result},
-                role="worker",
-            )
-            logger.info(f"✅ [Backend → {target_name}] 验证产物同步完成: {result}")
-        except Exception as e:
-            logger.warning(
-                f"⚠️ [Backend → {target_name}] 验证产物同步失败: {e}", exc_info=True
-            )
-            await _push(
-                websocket,
-                "validation_sync_result",
-                {"ok": False, "message": str(e)},
-                role="worker",
             )
 
     elif msg_type == "list_commands":
