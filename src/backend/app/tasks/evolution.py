@@ -39,7 +39,8 @@ def _on_worker_init(**kwargs):  # noqa: ARG001
     try:
         from app.services.container_runtime import cleanup_orphaned_containers
 
-        cleanup_orphaned_containers(extra_filters={"label": "task_id"})
+        # Other live workers may own running containers. Reap stopped jobs only.
+        cleanup_orphaned_containers(extra_filters={"label": "task_id", "status": ["exited", "dead"]})
     except Exception as e:
         logger.error(f"清理孤儿容器失败: {e}")
 

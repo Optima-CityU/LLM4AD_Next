@@ -738,8 +738,13 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
         """
         self.state = EvolutionState.RUNNING
         self.start_time = time.time()
-        self.current_generation = 0
-        self.state_tracker.start_run(self.config.max_generations)
+        if not self.islands:
+            self.current_generation = 0
+            self.state_tracker.start_run(self.config.max_generations)
+        else:
+            # Loaded populations retain their generation, metrics and budgets.
+            self.state_tracker.state = EvolutionState.RUNNING
+            self.state_tracker.end_time = None
 
         try:
             # Initialize population if empty
@@ -1198,7 +1203,11 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
             checkpoint.metadata.get("exported_migrant_ids", []) or []
         )
         self.current_generation = checkpoint.generation
-        self.global_best_individual = checkpoint.best_individual
+        self.global_best_individual = (
+            Algorithm.model_validate(checkpoint.best_individual)
+            if isinstance(checkpoint.best_individual, dict)
+            else checkpoint.best_individual
+        )
         self.history = checkpoint.history
 
         # Restore state tracker from checkpoint if available
