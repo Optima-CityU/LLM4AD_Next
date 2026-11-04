@@ -134,11 +134,26 @@ async def test_host_mode_publishes_adjacent_ports(captured_run, monkeypatch) -> 
             daemon_config=_daemon_config(),
             fingerprint="fp",
         )
-        binding = captured_run.kwargs["ports"][f"{settings.ARL_PASEO_PORT}/tcp"]
+        published = captured_run.kwargs["ports"]
+        binding = published[f"{settings.ARL_PASEO_PORT}/tcp"]
         assert binding[0] == "127.0.0.1"
         ports[role] = binding[1]
 
+        # 只有 Validator 额外发布验证服务端口，供宿主机上的 backend 探 /health
+        validation_key = f"{settings.ARL_VALIDATION_PORT}/tcp"
+        if role == ARLRole.VALIDATOR:
+            assert published[validation_key] == (
+                "127.0.0.1",
+                runtime.validation_host_port(session.session_id),
+            )
+        else:
+            assert validation_key not in published
+
     assert ports[ARLRole.VALIDATOR] == ports[ARLRole.WORKER] + 1
+    # 验证服务端口区间与 daemon 端口区间不重叠
+    assert runtime.validation_host_port(session.session_id) >= (
+        runtime._PORT_BASE + runtime._PORT_SLOTS * 2
+    )
 
 
 # ---- 凭据不进容器 ----

@@ -4296,12 +4296,12 @@
       "learning": "Learning"
     },
     "profile": {
-      "algorithm_evolution": "llm4ad",
-      "ml_vision": "autoresearch"
+      "algorithm_evolution": "LLM4AD",
+      "ml_vision": "AutoResearch"
     },
     "profileDesc": {
-      "algorithm_evolution": "Wires llm4ad's algorithm-evolution engine into experiment design and execution, iterating the algorithm as it runs",
-      "ml_vision": "Native AutoResearchClaw pipeline, without llm4ad integration"
+      "algorithm_evolution": "Built on the AutoResearchClaw pipeline, with LLM4AD's algorithm-evolution engine wired into experiment design and execution",
+      "ml_vision": "Native AutoResearchClaw pipeline, without LLM4AD integration"
     },
     "provider": {
       "inherit": "Session default",
@@ -4504,8 +4504,8 @@
       "sessionTypeLabel": "Session type",
       "sessionTypeNormal": "Standard session",
       "sessionTypeNormalDesc": "Standard research chat mode",
-      "sessionTypeArl": "ARL session",
-      "sessionTypeArlDesc": "Dual-agent collaboration (experimental)",
+      "sessionTypeArl": "AutoResearch Loop",
+      "sessionTypeArlDesc": "AI2AI fully automated workflow: researchers only set the research direction and available resources, and AutoResearch Loop handles the rest",
       "arlTitleRequired": "ARL sessions need a title",
       "arlWorkerHint": "LLM agent that carries out the research (Claude recommended)",
       "arlValidatorHint": "LLM agent that verifies the results (GPT/Codex recommended)",
@@ -4708,8 +4708,8 @@
       "title": "ARL dual agent",
       "worker": "Worker",
       "validator": "Validator",
-      "workerHint": "Claude Code in the worker container",
-      "validatorHint": "Codex in the validator container",
+      "workerHint": "Built on Claude Code: implements the research and submits it for validation",
+      "validatorHint": "Built on Codex: sets up the validation service and task spec",
       "connecting": "Connecting to the ARL session…",
       "connected": "ARL connected",
       "disconnected": "ARL disconnected",
@@ -4806,6 +4806,44 @@
       "stopping": "Stopping…",
       "modeTitle": "Permission mode",
       "modeUnknown": "Mode",
+      "modes": {
+        "claude": {
+          "plan": {
+            "label": "Plan Mode",
+            "description": "Analyze the codebase without executing tools or edits"
+          },
+          "default": {
+            "label": "Always Ask",
+            "description": "Prompts for permission the first time a tool is used"
+          },
+          "acceptEdits": {
+            "label": "Accept File Edits",
+            "description": "Automatically approves edit-focused tools without prompting"
+          },
+          "auto": {
+            "label": "Auto mode",
+            "description": "Uses a model classifier to review permission prompts automatically"
+          },
+          "bypassPermissions": {
+            "label": "Bypass",
+            "description": "Skip all permission prompts (use with caution)"
+          }
+        },
+        "codex": {
+          "auto": {
+            "label": "Default Permissions",
+            "description": "Edit files and run commands with Codex's default approval flow."
+          },
+          "auto-review": {
+            "label": "Auto-review",
+            "description": "Same workspace-write permissions as Default, but eligible on-request approvals are routed through the auto-reviewer subagent."
+          },
+          "full-access": {
+            "label": "Full Access",
+            "description": "Edit files, run commands, and access the network without additional prompts."
+          }
+        }
+      },
       "systemTitle": "System",
       "statusIdle": "Idle",
       "statusRunning": "Working",
@@ -4821,38 +4859,47 @@
       "commandsEmpty": "No matching commands",
       "commandKindSkill": "skill",
       "commandKindCommand": "command",
+      "loadOlder": "Load earlier messages",
+      "loadingOlder": "Loading earlier messages…",
+      "statusSubagentsRunning": "Subtasks running",
+      "subagentsRunning": "Subtasks {{running}}/{{total}} running",
+      "subagentsTotal": "Subtasks {{total}}",
+      "subagentsCollapse": "Collapse",
+      "subagentUntitled": "Untitled subtask",
+      "subagentEmpty": "This subtask has no messages yet",
+      "subagentLive": "Still running; refreshes when its status changes",
+      "peerBadge": "Peer",
+      "peerClosed": "This agent has ended; its transcript is unavailable after a container restart",
+      "peerUntitled": "Untitled validation run",
+      "subagentStatus": {
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "canceled": "Canceled"
+      },
+      "commandKindClient": "client",
+      "clearCommandDesc": "Archive this conversation and start a new one (workspace files are kept)",
+      "clearTitle": "Clear the {{role}} conversation?",
+      "clearDesc": "The current conversation is archived and the agent starts over with an empty context. The container and workspace files are not affected. A running turn will be interrupted.",
+      "clearConfirm": "Clear and start new",
+      "clearCancel": "Cancel",
+      "resetting": "Starting a new conversation…",
       "reconnecting": "Reconnecting to the ARL session…",
       "offline": "ARL connection lost",
       "retryConnect": "Reconnect",
-      "validationReady": "Validation service is ready",
-      "validationReadyHint": "Copy the Validator's task.md and the service credentials into this container's workspace; the Worker picks them up on its next turn.",
-      "validationNoTask": "Validation service is ready, but the Validator has not written task.md yet",
-      "validationNoTaskHint": "Ask the Validator on the left to generate task.md, then sync.",
-      "validationMissing": "No validation service detected yet",
-      "validationMissingHint": "Set up and start the validation MCP service in the Validator container on the left; this pane detects it automatically.",
-      "validationSync": "Sync task.md",
-      "validationSyncing": "Syncing…",
-      "validationResync": "Sync again",
-      "validationSynced": "Synced",
       "agentStatus": "Agent status",
-      "validationTitle": "Validation handoff",
       "validationWaiting": "Waiting for the Worker container…",
-      "validationStepService": "Service",
-      "validationStepTask": "task.md",
-      "validationStepSync": "Sync",
+      "validationLabel": "Validation service",
+      "validationOk": "Healthy",
+      "validationNotReady": "Not ready",
       "scrollToLatest": "Jump to latest",
       "placeholderShort": "Message {{role}}…",
       "composerHint": "Enter to send · Shift+Enter for newline · / commands",
       "guide": {
-        "validatorTitle": "Start here",
-        "validatorStep1": "Send /aris-setup to build the validation service",
-        "validatorStep2": "Click {sync} between the two input boxes to sync to the Worker",
-        "workerTitle": "Finish the Validator first",
-        "workerStep1": "Build the validation service in the Validator",
-        "workerStep2": "Click {sync} between the two input boxes to sync",
-        "workerStep3": "Send /aris-setup to start researching",
-        "useCommand": "Click to fill the composer",
-        "allDone": "All set. You can start chatting."
+        "validatorStart": "Build validation service",
+        "workerStart": "Start auto research",
+        "workerWait": "Click \"Build validation service\" in the Validator on the left first",
+        "workerWaitBusy": "The validation service is not ready yet. Finish setting it up in the Validator conversation on the left"
       }
     },
     "gate": {
