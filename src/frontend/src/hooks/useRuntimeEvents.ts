@@ -18,6 +18,10 @@ export interface RuntimeFailureState {
   status: number | null
   message: string
   ts: number
+  attempt: number
+  maxAttempts: number
+  retrying: boolean
+  retryIn: number
 }
 
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000]
@@ -29,6 +33,10 @@ interface ConnectedSnapshot {
   status?: number
   message?: string
   ts?: number
+  attempt?: number
+  max_attempts?: number
+  retrying?: boolean
+  retry_in?: number
 }
 
 interface RuntimeFrame {
@@ -38,7 +46,53 @@ interface RuntimeFrame {
   status?: number | null
   message?: string
   ts?: number
+  attempt?: number
+  max_attempts?: number
+  retrying?: boolean
+  retry_in?: number
   state?: ConnectedSnapshot
+}
+
+/** Restore retries on reconnect and clear stale failures when the gateway is healthy. */
+export function applyRuntimeHealthFrame(
+  previous: RuntimeFailureState | null,
+  event: string,
+  payload: RuntimeFrame,
+): RuntimeFailureState | null {
+  if (event === "connected") {
+    if (payload.state?.state === "ok") return null
+    if (payload.state?.state !== "failing") return previous
+    return {
+      count: payload.state.failures ?? 0,
+      reason: payload.state.reason ?? "other",
+      status: payload.state.status ?? null,
+      message: payload.state.message ?? "",
+      ts: payload.state.ts ?? 0,
+      attempt: payload.state.attempt ?? 0,
+      maxAttempts: payload.state.max_attempts ?? 0,
+      retrying: payload.state.retrying ?? false,
+      retryIn: payload.state.retry_in ?? 0,
+    }
+  }
+  if (event !== "runtime") return previous
+  if (
+    ["proxy_recovered", "proxy_cancelled", "proxy_started"].includes(
+      payload.type ?? "",
+    )
+  )
+    return null
+  if (payload.type !== "proxy_error") return previous
+  return {
+    count: payload.count ?? 0,
+    reason: payload.reason ?? "other",
+    status: payload.status ?? null,
+    message: payload.message ?? "",
+    ts: payload.ts ?? 0,
+    attempt: payload.attempt ?? 0,
+    maxAttempts: payload.max_attempts ?? 0,
+    retrying: payload.retrying ?? false,
+    retryIn: payload.retry_in ?? 0,
+  }
 }
 
 export function useRuntimeEvents(
@@ -70,28 +124,9 @@ export function useRuntimeEvents(
     }
 
     const applyFrame = (event: string, payload: RuntimeFrame) => {
-      if (event === "connected" && payload.state?.state === "failing") {
-        setFailure({
-          count: payload.state.failures ?? 0,
-          reason: payload.state.reason ?? "other",
-          status: payload.state.status ?? null,
-          message: payload.state.message ?? "",
-          ts: payload.state.ts ?? 0,
-        })
-        return
-      }
-      if (event !== "runtime") return
-      if (payload.type === "proxy_error") {
-        setFailure({
-          count: payload.count ?? 0,
-          reason: payload.reason ?? "other",
-          status: payload.status ?? null,
-          message: payload.message ?? "",
-          ts: payload.ts ?? 0,
-        })
-      } else if (payload.type === "proxy_recovered") {
-        setFailure(null)
-      }
+      setFailure((previous) =>
+        applyRuntimeHealthFrame(previous, event, payload),
+      )
     }
 
     const connect = () => {

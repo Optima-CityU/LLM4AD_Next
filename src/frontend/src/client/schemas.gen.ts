@@ -163,6 +163,759 @@ export const AppConfigSchemaResponseSchema = {
     description: '参数配置 JSON Schema 响应。'
 } as const;
 
+export const AutoDesignDraftProjectSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        config: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Config'
+        },
+        config_error: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Config Error'
+        }
+    },
+    type: 'object',
+    required: ['path', 'name'],
+    title: 'AutoDesignDraftProject',
+    description: 'One real editable project and its redacted configuration preview.'
+} as const;
+
+export const AutoDesignFileSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        size: {
+            type: 'integer',
+            title: 'Size',
+            default: 0
+        },
+        modified_time: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Modified Time'
+        },
+        title: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Title'
+        }
+    },
+    type: 'object',
+    required: ['path'],
+    title: 'AutoDesignFile',
+    description: 'One relative path available to a scoped file reader.'
+} as const;
+
+export const AutoDesignFileListSchema = {
+    properties: {
+        area: {
+            type: 'string',
+            enum: ['input', 'run', 'draft', 'references', 'analysis'],
+            title: 'Area'
+        },
+        task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Id'
+        },
+        files: {
+            items: {
+                '$ref': '#/components/schemas/AutoDesignFile'
+            },
+            type: 'array',
+            title: 'Files'
+        }
+    },
+    type: 'object',
+    required: ['area', 'files'],
+    title: 'AutoDesignFileList',
+    description: 'Files from task inputs, runs, drafts, references, or design records.'
+} as const;
+
+export const AutoDesignFileResponseSchema = {
+    properties: {
+        area: {
+            type: 'string',
+            enum: ['input', 'run', 'draft', 'references', 'analysis'],
+            title: 'Area'
+        },
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        total_lines: {
+            type: 'integer',
+            title: 'Total Lines'
+        },
+        start_line: {
+            type: 'integer',
+            title: 'Start Line'
+        },
+        end_line: {
+            type: 'integer',
+            title: 'End Line'
+        },
+        revision: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Revision'
+        },
+        editable: {
+            type: 'boolean',
+            title: 'Editable',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['area', 'path', 'content', 'total_lines', 'start_line', 'end_line'],
+    title: 'AutoDesignFileResponse',
+    description: 'File text with an explicit optional line range rather than silent truncation.'
+} as const;
+
+export const AutoDesignFileUpdateSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        revision: {
+            type: 'string',
+            title: 'Revision'
+        }
+    },
+    type: 'object',
+    required: ['path', 'content', 'revision'],
+    title: 'AutoDesignFileUpdate',
+    description: 'Save an existing draft only if its source revision still matches.'
+} as const;
+
+export const AutoDesignOperationRequestSchema = {
+    properties: {
+        operation: {
+            type: 'string',
+            enum: ['context', 'rename', 'list_files', 'read_file', 'create_child', 'patch_child', 'validate', 'publish', 'start', 'stop', 'memory_context', 'memory_list', 'memory_save', 'sync_draft'],
+            title: 'Operation'
+        },
+        task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Id'
+        },
+        arguments: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Arguments'
+        }
+    },
+    type: 'object',
+    required: ['operation'],
+    title: 'AutoDesignOperationRequest',
+    description: 'Task action explicitly requested from the task page or Agent.'
+} as const;
+
+export const AutoDesignPublishRequestSchema = {
+    properties: {
+        project_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Id'
+        },
+        task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Id'
+        },
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        enable_memory: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Enable Memory'
+        }
+    },
+    type: 'object',
+    title: 'AutoDesignPublishRequest',
+    description: 'Prepare the current verified project or update an unstarted version.'
+} as const;
+
+export const AutoDesignPublishResponseSchema = {
+    properties: {
+        session: {
+            '$ref': '#/components/schemas/AutoDesignSessionResponse'
+        },
+        task: {
+            '$ref': '#/components/schemas/TaskResponse'
+        }
+    },
+    type: 'object',
+    required: ['session', 'task'],
+    title: 'AutoDesignPublishResponse',
+    description: 'The prepared task and its associated conversation.'
+} as const;
+
+export const AutoDesignRuntimeRequestSchema = {
+    properties: {
+        operation: {
+            type: 'string',
+            enum: ['context', 'rename', 'list_files', 'read_file', 'create_child', 'patch_child', 'validate', 'publish', 'start', 'stop', 'memory_context', 'memory_list', 'memory_save', 'sync_draft'],
+            title: 'Operation'
+        },
+        task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Id'
+        },
+        arguments: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Arguments'
+        },
+        workspace_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Workspace Id'
+        }
+    },
+    type: 'object',
+    required: ['operation', 'workspace_id'],
+    title: 'AutoDesignRuntimeRequest',
+    description: 'Internal MCP envelope authorized using the existing runtime token.'
+} as const;
+
+export const AutoDesignSessionCreateSchema = {
+    properties: {
+        title: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Title',
+            default: 'AutoDesign'
+        },
+        project_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Id'
+        }
+    },
+    type: 'object',
+    title: 'AutoDesignSessionCreate',
+    description: 'Start an independent design without requiring uploaded materials.'
+} as const;
+
+export const AutoDesignSessionListSchema = {
+    properties: {
+        items: {
+            items: {
+                '$ref': '#/components/schemas/AutoDesignSessionResponse'
+            },
+            type: 'array',
+            title: 'Items'
+        },
+        total: {
+            type: 'integer',
+            title: 'Total'
+        }
+    },
+    type: 'object',
+    required: ['items', 'total'],
+    title: 'AutoDesignSessionList',
+    description: "Current user's design conversations."
+} as const;
+
+export const AutoDesignSessionResponseSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        mode: {
+            type: 'string',
+            enum: ['proposal', 'manuscript', 'algorithm', 'autodesign'],
+            title: 'Mode'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        conversation_preferences: {
+            '$ref': '#/components/schemas/PaperConversationPreferences'
+        },
+        active_source_version_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Source Version Id'
+        },
+        proposal_foundation: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/ProposalFoundation'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        proposal_entry_path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Proposal Entry Path'
+        },
+        proposal_stage_states: {
+            additionalProperties: {
+                '$ref': '#/components/schemas/ProposalStageState'
+            },
+            type: 'object',
+            title: 'Proposal Stage States'
+        },
+        rebuttal_context: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Rebuttal Context'
+        },
+        rebuttal_entries: {
+            items: {
+                '$ref': '#/components/schemas/RebuttalEntry'
+            },
+            type: 'array',
+            title: 'Rebuttal Entries'
+        },
+        rebuttal_output: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/RebuttalOutput'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        chair_message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Chair Message'
+        },
+        analysis_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Analysis Provider Id'
+        },
+        analysis_model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Analysis Model Name'
+        },
+        analysis_context_window_tokens: {
+            type: 'integer',
+            title: 'Analysis Context Window Tokens'
+        },
+        analysis_max_output_tokens: {
+            type: 'integer',
+            title: 'Analysis Max Output Tokens'
+        },
+        reviewer_a_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reviewer A Provider Id'
+        },
+        reviewer_a_model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reviewer A Model Name'
+        },
+        reviewer_b_provider_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reviewer B Provider Id'
+        },
+        reviewer_b_model_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Reviewer B Model Name'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        updated_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated Time'
+        },
+        project_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Id'
+        },
+        task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Task Id'
+        },
+        root_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Root Task Id'
+        },
+        validation_report: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Validation Report'
+        },
+        project_ready: {
+            type: 'boolean',
+            title: 'Project Ready',
+            default: false
+        },
+        project_revision: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Revision'
+        },
+        project_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Project Name'
+        },
+        published_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Published Task Id'
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'mode', 'description', 'active_source_version_id', 'proposal_foundation', 'proposal_entry_path', 'analysis_provider_id', 'analysis_model_name', 'analysis_context_window_tokens', 'analysis_max_output_tokens', 'reviewer_a_provider_id', 'reviewer_a_model_name', 'reviewer_b_provider_id', 'reviewer_b_model_name', 'created_time', 'updated_time'],
+    title: 'AutoDesignSessionResponse',
+    description: 'Native model settings plus the associated task and verified project.'
+} as const;
+
+export const AutoDesignTaskContextSchema = {
+    properties: {
+        title: {
+            type: 'string',
+            title: 'Title',
+            default: 'AutoDesign'
+        },
+        task: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/TaskResponse'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        root_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Root Task Id'
+        },
+        family: {
+            items: {
+                '$ref': '#/components/schemas/TaskResponse'
+            },
+            type: 'array',
+            title: 'Family'
+        },
+        config: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Config'
+        },
+        stats: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Stats'
+        },
+        draft_path: {
+            type: 'string',
+            title: 'Draft Path',
+            default: '/workspace/source/draft'
+        },
+        validation_report: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Validation Report'
+        },
+        project_ready: {
+            type: 'boolean',
+            title: 'Project Ready',
+            default: false
+        },
+        projects: {
+            items: {
+                '$ref': '#/components/schemas/AutoDesignDraftProject'
+            },
+            type: 'array',
+            title: 'Projects'
+        },
+        selected_project_path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Selected Project Path'
+        },
+        validation_current: {
+            type: 'boolean',
+            title: 'Validation Current',
+            default: false
+        },
+        editing_locked: {
+            type: 'boolean',
+            title: 'Editing Locked',
+            default: false
+        },
+        running_task_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Running Task Id'
+        },
+        draft_conflicts: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Draft Conflicts'
+        }
+    },
+    type: 'object',
+    title: 'AutoDesignTaskContext',
+    description: 'Live, sanitized task state and independently runnable family members.'
+} as const;
+
 export const Body_live_codes_add_targetsSchema = {
     properties: {
         files: {
@@ -5512,13 +6265,20 @@ export const PaperAgentRunResponseSchema = {
             title: 'Workspace Id'
         },
         source_version_id: {
-            type: 'string',
-            format: 'uuid',
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
             title: 'Source Version Id'
         },
         run_kind: {
             type: 'string',
-            enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
+            enum: ['autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
             title: 'Run Kind'
         },
         status: {
@@ -7287,7 +8047,7 @@ export const PaperRuntimeSessionCreateSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
-            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
+            enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
         }
     },
@@ -7353,7 +8113,7 @@ export const PaperSourceFileUpdateRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
+                    enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
                 },
                 {
                     type: 'null'
@@ -7380,7 +8140,7 @@ export const PaperSourcePathDeleteRequestSchema = {
             anyOf: [
                 {
                     type: 'string',
-                    enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
+                    enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
                 },
                 {
                     type: 'null'
@@ -7478,7 +8238,7 @@ export const PaperStageArtifactResponseSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
-            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
+            enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
         },
         run_id: {
@@ -7511,7 +8271,7 @@ export const PaperStageInvalidateRequestSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
-            enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
+            enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
         },
         expected_iteration: {
@@ -7555,7 +8315,7 @@ export const PaperWorkspaceCreateSchema = {
         },
         mode: {
             type: 'string',
-            enum: ['proposal', 'manuscript', 'algorithm'],
+            enum: ['proposal', 'manuscript', 'algorithm', 'autodesign'],
             title: 'Mode'
         }
     },
@@ -7578,7 +8338,7 @@ export const PaperWorkspaceDetailSchema = {
         },
         mode: {
             type: 'string',
-            enum: ['proposal', 'manuscript', 'algorithm'],
+            enum: ['proposal', 'manuscript', 'algorithm', 'autodesign'],
             title: 'Mode'
         },
         description: {
@@ -7824,7 +8584,7 @@ export const PaperWorkspaceDetailSchema = {
         workflow_stages: {
             items: {
                 type: 'string',
-                enum: ['formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
+                enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch']
             },
             type: 'array',
             title: 'Workflow Stages'
@@ -7832,7 +8592,7 @@ export const PaperWorkspaceDetailSchema = {
         available_run_kinds: {
             items: {
                 type: 'string',
-                enum: ['proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
+                enum: ['autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
             },
             type: 'array',
             title: 'Available Run Kinds'
@@ -7885,7 +8645,7 @@ export const PaperWorkspaceSummarySchema = {
         },
         mode: {
             type: 'string',
-            enum: ['proposal', 'manuscript', 'algorithm'],
+            enum: ['proposal', 'manuscript', 'algorithm', 'autodesign'],
             title: 'Mode'
         },
         description: {
@@ -14750,6 +15510,36 @@ export const VerifyEmailRequestSchema = {
     required: ['email', 'code'],
     title: 'VerifyEmailRequest',
     description: '邮箱验证码校验请求。'
+} as const;
+
+export const autodesign_upload_materialsSchema = {
+    properties: {
+        files: {
+            items: {
+                type: 'string',
+                format: 'binary'
+            },
+            type: 'array',
+            title: 'Files'
+        },
+        relative_paths: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Relative Paths'
+        }
+    },
+    type: 'object',
+    required: ['files'],
+    title: 'Body_llm4ad.autodesign-upload_materials'
 } as const;
 
 export const chat_tune_chat_tune_upload_dataSchema = {

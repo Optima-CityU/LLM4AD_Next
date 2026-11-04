@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 from openai import APIStatusError, AsyncOpenAI
+from openai.types.chat import ChatCompletion
 from pydantic import BaseModel, ValidationError
 
 from llm4ad.infra.provider.base import (
@@ -282,6 +283,39 @@ class OpenAICompatibleProvider(BaseProvider):
         """Return a bounded, single-line preview suitable for warning logs."""
         return content[:limit].replace("\r", "\\r").replace("\n", "\\n")
 
+    @staticmethod
+    def _response_metadata(response: ChatCompletion, requested_max_tokens: int | None) -> dict[str, Any]:
+        """Retain output diagnostics without exposing private reasoning text.
+
+        Args:
+            response: Parsed upstream completion and its token usage.
+            requested_max_tokens: Output budget sent for this specific call.
+
+        Returns:
+            Safe response identifiers, token statistics and content lengths.
+        """
+        message = response.choices[0].message
+        reasoning = getattr(message, "reasoning_content", None)
+        details = getattr(response.usage, "completion_tokens_details", None)
+        reasoning_tokens = getattr(details, "reasoning_tokens", None)
+        if not message.content and not message.tool_calls:
+            logger.warning(
+                "Empty final content: model={} finish_reason={} prompt_tokens={} "
+                "completion_tokens={} reasoning_tokens={} requested_max_tokens={}",
+                response.model, response.choices[0].finish_reason,
+                response.usage.prompt_tokens if response.usage else 0,
+                response.usage.completion_tokens if response.usage else 0,
+                reasoning_tokens, requested_max_tokens,
+            )
+        return {
+            "id": response.id,
+            "created": response.created,
+            "system_fingerprint": response.system_fingerprint,
+            "reasoning_tokens": reasoning_tokens,
+            "reasoning_content_chars": len(reasoning) if isinstance(reasoning, str) else 0,
+            "requested_max_tokens": requested_max_tokens,
+        }
+
     def _convert_messages(self, messages: list[ChatMessage]) -> list[dict[str, Any]]:
         """Convert internal ChatMessage format to OpenAI format.
 
@@ -442,11 +476,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 model=response.model,
                 finish_reason=response.choices[0].finish_reason or "stop",
                 request_stage=request_stage,
-                metadata={
-                    "id": response.id,
-                    "created": response.created,
-                    "system_fingerprint": response.system_fingerprint,
-                },
+                metadata=self._response_metadata(response, create_kwargs.get("max_tokens")),
                 parsed=None,
                 timing=ExecutionTiming.from_llm_stage(request_stage, latency_ms),
                 tool_calls=result_tool_calls,
@@ -536,11 +566,7 @@ class OpenAICompatibleProvider(BaseProvider):
                     model=response.model,
                     finish_reason=response.choices[0].finish_reason or "stop",
                     request_stage=request_stage,
-                    metadata={
-                        "id": response.id,
-                        "created": response.created,
-                        "system_fingerprint": response.system_fingerprint,
-                    },
+                    metadata=self._response_metadata(response, create_kwargs.get("max_tokens")),
                     parsed=parsed_result,
                     timing=ExecutionTiming.from_llm_stage(request_stage, latency_ms),
                     tool_calls=result_tool_calls,
@@ -584,11 +610,7 @@ class OpenAICompatibleProvider(BaseProvider):
             model=response.model,
             finish_reason=response.choices[0].finish_reason or "stop",
             request_stage=request_stage,
-            metadata={
-                "id": response.id,
-                "created": response.created,
-                "system_fingerprint": response.system_fingerprint,
-            },
+            metadata=self._response_metadata(response, create_kwargs.get("max_tokens")),
             parsed=None,
             timing=ExecutionTiming.from_llm_stage(request_stage, latency_ms),
             tool_calls=result_tool_calls,

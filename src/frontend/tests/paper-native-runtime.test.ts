@@ -1,3 +1,4 @@
+import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "../src/lib/researchModels"
 import { expect, test } from "bun:test"
 
 import {
@@ -15,6 +16,9 @@ const layoutSource = await Bun.file(
 const paperRouteSource = await Bun.file(
   new URL("../src/routes/_layout/papers.tsx", import.meta.url),
 ).text()
+const sourceNavigatorSource = await Bun.file(
+  new URL("../src/components/Common/SourceNavigator.tsx", import.meta.url),
+).text()
 const paperLayoutSource = await Bun.file(
   new URL("../src/routes/_layout_paper.tsx", import.meta.url),
 ).text()
@@ -25,7 +29,7 @@ const nativeRuntimeSource = await Bun.file(
   new URL("../src/components/Paper/PaperNativeRuntime.tsx", import.meta.url),
 ).text()
 
-test("AutoDiscovery can begin with arXiv intake before a source upload", () => {
+test("AutoDesign can begin with arXiv intake before a source upload", () => {
   expect(paperRouteSource).toContain("algorithmIntakeOpen")
   expect(paperRouteSource).toContain('stage="discovery_baseline"')
   expect(nativeRuntimeSource).toContain("llm4ad:submit-prompt")
@@ -202,11 +206,11 @@ test("autoresearch back navigation returns to the project list", () => {
   )
 })
 
-test("autorebuttal and autodiscovery are always available", () => {
+test("autorebuttal and AutoDesign are always available", () => {
   expect(parseResearchWorkspaceMode("manuscript")).toBe("manuscript")
   expect(parseResearchWorkspaceMode("algorithm")).toBe("algorithm")
   expect(sidebarSource).toContain('mode: "manuscript"')
-  expect(sidebarSource).toContain('mode: "algorithm"')
+  expect(sidebarSource).not.toContain('path: "/autodesign"')
   expect(sidebarSource).not.toContain("AUTO_REBUTTAL_ENABLED")
   expect(sidebarSource).not.toContain("AUTO_DISCOVERY_ENABLED")
   expect(paperRouteSource).not.toContain("AUTO_REBUTTAL_ENABLED")
@@ -424,7 +428,9 @@ test("embedded research tool records cannot navigate the iframe", () => {
 })
 
 test("autodiscovery separates research decisions from the final runnable task", () => {
-  expect(workflowSource).toContain('"discovery_baseline", "discovery_candidates", "discovery_evaluation", "discovery"')
+  expect(workflowSource).toContain(
+    '"discovery_baseline", "discovery_candidates", "discovery_evaluation", "discovery"',
+  )
   expect(workflowSource).toContain('"algorithm-discovery"')
   expect(workflowSource).toContain('"llm4ad-task-builder"')
   expect(workflowSource).toContain('"discovery-baseline"')
@@ -433,9 +439,15 @@ test("autodiscovery separates research decisions from the final runnable task", 
   expect(taskDockerfileSource).toContain(
     "skills/autodiscovery/algorithm-discovery",
   )
-  expect(taskDockerfileSource).toContain("skills/autodiscovery/discovery-baseline")
-  expect(taskDockerfileSource).toContain("skills/autodiscovery/discovery-candidates")
-  expect(taskDockerfileSource).toContain("skills/autodiscovery/discovery-evaluation")
+  expect(taskDockerfileSource).toContain(
+    "skills/autodiscovery/discovery-baseline",
+  )
+  expect(taskDockerfileSource).toContain(
+    "skills/autodiscovery/discovery-candidates",
+  )
+  expect(taskDockerfileSource).toContain(
+    "skills/autodiscovery/discovery-evaluation",
+  )
   expect(paperRouteSource).toContain("<PaperWorkflowStepper")
   expect(paperRouteSource).toContain("<AlgorithmStagePanel")
   expect(discoveryPanelSource).toContain("useCreatePaperProposalTasks")
@@ -446,7 +458,9 @@ test("autodiscovery separates research decisions from the final runnable task", 
   expect(discoveryPanelSource).toContain("proposal.package_manifest")
   expect(runtimeApiSource).toContain("mcp__llm4ad_stage__build_algorithm_task")
   expect(runtimeApiSource).toContain('request.workflow_stage == "discovery"')
-  expect(runtimeApiSource).toContain("mcp__llm4ad_stage__list_algorithm_proposals")
+  expect(runtimeApiSource).toContain(
+    "mcp__llm4ad_stage__list_algorithm_proposals",
+  )
   expect(discoveryPanelSource).toContain('to: "/evolution"')
   expect(zh.paper.workflow.stage.discoveryExamples).toHaveLength(3)
   expect(en.paper.workflow.stage.discoveryExamples).toHaveLength(3)
@@ -503,9 +517,9 @@ test("every proposal stage offers concrete conversation starters", () => {
 
 test("Anthropic and OpenAI providers can be bound through the protocol adapter", () => {
   expect(paperRouteSource).toContain("CLAUDE_RUNTIME_PROVIDER_TYPES")
-  expect(paperRouteSource).toContain('"anthropic"')
-  expect(paperRouteSource).toContain('"openai"')
-  expect(paperRouteSource).toContain('"openai_compatible"')
+  expect(CLAUDE_RUNTIME_PROVIDER_TYPES.has("anthropic")).toBe(true)
+  expect(CLAUDE_RUNTIME_PROVIDER_TYPES.has("openai")).toBe(true)
+  expect(CLAUDE_RUNTIME_PROVIDER_TYPES.has("openai_compatible")).toBe(true)
   expect(zh.paper.model.noProvidersHint).toContain("OpenAI")
   expect(en.paper.model.noProvidersHint).toContain("OpenAI")
 })
@@ -792,8 +806,8 @@ test("the document dock file tree collapses independently of the editor", () => 
   expect(paperRouteSource).toContain("filesCollapsed")
   // The rail has to carry the control that reopens it, so the tree is collapsed
   // by width rather than unmounted.
-  expect(paperRouteSource).toContain("collapseFiles")
-  expect(paperRouteSource).toContain("expandFiles")
+  expect(sourceNavigatorSource).toContain("collapseFiles")
+  expect(sourceNavigatorSource).toContain("expandFiles")
 })
 
 test("the collapsed editor unmounts its code editor instead of hiding it", () => {

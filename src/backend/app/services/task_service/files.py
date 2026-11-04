@@ -33,7 +33,15 @@ from ._helpers import (
     _validate_file_path,
     _validate_folder_name,
 )
-from .auth import get_task_with_auth
+from .auth import get_task_for_edit
+
+
+def _touch_inputs(db: Session, task: models.Task) -> None:
+    """Invalidate Agent baselines and verification after canonical file edits."""
+    task.version_time = datetime.now(UTC)
+    task.updated_time = task.version_time
+    db.add(task)
+    db.commit()
 
 
 def upload_task_data(
@@ -56,7 +64,7 @@ def upload_task_data(
     Raises:
         HTTPException: 未上传文件（400）
     """
-    task = get_task_with_auth(db, task_id, current_user)
+    task = get_task_for_edit(db, task_id, current_user)
 
     if not files:
         raise HTTPException(status_code=400, detail="至少上传一个文件")
@@ -90,6 +98,7 @@ def upload_task_data(
     db.add(task)
     db.commit()
 
+    _touch_inputs(db, task)
     return Message(message=f"上传成功，共 {len(files)} 个文件")
 
 
@@ -141,6 +150,7 @@ def update_task_data_file(
     内容以 UTF-8 写入对象存储；是否允许编辑某类文件由前端决定，后端不再做
     扩展名白名单校验。
     """
+    task = get_task_for_edit(db, task_id, current_user)
     _validate_file_path(file_update.file_path)
     _reject_placeholder_path(file_update.file_path)
     task, prefix = _get_task_input_data_path(db, task_id, current_user)
@@ -154,6 +164,7 @@ def update_task_data_file(
         new_data,
         content_type="text/plain; charset=utf-8",
     )
+    _touch_inputs(db, task)
     return Message(message="文件修改成功")
 
 
@@ -164,6 +175,7 @@ def delete_task_data_file(
     file_path: str,
 ) -> Message:
     """删除任务输入数据中的指定文件。"""
+    task = get_task_for_edit(db, task_id, current_user)
     _validate_file_path(file_path)
     _reject_placeholder_path(file_path)
     task, prefix = _get_task_input_data_path(db, task_id, current_user)
@@ -178,6 +190,7 @@ def delete_task_data_file(
 
     _backfill_empty_parent(prefix, file_path)
 
+    _touch_inputs(db, task)
     return Message(message="文件删除成功")
 
 
@@ -201,6 +214,7 @@ def rename_task_data_file(
     Raises:
         HTTPException: 路径非法、源文件不存在或目标文件已存在。
     """
+    task = get_task_for_edit(db, task_id, current_user)
     _validate_file_path(file_rename.old_path)
     _validate_file_path(file_rename.new_path)
     _reject_placeholder_path(file_rename.old_path)
@@ -266,6 +280,7 @@ def rename_task_data_file(
     # 源目录若变空，则补占位文件保留空目录结构
     _backfill_empty_parent(prefix, file_rename.old_path)
 
+    _touch_inputs(db, task)
     return Message(message="文件重命名成功")
 
 
@@ -290,7 +305,7 @@ def create_task_data_file(
     Returns:
         包含已创建文件相对路径的响应。
     """
-    task = get_task_with_auth(db, task_id, current_user)
+    task = get_task_for_edit(db, task_id, current_user)
 
     target_dir = _resolve_target_directory(file_create.path)
     if target_dir:
@@ -331,6 +346,7 @@ def create_task_data_file(
     # 目录已写入真实文件，移除可能存在的占位文件
     _remove_placeholder_if_present(prefix, target_dir)
 
+    _touch_inputs(db, task)
     return schemas.FileCreateResponse(file_path=relative_path)
 
 
@@ -355,7 +371,7 @@ def create_task_data_folder(
     Returns:
         包含已创建文件夹相对路径的响应。
     """
-    task = get_task_with_auth(db, task_id, current_user)
+    task = get_task_for_edit(db, task_id, current_user)
 
     parent_dir = _normalize_dir_path(folder_create.path)
     if not parent_dir:
@@ -392,6 +408,7 @@ def create_task_data_folder(
     placeholder_key = f"{prefix}/{folder_relative}/{PLACEHOLDER_NAME}"
     storage.upload(placeholder_key, b"", content_type="text/plain; charset=utf-8")
 
+    _touch_inputs(db, task)
     return schemas.FolderCreateResponse(folder_path=folder_relative)
 
 
@@ -415,6 +432,7 @@ def delete_task_data_folder(
     Raises:
         HTTPException: 路径非法、为空或文件夹不存在。
     """
+    task = get_task_for_edit(db, task_id, current_user)
     folder_path = _normalize_dir_path(folder_path)
     if not folder_path:
         raise HTTPException(status_code=400, detail="不允许删除根目录")
@@ -431,6 +449,7 @@ def delete_task_data_folder(
 
     _backfill_empty_parent(prefix, folder_path)
 
+    _touch_inputs(db, task)
     return Message(message="文件夹删除成功")
 
 
@@ -457,6 +476,7 @@ def rename_task_data_folder(
     Raises:
         HTTPException: 路径非法、源文件夹不存在、目标文件夹已存在或目标位于源内部。
     """
+    task = get_task_for_edit(db, task_id, current_user)
     from concurrent.futures import ThreadPoolExecutor
 
     old_path = _normalize_dir_path(folder_rename.old_path)
@@ -567,4 +587,5 @@ def rename_task_data_folder(
     # 源父目录若变空，补占位文件保留目录结构
     _backfill_empty_parent(prefix, old_path)
 
+    _touch_inputs(db, task)
     return Message(message="文件夹重命名成功")

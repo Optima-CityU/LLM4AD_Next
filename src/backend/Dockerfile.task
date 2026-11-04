@@ -198,11 +198,17 @@ COPY ./docker/knowledge-parser/sdk_events.py                  /app/knowledge-par
 COPY ./skills/document-knowledge-organizer                    /app/skills/document-knowledge-organizer
 COPY ./docker/knowledge-parser/CC-SWITCH-LICENSE              /usr/share/licenses/cc-switch/LICENSE
 COPY ./docker/paper-agent/stage_bridge.py                     /app/paper-agent/stage_bridge.py
+COPY ./docker/paper-agent/autodesign_bridge.py                /app/paper-agent/autodesign_bridge.py
+COPY ./docker/paper-agent/validate_cloud_task.py              /app/paper-agent/validate_cloud_task.py
 COPY ./docker/paper-agent/arxiv_entrypoint.py                 /app/paper-agent/arxiv_entrypoint.py
 COPY ./docker/paper-agent/protocol_adapter.py                 /app/paper-agent/protocol_adapter.py
 COPY ./src/backend/app/services/arxiv_coordination.py         /app/paper-agent/arxiv_coordination.py
 COPY --chmod=0755 ./docker/paper-agent/workspace-entrypoint.sh /app/paper-agent/workspace-entrypoint.sh
 COPY ./skills/llm4ad-task-builder                             /app/skills/llm4ad-task-builder
+COPY ./skills/llm4ad-cloud-package                            /app/skills/llm4ad-cloud-package
+COPY ./skills/autodesign/autodesign                          /app/skills/autodesign
+COPY ./skills/autodesign/run-analysis                        /app/skills/llm4ad-run-analysis
+COPY ./skills/autodesign/task-memory                         /app/skills/llm4ad-task-memory
 COPY ./skills/research-stage-publication                      /app/skills/research-stage-publication
 COPY ./skills/autodiscovery/algorithm-discovery               /app/skills/algorithm-discovery
 COPY ./skills/autodiscovery/discovery-baseline                 /app/skills/discovery-baseline

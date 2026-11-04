@@ -1,5 +1,6 @@
 """Evaluator for the second autocorrelation inequality."""
 
+import math
 from typing import Any
 
 import numpy as np
@@ -32,11 +33,16 @@ class SecondAutocorrelationEvaluator(JsonBenchmarkEvaluator):
     benchmark_key = "second_autocorrelation_inequality"
 
     def measure(self, payload: dict[str, Any]) -> float:
-        heights = finite_array(payload, "heights", (50,))
+        heights = finite_array(payload, 'heights', (50,))
         if np.any(heights < 0):
-            raise ValueError("heights must be non-negative")
-        computed = _lower_bound(heights)
-        reported = float(payload["c_lower_bound"])
-        if reported != computed:
-            raise ValueError(f"c_lower_bound miscalculation: expected {computed}")
-        return reported
+            raise ValueError('heights must be non-negative')
+        scale = float(np.max(heights))
+        if scale <= 0:
+            raise ValueError('heights must define non-zero convolution norms')
+        # The norm ratio is homogeneous; rescaling avoids overflow/underflow
+        # without changing the mathematical construction or objective.
+        computed = _lower_bound(heights / scale)
+        reported = float(payload['c_lower_bound'])
+        if not math.isfinite(reported) or not math.isclose(reported, computed, rel_tol=1e-12, abs_tol=1e-15):
+            raise ValueError(f'c_lower_bound miscalculation: expected {computed}')
+        return computed

@@ -6,6 +6,7 @@ import {
   useInfiniteTasks,
 } from "@/components/Evolution/EvolutionTaskList"
 import TaskDetail from "@/components/Evolution/TaskDetail/TaskDetail"
+import AutoDesignPanel from "@/components/AutoDesign/AutoDesignPanel"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { useEvolution } from "@/hooks/useEvolution"
 
@@ -25,10 +26,25 @@ function RouteComponent() {
     setLeftCollapsed,
     leftCollapsed,
     effectiveTaskId,
+    designSessionId,
+    setTaskView,
   } = useEvolution()
 
   const { data: tasksPages } = useInfiniteTasks(projectId ?? "")
   const hasAnyTask = (tasksPages?.pages[0]?.total ?? 0) > 0
+
+  if (designSessionId) {
+    return (
+      <AutoDesignPanel
+        sessionId={designSessionId}
+        projectId={projectId}
+        onOpenTask={(task) => {
+          setSelectedTask(task)
+          setTaskView("workbench")
+        }}
+      />
+    )
+  }
 
   if (!projectId) {
     return (
@@ -98,7 +114,8 @@ function RouteComponent() {
             projectId={projectId}
             onCreated={(task) => {
               setSelectedTask(task)
-              if (window.innerWidth < AUTO_COLLAPSE_WIDTH) setLeftCollapsed(true)
+              if (window.innerWidth < AUTO_COLLAPSE_WIDTH)
+                setLeftCollapsed(true)
             }}
             variant="large"
           />

@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query"
-import { Loader2 } from "lucide-react"
+import { ArrowLeft, Loader2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-
 import { Llm4AdTasksService } from "@/client"
-import { DEMO_TASK, isDemoTaskId } from "@/data/demoFixtures"
+import AutoDesignPanel from "@/components/AutoDesign/AutoDesignPanel"
+import { Button } from "@/components/ui/button"
+import { buildDemoTask, isDemoTaskId } from "@/data/demoFixtures"
 import { useDemoState } from "@/hooks/useDemoMode"
 import { useEvolution } from "@/hooks/useEvolution"
+import { rememberAgentVersion, taskViewPanelId } from "@/lib/autoDesign"
+import { cn } from "@/lib/utils"
 
 import ChatTuneView from "./ChatTuneView"
 import DemoBuildView from "./DemoBuildView"
@@ -17,32 +20,117 @@ interface TaskDetailProps {
   taskId: string
 }
 
-type TuneMode = "chat" | "stepper"
-
 export default function TaskDetail({ taskId }: TaskDetailProps) {
+  const { t } = useTranslation()
+  const {
+    taskView,
+    taskAgentAvailable,
+    setTaskView,
+    projectId,
+    setSelectedTask,
+    setSelectedChildTaskId,
+    setIsViewingParams,
+    setIsConfiguring,
+  } = useEvolution()
+  const agentLocked = !taskAgentAvailable
+  const visibleView = agentLocked ? "workbench" : taskView
+  useEffect(() => {
+    if (agentLocked && taskView === "agent") setTaskView("workbench")
+  }, [agentLocked, taskView, setTaskView])
+  const [openedVersions, setOpenedVersions] = useState<string[]>([])
+  useEffect(() => {
+    if (taskView === "agent" && !isDemoTaskId(taskId)) {
+      setOpenedVersions((opened) => rememberAgentVersion(opened, taskId))
+    }
+  }, [taskView, taskId])
+  if (isDemoTaskId(taskId)) return <TaskExecutionView taskId={taskId} />
+  const versions =
+    taskView === "agent"
+      ? rememberAgentVersion(openedVersions, taskId)
+      : openedVersions
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <section
+        id={taskViewPanelId(taskId, "workbench")}
+        aria-label={t("autodesign.workbench")}
+        hidden={visibleView !== "workbench"}
+        className={cn(
+          "min-h-0 flex-1 overflow-auto",
+          visibleView !== "workbench" && "hidden",
+        )}
+      >
+        <TaskExecutionView taskId={taskId} />
+      </section>
+      <section
+        id={taskViewPanelId(taskId, "agent")}
+        aria-label={t("autodesign.agent")}
+        hidden={visibleView !== "agent"}
+        className={cn("min-h-0 flex-1", visibleView !== "agent" && "hidden")}
+      >
+        {!agentLocked &&
+          versions.map((versionId) => (
+            <div
+              key={versionId}
+              hidden={versionId !== taskId}
+              className={cn("h-full min-h-0", versionId !== taskId && "hidden")}
+            >
+              <AutoDesignPanel
+                taskId={versionId}
+                projectId={projectId}
+                headerAction={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setTaskView("workbench")}
+                  >
+                    <ArrowLeft data-icon="inline-start" />
+                    {t("autodesign.parameterActions.returnToParameters")}
+                  </Button>
+                }
+                onOpenTask={(task) => {
+                  setSelectedTask(task)
+                  setSelectedChildTaskId(task.id)
+                  setIsViewingParams(false)
+                  setIsConfiguring(true)
+                  setTaskView("workbench")
+                }}
+              />
+            </div>
+          ))}
+      </section>
+    </div>
+  )
+}
+
+function TaskExecutionView({ taskId }: TaskDetailProps) {
   const { t } = useTranslation()
   const {
     isConfiguring,
     isViewingParams,
     isViewingAiBuildHistory,
-    forceManualConfigTaskId,
+    taskAgentAvailable,
+    setTaskView,
   } = useEvolution()
   const demoState = useDemoState()
-  const [tuneMode, setTuneMode] = useState<TuneMode>("chat")
-  // Reset to AI chat panel whenever the active task changes — otherwise a prior
-  // task's "switched to stepper" state leaks into a freshly created AI task.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on taskId change
-  useEffect(() => {
-    setTuneMode("chat")
-  }, [taskId])
   const { data: task, isLoading } = useQuery({
     queryKey: ["getTask", taskId],
     queryFn: () =>
       isDemoTaskId(taskId)
-        ? Promise.resolve(DEMO_TASK)
+        ? Promise.resolve(buildDemoTask(demoState.phase))
         : Llm4AdTasksService.getTask({ taskId }),
     enabled: !!taskId,
   })
+
+  if (isDemoTaskId(taskId)) {
+    if (
+      demoState.phase === "uninitialized" ||
+      demoState.phase === "configuring" ||
+      demoState.phase === "building"
+    ) {
+      return <DemoBuildView />
+    }
+    return <InitializedView task={buildDemoTask(demoState.phase)} />
+  }
 
   if (isLoading) {
     return (
@@ -60,60 +148,21 @@ export default function TaskDetail({ taskId }: TaskDetailProps) {
     )
   }
 
-  // Demo mode dispatch: the simulated task swaps panels as the user clicks
-  // through the tour. uninitialized/configuring/building → fake AI Build panel
-  // (with progress + file animation); running/completed → real result view
-  // backed by fixture data.
-  if (isDemoTaskId(task.id)) {
-    if (
-      demoState.phase === "uninitialized" ||
-      demoState.phase === "configuring" ||
-      demoState.phase === "building"
-    ) {
-      return <DemoBuildView />
-    }
-    return <InitializedView task={task} />
-  }
-
-  // AI build history → reuse the AI panel. Running/pending tasks are read-only
-  // (cannot mutate state while a turn is in flight); other statuses allow the
-  // user to keep chatting with the assistant on the existing session.
+  // Legacy records remain readable; new turns use the native AutoDesign Agent.
   if (isViewingAiBuildHistory) {
-    const liveLocked = task.status === "running" || task.status === "pending"
-    return <ChatTuneView key={task.id} task={task} readOnly={liveLocked} />
+    return <ChatTuneView key={task.id} task={task} readOnly />
   }
 
-  // View / adjust params → always the manual (stepper) panel. The AI build panel
-  // is never reachable from these entry points.
-  if (isViewingParams || isConfiguring) {
-    // The AI build panel is the default only for a fresh uninitialized ai_built
-    // task — not for a re-tune copy (tagged via forceManualConfigTaskId) and not
-    // for read-only param viewing.
-    const aiBuildDefault =
-      !isViewingParams &&
-      task.status === "uninitialized" &&
-      !!task.ai_built &&
-      forceManualConfigTaskId !== task.id
-
-    if (aiBuildDefault) {
-      if (tuneMode === "chat") {
-        return (
-          <ChatTuneView
-            key={task.id}
-            task={task}
-            onSwitchToStepper={() => setTuneMode("stepper")}
-          />
-        )
-      }
-      return (
-        <UninitializedView
-          task={task}
-          onSwitchToChat={() => setTuneMode("chat")}
-        />
-      )
-    }
-
-    return <UninitializedView task={task} readOnly={isViewingParams} />
+  if (isViewingParams || (isConfiguring && task.status === "uninitialized")) {
+    return (
+      <UninitializedView
+        task={task}
+        readOnly={isViewingParams}
+        onSwitchToChat={
+          taskAgentAvailable ? () => setTaskView("agent") : undefined
+        }
+      />
+    )
   }
 
   return <InitializedView task={task} />

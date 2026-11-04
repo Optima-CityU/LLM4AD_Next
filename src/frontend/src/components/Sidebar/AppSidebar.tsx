@@ -6,7 +6,6 @@ import {
   Database,
   FileText,
   FolderKanban,
-  GitBranch,
   MessageSquareReply,
   MessageSquareText,
   Microscope,
@@ -150,12 +149,6 @@ function ResearchWorkspaceNav() {
       title: t("sidebar.autoRebuttal"),
       path: "/papers",
       mode: "manuscript",
-    },
-    {
-      icon: GitBranch,
-      title: t("sidebar.autoDiscovery"),
-      path: "/papers",
-      mode: "algorithm",
     },
   ]
 

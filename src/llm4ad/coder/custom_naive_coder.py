@@ -16,7 +16,7 @@ from loguru import logger
 
 from llm4ad.coder.base import BaseCoder, GenerateResult, GenerateStatus
 from llm4ad.config.schema import CustomCoderConfig
-from llm4ad.infra.provider.base import BaseProvider
+from llm4ad.infra.provider.base import BaseProvider, GenerationResult
 from llm4ad.infra.timing import ExecutionTiming
 from llm4ad.planner.base import Algorithm
 
@@ -334,10 +334,14 @@ Return the code in a fenced code block with file path annotation:
             return GenerateResult(
                 status=GenerateStatus.FAILED,
                 working_dir=str(working_path),
-                error_message="No code found in LLM response",
+                error_message=f"No code found in LLM response: {self._missing_code_diagnostic(result)}",
                 metadata={
                     "tokens_used": result.total_tokens,
                     "cost_usd": result.cost_usd,
+                    "finish_reason": result.finish_reason,
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    **result.metadata,
                 },
                 timing=result.timing,
             )
@@ -505,7 +509,10 @@ Return the code in a fenced code block with file path annotation:
                     f"changed={block_changed} tokens={result.total_tokens}"
                 )
                 if not new_block:
-                    errors.append(f"[{file_path}] Failed to extract code for block '{block_name}'")
+                    errors.append(
+                        f"[{file_path}] Failed to extract code for block '{block_name}': "
+                        f"{self._missing_code_diagnostic(result)}"
+                    )
                     continue
 
                 # Validate new block
@@ -581,6 +588,31 @@ Return the code in a fenced code block with file path annotation:
                 "num_errors": len(errors),
             },
             timing=llm_timing,
+        )
+
+    def _missing_code_diagnostic(self, result: GenerationResult) -> str:
+        """Distinguish empty final output from a code-extraction failure.
+
+        Args:
+            result: Actual model response, finish reason and usage statistics.
+
+        Returns:
+            An actionable diagnostic containing no private reasoning text.
+        """
+        if result.finish_reason == "length":
+            cause = (
+                "output token budget exhausted before usable code was returned; "
+                "check coder.max_gen_tokens and the model's reasoning/output limits"
+            )
+        elif not result.text.strip():
+            cause = "empty final content; inspect the upstream model's final-answer and reasoning settings"
+        else:
+            cause = "no non-empty code block in the model's final content"
+        return (
+            f"{cause} (model={result.model or 'unknown'}, finish_reason={result.finish_reason}, "
+            f"prompt_tokens={result.prompt_tokens}, completion_tokens={result.completion_tokens}, "
+            f"reasoning_tokens={result.metadata.get('reasoning_tokens')}, "
+            f"requested_max_tokens={result.metadata.get('requested_max_tokens', self.max_tokens)})"
         )
 
     def _normalize_mutation_block(

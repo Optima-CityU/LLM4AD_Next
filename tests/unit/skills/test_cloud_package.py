@@ -103,6 +103,19 @@ def test_valid_package_contains_verified_snapshot_and_matching_report(project: P
     assert not (project / "validation.json").exists()
 
 
+def test_web_verification_runs_without_creating_or_opening_a_zip(package_helper, project: Path, monkeypatch):
+    """The platform path checks real candidates without portable archive handling."""
+    def reject_archive(*_args, **_kwargs):
+        raise AssertionError("In-platform verification must not use ZIP archives")
+    monkeypatch.setattr(package_helper.zipfile, "ZipFile", reject_archive)
+    report = package_helper.verify_project(project, 30)
+    assert report["status"] == "passed"
+    assert [sample["score"] for sample in report["samples"]] == [44, 79]
+    assert report["empty_candidate_rejected"] is True
+    assert report["project_tests"]["exit_code"] == 0
+    assert not list(project.parent.rglob("*.zip"))
+
+
 def test_fixed_seed_evaluator_cannot_pass_candidate_validation(project: Path):
     """Reject a real evaluation that ignores the candidate passed by the platform."""
     evaluator = project / "knapsack_evaluator.py"

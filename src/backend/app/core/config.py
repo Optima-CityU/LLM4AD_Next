@@ -11,6 +11,7 @@ from typing import Any, Literal, Self
 
 from pydantic import (
     EmailStr,
+    Field,
     HttpUrl,
     PostgresDsn,
     computed_field,
@@ -404,6 +405,12 @@ class Settings(BaseSettings):
     # same container is restarted when the workspace is opened again.
     PAPER_WORKSPACE_IDLE_TIMEOUT_SECONDS: int = 2 * 60 * 60
     PAPER_WORKSPACE_CLEANUP_INTERVAL_SECONDS: int = 10 * 60
+
+    # Research chats retry transport failures before forwarding response bytes.
+    PAPER_MODEL_FIRST_RESPONSE_TIMEOUT_SECONDS: float = Field(default=60, gt=0)
+    PAPER_MODEL_STREAM_IDLE_TIMEOUT_SECONDS: float = Field(default=120, gt=0)
+    PAPER_MODEL_MAX_RETRIES: int = Field(default=2, ge=0)
+    PAPER_MODEL_RETRY_DELAY_SECONDS: float = Field(default=1, ge=0)
 
     # ---- 首页资讯（GitHub Wiki 拉取） ----
     # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。

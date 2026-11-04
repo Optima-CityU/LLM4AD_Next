@@ -146,7 +146,7 @@
     "successToast": "Password reset successfully"
   },
   "layout": {
-    "projectManagement": "Projects",
+    "projectManagement": "Algorithm Evolution Projects",
     "research": "Research",
     "configTemplate": "Config Templates",
     "llmProvider": "LLM Providers",
@@ -163,11 +163,11 @@
     "liveCode": "WeChat Group QR"
   },
   "sidebar": {
-    "projectManagement": "Projects",
+    "projectManagement": "Algorithm Evolution Projects",
     "autoResearch": "AutoResearch",
     "autoProposal": "AutoProposal",
     "autoRebuttal": "AutoRebuttal",
-    "autoDiscovery": "AutoDiscovery",
+    "autoDiscovery": "AutoDesign",
     "paperWorkspace": "Research Studio",
     "research": "Research",
     "globalConfig": "Configuration",
@@ -222,7 +222,7 @@
       "navigation": {
         "proposal": "AutoProposal",
         "manuscript": "AutoRebuttal",
-        "algorithm": "AutoDiscovery"
+        "algorithm": "AutoDesign"
       },
       "modeDescription": {
         "proposal": "Start a Typst research proposal from your project brief without an upload; adding references or an existing draft remains optional",
@@ -261,6 +261,7 @@
       "noModelsHint": "This provider has no configured models. Add a model on the model providers page first.",
       "providersLoadFailed": "Failed to load model providers. Try again later.",
       "configure": "Configure model",
+      "switchFailed": "Could not switch models. Your previous model is still selected; please try again.",
       "bindingHint": "Choose the model and token limits used by this research workspace.",
       "required": "Configure an analysis model before starting.",
       "dialogTitle": "Analysis Model",
@@ -270,6 +271,7 @@
       "saved": "Analysis model saved"
     },
     "preferences": {
+      "saveFailed": "Could not save conversation preferences",
       "stepTitle": "Personalize the conversation (optional)",
       "stepDescription": "Choose the language for the assistant's explanations and suggestions, and add any preferred communication style. You can change this later.",
       "configured": "Configured",
@@ -277,14 +279,13 @@
       "dialogTitle": "Conversation preferences",
       "dialogDescription": "Choose how the assistant writes chat replies, stage explanations, and author-facing suggestions.",
       "language": "Assistant reply language",
-      "languageAuto": "Follow the conversation",
+      "languageAuto": "Follow browser language",
       "languageChinese": "简体中文",
       "languageEnglish": "English",
       "additionalGuidance": "Additional communication guidance (optional)",
       "guidancePlaceholder": "For example: explain suggestions in bullet points, then list what you need from me.",
       "scopeHint": "Applies to conversation and explanations only. Proposal text, paper source, and submitted reviewer responses keep their own requirements. Changes take effect from the next assistant reply.",
-      "saved": "Conversation preferences saved",
-      "saveFailed": "Could not save conversation preferences"
+      "saved": "Conversation preferences saved"
     },
     "runtime": {
       "title": "Research assistant",
@@ -303,6 +304,7 @@
       "autorebuttalRevisionRequired": "Rebuttal response needs input",
       "revisionDetails": "View details",
       "revisionDetailsDescription": "Review the stage result and outstanding items, then continue in the current conversation.",
+      "modelGatewayRetrying": "{{reason}}. Automatically retrying, attempt {{attempt}} of {{maxAttempts}}.",
       "modelGatewayFailing": "Model gateway requests are failing ({{count}} consecutive failures): {{reason}}. Switch models or retry later.",
       "changeModel": "Change model",
       "gatewayReason": {
@@ -371,7 +373,7 @@
       "arxivDescription": "Describe a topic or paste an arXiv ID/link. The assistant can search, explain candidates, then download your chosen paper into this workspace.",
       "arxivPlaceholder": "For example: a recent, inexpensive-to-test optimization algorithm; or https://arxiv.org/abs/2401.00001",
       "arxivSearch": "Ask the assistant",
-      "arxivPrompt": "Help me start AutoDiscovery from arXiv. My topic or paper is: {{query}}. If I named a paper, download and import it. Otherwise search arXiv, briefly explain suitable candidates and let me choose before downloading. Use the discovery-baseline Skill and the arXiv tools; do not publish a baseline until the complete paper has been imported.",
+      "arxivPrompt": "Help me start AutoDesign from arXiv. My topic or paper is: {{query}}. If I named a paper, download and import it. Otherwise search arXiv, briefly explain suitable candidates and let me choose before downloading. Use the discovery-baseline Skill and the arXiv tools; do not publish a baseline until the complete paper has been imported.",
       "arxivPendingTitle": "Choose a paper to investigate",
       "arxivPendingDescription": "The assistant can find and import a paper before establishing the baseline. The imported Markdown will appear here as the project's source; later stages will use that same version.",
       "arxivImportedTitle": "Paper imported",
@@ -770,13 +772,23 @@
         ],
         "discovery_baseline": "Paper Baseline",
         "discovery_baselineHint": "Use an uploaded paper or find one on arXiv, then establish its algorithm, evidence, and unknowns.",
-        "discovery_baselineExamples": ["Find recent arXiv papers on a low-cost algorithm problem and let me choose one to import.", "Read the imported or uploaded paper and summarize its algorithm, objective, baseline and evaluation evidence with exact file references.", "Which statements are paper claims, and which facts still need confirmation?"],
+        "discovery_baselineExamples": [
+          "Find recent arXiv papers on a low-cost algorithm problem and let me choose one to import.",
+          "Read the imported or uploaded paper and summarize its algorithm, objective, baseline and evaluation evidence with exact file references.",
+          "Which statements are paper claims, and which facts still need confirmation?"
+        ],
         "discovery_candidates": "Candidate Directions",
         "discovery_candidatesHint": "Compare evolvable algorithm boundaries and choose one direction with the author.",
-        "discovery_candidatesExamples": ["Compare two evolvable algorithm directions from the paper, including feasibility and evaluation risks.", "I prefer the … algorithm. Identify its exact code boundary and publish the selected candidate."],
+        "discovery_candidatesExamples": [
+          "Compare two evolvable algorithm directions from the paper, including feasibility and evaluation risks.",
+          "I prefer the … algorithm. Identify its exact code boundary and publish the selected candidate."
+        ],
         "discovery_evaluation": "Evaluation Design",
         "discovery_evaluationHint": "Define how the selected algorithm will be scored, validated and compared with its baseline.",
-        "discovery_evaluationExamples": ["Define the metric and direction, unmodified baseline, data protocol, validity checks and random seeds for this candidate.", "What evaluator inputs are still missing? Record the unknowns instead of inventing benchmark results."],
+        "discovery_evaluationExamples": [
+          "Define the metric and direction, unmodified baseline, data protocol, validity checks and random seeds for this candidate.",
+          "What evaluator inputs are still missing? Record the unknowns instead of inventing benchmark results."
+        ],
         "discovery": "Build & Evolve",
         "discoveryHint": "Build the selected direction into a validated task, then run and inspect evolution here when requested.",
         "discoveryExamples": [
@@ -793,7 +805,14 @@
         "targets": "Processing Target",
         "targetsHint": "Locate the exact section, passage, or algorithm behind each review concern.",
         "branch": "Target Operation",
-        "branchHint": "Run manuscript revision or algorithm discovery for one selected target."
+        "branchHint": "Run manuscript revision or algorithm discovery for one selected target.",
+        "autodesign": "Algorithm design",
+        "autodesignHint": "Build a project from your goal and optional references. Review its parameters, validate, and start it from the right panel.",
+        "autodesignExamples": [
+          "Help me define an optimization problem and choose an evaluation metric.",
+          "Design a scheduling heuristic and a small reproducible benchmark.",
+          "Turn my algorithm idea into a runnable project and validate its data and evaluator."
+        ]
       },
       "stageNav": {
         "discovery_baseline": "Baseline",
@@ -970,7 +989,13 @@
       "recentActivity": "Recent activity",
       "parameterDiff": "Change from parent version",
       "closeHint": "Closing this panel does not stop an active run. Technical package validation is not an observed improvement.",
-      "taskStatus": { "uninitialized": "Not started", "pending": "Queued", "running": "Running", "completed": "Completed", "failed": "Failed" },
+      "taskStatus": {
+        "uninitialized": "Not started",
+        "pending": "Queued",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
       "title": "Runnable algorithm tasks",
       "description": "The assistant generates and validates the algorithm, evaluator, and configuration first. Every item here is ready to import into project management.",
       "count": "{{count}} task packages",
@@ -2078,8 +2103,8 @@
     },
     "createTask": "New Task",
     "createTaskTitle": "Create Task",
-    "createTaskDescription": "Create a task in this project with manual configuration, AI build, or a ZIP package.",
-    "buildModeImport": "Import ZIP",
+    "createTaskDescription": "Create a task in this project with manual configuration or a ZIP package.",
+    "buildModeImport": "Import Project Package",
     "buildModeImportDesc": "Upload a locally validated task package into the current project.",
     "packageFile": "Task package (.zip)",
     "packageFileHelp": "Import code, evaluator, data and configuration together. Keep config.yaml in the task root; no extraction is needed.",
@@ -2161,7 +2186,7 @@
     "confirmCopy": "Confirm Copy",
     "copySuccess": "Task copied successfully",
     "deleteTask": "Delete Task",
-    "deleteTaskDescription": "This cannot be undone. Are you sure you want to delete this task?",
+    "deleteTaskDescription": "The task, its child versions, associated data and AI assistants will be deleted. This cannot be undone. Continue?",
     "confirmDelete": "Confirm Delete",
     "deleteSuccess": "Task deleted successfully",
     "emptyTaskList": "No tasks yet. Click the button above to create one.",
@@ -3158,7 +3183,9 @@
         "run_needs_gathering": "Requirements",
         "confirm_build": "Confirm Build"
       }
-    }
+    },
+    "buildModeAutoDesign": "Build with AutoDesign",
+    "buildModeAutoDesignDesc": "Build and validate a project with the AutoDesign Agent, then choose when to start."
   },
   "landing": {
     "pageTitle": "LLM4AD_Next - Algorithm Design with Large Language Models",
@@ -3299,7 +3326,7 @@
     },
     "evolutionCreate": {
       "title": "Create a new evolution task",
-      "content": "Click the \"New Task\" button to create a task. Each task corresponds to a complete algorithm evolution workflow."
+      "content": "Create a task with manual configuration or import a task package. Use AutoDesign to start designing in an independent conversation."
     },
     "evolutionTaskConfig": {
       "stepperTitle": "Configure task step by step",
@@ -5092,6 +5119,263 @@
       "biology": "Biology",
       "statistics": "Statistics",
       "quantum": "Quantum"
+    }
+  },
+  "autodesign": {
+    "title": "AutoDesign",
+    "use": "Use AutoDesign",
+    "agent": "AutoDesign Agent",
+    "workbench": "Task workbench",
+    "taskView": "Task view",
+    "context": "Context",
+    "files": "Files",
+    "package": "Package",
+    "refresh": "Refresh",
+    "conversations": "Conversations",
+    "newConversation": "New conversation",
+    "start": "Start designing",
+    "noMaterialsTitle": "Start with an idea",
+    "noMaterialsDescription": "Describe the algorithm and optionally upload text references. The assistant builds and verifies the project; then choose Open task setup.",
+    "starters": [
+      "Help me define an optimization problem and choose an evaluation metric.",
+      "Design a scheduling heuristic and a small reproducible benchmark.",
+      "Turn my algorithm idea into a runnable project and validate its data and evaluator."
+    ],
+    "currentTask": "Task",
+    "version": "Version",
+    "status": "Status",
+    "versionScope": "This conversation belongs to the selected task version. Switching views keeps your conversation and version selection.",
+    "family": "Task versions ({{count}})",
+    "config": "Configuration",
+    "stats": "Run statistics",
+    "executionHint": "Use the task workbench to configure, run, stop, and inspect an experiment. Switching views does not start or stop execution.",
+    "area": {
+      "input": "Input",
+      "run": "Run",
+      "draft": "Draft",
+      "references": "References"
+    },
+    "noFiles": "No files in this area yet.",
+    "lineRange": "Lines {{start}}–{{end}} of {{total}}",
+    "packageReady": "Cloud ZIP verified",
+    "packagePending": "No verified package yet",
+    "packageHint": "The assistant builds and verifies the project. Continue in the existing task setup to choose models, adjust parameters, and submit from the final step.",
+    "revision": "Package revision",
+    "validation": "Validation report",
+    "validate": "Validate draft",
+    "download": "Download ZIP",
+    "publishProject": "Algorithm Project",
+    "selectProject": "Choose a project",
+    "taskName": "Task name (optional)",
+    "publish": "Publish into project",
+    "published": "Package published. Your task is ready to open.",
+    "openTask": "Open task workbench",
+    "createProject": "Create an Algorithm Project",
+    "projectFolder": "Draft project folder",
+    "sessionFailed": "Could not load the AutoDesign conversation.",
+    "filesFailed": "Could not read these files. Try refreshing.",
+    "contextFailed": "Could not load task context. Try refreshing.",
+    "projectsFailed": "Could not load Algorithm Evolution Projects.",
+    "actionFailed": "The action failed. Check the draft and try again.",
+    "modelDescription": "Choose a provider and model for this AutoDesign conversation. Your saved default model is used when available.",
+    "creationHint": "Start with a description and optional references. Build and validate the project, then use the existing new-task setup before submitting a run.",
+    "enterAgent": "Enter AutoDesign Agent",
+    "designInProgress": "Building",
+    "materials": "References",
+    "materialsHint": "Upload UTF-8 text documents such as Markdown, TXT, LaTeX, Typst, or configuration files. References can be viewed or deleted.",
+    "uploadMaterials": "Upload references",
+    "materialsUploaded": "References uploaded. The Agent can read them from references/.",
+    "materialsFailed": "Could not upload references. Check the files and retry.",
+    "launch": "Start task",
+    "launched": "Run submitted. Opening the task workbench.",
+    "launchHint": "Confirm the run from the final step of the existing task setup to start the task.",
+    "awaitValidation": "Refine the algorithm, data and evaluator with the assistant. It verifies the project before task setup becomes available.",
+    "taskSetup": "Task setup",
+    "textDocumentsOnly": "Only UTF-8 text documents are supported; PDF, Word, archives, and binary files are not accepted.",
+    "deleteReference": "Delete {{name}}",
+    "deleteReferenceTitle": "Delete reference?",
+    "deleteReferenceHint": "Delete “{{name}}”. Generated algorithm drafts will be kept.",
+    "referenceDeleted": "Reference deleted.",
+    "referenceDeleteFailed": "Could not delete the reference. Refresh and retry.",
+    "selectPlan": "Select a draft to validate",
+    "parametersPending": "After the project is generated, use the existing task setup to review parameters, choose models, and confirm the run.",
+    "parametersHint": "Review and edit parameters in the existing task setup, then confirm when to start.",
+    "invalidConfig": "Cannot read config.yaml. Fix it in Project files or ask the assistant to repair it.",
+    "evolutionParameters": "Algorithm and evolution",
+    "evaluationParameters": "Evaluation and data",
+    "modelParameters": "Models and context",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "fullParameters": "View all parameters",
+    "validationAndStart": "Project validation",
+    "validationHint": "The assistant checks the project and runs a real trial before the existing task setup becomes available.",
+    "validateTask": "Validate task",
+    "validationFailed": "Validation failed. Review the results and ask the Agent to fix the issue.",
+    "validationExpired": "Files changed after the last trial. The assistant needs to test the current project again.",
+    "runningLockedTitle": "Task is executing",
+    "runningLockedHint": "Agent editing is disabled while the task is queued or running. Use the workbench to monitor it and return after it stops.",
+    "parameter": {
+      "method": "Method",
+      "generations": "Max generations",
+      "population": "Population size",
+      "islands": "Islands",
+      "concurrency": "Model concurrency",
+      "evaluator": "Evaluator",
+      "evaluationTimeout": "Evaluation timeout (s)",
+      "dataset": "Dataset",
+      "memory": "Memory",
+      "plannerModel": "Planner model",
+      "coderModel": "Coder model",
+      "contextWindow": "Context window",
+      "outputTokens": "Max output tokens"
+    },
+    "check": {
+      "config": "Configuration",
+      "dependencies": "Dependencies and runtime",
+      "sources": "Initial code and data",
+      "evaluation": "Evaluator and real trial"
+    },
+    "checkHint": {
+      "config": "Parse and validate the platform configuration.",
+      "dependencies": "Install project dependencies and check core numerical imports.",
+      "sources": "Check initial code syntax, paths, and real dataset files.",
+      "evaluation": "Run the baseline, invalid-candidate checks, and task-specific evaluator tests."
+    },
+    "checkStatus": {
+      "pending": "Pending",
+      "running": "Checking",
+      "passed": "Passed",
+      "failed": "Failed"
+    },
+    "viewParameters": "Task parameters",
+    "generatedFiles": "Project files",
+    "filesPending": "References are managed separately. Open View project files to inspect generated files.",
+    "draftSaved": "Draft saved. The assistant handles project verification in the conversation.",
+    "unsaved": "Unsaved",
+    "editSource": "Edit source",
+    "preview": "Preview",
+    "discardChanges": "Discard edits and reload",
+    "draftChanged": "The assistant or another editor has updated this file. Your edits are kept; reload the latest version before saving.",
+    "editConflict": "The draft changed or is currently locked. Your edits are kept; reload the latest version before saving.",
+    "saveFailed": "Could not save the draft. Your edits are kept.",
+    "fileUnavailable": "This file cannot be displayed. It may have been removed or contain binary data.",
+    "protectedFile": "Read only: this file contains masked credentials. Use task parameters to edit its settings.",
+    "saveBeforeValidation": "Save project file changes before continuing.",
+    "validationStale": "Revalidation needed",
+    "configureTask": "Open task setup",
+    "readyToConfigure": "Task created for setup. Select models, review the configuration, and submit from the final step.",
+    "viewSource": "View source",
+    "agentValidationHint": "Task setup becomes available after the assistant verifies the project. Follow the checks and results in the conversation.",
+    "referencesPending": "Upload reference text documents here, then select a file to view or delete it.",
+    "projectFilesPending": "Code, data and documentation generated by the assistant will appear here.",
+    "buildState": {
+      "waiting": {
+        "label": "Not built",
+        "hint": "Describe your goal in the conversation to begin. References are optional."
+      },
+      "drafting": {
+        "label": "Not verified",
+        "hint": "Refine the plan with the assistant. It writes and tests the project before task setup."
+      },
+      "running": {
+        "label": "Verifying",
+        "hint": "The assistant is checking the runtime and project. Check results update automatically."
+      },
+      "failed": {
+        "label": "Verification failed",
+        "hint": "The check did not pass. The assistant can use the execution error to continue repairs and explain the issue in the conversation."
+      },
+      "changed": {
+        "label": "Needs recheck",
+        "hint": "Files changed after the last trial. The assistant needs to test the current project again."
+      },
+      "unsaved": {
+        "label": "Unsaved changes",
+        "hint": "Save project files before continuing with the assistant and testing the changes."
+      },
+      "ready": {
+        "label": "Verified",
+        "hint": "The project passed a real trial. Open task setup to choose run models, review parameters, and confirm the run."
+      },
+      "loading": {
+        "label": "Loading status",
+        "hint": "Reading project files and the latest verification state."
+      },
+      "unavailable": {
+        "label": "Status unavailable",
+        "hint": "The latest state could not be loaded. Retry before relying on an earlier verification result."
+      }
+    },
+    "preferencesDescription": "Applies to replies, suggestions and project documentation such as README. Auto follows the browser language; code, configuration fields and metric names are preserved.",
+    "workspace": {
+      "title": "Project materials",
+      "navigation": "Project materials navigation",
+      "uploadReferences": "Add references",
+      "readOnly": "Read only",
+      "updated": "Updated",
+      "configure": "Task setup",
+      "referencesEmptyTitle": "Add context for your project",
+      "referencesEmptyHint": "References are optional. Upload requirements, paper text or evaluation guidance, or describe your goal in the conversation. The Artifacts tab will notify you when files are generated.",
+      "projectEmptyTitle": "Project files will appear here",
+      "artifacts": "Artifacts",
+      "newArtifacts": "New",
+      "viewNewArtifacts": "View new artifacts ({{count}} files)"
+    },
+    "statusDetails": {
+      "title": "Project status",
+      "checks": "Current verification",
+      "previousChecks": "Previous verification (current changes unverified)",
+      "task": "Evolution task",
+      "noTask": "Not created",
+      "checkState": {
+        "pending": "Pending",
+        "running": "Checking",
+        "passed": "Passed",
+        "failed": "Failed",
+        "unknown": "No result"
+      }
+    },
+    "tuning": {
+      "title": "Task Parameter Assistant",
+      "childTitle": "Child Task Parameter Assistant",
+      "description": "Tune the existing task using its actual configuration and available results. Explain settings, inspect the parent run, or adjust the selected child for your goal, then return to parameters to review.",
+      "examples": {
+        "explain": "Read the current task configuration and explain which settings affect search quality, runtime, and model cost.",
+        "diagnose": "Inspect the parent run’s available logs and evaluation results to identify useful tuning changes. State clearly when no results are available.",
+        "apply": "Adjust the editable child for my stated tuning goal. Explain the changes and tradeoffs without starting evolution."
+      }
+    },
+    "parameterActions": {
+      "askAgent": "Edit with AI assistant",
+      "returnToParameters": "Back to parameters",
+      "saveFailed": "Could not save the current parameters. Retry before opening the assistant.",
+      "analyzeResults": "Analyze results with AI"
+    },
+    "memory": {
+      "title": "Memory",
+      "description": "Manage experience for construction, result analysis and tuning. Parent and child tasks share task memory; automatic use during evolution follows the task configuration.",
+      "cardsDescription": "These are the same cards used by platform memory management. View, edit and manage them here.",
+      "scopes": {
+        "user": "User memory",
+        "project": "Project memory",
+        "task": "Task memory"
+      },
+      "shortScopes": {
+        "user": "User",
+        "project": "Project",
+        "task": "Task"
+      },
+      "bindingRequired": "Bind a memory Chat model and an Embedding model here to use stored experience.",
+      "configure": "Configure memory models"
+    },
+    "analysis": {
+      "title": "Experiment Analysis Assistant",
+      "description": "Inspect this version’s actual configuration, logs and evaluations. Analysis preserves the experiment; requested changes or reruns use an unstarted child.",
+      "examples": {
+        "explain": "Read this task’s actual run records and explain its scores, valid evaluations and main results with source evidence.",
+        "diagnose": "Diagnose failures or stagnation using this version’s configuration, logs and candidate code without modifying or running tasks.",
+        "apply": "Recommend improvements grounded in this experiment and explain tradeoffs without automatically creating or running a child."
+      }
     }
   }
 }

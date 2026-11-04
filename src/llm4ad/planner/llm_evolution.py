@@ -6,6 +6,7 @@ This is the default planner that coordinates the evolution process using:
 - Supports memory-based retrieval of past good solutions for inspiration.
 """
 import time
+from pathlib import Path
 
 from loguru import logger
 
@@ -350,6 +351,14 @@ class LLMEvolutionPlanner(BasePlanner):
             else "# Initial Candidate\n\nThe worktree contains the task baseline. Implement a new candidate."
         )
 
+        # Keep the task and insight separate from the coder's output contract.
+        context = self.coder.prepare_context(algorithm.description, kwargs.get("base_context", {}))
+        context.setdefault("task_description", task_description)
+        context["insight_type"] = algorithm.insight_type.value
+        context["domain"] = algorithm.domain
+        if algorithm.name:
+            context["algorithm_name"] = algorithm.name
+
         # Choose the appropriate prompt template based on coder type.
         # Agent-based coders (claude_code) use the agent template which expects
         # the coder to handle file I/O via tools.
@@ -366,12 +375,26 @@ class LLMEvolutionPlanner(BasePlanner):
             project_context = self.coder._collect_project_context(
                 working_dir, mask_evolve_blocks=mask_evolve,
             )
-            prompt = IMPLEMENT_ALGORITHM_PLAIN_LLM.format(
-                background=task_description,
-                description=algorithm.description,
-                project_context=project_context,
-                inheritance_instructions=inheritance_instructions,
-            )
+            if context.get("parent_code") is None:
+                evolve_files = self.coder._collect_evolve_file_map(Path(working_dir))
+                if evolve_files:
+                    context["parent_code"] = evolve_files
+            if context.get("parent_code") is not None:
+                # The coder renders its mutation template for every EVOLVE block,
+                # including baseline candidates. A full-file prompt here would
+                # contradict that template's replacement-block output contract.
+                prompt = (
+                    f"# Algorithm Description\n\n{algorithm.description}\n\n"
+                    f"{inheritance_instructions}\n\n"
+                    f"# Project Context\n\n{project_context}"
+                )
+            else:
+                prompt = IMPLEMENT_ALGORITHM_PLAIN_LLM.format(
+                    background=task_description,
+                    description=algorithm.description,
+                    project_context=project_context,
+                    inheritance_instructions=inheritance_instructions,
+                )
         else:
             prompt = IMPLEMENT_ALGORITHM.format(
                 background=task_description,
@@ -379,13 +402,6 @@ class LLMEvolutionPlanner(BasePlanner):
                 inheritance_instructions=inheritance_instructions,
             )
         logger.debug(f"Prompt for code generation: {len(prompt)} chars")
-
-        # Prepare context
-        context = self.coder.prepare_context(algorithm.description, kwargs.get("base_context", {}))
-        context["insight_type"] = algorithm.insight_type.value
-        context["domain"] = algorithm.domain
-        if algorithm.name:
-            context["algorithm_name"] = algorithm.name
 
         start_time = time.time()
 

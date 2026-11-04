@@ -56,13 +56,25 @@ export function usePaperRuntimeSession(
   enabled: boolean,
   profileKey: string,
 ) {
+  const browserLanguage =
+    typeof navigator === "undefined"
+      ? ""
+      : navigator.languages?.join(",") || navigator.language
+  const runtimeProfileKey = `${profileKey}:${browserLanguage}`
   return useQuery({
-    queryKey: ["paper-runtime-session", workspaceId, workflowStage, profileKey],
-    queryFn: () =>
-      Llm4AdPapersService.createRuntimeSession({
+    queryKey: [
+      "paper-runtime-session",
+      workspaceId,
+      workflowStage,
+      runtimeProfileKey,
+    ],
+    queryFn: async () => ({
+      ...(await Llm4AdPapersService.createRuntimeSession({
         workspaceId,
         requestBody: { workflow_stage: workflowStage },
-      }),
+      })),
+      runtimeProfileKey,
+    }),
     enabled,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === workspaceId &&

@@ -125,6 +125,26 @@ async def test_chat_success(provider):
 
 
 @pytest.mark.asyncio
+async def test_empty_reasoning_response_retains_token_diagnostics(provider):
+    """Expose output exhaustion statistics without treating reasoning as code."""
+    provider.client.chat.completions.create.return_value = ChatCompletion(
+        id="reasoning-only", created=1, model="reasoning-model", object="chat.completion",
+        choices=[Choice(index=0, finish_reason="length", message=ChatCompletionMessage(
+            role="assistant", content=None, reasoning_content="private reasoning text",
+        ))],
+        usage={"prompt_tokens": 3000, "completion_tokens": 8192, "total_tokens": 11192,
+               "completion_tokens_details": {"reasoning_tokens": 8192}},
+    )
+    result = await provider.generate("Implement the candidate", max_tokens=8192)
+    assert result.text == ""
+    assert result.finish_reason == "length"
+    assert result.metadata["reasoning_tokens"] == 8192
+    assert result.metadata["reasoning_content_chars"] == len("private reasoning text")
+    assert result.metadata["requested_max_tokens"] == 8192
+    assert "private reasoning text" not in str(result.metadata)
+
+
+@pytest.mark.asyncio
 async def test_chat_with_named_messages(provider):
     """Test chat messages with name field."""
     mock_response = ChatCompletion(

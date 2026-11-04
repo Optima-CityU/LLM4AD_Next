@@ -2479,43 +2479,43 @@ def get_workspace_detail(
     )
 
 
-def delete_workspace(
-    db: Session,
-    current_user: models.User,
-    workspace_id: uuid.UUID,
-) -> None:
-    """Delete workspace metadata and clean its object and local runtime files."""
-    from app.services import credential_broker
-    from app.services.paper_workspace_runtime import stop_paper_workspace_container
-
-    workspace = _owned_workspace(db, current_user.id, workspace_id)
-    prefix = f"paper/{current_user.id}/{workspace.id}/"
+def prepare_workspace_deletion(db: Session, workspace: models.PaperWorkspace) -> models.PaperCleanupJob:
+    """Stage workspace removal in the caller's task or workspace transaction."""
+    prefix = f"paper/{workspace.user_id}/{workspace.id}/"
     run_ids = list(
         db.exec(select(models.PaperAgentRun.id).where(models.PaperAgentRun.workspace_id == workspace.id)).all()
     )
     job = models.PaperCleanupJob(
-        user_id=current_user.id,
-        payload={"prefix": prefix, "run_ids": [str(run_id) for run_id in run_ids]},
+        user_id=workspace.user_id,
+        payload={"workspace_id": str(workspace.id), "prefix": prefix, "run_ids": [str(run_id) for run_id in run_ids]},
     )
     db.add(job)
     db.delete(workspace)
-    db.commit()
-    for run_id in run_ids:
-        credential_broker.revoke_task_tokens(run_id)
+    return job
+
+
+def cleanup_workspace_deletion(db: Session, job: models.PaperCleanupJob) -> None:
+    """Clean a committed deletion using its original workspace owner and paths."""
+    from app.services import credential_broker
+    from app.services.paper_workspace_runtime import stop_paper_workspace_container
+
+    workspace_id = uuid.UUID(job.payload["workspace_id"])
+    for run_id in job.payload["run_ids"]:
+        credential_broker.revoke_task_tokens(uuid.UUID(run_id))
     cleanup_errors: list[str] = []
     try:
-        keys = _storage().list_objects(prefix=prefix)
+        keys = _storage().list_objects(prefix=job.payload["prefix"])
         _storage().delete_many(keys)
     except Exception as exc:
         cleanup_errors.append(f"object storage: {exc}")
-    if not stop_paper_workspace_container(workspace.id, remove=True):
-        logger.debug("Paper workspace container was already absent: {}", workspace.id)
+    if not stop_paper_workspace_container(workspace_id, remove=True):
+        logger.debug("Paper workspace container was already absent: {}", workspace_id)
     # Its container is gone for good, so drop the idle-tracking entry too —
     # otherwise the cleanup loop keeps picking up a workspace that can never be
     # stopped.
-    forget_paper_workspace_active(workspace.id)
+    forget_paper_workspace_active(workspace_id)
     try:
-        remove_paper_project_workspace(current_user.id, workspace.id)
+        remove_paper_project_workspace(job.user_id, workspace_id)
     except OSError as exc:
         cleanup_errors.append(f"project workspace: {exc}")
     job.status = "pending" if cleanup_errors else "completed"
@@ -2523,3 +2523,15 @@ def delete_workspace(
     job.error = "\n".join(cleanup_errors)[:4_000] or None
     db.add(job)
     db.commit()
+
+
+def delete_workspace(
+    db: Session,
+    current_user: models.User,
+    workspace_id: uuid.UUID,
+) -> None:
+    """Delete workspace metadata and clean its object and local runtime files."""
+    workspace = _owned_workspace(db, current_user.id, workspace_id)
+    job = prepare_workspace_deletion(db, workspace)
+    db.commit()
+    cleanup_workspace_deletion(db, job)

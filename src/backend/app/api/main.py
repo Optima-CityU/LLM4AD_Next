@@ -21,6 +21,7 @@ from app.api.base_routes import (
     utils,
 )
 from app.api.llm4ad import arl_ws as llm4ad_arl_ws
+from app.api.llm4ad import autodesign as llm4ad_autodesign
 from app.api.llm4ad import chat_tune as llm4ad_chat_tune
 from app.api.llm4ad import embedding_providers as llm4ad_embedding_providers
 from app.api.llm4ad import knowledge as llm4ad_knowledge
@@ -65,3 +66,4 @@ api_router.include_router(llm4ad_papers.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_paper_runtime.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_research.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_arl_ws.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_autodesign.router, prefix="/llm4ad")

@@ -34,6 +34,7 @@ import { Route as LayoutGuideRouteImport } from './routes/_layout/guide'
 import { Route as LayoutFeedbackRouteImport } from './routes/_layout/feedback'
 import { Route as LayoutConfig_templateRouteImport } from './routes/_layout/config_template'
 import { Route as LayoutChangelogRouteImport } from './routes/_layout/changelog'
+import { Route as LayoutAutodesignRouteImport } from './routes/_layout/autodesign'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as Layout_paperPapersWorkspaceIdRouteImport } from './routes/_layout_paper/papers.$workspaceId'
 
@@ -159,6 +160,11 @@ const LayoutChangelogRoute = LayoutChangelogRouteImport.update({
   path: '/changelog',
   getParentRoute: () => LayoutRoute,
 } as any)
+const LayoutAutodesignRoute = LayoutAutodesignRouteImport.update({
+  id: '/autodesign',
+  path: '/autodesign',
+  getParentRoute: () => LayoutRoute,
+} as any)
 const LayoutAdminRoute = LayoutAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -179,6 +185,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
+  '/autodesign': typeof LayoutAutodesignRoute
   '/changelog': typeof LayoutChangelogRoute
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
@@ -203,6 +210,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
+  '/autodesign': typeof LayoutAutodesignRoute
   '/changelog': typeof LayoutChangelogRoute
   '/config_template': typeof LayoutConfig_templateRoute
   '/feedback': typeof LayoutFeedbackRoute
@@ -233,6 +241,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/verify-email': typeof VerifyEmailRoute
   '/_layout/admin': typeof LayoutAdminRoute
+  '/_layout/autodesign': typeof LayoutAutodesignRoute
   '/_layout/changelog': typeof LayoutChangelogRoute
   '/_layout/config_template': typeof LayoutConfig_templateRoute
   '/_layout/feedback': typeof LayoutFeedbackRoute
@@ -259,6 +268,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/admin'
+    | '/autodesign'
     | '/changelog'
     | '/config_template'
     | '/feedback'
@@ -283,6 +293,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/admin'
+    | '/autodesign'
     | '/changelog'
     | '/config_template'
     | '/feedback'
@@ -312,6 +323,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/verify-email'
     | '/_layout/admin'
+    | '/_layout/autodesign'
     | '/_layout/changelog'
     | '/_layout/config_template'
     | '/_layout/feedback'
@@ -520,6 +532,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutChangelogRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_layout/autodesign': {
+      id: '/_layout/autodesign'
+      path: '/autodesign'
+      fullPath: '/autodesign'
+      preLoaderRoute: typeof LayoutAutodesignRouteImport
+      parentRoute: typeof LayoutRoute
+    }
     '/_layout/admin': {
       id: '/_layout/admin'
       path: '/admin'
@@ -539,6 +558,7 @@ declare module '@tanstack/react-router' {
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
+  LayoutAutodesignRoute: typeof LayoutAutodesignRoute
   LayoutChangelogRoute: typeof LayoutChangelogRoute
   LayoutConfig_templateRoute: typeof LayoutConfig_templateRoute
   LayoutFeedbackRoute: typeof LayoutFeedbackRoute
@@ -554,6 +574,7 @@ interface LayoutRouteChildren {
 
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
+  LayoutAutodesignRoute: LayoutAutodesignRoute,
   LayoutChangelogRoute: LayoutChangelogRoute,
   LayoutConfig_templateRoute: LayoutConfig_templateRoute,
   LayoutFeedbackRoute: LayoutFeedbackRoute,

@@ -10,6 +10,9 @@ from _shared.runtime import JsonBenchmarkEvaluator, finite_array
 from llm4ad.evaluator.base import BaseEvaluator
 
 
+GEOMETRY_TOL = 1e-12
+
+
 def _minimum_area(points: np.ndarray) -> float:
     minimum = math.inf
     for first, second, third in itertools.combinations(range(len(points)), 3):
@@ -33,7 +36,11 @@ class HeilbronnTriangleEvaluator(JsonBenchmarkEvaluator):
         if len(set(map(tuple, points))) != len(points):
             raise ValueError("points must be distinct")
         for x_coordinate, y_coordinate in points:
-            if not (y_coordinate >= 0 and root3 * x_coordinate <= root3 - y_coordinate and y_coordinate <= root3 * x_coordinate):
+            if not (
+                y_coordinate >= -GEOMETRY_TOL
+                and root3 * x_coordinate <= root3 - y_coordinate + GEOMETRY_TOL
+                and y_coordinate <= root3 * x_coordinate + GEOMETRY_TOL
+            ):
                 raise ValueError("points must lie inside the unit-side equilateral triangle")
         for first, second, third in itertools.combinations(range(len(points)), 3):
             a, b, c = points[first], points[second], points[third]

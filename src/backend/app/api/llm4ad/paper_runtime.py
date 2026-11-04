@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import secrets
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
@@ -57,6 +59,7 @@ from app.services import (
     paper_service,
     paper_task_control,
     paper_workflow,
+    runtime_health,
 )
 from app.services.paper_workspace_runtime import (
     CONTAINER_SOURCE_ROOT,
@@ -220,13 +223,34 @@ def _runtime_run_payload(
     }
 
 
-def _conversation_preferences_prompt(workspace: PaperWorkspace) -> str:
-    """Apply author preferences to explanations without changing deliverables."""
-    if workspace.mode not in {"proposal", "manuscript"}:
+def _browser_language(accept_language: str | None) -> str | None:
+    """Resolve the preferred browser locale from a weighted HTTP language header."""
+    choices = []
+    for item in (accept_language or "").split(","):
+        language, *parameters = item.strip().split(";")
+        if not re.fullmatch(r"[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*", language):
+            continue
+        quality = 1.0
+        for parameter in parameters:
+            key, separator, value = parameter.strip().partition("=")
+            if separator and key.lower() == "q":
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        if 0 < quality <= 1:
+            choices.append((language, quality))
+    return max(choices, key=lambda choice: choice[1])[0] if choices else None
+
+
+def _conversation_preferences_prompt(workspace: PaperWorkspace, accept_language: str | None = None) -> str:
+    """Apply explicit or browser language preferences to author-facing explanations."""
+    if workspace.mode not in {"proposal", "manuscript", "autodesign"}:
         return ""
     preferences = PaperConversationPreferences.model_validate(workspace.conversation_preferences or {})
     guidance = preferences.additional_guidance.strip()
-    if preferences.reply_language == "auto" and not guidance:
+    browser_language = _browser_language(accept_language) if preferences.reply_language == "auto" else None
+    if preferences.reply_language == "auto" and not browser_language and not guidance:
         return ""
 
     lines = [
@@ -240,11 +264,29 @@ def _conversation_preferences_prompt(workspace: PaperWorkspace) -> str:
         lines.append("Use Simplified Chinese for those conversational and explanatory parts.")
     elif preferences.reply_language == "en":
         lines.append("Use English for those conversational and explanatory parts.")
+    elif browser_language:
+        language = browser_language.lower()
+        if language.startswith("zh"):
+            target = "Traditional Chinese" if any(part in language.split("-") for part in ("hant", "tw", "hk", "mo")) else "Simplified Chinese"
+        elif language.startswith("en"):
+            target = "English"
+        else:
+            target = f"the language identified by browser locale {browser_language}"
+        lines.append(f"The author selected Follow browser language ({browser_language}). Use {target} for those parts.")
+    lines.append("Honor an explicit language request from the author for the current response.")
     if guidance:
         lines.append(
             "Author's optional presentation note: " + json.dumps(guidance, ensure_ascii=False)
         )
-    lines.append(
+    if workspace.mode == "autodesign":
+        lines.append(
+            "In AutoDesign, the project overview and README.md are author-facing explanations and follow "
+            "the same language preference. Keep them aligned when the author asks to revise the project. "
+            "Preserve code, configuration keys and values, function names, metric names, IDs and quoted sources. "
+            "An explicitly requested document language takes precedence. Presentation guidance does not override the Skills."
+        )
+    else:
+        lines.append(
         "Do not apply these preferences to proposal document text, Typst or Markdown source, "
         "the submitted reviewer rebuttal responses (including RebuttalEntry.response, "
         "RebuttalGlobalResponse.response, and RebuttalOutput.text), the author-to-chair message, citations or source "
@@ -257,8 +299,10 @@ def _conversation_preferences_prompt(workspace: PaperWorkspace) -> str:
 def _runtime_allowed_tools(workspace_mode: str) -> list[str]:
     """Return the file and interaction tools allowed for one workflow mode."""
     tools = ["Read", "Glob", "Grep", "AskUserQuestion", "Skill"]
-    if workspace_mode == "proposal":
+    if workspace_mode in {"proposal", "autodesign"}:
         tools.extend(["Write", "Edit"])
+    if workspace_mode == "autodesign":
+        tools.append("Bash")
     return tools
 
 
@@ -266,7 +310,7 @@ def _runtime_stage_mcp_configuration(
     workflow_stage: str,
 ) -> tuple[dict[str, object], list[str]]:
     """Return external read-only MCP servers and tools for one stage."""
-    if workflow_stage in {"literature", "discovery_baseline"}:
+    if workflow_stage in {"literature", "discovery_baseline", "autodesign"}:
         return (
             {
                 "arxiv": {
@@ -331,12 +375,18 @@ async def create_runtime_session(
     db: SessionDep,
     current_user: CurrentUser,
     access_token: TokenDep,
+    http_request: Request,
 ) -> PaperRuntimeSessionResponse:
     """Create an opaque browser session for an owned workspace runtime."""
-    paper_service.get_workspace_detail(db, current_user, workspace_id)
     workspace = db.get(PaperWorkspace, workspace_id)
     if workspace is None or workspace.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Research workspace not found")
+    if workspace.mode == "autodesign":
+        from app.services.autodesign_service import ensure_session_editable
+
+        ensure_session_editable(db, current_user, workspace_id)
+    if workspace.mode != "autodesign":
+        paper_service.get_workspace_detail(db, current_user, workspace_id)
     workflow = paper_workflow.get_research_workflow(workspace.mode)
     run_kind = workflow.run_kind_by_stage.get(request.workflow_stage)
     if run_kind is None:
@@ -364,7 +414,7 @@ async def create_runtime_session(
     if provider is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research model provider is unavailable")
     knowledge_service.validate_parser_binding(provider, current_user.id, workspace.analysis_model_name)
-    intake_without_source = (
+    intake_without_source = workspace.mode == "autodesign" or (
         workspace.mode == "algorithm"
         and request.workflow_stage == "discovery_baseline"
         and workspace.active_source_version_id is None
@@ -511,6 +561,35 @@ async def create_runtime_session(
         )
     if workspace.mode == "proposal":
         allowed_tools.append("mcp__llm4ad_stage__check_typst")
+    autodesign_context = ""
+    if workspace.mode == "autodesign":
+        from app.services import autodesign_service
+
+        design = autodesign_service.get_session(db, current_user, workspace_id)
+        autodesign_context = "\nCurrent task association (read the task tools for fresh state):\n" + json.dumps({
+            "project_id": str(design.project_id) if design.project_id else None,
+            "task_id": str(design.task_id) if design.task_id else None,
+            "root_task_id": str(design.root_task_id) if design.root_task_id else None,
+            "project_ready": design.project_ready,
+        })
+        mcp_servers = {
+            "llm4ad_autodesign": {
+                "type": "stdio",
+                "command": "/app/backend/.venv/bin/python",
+                "args": ["/app/paper-agent/autodesign_bridge.py"],
+                "env": {
+                    "LLM4AD_AUTODESIGN_URL": f"http://backend:8000{settings.API_V1_STR}/llm4ad/autodesign/runtime/operations",
+                    "LLM4AD_AUTODESIGN_WORKSPACE_ID": str(workspace_id),
+                    "LLM4AD_AUTODESIGN_TOKEN": paper_workspace_runtime_token(workspace_id),
+                },
+            }
+        }
+        allowed_tools = [tool for tool in allowed_tools if not tool.startswith("mcp__llm4ad_stage__")]
+        allowed_tools.extend(f"mcp__llm4ad_autodesign__{name}" for name in (
+            "get_task_context", "update_project_name", "list_task_files", "read_task_file", "create_child_task", "patch_child_parameters",
+            "validate_project", "prepare_task", "start_task", "stop_task",
+            "get_memory_context", "list_memory_cards", "save_memory_card", "patch_task_parameters", "sync_task_draft",
+        ))
     external_mcp_servers, external_mcp_tools = _runtime_stage_mcp_configuration(request.workflow_stage)
     mcp_servers.update(external_mcp_servers)
     allowed_tools.extend(external_mcp_tools)
@@ -527,12 +606,15 @@ async def create_runtime_session(
             "ANTHROPIC_DEFAULT_OPUS_MODEL": workspace.analysis_model_name,
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(workspace.analysis_max_output_tokens),
+            "ENABLE_TOOL_SEARCH": "false",
+            # The gateway owns bounded retries before any response is forwarded.
+            "CLAUDE_CODE_MAX_RETRIES": "0",
         },
         "skills": list(workflow.skills_by_run_kind[run_kind]),
         "mcpServers": mcp_servers,
         "toolsSettings": {
             "allowedTools": allowed_tools,
-            "disallowedTools": ["Bash", "WebFetch", "WebSearch"],
+            "disallowedTools": ["WebFetch", "WebSearch", "ToolSearch"] if workspace.mode == "autodesign" else ["Bash", "WebFetch", "WebSearch"],
             "skipPermissions": False,
         },
         "permissionMode": "default",
@@ -558,7 +640,8 @@ async def create_runtime_session(
                 if workspace.mode == "proposal"
                 else ""
             )
-            + _conversation_preferences_prompt(workspace)
+            + _conversation_preferences_prompt(workspace, http_request.headers.get("accept-language"))
+            + autodesign_context
         ),
     }
     async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
@@ -1019,13 +1102,15 @@ async def proxy_runtime_websocket(websocket: WebSocket, workspace_id: uuid.UUID)
                     message = await websocket.receive()
                     if message["type"] == "websocket.disconnect":
                         return
-                    if message.get("text") is not None:
-                        await upstream.send(message["text"])
-                    elif message.get("bytes") is not None:
-                        await upstream.send(message["bytes"])
+                    payload = message.get("text") if message.get("text") is not None else message.get("bytes")
+                    if payload is not None:
+                        runtime_health.record_runtime_chat_control(str(workspace_id), payload)
+                        await upstream.send(payload)
 
             async def runtime_to_browser() -> None:
                 async for message in upstream:
+                    if not await _runtime_message_is_current(str(workspace_id), message):
+                        continue
                     if isinstance(message, bytes):
                         await websocket.send_bytes(message)
                     else:
@@ -1043,3 +1128,19 @@ async def proxy_runtime_websocket(websocket: WebSocket, workspace_id: uuid.UUID)
         return
     except Exception:
         await websocket.close(code=1011, reason="Research runtime connection failed")
+
+
+async def _runtime_message_is_current(workspace_id: str, message: str | bytes) -> bool:
+    """Drop delayed platform failures after a stop while keeping actual chat output."""
+    try:
+        payload = json.loads(message)
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return True
+    if not isinstance(payload, dict):
+        return True
+    if payload.get("kind") != "task_notification" or not str(payload.get("id", "")).startswith("platform_notice_"):
+        return True
+    session_id = payload.get("sessionId")
+    if not isinstance(session_id, str):
+        return True
+    return not await runtime_health.runtime_request_cancelled(workspace_id, session_id, time.time())

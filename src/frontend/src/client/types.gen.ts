@@ -81,6 +81,198 @@ export type AppConfigSchemaResponse = {
     };
 };
 
+export type autodesign_upload_materials = {
+    files: Array<((Blob | File))>;
+    relative_paths?: (Array<(string)> | null);
+};
+
+/**
+ * One real editable project and its redacted configuration preview.
+ */
+export type AutoDesignDraftProject = {
+    path: string;
+    name: string;
+    config?: {
+        [key: string]: unknown;
+    };
+    config_error?: (string | null);
+};
+
+/**
+ * One relative path available to a scoped file reader.
+ */
+export type AutoDesignFile = {
+    path: string;
+    size?: number;
+    modified_time?: (string | null);
+    title?: (string | null);
+};
+
+/**
+ * Files from task inputs, runs, drafts, references, or design records.
+ */
+export type AutoDesignFileList = {
+    area: 'input' | 'run' | 'draft' | 'references' | 'analysis';
+    task_id?: (string | null);
+    files: Array<AutoDesignFile>;
+};
+
+export type area = 'input' | 'run' | 'draft' | 'references' | 'analysis';
+
+/**
+ * File text with an explicit optional line range rather than silent truncation.
+ */
+export type AutoDesignFileResponse = {
+    area: 'input' | 'run' | 'draft' | 'references' | 'analysis';
+    path: string;
+    content: string;
+    total_lines: number;
+    start_line: number;
+    end_line: number;
+    revision?: (string | null);
+    editable?: boolean;
+};
+
+/**
+ * Save an existing draft only if its source revision still matches.
+ */
+export type AutoDesignFileUpdate = {
+    path: string;
+    content: string;
+    revision: string;
+};
+
+/**
+ * Task action explicitly requested from the task page or Agent.
+ */
+export type AutoDesignOperationRequest = {
+    operation: 'context' | 'rename' | 'list_files' | 'read_file' | 'create_child' | 'patch_child' | 'validate' | 'publish' | 'start' | 'stop' | 'memory_context' | 'memory_list' | 'memory_save' | 'sync_draft';
+    task_id?: (string | null);
+    arguments?: {
+        [key: string]: unknown;
+    };
+};
+
+export type operation = 'context' | 'rename' | 'list_files' | 'read_file' | 'create_child' | 'patch_child' | 'validate' | 'publish' | 'start' | 'stop' | 'memory_context' | 'memory_list' | 'memory_save' | 'sync_draft';
+
+/**
+ * Prepare the current verified project or update an unstarted version.
+ */
+export type AutoDesignPublishRequest = {
+    project_id?: (string | null);
+    task_id?: (string | null);
+    name?: (string | null);
+    enable_memory?: (boolean | null);
+};
+
+/**
+ * The prepared task and its associated conversation.
+ */
+export type AutoDesignPublishResponse = {
+    session: AutoDesignSessionResponse;
+    task: TaskResponse;
+};
+
+/**
+ * Internal MCP envelope authorized using the existing runtime token.
+ */
+export type AutoDesignRuntimeRequest = {
+    operation: 'context' | 'rename' | 'list_files' | 'read_file' | 'create_child' | 'patch_child' | 'validate' | 'publish' | 'start' | 'stop' | 'memory_context' | 'memory_list' | 'memory_save' | 'sync_draft';
+    task_id?: (string | null);
+    arguments?: {
+        [key: string]: unknown;
+    };
+    workspace_id: string;
+};
+
+/**
+ * Start an independent design without requiring uploaded materials.
+ */
+export type AutoDesignSessionCreate = {
+    title?: string;
+    project_id?: (string | null);
+};
+
+/**
+ * Current user's design conversations.
+ */
+export type AutoDesignSessionList = {
+    items: Array<AutoDesignSessionResponse>;
+    total: number;
+};
+
+/**
+ * Native model settings plus the associated task and verified project.
+ */
+export type AutoDesignSessionResponse = {
+    id: string;
+    title: string;
+    mode: 'proposal' | 'manuscript' | 'algorithm' | 'autodesign';
+    description: (string | null);
+    conversation_preferences?: PaperConversationPreferences;
+    active_source_version_id: (string | null);
+    proposal_foundation: (ProposalFoundation | null);
+    proposal_entry_path: (string | null);
+    proposal_stage_states?: {
+        [key: string]: ProposalStageState;
+    };
+    rebuttal_context?: {
+        [key: string]: unknown;
+    };
+    rebuttal_entries?: Array<RebuttalEntry>;
+    rebuttal_output?: (RebuttalOutput | null);
+    chair_message?: (string | null);
+    analysis_provider_id: (string | null);
+    analysis_model_name: (string | null);
+    analysis_context_window_tokens: number;
+    analysis_max_output_tokens: number;
+    reviewer_a_provider_id: (string | null);
+    reviewer_a_model_name: (string | null);
+    reviewer_b_provider_id: (string | null);
+    reviewer_b_model_name: (string | null);
+    created_time: string;
+    updated_time: string;
+    project_id?: (string | null);
+    task_id?: (string | null);
+    root_task_id?: (string | null);
+    validation_report?: {
+        [key: string]: unknown;
+    };
+    project_ready?: boolean;
+    project_revision?: (string | null);
+    project_name?: (string | null);
+    published_task_id?: (string | null);
+};
+
+export type mode = 'proposal' | 'manuscript' | 'algorithm' | 'autodesign';
+
+/**
+ * Live, sanitized task state and independently runnable family members.
+ */
+export type AutoDesignTaskContext = {
+    title?: string;
+    task?: (TaskResponse | null);
+    root_task_id?: (string | null);
+    family?: Array<TaskResponse>;
+    config?: {
+        [key: string]: unknown;
+    };
+    stats?: {
+        [key: string]: unknown;
+    };
+    draft_path?: string;
+    validation_report?: {
+        [key: string]: unknown;
+    };
+    project_ready?: boolean;
+    projects?: Array<AutoDesignDraftProject>;
+    selected_project_path?: (string | null);
+    validation_current?: boolean;
+    editing_locked?: boolean;
+    running_task_id?: (string | null);
+    draft_conflicts?: Array<(string)>;
+};
+
 export type Body_live_codes_add_targets = {
     /**
      * 真实群码图片，可多张
@@ -1749,8 +1941,8 @@ export type PaginatedTaskResponse = {
 export type PaperAgentRunResponse = {
     id: string;
     workspace_id: string;
-    source_version_id: string;
-    run_kind: 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+    source_version_id: (string | null);
+    run_kind: 'autodesign' | 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
     status: 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
     progress: number;
     stage: string;
@@ -1766,7 +1958,7 @@ export type PaperAgentRunResponse = {
     updated_time: string;
 };
 
-export type run_kind = 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
+export type run_kind = 'autodesign' | 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge';
 
 export type status2 = 'pending' | 'running' | 'ready' | 'failed' | 'cancelled';
 
@@ -2219,10 +2411,10 @@ export type PaperRevisionPatchResponse = {
  * Select the backend-owned stage profile for a native session.
  */
 export type PaperRuntimeSessionCreate = {
-    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workflow_stage: 'autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
 };
 
-export type workflow_stage = 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+export type workflow_stage = 'autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
 
 /**
  * Opaque browser session for an embedded research runtime.
@@ -2252,7 +2444,7 @@ export type PaperSourceFileResponse = {
 export type PaperSourceFileUpdateRequest = {
     path: string;
     content: string;
-    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+    workflow_stage?: ('autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
 };
 
 /**
@@ -2260,7 +2452,7 @@ export type PaperSourceFileUpdateRequest = {
  */
 export type PaperSourcePathDeleteRequest = {
     path: string;
-    workflow_stage?: ('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
+    workflow_stage?: ('autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch' | null);
 };
 
 /**
@@ -2287,7 +2479,7 @@ export type source_kind = 'markdown' | 'latex_zip' | 'source_bundle';
  * Published result and revision metadata for one research stage.
  */
 export type PaperStageArtifactResponse = {
-    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workflow_stage: 'autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
     run_id: string;
     source_version_id: string;
     status: string;
@@ -2300,7 +2492,7 @@ export type PaperStageArtifactResponse = {
  * Invalidate the stage revision replaced by an edited conversation turn.
  */
 export type PaperStageInvalidateRequest = {
-    workflow_stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    workflow_stage: 'autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
     expected_iteration?: (number | null);
 };
 
@@ -2310,10 +2502,8 @@ export type PaperStageInvalidateRequest = {
 export type PaperWorkspaceCreate = {
     title: string;
     description?: (string | null);
-    mode: 'proposal' | 'manuscript' | 'algorithm';
+    mode: 'proposal' | 'manuscript' | 'algorithm' | 'autodesign';
 };
-
-export type mode = 'proposal' | 'manuscript' | 'algorithm';
 
 /**
  * Paper workspace with source, review, metric, and proposal summaries.
@@ -2321,7 +2511,7 @@ export type mode = 'proposal' | 'manuscript' | 'algorithm';
 export type PaperWorkspaceDetail = {
     id: string;
     title: string;
-    mode: 'proposal' | 'manuscript' | 'algorithm';
+    mode: 'proposal' | 'manuscript' | 'algorithm' | 'autodesign';
     description: (string | null);
     conversation_preferences?: PaperConversationPreferences;
     active_source_version_id: (string | null);
@@ -2355,8 +2545,8 @@ export type PaperWorkspaceDetail = {
     revision_candidates?: Array<PaperRevisionCandidateResponse>;
     active_run?: (PaperAgentRunResponse | null);
     workflow_available: boolean;
-    workflow_stages?: Array<('formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
-    available_run_kinds?: Array<('proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
+    workflow_stages?: Array<('autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch')>;
+    available_run_kinds?: Array<('autodesign' | 'proposal_formatting' | 'proposal_literature' | 'proposal_rationale' | 'proposal_objectives' | 'proposal_methods' | 'proposal_innovation_plan' | 'proposal_foundation_feasibility' | 'proposal_final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'boundary_analysis' | 'issue_extraction' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'algorithm_discovery' | 'metric_suggestion' | 'paper_revision' | 'judge')>;
 };
 
 /**
@@ -2375,7 +2565,7 @@ export type PaperWorkspaceList = {
 export type PaperWorkspaceSummary = {
     id: string;
     title: string;
-    mode: 'proposal' | 'manuscript' | 'algorithm';
+    mode: 'proposal' | 'manuscript' | 'algorithm' | 'autodesign';
     description: (string | null);
     conversation_preferences?: PaperConversationPreferences;
     active_source_version_id: (string | null);
@@ -4737,6 +4927,116 @@ export type LiveQrPublicQrcodeData = {
 
 export type LiveQrPublicQrcodeResponse = (unknown);
 
+export type Llm4AdAutodesignCreateSessionData = {
+    requestBody: AutoDesignSessionCreate;
+};
+
+export type Llm4AdAutodesignCreateSessionResponse = (AutoDesignSessionResponse);
+
+export type Llm4AdAutodesignListSessionsData = {
+    projectId?: (string | null);
+};
+
+export type Llm4AdAutodesignListSessionsResponse = (AutoDesignSessionList);
+
+export type Llm4AdAutodesignGetTaskSessionData = {
+    taskId: string;
+};
+
+export type Llm4AdAutodesignGetTaskSessionResponse = (AutoDesignSessionResponse);
+
+export type Llm4AdAutodesignGetSessionData = {
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignGetSessionResponse = (AutoDesignSessionResponse);
+
+export type Llm4AdAutodesignDeleteSessionData = {
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignDeleteSessionResponse = (void);
+
+export type Llm4AdAutodesignGetSessionContextData = {
+    sessionId: string;
+    taskId?: (string | null);
+};
+
+export type Llm4AdAutodesignGetSessionContextResponse = (AutoDesignTaskContext);
+
+export type Llm4AdAutodesignListFilesData = {
+    area?: 'input' | 'run' | 'draft' | 'references' | 'analysis';
+    directory?: string;
+    sessionId: string;
+    taskId?: (string | null);
+};
+
+export type Llm4AdAutodesignListFilesResponse = (AutoDesignFileList);
+
+export type Llm4AdAutodesignReadFileData = {
+    area?: 'input' | 'run' | 'draft' | 'references' | 'analysis';
+    endLine?: (number | null);
+    path: string;
+    sessionId: string;
+    startLine?: (number | null);
+    taskId?: (string | null);
+};
+
+export type Llm4AdAutodesignReadFileResponse = (AutoDesignFileResponse);
+
+export type Llm4AdAutodesignUpdateDraftFileData = {
+    requestBody: AutoDesignFileUpdate;
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignUpdateDraftFileResponse = (AutoDesignFileResponse);
+
+export type Llm4AdAutodesignPrepareTaskData = {
+    requestBody: AutoDesignPublishRequest;
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignPrepareTaskResponse = (AutoDesignPublishResponse);
+
+export type Llm4AdAutodesignLaunchSessionData = {
+    requestBody: AutoDesignPublishRequest;
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignLaunchSessionResponse = (AutoDesignPublishResponse);
+
+export type Llm4AdAutodesignUploadMaterialsData = {
+    formData: autodesign_upload_materials;
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignUploadMaterialsResponse = (AutoDesignFileList);
+
+export type Llm4AdAutodesignDeleteMaterialData = {
+    path: string;
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignDeleteMaterialResponse = (AutoDesignFileList);
+
+export type Llm4AdAutodesignOperateData = {
+    requestBody: AutoDesignOperationRequest;
+    sessionId: string;
+};
+
+export type Llm4AdAutodesignOperateResponse = ({
+    [key: string]: unknown;
+});
+
+export type Llm4AdAutodesignRuntimeOperationData = {
+    requestBody: AutoDesignRuntimeRequest;
+    xLlm4AdRuntimeToken?: (string | null);
+};
+
+export type Llm4AdAutodesignRuntimeOperationResponse = ({
+    [key: string]: unknown;
+});
+
 export type Llm4AdChatTuneGetSessionData = {
     /**
      * 游标：返回该消息 ID 之前（更早）的消息；缺省时返回最新一页
@@ -5166,7 +5466,7 @@ export type Llm4AdPapersDeleteWorkspaceResponse = (void);
 
 export type Llm4AdPapersGetStageArtifactData = {
     runId?: (string | null);
-    stage: 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
+    stage: 'autodesign' | 'formatting' | 'literature' | 'rationale' | 'objectives' | 'methods' | 'innovation_plan' | 'foundation_feasibility' | 'final_review' | 'rebuttal_baseline' | 'autorebuttal' | 'ac_summary' | 'discovery_baseline' | 'discovery_candidates' | 'discovery_evaluation' | 'discovery' | 'reviews' | 'boundary' | 'targets' | 'branch';
     workspaceId: string;
 };
 

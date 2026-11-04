@@ -146,7 +146,7 @@
     "successToast": "密码重置成功"
   },
   "layout": {
-    "projectManagement": "项目管理",
+    "projectManagement": "算法演化项目",
     "research": "研究",
     "configTemplate": "参数模板",
     "llmProvider": "模型供应商",
@@ -163,11 +163,11 @@
     "liveCode": "微信群活码"
   },
   "sidebar": {
-    "projectManagement": "项目管理",
+    "projectManagement": "算法演化项目",
     "autoResearch": "AutoResearch",
     "autoProposal": "AutoProposal",
     "autoRebuttal": "AutoRebuttal",
-    "autoDiscovery": "AutoDiscovery",
+    "autoDiscovery": "AutoDesign 自动算法设计",
     "paperWorkspace": "科研工作台",
     "research": "研究",
     "globalConfig": "全局配置",
@@ -222,7 +222,7 @@
       "navigation": {
         "proposal": "AutoProposal",
         "manuscript": "AutoRebuttal",
-        "algorithm": "AutoDiscovery"
+        "algorithm": "AutoDesign"
       },
       "modeDescription": {
         "proposal": "根据项目描述直接开始 Typst 研究提案，无需预先上传；参考资料或已有草稿均为可选补充",
@@ -261,6 +261,7 @@
       "noModelsHint": "该供应商尚未配置模型，请先在模型供应商页面补充模型。",
       "providersLoadFailed": "模型供应商加载失败，请稍后重试。",
       "configure": "配置解析模型",
+      "switchFailed": "模型切换失败，仍保留原有模型，请重试。",
       "bindingHint": "选择该研究工作区使用的模型和 Token 限制。",
       "required": "开始前请先配置解析模型。",
       "dialogTitle": "解析模型配置",
@@ -270,6 +271,7 @@
       "saved": "解析模型已保存"
     },
     "preferences": {
+      "saveFailed": "保存对话偏好失败",
       "stepTitle": "个性化对话（可选）",
       "stepDescription": "选择助手解释和建议的语言，也可以补充你喜欢的沟通方式；后续仍可随时调整。",
       "configured": "已设置",
@@ -277,14 +279,13 @@
       "dialogTitle": "对话偏好设置",
       "dialogDescription": "调整助手在对话、阶段说明与待补充建议中的表达方式。",
       "language": "助手回复语言",
-      "languageAuto": "跟随对话语言",
+      "languageAuto": "跟随浏览器语言",
       "languageChinese": "简体中文",
       "languageEnglish": "English",
       "additionalGuidance": "其他表达偏好（可选）",
       "guidancePlaceholder": "例如：先用要点解释建议，再告诉我需要补充哪些材料。",
       "scopeHint": "仅用于交流与说明，不改变申报书、论文源码或提交给审稿人的 Rebuttal 正文。保存后从下一次助手回复开始生效。",
-      "saved": "对话偏好已保存",
-      "saveFailed": "保存对话偏好失败"
+      "saved": "对话偏好已保存"
     },
     "runtime": {
       "title": "科研助手",
@@ -303,6 +304,7 @@
       "autorebuttalRevisionRequired": "Rebuttal 回复需要补充",
       "revisionDetails": "查看详情",
       "revisionDetailsDescription": "查看阶段结论与待处理事项，并在当前会话中继续完善。",
+      "modelGatewayRetrying": "{{reason}}，正在自动重试（第 {{attempt}}/{{maxAttempts}} 次尝试）。",
       "modelGatewayFailing": "模型网关请求失败（第 {{count}} 次）：{{reason}}。建议更换模型或稍后重试。",
       "changeModel": "更换模型",
       "gatewayReason": {
@@ -371,7 +373,7 @@
       "arxivDescription": "描述研究方向，或粘贴 arXiv 编号/链接。助手会检索并解释候选论文，再将选定论文下载到工作区。",
       "arxivPlaceholder": "例如：近期、测试成本低的优化算法论文；或 https://arxiv.org/abs/2401.00001",
       "arxivSearch": "交给助手检索",
-      "arxivPrompt": "请帮我从 arXiv 开始 AutoDiscovery。我的研究方向或论文是：{{query}}。如果我指定了论文，请下载并导入；否则先检索 arXiv，简要说明合适的候选，让我选择后再下载。请使用 discovery-baseline Skill 和 arXiv 工具；在完整论文导入前不要发布基准。",
+      "arxivPrompt": "请帮我从 arXiv 开始 AutoDesign。我的研究方向或论文是：{{query}}。如果我指定了论文，请下载并导入；否则先检索 arXiv，简要说明合适的候选，让我选择后再下载。请使用 discovery-baseline Skill 和 arXiv 工具；在完整论文导入前不要发布基准。",
       "arxivPendingTitle": "选择要研究的论文",
       "arxivPendingDescription": "助手可以先寻找并导入论文，再建立研究基准。导入后的 Markdown 将成为本项目的论文源文件，后续阶段沿用同一版本。",
       "arxivImportedTitle": "论文已导入",
@@ -770,13 +772,23 @@
         ],
         "discovery_baseline": "论文基准",
         "discovery_baselineHint": "可使用上传的论文，也可从 arXiv 查找并导入；随后梳理算法、证据和未知信息。",
-        "discovery_baselineExamples": ["帮我找几篇近期、测试成本低的算法论文，说明区别并让我选择一篇导入。", "请阅读已导入或上传的论文，按原文件位置梳理算法、目标、原始基线和已有评估证据。", "请区分论文中的主张和已实际验证的事实；未知内容列出来。"],
+        "discovery_baselineExamples": [
+          "帮我找几篇近期、测试成本低的算法论文，说明区别并让我选择一篇导入。",
+          "请阅读已导入或上传的论文，按原文件位置梳理算法、目标、原始基线和已有评估证据。",
+          "请区分论文中的主张和已实际验证的事实；未知内容列出来。"
+        ],
         "discovery_candidates": "候选方向",
         "discovery_candidatesHint": "比较可进化的算法边界，与我一起选择一个方向。",
-        "discovery_candidatesExamples": ["请比较论文中两个可进化的算法方向，说明实现可行性和评估风险。", "我倾向于优化……算法。请定位准确的代码边界并发布选中的候选方案。"],
+        "discovery_candidatesExamples": [
+          "请比较论文中两个可进化的算法方向，说明实现可行性和评估风险。",
+          "我倾向于优化……算法。请定位准确的代码边界并发布选中的候选方案。"
+        ],
         "discovery_evaluation": "评估设计",
         "discovery_evaluationHint": "确定所选算法的评分、有效性检查及与原始基线的比较方式。",
-        "discovery_evaluationExamples": ["请为这个候选方案确定指标和方向、原版基线、数据协议、有效性检查和随机种子。", "目前还缺哪些评估输入？请如实记录，不要编造实验结果。"],
+        "discovery_evaluationExamples": [
+          "请为这个候选方案确定指标和方向、原版基线、数据协议、有效性检查和随机种子。",
+          "目前还缺哪些评估输入？请如实记录，不要编造实验结果。"
+        ],
         "discovery": "构建与进化",
         "discoveryHint": "将选定方向构建为通过技术校验的任务；在我要求时于此启动和查看进化。",
         "discoveryExamples": [
@@ -793,7 +805,14 @@
         "targets": "处理目标",
         "targetsHint": "定位审稿意见对应的章节、片段或算法。",
         "branch": "目标处理",
-        "branchHint": "仅对选中的一个目标执行论文改写或算法发现。"
+        "branchHint": "仅对选中的一个目标执行论文改写或算法发现。",
+        "autodesign": "自动算法设计",
+        "autodesignHint": "从问题描述开始，结合参考资料构建项目。完成后在右侧核对参数、校验并启动任务。",
+        "autodesignExamples": [
+          "帮我定义一个优化问题，并选择合适的评价指标。",
+          "设计一种调度启发式算法，并构建一个可复现的小型基准。",
+          "我有一个算法想法，请帮我构建可运行的项目，并验证数据和评估器。"
+        ]
       },
       "stageNav": {
         "discovery_baseline": "论文基准",
@@ -970,9 +989,15 @@
       "recentActivity": "最近动态",
       "parameterDiff": "相对父版本的参数变化",
       "closeHint": "收起此面板不会停止正在运行的任务。任务包通过技术校验不代表算法已经改进。",
-      "taskStatus": { "uninitialized": "尚未启动", "pending": "排队中", "running": "运行中", "completed": "已完成", "failed": "运行失败" },
+      "taskStatus": {
+        "uninitialized": "尚未启动",
+        "pending": "排队中",
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "运行失败"
+      },
       "title": "可运行算法任务",
-      "description": "助手会先完成算法、评价器和配置的生成与校验；这里展示的是可直接导入项目管理的任务包。",
+      "description": "助手会先完成算法、评价器和配置的生成与校验；这里展示的是可直接导入算法演化项目的任务包。",
       "count": "{{count}} 个任务包",
       "emptyTitle": "正在发现算法目标",
       "emptyDescription": "在左侧与助手讨论算法边界、输入输出、评价指标和数据。完整任务包通过校验后会自动显示在这里。",
@@ -2078,8 +2103,8 @@
     },
     "createTask": "新建任务",
     "createTaskTitle": "创建任务",
-    "createTaskDescription": "选择人工构建、AI 构建或导入 ZIP，在当前项目下创建任务。",
-    "buildModeImport": "导入 ZIP",
+    "createTaskDescription": "通过手动配置或导入 ZIP 任务包，在此项目中创建任务。",
+    "buildModeImport": "导入项目包",
     "buildModeImportDesc": "上传在本地验证过的任务包，导入到当前项目。",
     "packageFile": "任务压缩包（.zip）",
     "packageFileHelp": "代码、评估器、数据与配置将一并导入。ZIP 无需解压，任务根目录需包含 config.yaml。",
@@ -2110,7 +2135,7 @@
     "importSuccess": "任务已导入当前项目，请选择模型并确认配置。",
     "buildModeLabel": "构建方式",
     "buildModeAi": "AI 构建",
-    "buildModeManual": "人工构建",
+    "buildModeManual": "手动构建",
     "buildModeAiDesc": "通过对话式 AI 助手引导完成配置，适合快速上手或探索性实验",
     "buildModeManualDesc": "使用分步表单手动配置所有参数，适合精确控制和高级用户",
     "buildModeAiTemplateHint": "AI 构建模式下无需选择模板，助手将引导你完成全部配置",
@@ -2161,7 +2186,7 @@
     "confirmCopy": "确定复制",
     "copySuccess": "任务复制成功",
     "deleteTask": "删除任务",
-    "deleteTaskDescription": "删除后无法恢复，确定要删除该任务吗？",
+    "deleteTaskDescription": "任务及其子任务、相关数据和 AI 助手会一并删除，且无法恢复。确定继续吗？",
     "confirmDelete": "确定删除",
     "deleteSuccess": "任务删除成功",
     "emptyTaskList": "暂无任务，点击上方按钮创建",
@@ -3159,7 +3184,9 @@
         "run_needs_gathering": "需求收集",
         "confirm_build": "确认构建"
       }
-    }
+    },
+    "buildModeAutoDesign": "AutoDesign 构建",
+    "buildModeAutoDesignDesc": "由 AutoDesign 助手对话构建并真实验证项目，再由你选择启动。"
   },
   "landing": {
     "pageTitle": "LLM4AD_Next - 基于大模型的算法设计工具",
@@ -3300,7 +3327,7 @@
     },
     "evolutionCreate": {
       "title": "创建新的进化任务",
-      "content": "点击「新建任务」按钮即可创建一个新任务。每个任务对应一次完整的算法进化流程。"
+      "content": "手动配置或导入任务包来创建任务。也可以点击「使用 AutoDesign」，从独立会话开始算法设计。"
     },
     "evolutionTaskConfig": {
       "stepperTitle": "按步骤配置任务",
@@ -5093,6 +5120,263 @@
       "isEnabled": "启用该群码",
       "sortOrder": "排序（越小越优先）",
       "success": "已保存"
+    }
+  },
+  "autodesign": {
+    "title": "AutoDesign 自动算法设计",
+    "use": "使用 AutoDesign",
+    "agent": "AutoDesign 助手",
+    "workbench": "任务工作台",
+    "taskView": "任务视图",
+    "context": "上下文",
+    "files": "文件",
+    "package": "任务包",
+    "refresh": "刷新",
+    "conversations": "设计会话",
+    "newConversation": "新建会话",
+    "start": "开始算法设计",
+    "noMaterialsTitle": "从一个想法开始",
+    "noMaterialsDescription": "描述你想设计的算法，也可上传参考文本文档。助手会构建并校验项目，完成后点击“进入步骤配置”。",
+    "starters": [
+      "帮我定义一个优化问题，并选择合适的评价指标。",
+      "设计一种调度启发式算法，并构建一个可复现的小型基准。",
+      "我有一个算法想法，请帮我构建可运行的项目，并验证数据和评估器。"
+    ],
+    "currentTask": "当前任务",
+    "version": "当前版本",
+    "status": "状态",
+    "versionScope": "会话绑定当前任务版本。切换视图会保留会话与版本选择。",
+    "family": "任务版本（{{count}}）",
+    "config": "配置",
+    "stats": "运行统计",
+    "executionHint": "在任务工作台中配置、运行、停止和查看实验。切换视图不会启动或停止执行。",
+    "area": {
+      "input": "输入",
+      "run": "运行",
+      "draft": "草稿",
+      "references": "参考文件"
+    },
+    "noFiles": "该区域暂无文件。",
+    "lineRange": "第 {{start}}–{{end}} 行，共 {{total}} 行",
+    "packageReady": "Cloud ZIP 已通过校验",
+    "packagePending": "暂无已校验的任务包",
+    "packageHint": "助手负责构建和校验项目。完成后可进入已有的步骤配置页面，选择模型、调整参数，并在最后一步确认运行。",
+    "revision": "任务包修订",
+    "validation": "校验报告",
+    "validate": "校验草稿",
+    "download": "下载 ZIP",
+    "publishProject": "算法演化项目",
+    "selectProject": "选择项目",
+    "taskName": "任务名称（可选）",
+    "publish": "发布到项目",
+    "published": "任务包已发布，可以打开任务工作台。",
+    "openTask": "打开任务工作台",
+    "createProject": "创建算法演化项目",
+    "projectFolder": "草稿项目目录",
+    "sessionFailed": "无法加载 AutoDesign 会话。",
+    "filesFailed": "无法读取文件，请刷新重试。",
+    "contextFailed": "无法加载任务上下文，请刷新重试。",
+    "projectsFailed": "无法加载算法演化项目。",
+    "actionFailed": "操作失败，请检查草稿后重试。",
+    "modelDescription": "为此 AutoDesign 会话选择供应商和模型。若已设置默认模型，新会话会自动使用。",
+    "creationHint": "进入后可直接描述需求，也可补充参考资料。生成并校验项目后，可进入新建任务的步骤配置，最终确认后再运行。",
+    "enterAgent": "进入 AutoDesign 助手",
+    "designInProgress": "构建中",
+    "materials": "参考资料",
+    "materialsHint": "仅支持 UTF-8 文本文档，如 Markdown、TXT、LaTeX、Typst 和配置文件。可查看或删除已上传的参考资料。",
+    "uploadMaterials": "上传参考文件",
+    "materialsUploaded": "参考文件已上传，助手可从 references/ 读取。",
+    "materialsFailed": "参考文件上传失败，请检查文件后重试。",
+    "launch": "启动任务",
+    "launched": "任务已提交运行，正在打开任务工作台。",
+    "launchHint": "在已有任务配置的最后一步确认运行后，将启动任务并显示工作台。",
+    "awaitValidation": "与助手完善算法、数据和评估器。助手会自行校验项目，通过后可进入步骤配置。",
+    "taskSetup": "任务参数",
+    "textDocumentsOnly": "仅支持 UTF-8 文本文档，不支持 PDF、Word、压缩包或二进制文件。",
+    "deleteReference": "删除 {{name}}",
+    "deleteReferenceTitle": "删除参考资料？",
+    "deleteReferenceHint": "将删除“{{name}}”。已生成的算法草稿会保留。",
+    "referenceDeleted": "参考资料已删除。",
+    "referenceDeleteFailed": "删除失败，请刷新后重试。",
+    "selectPlan": "选择待校验方案",
+    "parametersPending": "项目生成后可进入已有步骤配置，检查参数、选择模型，最后确认运行。",
+    "parametersHint": "在已有步骤配置中检查和修改参数，再由你确认启动。",
+    "invalidConfig": "无法读取 config.yaml，请在项目文件中修复，或让助手修复。",
+    "evolutionParameters": "算法与进化",
+    "evaluationParameters": "评估与数据",
+    "modelParameters": "模型与上下文",
+    "enabled": "已开启",
+    "disabled": "已关闭",
+    "fullParameters": "查看完整参数",
+    "validationAndStart": "项目校验",
+    "validationHint": "助手负责检查和真实试跑，完成后可进入已有步骤配置。",
+    "validateTask": "校验任务",
+    "validationFailed": "校验失败，请查看检查结果并让助手修复。",
+    "validationExpired": "项目在上次试跑后有修改，助手需要针对最新文件重新试跑。",
+    "runningLockedTitle": "任务正在运行",
+    "runningLockedHint": "任务排队或运行期间暂停助手修改，请在任务工作台查看运行状态，停止或结束后再使用助手。",
+    "parameter": {
+      "method": "进化算法",
+      "generations": "最大代数",
+      "population": "种群大小",
+      "islands": "岛屿数量",
+      "concurrency": "模型并发",
+      "evaluator": "评估器",
+      "evaluationTimeout": "评估超时（秒）",
+      "dataset": "数据集",
+      "memory": "记忆功能",
+      "plannerModel": "规划模型",
+      "coderModel": "代码模型",
+      "contextWindow": "上下文窗口",
+      "outputTokens": "最大输出 Token"
+    },
+    "check": {
+      "config": "配置合法性",
+      "dependencies": "依赖与运行环境",
+      "sources": "初始代码与数据",
+      "evaluation": "评估器与真实试跑"
+    },
+    "checkHint": {
+      "config": "解析配置并验证平台配置结构。",
+      "dependencies": "安装项目依赖，并检查核心数值库能否正常导入。",
+      "sources": "检查初始代码语法、文件路径和实际数据集。",
+      "evaluation": "运行基线、无效候选校验和项目评估器测试。"
+    },
+    "checkStatus": {
+      "pending": "待检查",
+      "running": "检查中",
+      "passed": "已通过",
+      "failed": "未通过"
+    },
+    "viewParameters": "任务参数",
+    "generatedFiles": "项目文件",
+    "filesPending": "参考资料独立管理，生成的项目文件可从“查看项目文件”打开。",
+    "draftSaved": "草稿已保存，项目校验由助手在对话中完成。",
+    "unsaved": "未保存",
+    "editSource": "编辑源码",
+    "preview": "预览",
+    "discardChanges": "放弃修改并重新加载",
+    "draftChanged": "助手或其他编辑器已更新该文件。你的修改仍保留，请重新加载最新版本后再保存。",
+    "editConflict": "草稿已更新或暂时锁定。你的修改仍保留，请重新加载最新版本后再保存。",
+    "saveFailed": "草稿保存失败，你的修改仍保留。",
+    "fileUnavailable": "无法展示该文件，可能已删除或属于二进制文件。",
+    "protectedFile": "此文件包含已隐藏的凭据，仅供查看。可在任务参数中修改配置。",
+    "saveBeforeValidation": "项目文件有未保存的修改，请先保存。",
+    "validationStale": "需要重新校验",
+    "configureTask": "进入步骤配置",
+    "readyToConfigure": "项目已进入新建任务配置，请选择模型并确认参数，最后再提交运行。",
+    "viewSource": "查看源码",
+    "agentValidationHint": "助手完成项目校验后，即可进入步骤配置。校验进度和结果会显示在左侧对话中。",
+    "referencesPending": "上传参考文本文档后，可在这里选择文件查看或删除。",
+    "projectFilesPending": "助手生成的代码、数据和说明文档会显示在这里。",
+    "buildState": {
+      "waiting": {
+        "label": "待构建",
+        "hint": "在左侧描述目标即可开始，参考资料可选。"
+      },
+      "drafting": {
+        "label": "待校验",
+        "hint": "继续与助手完善方案。助手会编写并试跑项目，完成后可进入步骤配置。"
+      },
+      "running": {
+        "label": "校验中",
+        "hint": "助手正在检查运行环境和项目，检查状态会自动更新。"
+      },
+      "failed": {
+        "label": "校验未通过",
+        "hint": "本次检查未通过，助手可根据执行错误继续修复。具体问题会在对话中说明。"
+      },
+      "changed": {
+        "label": "需重新校验",
+        "hint": "项目在上次试跑后有修改，助手需要针对最新文件重新试跑。"
+      },
+      "unsaved": {
+        "label": "有未保存修改",
+        "hint": "先保存项目文件，再继续与助手完善和试跑。"
+      },
+      "ready": {
+        "label": "校验通过",
+        "hint": "项目已通过真实试跑。进入步骤配置，选择运行模型、检查参数，最后确认启动。"
+      },
+      "loading": {
+        "label": "读取状态中",
+        "hint": "正在读取项目文件和最新校验状态。"
+      },
+      "unavailable": {
+        "label": "状态暂不可用",
+        "hint": "未能获取最新状态。请重试后再确认项目是否已通过校验。"
+      }
+    },
+    "preferencesDescription": "用于助手回复、建议和项目 README 等说明文档。自动语言跟随浏览器；代码、配置字段和指标名称保持原样。",
+    "workspace": {
+      "title": "项目资料",
+      "navigation": "项目资料分类",
+      "uploadReferences": "上传参考",
+      "readOnly": "只读",
+      "updated": "有更新",
+      "configure": "配置任务",
+      "referencesEmptyTitle": "补充项目参考资料",
+      "referencesEmptyHint": "参考资料可选。可上传项目要求、论文文本或评估说明，也可直接在左侧描述需求。生成文件后，“产物”标签会提示新内容。",
+      "projectEmptyTitle": "等待生成项目文件",
+      "artifacts": "产物",
+      "newArtifacts": "新产物",
+      "viewNewArtifacts": "已有新产物，点击查看（{{count}} 个文件）"
+    },
+    "statusDetails": {
+      "title": "项目状态",
+      "checks": "当前校验",
+      "previousChecks": "上次校验（当前修改尚未验证）",
+      "task": "演化任务",
+      "noTask": "尚未创建",
+      "checkState": {
+        "pending": "待检查",
+        "running": "检查中",
+        "passed": "通过",
+        "failed": "未通过",
+        "unknown": "暂无结果"
+      }
+    },
+    "tuning": {
+      "title": "任务调参助手",
+      "childTitle": "子任务调参助手",
+      "description": "基于当前任务的实际配置和已有结果协助调参。可以解释参数、分析父任务表现，或按你的目标修改当前子任务；完成后返回参数配置查看。",
+      "examples": {
+        "explain": "先读取当前任务的实际参数，解释哪些设置会影响搜索质量、运行时间和模型调用成本。",
+        "diagnose": "结合父任务已有的日志和评估结果，分析这次调参最值得优先改进的地方；没有结果时请明确说明。",
+        "apply": "按我已说明的目标调整当前可编辑子任务的参数，解释具体变动和取舍，不要自动启动任务。"
+      }
+    },
+    "parameterActions": {
+      "askAgent": "让 AI 助手协助修改",
+      "returnToParameters": "返回参数配置",
+      "saveFailed": "当前参数保存失败，请重试后再进入助手。",
+      "analyzeResults": "让 AI 助手分析结果"
+    },
+    "memory": {
+      "title": "记忆",
+      "description": "查看和管理已有经验，供助手构建、分析和调参时参考。父子任务共享任务记忆；演化时是否自动使用记忆由任务配置决定。",
+      "cardsDescription": "与平台记忆管理使用同一套卡片，可查看、编辑和管理。",
+      "scopes": {
+        "user": "用户记忆",
+        "project": "项目记忆",
+        "task": "任务记忆"
+      },
+      "shortScopes": {
+        "user": "用户",
+        "project": "项目",
+        "task": "任务"
+      },
+      "bindingRequired": "尚未绑定记忆模型，可在这里配置 Chat 与 Embedding。",
+      "configure": "配置记忆模型"
+    },
+    "analysis": {
+      "title": "实验分析助手",
+      "description": "读取当前版本的实际配置、日志和评估结果，解释表现或失败原因。分析保留原实验；需要修改或重跑时，再创建未启动的子任务。",
+      "examples": {
+        "explain": "读取当前任务的实际运行记录，解释得分、有效评估次数和主要结果，并标明证据来源。",
+        "diagnose": "结合当前版本的配置、日志和候选代码，分析失败或停滞的原因；不要修改任务或启动新实验。",
+        "apply": "根据当前实验给出改进建议，说明依据和取舍；先给建议，不要自动创建子任务或运行。"
+      }
     }
   }
 }

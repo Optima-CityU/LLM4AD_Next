@@ -247,10 +247,10 @@ async def evaluate_snapshot(root: Path, config: Any, instances: list[Path]) -> d
 
 
 def check_snapshot(root: Path) -> dict[str, Any]:
-    """Validate configuration, code, and actual evaluation in an extracted ZIP.
+    """Validate configuration, code, and actual evaluation in an isolated snapshot.
 
     Args:
-        root: Extracted single-root task directory.
+        root: Isolated single-root task directory.
 
     Returns:
         Machine-readable verification results.
@@ -349,33 +349,11 @@ def check_snapshot(root: Path) -> dict[str, Any]:
     }
 
 
-def pack(root: Path, output: Path, timeout: float) -> dict[str, Any]:
-    """Package a snapshot, verify its extracted contents, and deliver the ZIP.
-
-    Args:
-        root: Source task directory.
-        output: New destination ZIP outside the task directory.
-        timeout: Maximum seconds for the validation worker.
-
-    Returns:
-        Validation report embedded in the delivered ZIP.
-    """
-    report_path = output.with_suffix(".validation.json")
-    if output.suffix.lower() != ".zip" or output.is_relative_to(root):
-        raise ValueError("Choose a .zip output outside the source task directory")
-    if output.exists() or report_path.exists():
-        raise ValueError("Output already exists; choose a new archive/report filename")
-    files = package_files(root)
-    with tempfile.TemporaryDirectory(prefix="llm4ad-cloud-package-") as temporary:
+def _verify_snapshot(snapshot: Path, files: list[Path], timeout: float) -> dict[str, Any]:
+    """Run baseline and task tests against one isolated directory snapshot."""
+    hashes = {relative.as_posix(): hashlib.sha256((snapshot / relative).read_bytes()).hexdigest() for relative in files}
+    with tempfile.TemporaryDirectory(prefix="llm4ad-project-check-") as temporary:
         workspace = Path(temporary)
-        archive_path = workspace / "task.zip"
-        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-            for relative in files:
-                archive.write(root / relative, f"{root.name}/{relative.as_posix()}")
-        extracted = workspace / "extracted"
-        with zipfile.ZipFile(archive_path) as archive:
-            archive.extractall(extracted)
-        snapshot = extracted / root.name
         worker_report = workspace / "worker.json"
         started = time.monotonic()
         result = subprocess.run(
@@ -417,11 +395,58 @@ def pack(root: Path, output: Path, timeout: float) -> dict[str, Any]:
         if test_result.returncode:
             raise ValueError(f"Task-specific evaluator tests failed:\n{test_result.stdout}\n{test_result.stderr}")
         report["project_tests"] = {"script": "test_evaluator.py", "exit_code": 0}
+    report["files_sha256"] = hashes
+    return report
+
+
+def verify_project(root: Path, timeout: float) -> dict[str, Any]:
+    """Verify an in-platform project directory without creating an archive.
+
+    Args:
+        root: Current project directory containing config.yaml.
+        timeout: Time available for baseline and evaluator tests.
+
+    Returns:
+        Actual execution results and digests of the verified inputs.
+    """
+    files = package_files(root)
+    with tempfile.TemporaryDirectory(prefix="llm4ad-project-snapshot-") as temporary:
+        snapshot = Path(temporary) / root.name
+        for relative in files:
+            destination = snapshot / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(root / relative, destination)
+        return _verify_snapshot(snapshot, files, timeout)
+
+
+def pack(root: Path, output: Path, timeout: float) -> dict[str, Any]:
+    """Package a snapshot, verify its extracted contents, and deliver the ZIP.
+
+    Args:
+        root: Source task directory.
+        output: New destination ZIP outside the task directory.
+        timeout: Maximum seconds for the validation worker.
+
+    Returns:
+        Validation report embedded in the delivered ZIP.
+    """
+    report_path = output.with_suffix(".validation.json")
+    if output.suffix.lower() != ".zip" or output.is_relative_to(root):
+        raise ValueError("Choose a .zip output outside the source task directory")
+    if output.exists() or report_path.exists():
+        raise ValueError("Output already exists; choose a new archive/report filename")
+    files = package_files(root)
+    with tempfile.TemporaryDirectory(prefix="llm4ad-cloud-package-") as temporary:
+        workspace = Path(temporary)
+        archive_path = workspace / "task.zip"
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for relative in files:
+                archive.write(root / relative, f"{root.name}/{relative.as_posix()}")
+        extracted = workspace / "extracted"
         with zipfile.ZipFile(archive_path) as archive:
-            report["files_sha256"] = {
-                relative.as_posix(): hashlib.sha256(archive.read(f"{root.name}/{relative.as_posix()}")).hexdigest()
-                for relative in files
-            }
+            archive.extractall(extracted)
+        snapshot = extracted / root.name
+        report = _verify_snapshot(snapshot, files, timeout)
         report_text = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
         with zipfile.ZipFile(archive_path, "a", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(f"{root.name}/validation.json", report_text)
@@ -437,6 +462,7 @@ def main() -> int:
     parser.add_argument("project", type=Path, nargs="?")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--verify-only", action="store_true", help="Validate a project directory and write only a JSON report")
     parser.add_argument("--check-root", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--worker-report", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -447,9 +473,15 @@ def main() -> int:
         else:
             if not args.project or not args.output or args.timeout <= 0:
                 parser.error("project, --output, and a positive --timeout are required")
-            report = pack(args.project.resolve(), args.output.resolve(), args.timeout)
-            print(f"Validated {len(report['samples'])} instances; ZIP: {args.output.resolve()}")
-            print(f"Report: {args.output.resolve().with_suffix('.validation.json')}")
+            if args.verify_only:
+                report = verify_project(args.project.resolve(), args.timeout)
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+                print(f"Validated {len(report['samples'])} instances; report: {args.output.resolve()}")
+            else:
+                report = pack(args.project.resolve(), args.output.resolve(), args.timeout)
+                print(f"Validated {len(report['samples'])} instances; ZIP: {args.output.resolve()}")
+                print(f"Report: {args.output.resolve().with_suffix('.validation.json')}")
         return 0
     except Exception as exc:
         print(f"Validation failed: {exc}", file=sys.stderr)

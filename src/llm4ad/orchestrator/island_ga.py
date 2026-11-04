@@ -828,7 +828,8 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
         return EvolutionResult(
             state=self.state,
             best_individual=self.global_best_individual,
-            final_generation=self.current_generation,
+            # The cursor may already point at the next step for checkpointing.
+            final_generation=self.history[-1]["generation"] if self.history else 0,
             total_evaluations=self._get_total_evaluations(),
             history=self.history,
             duration_seconds=duration,

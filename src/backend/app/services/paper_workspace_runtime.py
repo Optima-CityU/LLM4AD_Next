@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -67,6 +68,26 @@ def paper_workspace_runtime_token(workspace_id: uuid.UUID | str) -> str:
     """Derive the private service token for one workspace runtime."""
     message = f"paper-runtime:{workspace_id}".encode()
     return hmac.new(settings.SECRET_KEY.encode(), message, hashlib.sha256).hexdigest()
+
+
+def prepare_paper_workspace_path(path: Path, *, recursive: bool = False) -> None:
+    """Make managed runtime paths writable using the source-upload convention.
+
+    Args:
+        path: Backend-visible workspace directory to prepare.
+        recursive: Also prepare newly seeded editable files and directories.
+    """
+    if path.is_symlink():
+        raise ValueError("Research workspace directory cannot be a symbolic link")
+    path.mkdir(parents=True, exist_ok=True)
+    for entry in [path, *path.rglob("*")] if recursive else [path]:
+        if entry.is_symlink():
+            continue
+        entry.chmod(0o777 if entry.is_dir() else (entry.stat().st_mode & 0o111) | 0o666)
+        try:
+            os.chown(entry, 65534, 65534)
+        except PermissionError:
+            pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +355,12 @@ def reconcile_paper_workspace_containers() -> int:
 
 def ensure_paper_workspace_container(spec: PaperWorkspaceExecSpec):
     """Start or recreate the stable container for one research workspace."""
+    workspace = Path(spec.host_workspace)
+    prepare_paper_workspace_path(workspace)
+    prepare_paper_workspace_path(workspace / "source")
+    draft = workspace / "source" / "draft"
+    if draft.is_dir():
+        prepare_paper_workspace_path(draft, recursive=True)
     client = get_docker_client()
     try:
         image = client.images.get(settings.KNOWLEDGE_PARSER_IMAGE)

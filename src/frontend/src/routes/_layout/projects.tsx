@@ -36,7 +36,7 @@ export const Route = createFileRoute("/_layout/projects")({
   head: () => ({
     meta: [
       {
-        title: "Projects - LLM4AD_Next",
+        title: "Algorithm Evolution Projects - LLM4AD_Next",
       },
     ],
   }),

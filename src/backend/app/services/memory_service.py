@@ -1472,6 +1472,8 @@ def _remote_upsert_card(
             project_id=project_id,
             task_id=task_id,
         )
+        if "llm4ad_evidence" in request.metadata:
+            metadata_patch["llm4ad_evidence"] = request.metadata["llm4ad_evidence"]
         _mindmemos_post(
             current_user,
             "/v1/memory/update",
@@ -1510,6 +1512,8 @@ def _remote_upsert_card(
         project_id=project_id,
         task_id=task_id,
     )
+    if "llm4ad_evidence" in request.metadata:
+        metadata["llm4ad_evidence"] = request.metadata["llm4ad_evidence"]
     data = _mindmemos_post(
         current_user,
         "/v1/memory/add",

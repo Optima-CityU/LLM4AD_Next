@@ -117,7 +117,7 @@ task-specific sizing decision: `evolve_detector` captures only 5 lines on each
 side, and the custom coder uses a 4,096-token project context and output budget.
 Always write explicit values in a generated Cloud package.
 
-| Setting | Actual scope | Starting point for a small multi-file algorithm |
+| Setting | Actual scope | Starting point for a small multi-file algorithm without a large reasoning budget |
 | --- | --- | --- |
 | `repo_analyzer.context_lines_before` / `context_lines_after` | Surrounding source lines captured for each EVOLVE block, not a model token window | `80` / `80`; inspect that signatures, imports and nearby helpers are included. Increase when those dependencies lie farther away. |
 | `coder.context_max_tokens` | Project source injected by `type: custom`; currently approximated at 4 characters per token | `16384`; consider `32768` for larger candidates when the selected model supports the complete prompt. |
@@ -132,6 +132,30 @@ captured context, and reserve space for problem instructions, parents, evaluatio
 feedback, memory and generated output. Crossover includes multiple parents, so
 account for all of them. The custom coder's character estimate is not an exact
 token count, especially for non-English text.
+
+An output budget is shared with reasoning on models that account for thinking
+tokens as completion tokens. A small source file does not establish that an 8K
+output budget will leave room for the final code. Check the selected model's
+documented output accounting and supported output cap; size the request for both
+reasoning and the expected replacement. Do not copy the example's 8K setting
+unchanged for an unknown reasoning model. A model's advertised input window is
+not its output allowance, and increasing `coder.context_max_tokens` does not
+increase the completion budget.
+
+The AutoDesign conversation model and the evolution task's planner/coder models
+are separate bindings. Use the actual task binding or the platform's default-model
+selection when checking capacity. Do not infer those models' limits from the
+assistant's context/output settings. State an unresolved model assumption when
+the task's eventual binding is not available.
+
+For failed generation, inspect final-content length, `finish_reason`,
+`prompt_tokens`, `completion_tokens`, and available `reasoning_tokens` before
+changing parameters. Empty final content with `finish_reason=length` indicates
+output exhaustion; reasoning-only content ending with `stop` can instead reflect
+upstream model behavior. Neither establishes that source input was truncated.
+Reasoning text is not a substitute for the requested final code. Explain the
+observed evidence, then adjust the output budget or supported reasoning mode as
+appropriate. Avoid repeating a large evolution run before this failure is resolved.
 
 Keep total prompt tokens plus requested output comfortably within the chosen
 model's context window and its output cap. If no target model is known, document
@@ -152,7 +176,7 @@ For `claude_code` / `opencode`, custom-coder-only fields do not configure the CL
 context window; use the deployed CLI and selected model's supported behavior.
 
 Record the chosen settings and rationale in README, including a model assumption
-such as “a model supporting at least a 64K context and 8K output” for a modest task
+such as “a non-thinking model supporting at least a 64K context and 8K final output” for a modest task
 after checking its estimated full prompt. Baseline-only local verification makes
 no model calls, so it cannot prove that the bound model accepts these settings.
 
