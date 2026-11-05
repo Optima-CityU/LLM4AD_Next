@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -33,6 +33,8 @@ import { z } from "zod"
 import {
   type ExampleTemplateConfigItem,
   type ExampleTemplateItem,
+  Llm4AdAutodesignService,
+  Llm4AdPapersService,
   Llm4AdTasksService,
   type TaskCreate,
   type TaskResponse,
@@ -75,7 +77,6 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
-import ImportTaskForm from "./ImportTaskForm"
 import {
   Select,
   SelectContent,
@@ -95,9 +96,14 @@ import { DEMO_TASK, isDemoProjectId } from "@/data/demoFixtures"
 import useCustomToast from "@/hooks/useCustomToast"
 import { getDemoState, setDemoPhase, useDemoState } from "@/hooks/useDemoMode"
 import { useEvolution } from "@/hooks/useEvolution"
+import {
+  useAutoDesignSessions,
+  useCreateAutoDesignSession,
+} from "@/hooks/useAutoDesign"
+import { autoDesignKeys } from "@/lib/autoDesign"
+import { taskKeys } from "@/lib/task-queries"
 import { cn, formatDateTime } from "@/lib/utils"
 import { handleError } from "@/utils"
-
 import {
   getTemplateCaseKey,
   getTemplateGroupKey,
@@ -105,6 +111,7 @@ import {
   isExampleTemplateGroup,
   splitExampleTemplates,
 } from "./exampleTemplateGroups"
+import ImportTaskForm from "./ImportTaskForm"
 
 const AUTO_COLLAPSE_WIDTH = 1600
 
@@ -238,11 +245,11 @@ export function CreateTaskDialog({
   const [isOpen, setIsOpen] = useState(false)
   const [confirmNoTemplateOpen, setConfirmNoTemplateOpen] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  // In the demo, default the dialog to AI build so the walkthrough lands on
-  // the path it actually simulates. Real projects keep manual as default.
-  const [buildMode, setBuildMode] = useState<"ai" | "manual" | "import">(
-    isDemo ? "ai" : "manual",
-  )
+  const [buildMode, setBuildMode] = useState<
+    "manual" | "import" | "autodesign" | "ai"
+  >(isDemo ? "ai" : "manual")
+  const navigate = useNavigate()
+  const createDesign = useCreateAutoDesignSession()
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { t, i18n } = useTranslation()
@@ -270,8 +277,6 @@ export function CreateTaskDialog({
       config_name: undefined,
     },
   })
-
-  const isAiMode = buildMode === "ai"
 
   const selectedTemplateName = form.watch("template_name")
   const selectedConfigName = form.watch("config_name")
@@ -387,12 +392,10 @@ export function CreateTaskDialog({
     }
   }, [effectiveConfigName, selectedConfigName, form])
 
-  const handleBuildModeChange = (mode: "ai" | "manual" | "import") => {
+  const handleBuildModeChange = (
+    mode: "manual" | "import" | "autodesign" | "ai",
+  ) => {
     setBuildMode(mode)
-    if (mode === "ai") {
-      form.setValue("template_name", undefined)
-      form.setValue("config_name", undefined)
-    }
   }
 
   const mutation = useMutation({
@@ -417,7 +420,7 @@ export function CreateTaskDialog({
     if (isDemo) {
       setIsOpen(false)
       form.reset()
-      setBuildMode("ai")
+      setBuildMode(isDemo ? "ai" : "manual")
       setDemoPhase("configuring")
       onCreated(DEMO_TASK)
       return
@@ -426,9 +429,9 @@ export function CreateTaskDialog({
       name: data.name,
       project_id: projectId,
       language: i18n.language?.startsWith("zh") ? "zh" : "en",
-      ai_built: isAiMode,
+      ai_built: false,
     }
-    if (!isAiMode && data.template_name) {
+    if (data.template_name) {
       payload.template_name = data.template_name
       if (data.config_name) {
         payload.config_name = data.config_name
@@ -445,8 +448,22 @@ export function CreateTaskDialog({
       submitTask(data)
       return
     }
-    if (isAiMode) {
-      submitTask(data)
+    if (buildMode === "autodesign") {
+      createDesign.mutate(
+        { title: data.name, project_id: projectId },
+        {
+          onSuccess: (session) => {
+            setIsOpen(false)
+            form.reset()
+            setBuildMode(isDemo ? "ai" : "manual")
+            void navigate({
+              to: "/evolution",
+              search: { projectId, designSessionId: session.id },
+            })
+          },
+          onError: () => showErrorToast(t("autodesign.sessionFailed")),
+        },
+      )
       return
     }
     if (!data.template_name) {
@@ -461,7 +478,12 @@ export function CreateTaskDialog({
       <legend className="mb-2 text-sm font-medium leading-none">
         {t("evolution.buildModeLabel")}
       </legend>
-      <div className="grid grid-cols-2 gap-3">
+      <div
+        className={cn(
+          "grid gap-3",
+          isDemo ? "sm:grid-cols-2" : "sm:grid-cols-3",
+        )}
+      >
         {(
           [
             {
@@ -471,10 +493,12 @@ export function CreateTaskDialog({
               description: "buildModeManualDesc",
             },
             {
-              mode: "ai",
+              mode: isDemo ? "ai" : "autodesign",
               icon: Bot,
               title: "buildModeAi",
-              description: "buildModeAiDesc",
+              description: isDemo
+                ? "buildModeAiDesc"
+                : "buildModeAutoDesignDesc",
             },
             ...(!isDemo
               ? [
@@ -494,12 +518,12 @@ export function CreateTaskDialog({
               key={mode}
               type="button"
               aria-pressed={selected}
-              disabled={isImporting || mutation.isPending}
+              disabled={
+                isImporting || mutation.isPending || createDesign.isPending
+              }
               onClick={() => handleBuildModeChange(mode)}
               className={cn(
                 "relative flex min-w-0 flex-col items-start gap-1.5 rounded-lg border-2 p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
-                mode === "import" &&
-                  "col-span-2 flex-row items-center gap-3 pr-8",
                 selected
                   ? "border-primary bg-primary/5 shadow-sm shadow-primary/10"
                   : "border-border/60 hover:border-primary/40 hover:bg-accent/30",
@@ -549,7 +573,7 @@ export function CreateTaskDialog({
     <Dialog
       open={isOpen}
       onOpenChange={(open) => {
-        if (isImporting || mutation.isPending) return
+        if (isImporting || mutation.isPending || createDesign.isPending) return
         setIsOpen(open)
         if (!open) {
           form.reset()
@@ -598,7 +622,7 @@ export function CreateTaskDialog({
       <DialogContent
         data-tour="create-task-dialog"
         className={cn(
-          "max-h-[90dvh] sm:max-w-lg",
+          "max-h-[90dvh] sm:max-w-2xl",
           buildMode === "import"
             ? "flex flex-col overflow-hidden"
             : "overflow-y-auto",
@@ -622,7 +646,7 @@ export function CreateTaskDialog({
             onPendingChange={setIsImporting}
             onClose={() => {
               setIsOpen(false)
-              setBuildMode("manual")
+              setBuildMode(isDemo ? "ai" : "manual")
               form.reset()
             }}
             onImported={(task) => {
@@ -630,7 +654,7 @@ export function CreateTaskDialog({
                 queryKey: getTasksQueryKey(projectId),
               })
               setIsOpen(false)
-              setBuildMode("manual")
+              setBuildMode(isDemo ? "ai" : "manual")
               form.reset()
               onCreated(task)
             }}
@@ -661,14 +685,14 @@ export function CreateTaskDialog({
 
                 {buildModeSelector}
 
-                {/* Template/Config — only for manual mode */}
-                {isAiMode ? (
-                  <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
-                    <Bot className="size-4 text-primary shrink-0" />
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      {t("evolution.buildModeAiTemplateHint")}
-                    </p>
-                  </div>
+                {buildMode === "autodesign" || buildMode === "ai" ? (
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {t(
+                      buildMode === "ai"
+                        ? "evolution.buildModeAiTemplateHint"
+                        : "autodesign.creationHint",
+                    )}
+                  </p>
                 ) : (
                   <>
                     <FormField
@@ -844,17 +868,24 @@ export function CreateTaskDialog({
               </div>
               <DialogFooter>
                 <DialogClose asChild>
-                  <Button variant="outline" disabled={mutation.isPending}>
+                  <Button
+                    variant="outline"
+                    disabled={mutation.isPending || createDesign.isPending}
+                  >
                     {t("common.cancel")}
                   </Button>
                 </DialogClose>
                 <LoadingButton
                   type="submit"
                   data-tour="create-task-submit"
-                  loading={mutation.isPending}
+                  loading={mutation.isPending || createDesign.isPending}
                   className="bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30"
                 >
-                  {t("common.create")}
+                  {t(
+                    buildMode === "autodesign"
+                      ? "autodesign.enterAgent"
+                      : "common.create",
+                  )}
                 </LoadingButton>
               </DialogFooter>
             </form>
@@ -896,16 +927,133 @@ export function CreateTaskDialog({
   )
 }
 
+type TaskListTarget = {
+  id: string
+  name: string
+  kind: "task" | "design"
+}
+
+type TaskListItem = TaskListTarget & { createdTime: string } & (
+    | { kind: "task"; task: TaskResponse }
+    | { kind: "design" }
+  )
+
+function TaskListActions({
+  onRename,
+  onDelete,
+  onCopy,
+}: {
+  onRename: () => void
+  onDelete: () => void
+  onCopy?: () => void
+}) {
+  const { t } = useTranslation()
+  const actions = [
+    ...(onCopy
+      ? [
+          {
+            label: t("evolution.copyTask"),
+            Icon: Copy,
+            action: onCopy,
+            destructive: false,
+          },
+        ]
+      : []),
+    {
+      label: t("evolution.renameTask"),
+      Icon: Pencil,
+      action: onRename,
+      destructive: false,
+    },
+    {
+      label: t("evolution.deleteTask"),
+      Icon: Trash2,
+      action: onDelete,
+      destructive: true,
+    },
+  ]
+
+  return (
+    <>
+      <div className="ml-auto hidden md:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        {actions.map(({ label, Icon, action, destructive }) => (
+          <button
+            key={label}
+            type="button"
+            className={cn(
+              "p-1 rounded text-muted-foreground",
+              destructive
+                ? "hover:bg-red-500/20 hover:text-red-400"
+                : "hover:bg-accent/60 hover:text-primary",
+            )}
+            title={label}
+            aria-label={label}
+            onClick={(event) => {
+              event.stopPropagation()
+              action()
+            }}
+          >
+            <Icon className="size-3" />
+          </button>
+        ))}
+      </div>
+      <div className="ml-auto md:hidden">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-accent/60"
+              title={t("common.more")}
+              aria-label={t("common.more")}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <MoreVertical className="size-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={4}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {actions
+              .filter((action) => !action.destructive)
+              .map(({ label, Icon, action }) => (
+                <DropdownMenuItem
+                  key={label}
+                  className="text-xs cursor-pointer"
+                  onSelect={action}
+                >
+                  <Icon className="size-3.5 mr-2" />
+                  {label}
+                </DropdownMenuItem>
+              ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-xs cursor-pointer text-red-400 focus:text-red-400 focus:bg-red-500/10"
+              onSelect={onDelete}
+            >
+              <Trash2 className="size-3.5 mr-2" />
+              {t("evolution.deleteTask")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </>
+  )
+}
+
 function RenameTaskDialog({
   task,
   open,
   onOpenChange,
   projectId,
+  onRenamed,
 }: {
-  task: { id: string; name: string }
+  task: TaskListTarget
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
+  onRenamed: (name: string) => void
 }) {
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
@@ -919,18 +1067,34 @@ function RenameTaskDialog({
   })
 
   const mutation = useMutation({
-    mutationFn: (data: NameFormData) =>
-      Llm4AdTasksService.updateTask({
-        taskId: task.id,
-        requestBody: { name: data.name },
-      }),
-    onSuccess: () => {
+    mutationFn: async (data: NameFormData) => {
+      if (task.kind === "design") {
+        await Llm4AdAutodesignService.operate({
+          sessionId: task.id,
+          requestBody: { operation: "rename", arguments: { name: data.name } },
+        })
+      } else {
+        await Llm4AdTasksService.updateTask({
+          taskId: task.id,
+          requestBody: { name: data.name },
+        })
+      }
+    },
+    onSuccess: (_data, variables) => {
+      onRenamed(variables.name)
       showSuccessToast(t("evolution.renameSuccess"))
       onOpenChange(false)
     },
     onError: handleError.bind(showErrorToast),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: getTasksQueryKey(projectId) })
+      void queryClient.invalidateQueries({ queryKey: autoDesignKeys.all })
+      if (task.kind === "task") {
+        void queryClient.invalidateQueries({
+          queryKey: taskKeys.detail(task.id),
+        })
+        void queryClient.invalidateQueries({ queryKey: ["taskTree"] })
+      }
     },
   })
 
@@ -999,7 +1163,16 @@ export default function EvolutionTaskList() {
     setSelectedTask,
     setLeftCollapsed,
     effectiveStatus,
+    designSessionId,
   } = useEvolution()
+  const navigate = useNavigate()
+  const designs = useAutoDesignSessions(
+    projectId,
+    Boolean(projectId) && !isDemoProjectId(projectId),
+  )
+  const drafts = (designs.data?.items ?? []).filter(
+    (session) => !session.task_id,
+  )
   const queryClient = useQueryClient()
   const { showSuccessToast, showErrorToast } = useCustomToast()
   const { t } = useTranslation()
@@ -1016,12 +1189,28 @@ export default function EvolutionTaskList() {
     [tasksPages],
   )
   const total = tasksPages?.pages[0]?.total ?? 0
-  const [renameTask, setRenameTask] = useState<{
-    id: string
-    name: string
-  } | null>(null)
+  const entries: TaskListItem[] = [
+    ...drafts.map(
+      (session): TaskListItem => ({
+        id: session.id,
+        name: session.title,
+        kind: "design",
+        createdTime: session.created_time,
+      }),
+    ),
+    ...items.map(
+      (task): TaskListItem => ({
+        id: task.id,
+        name: task.name,
+        kind: "task",
+        createdTime: task.created_time,
+        task,
+      }),
+    ),
+  ]
+  const [renameTask, setRenameTask] = useState<TaskListTarget | null>(null)
   const [copyTaskId, setCopyTaskId] = useState<string | null>(null)
-  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<TaskListTarget | null>(null)
 
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -1051,22 +1240,52 @@ export default function EvolutionTaskList() {
     },
   })
 
+  const selectEntry = (entry: TaskListItem | null, replace = false) => {
+    setSelectedTask(entry?.kind === "task" ? entry.task : null)
+    void navigate({
+      to: "/evolution",
+      search:
+        entry?.kind === "design"
+          ? { projectId, designSessionId: entry.id }
+          : { projectId, taskId: entry?.id },
+      replace,
+    })
+  }
+
   const deleteMutation = useMutation({
-    mutationFn: (taskId: string) => Llm4AdTasksService.deleteTask({ taskId }),
-    onSuccess: (_data, deletedId) => {
-      showSuccessToast(t("evolution.deleteSuccess"))
-      if (selectedTask?.id === deletedId) {
-        const idx = items.findIndex((it) => it.id === deletedId)
-        const remaining = items.filter((it) => it.id !== deletedId)
-        const next =
-          remaining.length === 0
-            ? null
-            : remaining[Math.min(idx, remaining.length - 1)]
-        setSelectedTask(next)
+    mutationFn: async (target: TaskListTarget) => {
+      if (target.kind === "design") {
+        await Llm4AdPapersService.deleteWorkspace({ workspaceId: target.id })
+      } else {
+        await Llm4AdTasksService.deleteTask({ taskId: target.id })
       }
-      queryClient.invalidateQueries({
+    },
+    onSuccess: (_data, target) => {
+      showSuccessToast(t("evolution.deleteSuccess"))
+      const isSelected =
+        target.kind === "design"
+          ? designSessionId === target.id
+          : !designSessionId && selectedTask?.id === target.id
+      if (isSelected) {
+        const index = entries.findIndex(
+          (entry) => entry.kind === target.kind && entry.id === target.id,
+        )
+        const remaining = entries.filter(
+          (entry) => entry.kind !== target.kind || entry.id !== target.id,
+        )
+        selectEntry(
+          remaining[Math.min(index, remaining.length - 1)] ?? null,
+          true,
+        )
+      }
+      queryClient.removeQueries({
+        queryKey: autoDesignKeys.all,
+        predicate: (query) => query.queryKey.includes(target.id),
+      })
+      void queryClient.invalidateQueries({
         queryKey: getTasksQueryKey(projectId!),
       })
+      void queryClient.invalidateQueries({ queryKey: autoDesignKeys.all })
     },
     onError: handleError.bind(showErrorToast),
   })
@@ -1075,21 +1294,24 @@ export default function EvolutionTaskList() {
   selectedTaskRef.current = selectedTask
 
   useEffect(() => {
-    if (!projectId || isTasksLoading) return
+    if (!projectId || isTasksLoading || designSessionId) return
     const current = selectedTaskRef.current
     if (items.length > 0) {
       if (!current || current.project_id !== projectId) {
         setSelectedTask(items[0])
       } else {
         const updated = items.find((t) => t.id === current.id)
-        if (updated && updated.status !== current.status) {
+        if (
+          updated &&
+          (updated.status !== current.status || updated.name !== current.name)
+        ) {
           setSelectedTask(updated)
         }
       }
     } else {
       setSelectedTask(null)
     }
-  }, [projectId, items, isTasksLoading, setSelectedTask])
+  }, [projectId, items, isTasksLoading, setSelectedTask, designSessionId])
 
   if (!projectId) return null
 
@@ -1114,7 +1336,7 @@ export default function EvolutionTaskList() {
 
       {/* Task List */}
       <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1 scrollbar-thin">
-        {items.length === 0 ? (
+        {entries.length === 0 ? (
           isTasksLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="size-4 animate-spin text-muted-foreground/60" />
@@ -1128,151 +1350,83 @@ export default function EvolutionTaskList() {
             </div>
           )
         ) : (
-          items.map((task) => {
-            const isActive = selectedTask?.id === task.id
-            const baseStatus = task.active_status ?? task.status
-            const displayStatus = isActive ? effectiveStatus : baseStatus
+          entries.map((entry) => {
+            const isActive =
+              entry.kind === "design"
+                ? designSessionId === entry.id
+                : !designSessionId && selectedTask?.id === entry.id
+            const baseStatus =
+              entry.kind === "task"
+                ? (entry.task.active_status ?? entry.task.status)
+                : "uninitialized"
+            const displayStatus =
+              entry.kind === "task" && isActive ? effectiveStatus : baseStatus
             const status =
               statusConfig[displayStatus] ?? statusConfig.uninitialized
-            const StatusIcon = status.icon
+            const StatusIcon = entry.kind === "design" ? Bot : status.icon
+            const openEntry = () => {
+              selectEntry(entry)
+              if (window.innerWidth < AUTO_COLLAPSE_WIDTH)
+                setLeftCollapsed(true)
+            }
 
             return (
               <div
-                key={task.id}
+                key={`${entry.kind}:${entry.id}`}
                 data-tour={
-                  task.id === DEMO_TASK.id ? "demo-task-row" : undefined
+                  entry.kind === "task" && entry.id === DEMO_TASK.id
+                    ? "demo-task-row"
+                    : undefined
                 }
-                className={`group flex flex-col gap-1 px-3 py-2.5 rounded-md cursor-pointer
-                  transition-all duration-200 border
-                  ${
-                    isActive
-                      ? "bg-primary/10 border-primary/40 shadow-[0_0_12px] shadow-primary/15"
-                      : "border-transparent hover:bg-accent/60 hover:border-border/40"
-                  }`}
-                onClick={() => {
-                  setSelectedTask(task)
-                  if (window.innerWidth < AUTO_COLLAPSE_WIDTH)
-                    setLeftCollapsed(true)
-                }}
+                className={cn(
+                  "group flex flex-col gap-1 px-3 py-2.5 rounded-md transition-all duration-200 border",
+                  isActive
+                    ? "bg-primary/10 border-primary/40 shadow-[0_0_12px] shadow-primary/15"
+                    : "border-transparent hover:bg-accent/60 hover:border-border/40",
+                )}
               >
-                {/* Row 1: icon + name + badge */}
-                <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  className="flex min-w-0 items-center gap-2.5 text-left"
+                  onClick={openEntry}
+                >
                   <StatusIcon
-                    className={`size-3.5 shrink-0${displayStatus === "running" ? " animate-spin" : ""}`}
+                    className={cn(
+                      "size-3.5 shrink-0",
+                      displayStatus === "running" && "animate-spin",
+                    )}
                     style={{ color: status.color }}
                   />
                   <span
-                    className={`text-sm truncate flex-1 ${
-                      isActive ? "text-primary" : "text-muted-foreground"
-                    }`}
+                    className={cn(
+                      "text-sm truncate flex-1",
+                      isActive ? "text-primary" : "text-muted-foreground",
+                    )}
                   >
-                    {task.name}
+                    {entry.name}
                   </span>
                   <span
                     className="text-[10px] shrink-0 px-1.5 py-0.5 rounded"
                     style={{ color: status.color, background: status.bg }}
                   >
-                    {status.label}
+                    {entry.kind === "design"
+                      ? t("autodesign.designInProgress")
+                      : status.label}
                   </span>
-                </div>
-
-                {/* Row 2: created time + hover actions */}
+                </button>
                 <div className="flex items-center pl-6">
                   <span className="text-[10px] text-muted-foreground/60">
-                    {formatDateTime(task.created_time)}
+                    {formatDateTime(entry.createdTime)}
                   </span>
-                  <div
-                    className="ml-auto hidden md:flex items-center gap-0.5
-                    opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <button
-                      type="button"
-                      className="p-1 rounded hover:bg-accent/60 text-muted-foreground hover:text-primary"
-                      title={t("evolution.copyTask")}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setCopyTaskId(task.id)
-                      }}
-                    >
-                      <Copy className="size-3" />
-                    </button>
-                    <button
-                      type="button"
-                      className="p-1 rounded hover:bg-accent/60 text-muted-foreground hover:text-primary"
-                      title={t("evolution.renameTask")}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setRenameTask({ id: task.id, name: task.name })
-                      }}
-                    >
-                      <Pencil className="size-3" />
-                    </button>
-                    <button
-                      type="button"
-                      className="p-1 rounded hover:bg-red-500/20 text-muted-foreground hover:text-red-400"
-                      title={t("evolution.deleteTask")}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setDeleteTaskId(task.id)
-                      }}
-                    >
-                      <Trash2 className="size-3" />
-                    </button>
-                  </div>
-
-                  {/* Kebab menu for mobile/touch devices */}
-                  <div className="ml-auto md:hidden">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          className="p-1 rounded text-muted-foreground hover:text-primary
-                            hover:bg-accent/60"
-                          title={t("common.more")}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreVertical className="size-3" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        sideOffset={4}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <DropdownMenuItem
-                          className="text-xs cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setCopyTaskId(task.id)
-                          }}
-                        >
-                          <Copy className="size-3.5 mr-2" />
-                          {t("evolution.copyTask")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-xs cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setRenameTask({ id: task.id, name: task.name })
-                          }}
-                        >
-                          <Pencil className="size-3.5 mr-2" />
-                          {t("evolution.renameTask")}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-xs cursor-pointer text-red-400 focus:text-red-400 focus:bg-red-500/10"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setDeleteTaskId(task.id)
-                          }}
-                        >
-                          <Trash2 className="size-3.5 mr-2" />
-                          {t("evolution.deleteTask")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  <TaskListActions
+                    onCopy={
+                      entry.kind === "task"
+                        ? () => setCopyTaskId(entry.id)
+                        : undefined
+                    }
+                    onRename={() => setRenameTask(entry)}
+                    onDelete={() => setDeleteTarget(entry)}
+                  />
                 </div>
               </div>
             )
@@ -1325,6 +1479,14 @@ export default function EvolutionTaskList() {
             if (!open) setRenameTask(null)
           }}
           projectId={projectId}
+          onRenamed={(name) => {
+            if (
+              renameTask.kind === "task" &&
+              selectedTask?.id === renameTask.id
+            ) {
+              setSelectedTask({ ...selectedTask, name })
+            }
+          }}
         />
       )}
 
@@ -1365,9 +1527,9 @@ export default function EvolutionTaskList() {
 
       {/* Delete confirm dialog */}
       <Dialog
-        open={!!deleteTaskId}
+        open={!!deleteTarget}
         onOpenChange={(open) => {
-          if (!open) setDeleteTaskId(null)
+          if (!open && !deleteMutation.isPending) setDeleteTarget(null)
         }}
       >
         <DialogContent className="sm:max-w-sm">
@@ -1379,17 +1541,18 @@ export default function EvolutionTaskList() {
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">{t("common.cancel")}</Button>
+              <Button variant="outline" disabled={deleteMutation.isPending}>
+                {t("common.cancel")}
+              </Button>
             </DialogClose>
             <LoadingButton
               loading={deleteMutation.isPending}
               className="bg-red-500/20 text-red-400 border border-red-500/40 hover:bg-red-500/30"
               onClick={() => {
-                if (deleteTaskId) {
-                  deleteMutation.mutate(deleteTaskId, {
-                    onSettled: () => setDeleteTaskId(null),
+                if (deleteTarget)
+                  deleteMutation.mutate(deleteTarget, {
+                    onSuccess: () => setDeleteTarget(null),
                   })
-                }
               }}
             >
               {t("evolution.confirmDelete")}

@@ -35,6 +35,20 @@ def get_task_with_auth(db: Session, task_id: uuid.UUID, current_user: models.Use
     return task
 
 
+def require_unstarted_task(task: models.Task) -> None:
+    """Preserve executed versions by directing input changes to a new child."""
+    if task.status != TaskStatus.UNINITIALIZED or task.celery_task_id:
+        raise HTTPException(status_code=409, detail="This version has already started; create an unstarted child to change inputs or run again")
+
+
+def get_task_for_edit(db: Session, task_id: uuid.UUID, current_user: models.User) -> models.Task:
+    """Authorize and lock the version before replacing canonical task inputs."""
+    task = get_task_with_auth(db, task_id, current_user)
+    db.refresh(task, with_for_update=True)
+    require_unstarted_task(task)
+    return task
+
+
 def get_active_status(db: Session, task: models.Task) -> TaskStatus:
     """返回任务当前活跃版本的状态。
 

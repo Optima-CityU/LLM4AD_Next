@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PaperSourceKind = Literal["markdown", "latex_zip", "source_bundle"]
 PaperRunKind = Literal[
+    "autodesign",
     "proposal_formatting",
     "proposal_literature",
     "proposal_rationale",
@@ -33,8 +34,9 @@ PaperRunKind = Literal[
 ]
 PaperRunStatus = Literal["pending", "running", "ready", "failed", "cancelled"]
 PaperMetricSource = Literal["reviewer_baseline", "model_suggested", "user_defined"]
-ResearchWorkspaceMode = Literal["proposal", "manuscript", "algorithm"]
+ResearchWorkspaceMode = Literal["proposal", "manuscript", "algorithm", "autodesign"]
 ResearchWorkflowStage = Literal[
+    "autodesign",
     "formatting",
     "literature",
     "rationale",
@@ -62,7 +64,7 @@ class PaperWorkspaceCreate(BaseModel):
 
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=4_000)
-    mode: Literal["proposal", "manuscript", "algorithm"]
+    mode: ResearchWorkspaceMode
 
 
 class PaperConversationPreferences(BaseModel):
@@ -551,7 +553,7 @@ class PaperAgentRunResponse(BaseModel):
 
     id: uuid.UUID
     workspace_id: uuid.UUID
-    source_version_id: uuid.UUID
+    source_version_id: uuid.UUID | None
     run_kind: PaperRunKind
     status: PaperRunStatus
     progress: int

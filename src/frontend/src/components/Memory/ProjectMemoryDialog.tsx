@@ -1,7 +1,7 @@
 import { Database, FolderKanban } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-
+import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,17 +13,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { authFetch } from "@/utils/auth"
-
 import MemoryCardManager from "./MemoryCardManager"
 import type { MemoryConfig } from "./types"
-import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 
 export default function ProjectMemoryDialog({
   projectId,
   projectName,
+  compact = false,
 }: {
   projectId: string
   projectName?: string
+  compact?: boolean
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -32,6 +32,7 @@ export default function ProjectMemoryDialog({
   const [loadFailed, setLoadFailed] = useState(false)
   const [tourStep, setTourStep] = useState<number | null>(null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A project switch must discard the previous project's fetched state.
   useEffect(() => {
     setConfig(null)
     setLoadFailed(false)
@@ -130,7 +131,11 @@ export default function ProjectMemoryDialog({
   }
 
   return (
-    <Dialog open={open} modal={tourStep === null} onOpenChange={handleOpenChange}>
+    <Dialog
+      open={open}
+      modal={tourStep === null}
+      onOpenChange={handleOpenChange}
+    >
       <OnboardingTour
         tourId="project-memory"
         enabled={open && !isConfigLoading && !loadFailed}
@@ -165,10 +170,13 @@ export default function ProjectMemoryDialog({
           size="sm"
           className="h-9 shrink-0 gap-1.5"
           title={t("memory.projectDialog.trigger")}
+          aria-label={t("memory.projectDialog.trigger")}
           disabled={!hasProject}
         >
           <Database className="size-4" />
-          <span>{t("memory.projectDialog.trigger")}</span>
+          <span className={compact ? "hidden 2xl:inline" : undefined}>
+            {t("memory.projectDialog.trigger")}
+          </span>
         </Button>
       </DialogTrigger>
       <DialogContent
@@ -182,19 +190,30 @@ export default function ProjectMemoryDialog({
         }}
       >
         <div inert={tourStep !== null}>
-          <DialogHeader className="border-b px-5 py-4" data-tour="project-memory-scope">
+          <DialogHeader
+            className="border-b px-5 py-4"
+            data-tour="project-memory-scope"
+          >
             <div className="flex flex-wrap items-start justify-between gap-3 pr-8">
               <div className="min-w-0">
                 <DialogTitle className="flex items-center gap-2">
                   <FolderKanban className="size-4 text-primary" />
                   {t("memory.projectDialog.title")}
                 </DialogTitle>
-                <DialogDescription className="mt-1">{dialogDescription}</DialogDescription>
+                <DialogDescription className="mt-1">
+                  {dialogDescription}
+                </DialogDescription>
               </div>
               <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                <Badge variant="outline">{t("memory.projectDialog.badges.scope")}</Badge>
-                <Badge variant={systemReady ? "default" : "secondary"}>{serviceLabel}</Badge>
-                <Badge variant={bindingReady ? "outline" : "secondary"}>{bindingLabel}</Badge>
+                <Badge variant="outline">
+                  {t("memory.projectDialog.badges.scope")}
+                </Badge>
+                <Badge variant={systemReady ? "default" : "secondary"}>
+                  {serviceLabel}
+                </Badge>
+                <Badge variant={bindingReady ? "outline" : "secondary"}>
+                  {bindingLabel}
+                </Badge>
               </div>
             </div>
           </DialogHeader>

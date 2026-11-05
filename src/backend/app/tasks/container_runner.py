@@ -25,8 +25,6 @@ try:
     import task_config_crypto  # noqa: E402
 except ModuleNotFoundError:  # pragma: no cover - only used outside script mode
     from app.tasks import task_config_crypto  # type: ignore[no-redef]
-from llm4ad import LLM4AD
-from llm4ad.config import AppConfig
 from loguru import logger
 
 DATA_DIR = "/task/data"
@@ -227,6 +225,11 @@ def main() -> None:
         logger.info(f"Container starting, data_dir={DATA_DIR}")
 
         _install_dependencies(DATA_DIR)
+
+        # Import numerical packages only after installing the task requirements;
+        # otherwise replacing NumPy leaves an old module with new binary wheels.
+        from llm4ad import LLM4AD
+        from llm4ad.config import AppConfig
 
         # 依赖安装完成后清除可能含私有源凭据的环境变量，使后续用户代码及其
         # 子进程继承到的环境中不残留任何秘密（解密密钥已在上面 pop）。

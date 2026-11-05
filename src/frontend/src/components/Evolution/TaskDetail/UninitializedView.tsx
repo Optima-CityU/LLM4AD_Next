@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Info,
-  Layers,
   Loader2,
   Save,
   Settings2,
@@ -17,6 +16,7 @@ import { toast } from "sonner"
 import type { FileTreeNode, TaskResponse } from "@/client"
 import { Llm4AdTasksService } from "@/client"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
+import { Button } from "@/components/ui/button"
 import { useEvolution } from "@/hooks/useEvolution"
 
 import Stepper from "./Stepper"
@@ -191,29 +191,39 @@ export default function UninitializedView({
 
   // Auto-save config on step change via updateTask
   const saveConfig = useCallback(async () => {
-    if (Object.keys(configValues).length === 0) return
+    if (Object.keys(configValues).length === 0) return true
     try {
       await Llm4AdTasksService.updateTask({
         taskId: task.id,
         requestBody: { input_args: configValues },
       })
       queryClient.invalidateQueries({ queryKey: ["getTask", task.id] })
+      return true
     } catch {
-      // silent save
+      return false
     }
   }, [task.id, configValues, queryClient])
 
   const handleSave = useCallback(async () => {
     setIsSaving(true)
     try {
-      await saveConfig()
-      toast.success(t("evolution.saveConfigSuccess"))
-    } catch {
-      // saveConfig already handles errors silently
+      if (await saveConfig()) toast.success(t("evolution.saveConfigSuccess"))
+      else toast.error(t("autodesign.parameterActions.saveFailed"))
     } finally {
       setIsSaving(false)
     }
   }, [saveConfig, t])
+
+  const handleOpenAgent = async () => {
+    if (!onSwitchToChat || isSaving) return
+    setIsSaving(true)
+    try {
+      if (readOnly || (await saveConfig())) onSwitchToChat()
+      else toast.error(t("autodesign.parameterActions.saveFailed"))
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const goToStep = useCallback(
     (step: number) => {
@@ -493,32 +503,24 @@ export default function UninitializedView({
             <StorageUsageBadge storage={task.storage_usage} />
           )}
           {onSwitchToChat && (
-            <div
-              role="tablist"
-              aria-label={t("evolution.chatTune.modeSwitchLabel")}
-              className="inline-flex items-center gap-0.5 p-0.5 rounded-md border border-primary/40 bg-primary/5 shadow-sm"
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isSaving}
+              onClick={() => void handleOpenAgent()}
+              data-tour="task-parameter-agent"
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected="false"
-                onClick={onSwitchToChat}
-                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
-                title={t("evolution.chatTune.switchChatTitle")}
-              >
-                <Sparkles className="size-3.5" />
-                <span>{t("evolution.chatTune.modeAi")}</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected="true"
-                className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium bg-primary text-primary-foreground shadow-sm"
-              >
-                <Layers className="size-3.5" />
-                <span>{t("evolution.chatTune.modeManual")}</span>
-              </button>
-            </div>
+              {isSaving ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Sparkles data-icon="inline-start" />
+              )}
+              {t(
+                readOnly && task.status !== "uninitialized"
+                  ? "autodesign.parameterActions.analyzeResults"
+                  : "autodesign.parameterActions.askAgent",
+              )}
+            </Button>
           )}
           {!readOnly && currentStep > 1 && (
             <button

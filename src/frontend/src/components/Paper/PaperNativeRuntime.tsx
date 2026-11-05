@@ -9,22 +9,33 @@ import {
   SlidersHorizontal,
   Upload,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useTranslation } from "react-i18next"
 
-import type { PaperRuntimeSessionCreate, ProposalStageState } from "@/client"
+import type {
+  PaperConversationPreferences,
+  PaperRuntimeSessionCreate,
+  ProposalStageState,
+} from "@/client"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { Textarea } from "@/components/ui/textarea"
+import { useEmbeddedModelBinding } from "@/hooks/useEmbeddedModelBinding"
 import {
   useInvalidatePaperWorkflowStage,
   usePaperRuntimeSession,
 } from "@/hooks/usePapers"
-import { useRuntimeEvents } from "@/hooks/useRuntimeEvents"
 import {
   cssColorToHslChannels,
   observeEmbeddedTheme,
@@ -42,6 +53,10 @@ type PaperNativeRuntimeProps = {
   artifactPaths: string[]
   stageState?: ProposalStageState
   modelName: string | null
+  modelProviderId: string | null
+  contextWindowTokens: number
+  maxOutputTokens: number
+  conversationPreferences: PaperConversationPreferences
   onConfigureModel: () => void
   onConfigurePreferences: () => void
   showProjectContextPrompt?: boolean
@@ -49,6 +64,13 @@ type PaperNativeRuntimeProps = {
   onSkipProjectContext?: () => void
   onOpenArtifact: (path: string) => void
   arxivIntake?: boolean
+  onConversationRewind?: () => void
+  headerAction?: ReactNode
+  guidance?: {
+    title: string
+    description: string
+    examples: string[]
+  }
 }
 
 function ProjectContextPrompt({
@@ -120,6 +142,10 @@ export default function PaperNativeRuntime({
   artifactPaths,
   stageState,
   modelName,
+  modelProviderId,
+  contextWindowTokens,
+  maxOutputTokens,
+  conversationPreferences,
   onConfigureModel,
   onConfigurePreferences,
   showProjectContextPrompt = false,
@@ -127,11 +153,34 @@ export default function PaperNativeRuntime({
   onSkipProjectContext,
   onOpenArtifact,
   arxivIntake = false,
+  onConversationRewind,
+  headerAction,
+  guidance,
 }: PaperNativeRuntimeProps) {
   const { t, i18n } = useTranslation()
-  const [loadedSessionId, setLoadedSessionId] = useState<string | null>(null)
+  const [loadedFrameKey, setLoadedFrameKey] = useState<string | null>(null)
   const [arxivQuery, setArxivQuery] = useState("")
   const frameRef = useRef<HTMLIFrameElement>(null)
+  const modelBinding = useMemo(
+    () => ({
+      provider_id: modelProviderId ?? "",
+      model_name: modelName ?? "",
+      context_window_tokens: contextWindowTokens,
+      max_output_tokens: maxOutputTokens,
+    }),
+    [modelProviderId, modelName, contextWindowTokens, maxOutputTokens],
+  )
+  const {
+    metadata: modelMetadata,
+    selectModel,
+    modelUpdating,
+    selectPreferences,
+    preferencesUpdating,
+  } = useEmbeddedModelBinding(
+    workspaceId,
+    modelBinding,
+    conversationPreferences,
+  )
   const { mutate: invalidateStage } =
     useInvalidatePaperWorkflowStage(workspaceId)
   const session = usePaperRuntimeSession(
@@ -140,7 +189,10 @@ export default function PaperNativeRuntime({
     modelReady && prerequisiteReady,
     profileKey,
   )
-  const frameReady = session.data?.session_id === loadedSessionId
+  const frameKey = session.data
+    ? `${session.data.session_id}:${session.data.runtimeProfileKey}`
+    : null
+  const frameReady = frameKey !== null && frameKey === loadedFrameKey
   const submitArxivQuery = () => {
     const query = arxivQuery.trim()
     if (!query || !frameReady) return
@@ -153,29 +205,21 @@ export default function PaperNativeRuntime({
     )
     setArxivQuery("")
   }
-  // 模型网关健康流：会话加载后订阅，上游失败时给出可操作提示。
-  const runtimeEvents = useRuntimeEvents(
-    workspaceId,
-    Boolean(session.data && frameReady),
-  )
-  const runtimeFailure = runtimeEvents.failure
-  const gatewayReasonLabel = runtimeFailure
-    ? t(`paper.runtime.gatewayReason.${runtimeFailure.reason}`, {
-        defaultValue: runtimeFailure.reason,
-      })
-    : ""
-  const stageTitle = t(`paper.workflow.stage.${stage}`)
-  const stageDescription = t(`paper.workflow.stage.${stage}Hint`)
+  const stageTitle = guidance?.title ?? t(`paper.workflow.stage.${stage}`)
+  const stageDescription =
+    guidance?.description ?? t(`paper.workflow.stage.${stage}Hint`)
   const stageExamples = useMemo(() => {
-    const translated = t(`paper.workflow.stage.${stage}Examples`, {
-      returnObjects: true,
-    })
+    const translated =
+      guidance?.examples ??
+      t(`paper.workflow.stage.${stage}Examples`, {
+        returnObjects: true,
+      })
     return Array.isArray(translated)
       ? translated
           .filter((example): example is string => typeof example === "string")
           .slice(0, 3)
       : []
-  }, [stage, t])
+  }, [guidance?.examples, stage, t])
   const needsRevision = stageState?.status === "needs_revision"
   const showRevisionSummary = needsRevision && stage !== "autorebuttal"
   const revisionTitle = t(
@@ -213,6 +257,8 @@ export default function PaperNativeRuntime({
         stage,
         stageDescription,
         stageExamples,
+        ...modelMetadata,
+        modelUpdating: modelMetadata.modelUpdating || session.isFetching,
         tokens,
       },
       window.location.origin,
@@ -224,7 +270,13 @@ export default function PaperNativeRuntime({
     stageExamples,
     stage,
     stageTitle,
+    modelMetadata,
+    session.isFetching,
   ])
+
+  useEffect(() => {
+    if (frameReady) syncAppearance()
+  }, [frameReady, syncAppearance])
 
   useEffect(() => {
     const observer = new MutationObserver(syncAppearance)
@@ -250,9 +302,23 @@ export default function PaperNativeRuntime({
     const handleConversationRewind = (event: MessageEvent) => {
       if (
         event.origin !== window.location.origin ||
-        event.source !== frameRef.current?.contentWindow ||
-        event.data?.type !== "llm4ad:conversation-rewound"
+        event.source !== frameRef.current?.contentWindow
       ) {
+        return
+      }
+      if (event.data?.type === "llm4ad:update-model-binding") {
+        if (!modelUpdating && !preferencesUpdating)
+          selectModel(event.data.binding)
+        return
+      }
+      if (event.data?.type === "llm4ad:update-preferences") {
+        if (!modelUpdating && !preferencesUpdating)
+          selectPreferences(event.data.preferences)
+        return
+      }
+      if (event.data?.type !== "llm4ad:conversation-rewound") return
+      if (onConversationRewind) {
+        onConversationRewind()
         return
       }
       invalidateStage({
@@ -262,7 +328,16 @@ export default function PaperNativeRuntime({
     }
     window.addEventListener("message", handleConversationRewind)
     return () => window.removeEventListener("message", handleConversationRewind)
-  }, [invalidateStage, stage, stageState?.iteration])
+  }, [
+    invalidateStage,
+    onConversationRewind,
+    stage,
+    stageState?.iteration,
+    modelUpdating,
+    selectModel,
+    preferencesUpdating,
+    selectPreferences,
+  ])
 
   if (!modelReady || !prerequisiteReady) {
     return (
@@ -284,6 +359,7 @@ export default function PaperNativeRuntime({
             )}
           </p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {headerAction}
             {!modelReady && (
               <Button onClick={onConfigureModel}>
                 <Settings2 className="size-3.5" />
@@ -320,15 +396,21 @@ export default function PaperNativeRuntime({
           <p className="mt-3 text-[15px] leading-7 text-muted-foreground">
             {t("paper.runtime.unavailableDescription")}
           </p>
-          <Button
-            className="mt-4"
-            size="sm"
-            variant="outline"
-            onClick={() => void session.refetch()}
-          >
-            <RefreshCw className="size-3.5" />
-            {t("common.retry")}
-          </Button>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {headerAction}
+            <Button size="sm" variant="outline" onClick={onConfigureModel}>
+              <Settings2 className="size-3.5" />
+              {t("paper.model.configure")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void session.refetch()}
+            >
+              <RefreshCw className="size-3.5" />
+              {t("common.retry")}
+            </Button>
+          </div>
         </div>
       </div>
     )
@@ -337,19 +419,41 @@ export default function PaperNativeRuntime({
   const artifactSummary = artifactPaths.length
     ? t("paper.runtime.artifactCount", { count: artifactPaths.length })
     : t("paper.runtime.artifactPending")
+  const compactHeader = stage === "autodesign"
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <header className="flex shrink-0 flex-wrap items-start gap-4 border-b bg-card/40 px-5 py-3.5">
-        <div className="min-w-0 flex-1 border-l-2 border-primary/65 pl-3.5">
-          <h2 className="font-serif text-lg font-semibold tracking-tight text-pretty">
+      <header
+        className={cn(
+          "flex shrink-0 flex-wrap items-start gap-4 border-b bg-card/40 px-5 py-3.5",
+          compactHeader && "items-center gap-2 bg-background py-3",
+        )}
+      >
+        <div
+          className={cn(
+            "min-w-0 flex-1",
+            !compactHeader && "border-l-2 border-primary/65 pl-3.5",
+          )}
+        >
+          <h2
+            className={cn(
+              "text-lg font-semibold tracking-tight text-pretty",
+              compactHeader ? "text-base" : "font-serif",
+            )}
+          >
             {stageTitle}
           </h2>
-          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">
+          <p
+            className={cn(
+              "mt-1 max-w-2xl text-sm leading-5 text-muted-foreground",
+              compactHeader && "sr-only",
+            )}
+          >
             {stageDescription}
           </p>
         </div>
         <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
+          {headerAction}
           {showRevisionSummary && (
             <Popover>
               <PopoverTrigger asChild>
@@ -412,41 +516,22 @@ export default function PaperNativeRuntime({
               </PopoverContent>
             </Popover>
           )}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-9 max-w-56 gap-2 px-3 text-sm"
-            onClick={onConfigureModel}
-            title={modelName ?? t("paper.model.configure")}
-          >
-            <Settings2 className="size-3.5 shrink-0" />
-            <span className="truncate">
-              {modelName ?? t("paper.model.configure")}
-            </span>
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-9 gap-2 px-3 text-sm"
-            onClick={onConfigurePreferences}
-          >
-            <SlidersHorizontal className="size-3.5" />
-            {t("paper.preferences.configure")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-9 gap-2 px-3 text-sm"
-            disabled={artifactPaths.length === 0}
-            onClick={() => artifactPaths[0] && onOpenArtifact(artifactPaths[0])}
-            title={artifactPaths.join("\n") || artifactSummary}
-          >
-            <FileCheck2 className="size-3.5" />
-            {artifactSummary}
-          </Button>
+          {!compactHeader && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-9 gap-2 px-3 text-sm"
+              disabled={artifactPaths.length === 0}
+              onClick={() =>
+                artifactPaths[0] && onOpenArtifact(artifactPaths[0])
+              }
+              title={artifactPaths.join("\n") || artifactSummary}
+            >
+              <FileCheck2 className="size-3.5" />
+              {artifactSummary}
+            </Button>
+          )}
         </div>
       </header>
       {showProjectContextPrompt &&
@@ -458,24 +543,6 @@ export default function PaperNativeRuntime({
             onSkip={onSkipProjectContext}
           />
         )}
-      {runtimeFailure && (
-        <div
-          role="status"
-          className="flex shrink-0 items-center gap-3 border-b border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm"
-        >
-          <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <p className="min-w-0 flex-1 leading-5 text-foreground">
-            {t("paper.runtime.modelGatewayFailing", {
-              count: runtimeFailure.count,
-              reason: gatewayReasonLabel,
-            })}
-          </p>
-          <Button size="sm" variant="outline" onClick={onConfigureModel}>
-            <Settings2 className="size-3.5" />
-            {t("paper.runtime.changeModel")}
-          </Button>
-        </div>
-      )}
       {arxivIntake && (
         <div className="shrink-0 border-b bg-card/40 px-5 py-4">
           <div className="mx-auto max-w-3xl">
@@ -524,14 +591,14 @@ export default function PaperNativeRuntime({
         {session.data && (
           <iframe
             ref={frameRef}
-            key={session.data.session_id}
+            key={frameKey}
             src={session.data.runtime_url}
             title={t("paper.runtime.title")}
             className="h-full min-h-0 w-full border-0 bg-background"
             sandbox="allow-forms allow-same-origin allow-scripts"
             allow="clipboard-read; clipboard-write"
             onLoad={() => {
-              setLoadedSessionId(session.data.session_id)
+              setLoadedFrameKey(frameKey)
               syncAppearance()
             }}
           />

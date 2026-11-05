@@ -11,6 +11,7 @@ from typing import Any, Literal, Self
 
 from pydantic import (
     EmailStr,
+    Field,
     HttpUrl,
     PostgresDsn,
     computed_field,
@@ -259,7 +260,7 @@ class Settings(BaseSettings):
     ARL_CONTAINER_CPU_LIMIT: float = 2.0  # ARL 容器 CPU 核心数限制
     ARL_PASEO_PORT: int = 6767  # Paseo daemon 监听端口（容器内）
     ARL_DAEMON_READY_TIMEOUT: float = 120.0  # 等待 daemon /api/health 就绪的超时（秒）
-    ARL_INSTALL_READY_TIMEOUT: float = 180.0  # 等待 .aris/install.json 出现的超时（秒）
+    ARL_INSTALL_READY_TIMEOUT: float = 180.0  # 等待 .contrejour/install.json 出现的超时（秒）
     ARL_NETWORK: str = ""  # ARL 容器网络名称（空则从 PROJECT_NAME 推导 {项目名}_default）
     # 复用已在运行的容器时的探活超时（秒）。容器已 running 且 daemon 常驻，正常
     # 应毫秒级响应；给一个短超时即可区分「daemon 活着」与「容器壳还在但进程死了」，
@@ -273,10 +274,12 @@ class Settings(BaseSettings):
     # WS 连接期间刷新活跃时间的心跳间隔（秒）。须远小于空闲阈值，否则长时间
     # 静默观察 agent 输出的连接会被误判空闲而被停掉。
     ARL_SESSION_HEARTBEAT_INTERVAL: float = 60.0
-    # 轮询 Validator 验证服务（.aris/validation 下的 token + config.json）的间隔（秒）。
+    # 轮询 Validator 验证服务 /health 的间隔（秒）。
     # 用户在 Validator 侧完成多轮交互后才会拉起该服务，没有任何事件可订阅，只能轮询。
-    # 探测只是几次 stat + 一次小文件读，开销可忽略；取 5s 让按钮出现得够及时。
+    # 探测是一次同网络的 HTTP 请求，开销可忽略；取 5s 让 Worker 入口出现得够及时。
     ARL_VALIDATION_POLL_INTERVAL: float = 5.0
+    # 验证服务（Contrejour MCP）在 Validator 容器内的监听端口，经 CONTREJOUR_PORT 注入
+    ARL_VALIDATION_PORT: int = 8765
 
     # ---- 调参（chat-tune）隔离容器配置 ----
     CHAT_TUNE_CONTAINER_PORT: int = 8800              # 容器内 SSE 服务监听端口（不发布到宿主）
@@ -404,6 +407,12 @@ class Settings(BaseSettings):
     # same container is restarted when the workspace is opened again.
     PAPER_WORKSPACE_IDLE_TIMEOUT_SECONDS: int = 2 * 60 * 60
     PAPER_WORKSPACE_CLEANUP_INTERVAL_SECONDS: int = 10 * 60
+
+    # Research chats retry transport failures before forwarding response bytes.
+    PAPER_MODEL_FIRST_RESPONSE_TIMEOUT_SECONDS: float = Field(default=60, gt=0)
+    PAPER_MODEL_STREAM_IDLE_TIMEOUT_SECONDS: float = Field(default=120, gt=0)
+    PAPER_MODEL_MAX_RETRIES: int = Field(default=2, ge=0)
+    PAPER_MODEL_RETRY_DELAY_SECONDS: float = Field(default=1, ge=0)
 
     # ---- 首页资讯（GitHub Wiki 拉取） ----
     # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。

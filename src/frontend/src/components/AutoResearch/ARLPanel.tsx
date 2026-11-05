@@ -1,17 +1,12 @@
-import { ArrowRight, Check, Loader2, RotateCw, WifiOff } from "lucide-react"
+import { Loader2, RotateCw, WifiOff } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { Button } from "@/components/ui/button"
 import { ARL_ROLES, type ARLRole } from "@/hooks/useARLWebSocket"
-import { cn } from "@/lib/utils"
 
 import ARLPane from "./ARLPane"
 import { useARLSession } from "./ARLSessionContext"
-import {
-  canSyncValidation,
-  connectionStatusKey,
-  validationMessageKeys,
-} from "./arlAgentMeta"
+import { connectionStatusKey } from "./arlAgentMeta"
 
 /**
  * Left-to-right order of the panes.
@@ -32,7 +27,7 @@ const PANE_ORDER: ARLRole[] = ["validator", "worker"]
  * The socket itself is owned by {@link ARLSessionProvider}, which the
  * right-hand panels share.
  *
- * Session-wide status (connection, validation handoff) lives in the right
+ * Session-wide status (connection, validation service) lives in the right
  * column's agent status card. This view only surfaces the connection when it
  * is down, because that is the one state that blocks both panes at once.
  */
@@ -45,7 +40,6 @@ export default function ARLPanel() {
     offline,
     panes,
     validation,
-    syncValidation,
     commands,
     listCommands,
     sendMessage,
@@ -53,27 +47,15 @@ export default function ARLPanel() {
     setMode,
     respondPermission,
     respondPermissions,
+    loadOlder,
+    fetchSubagentTimeline,
+    fetchPeerTimeline,
+    resetAgent,
     reconnect,
   } = useARLSession()
 
   const agentsReady = ARL_ROLES.every((role) => panes[role].ready)
   const booting = connected && !agentsReady
-
-  // Handoff button on the seam: Validator → Worker. Same action as the one
-  // in the status card, placed where the user's eyes already are (the
-  // composers) so the cross-pane step is not missed.
-  const synced = !!validation.syncedAt
-  const syncable = canSyncValidation(validation)
-  const syncing = validation.syncing
-  const handoffTitle = syncing
-    ? t("autoResearch.arl.validationSyncing")
-    : syncable
-      ? t(
-          synced
-            ? "autoResearch.arl.validationResync"
-            : "autoResearch.arl.validationSync",
-        )
-      : t(`autoResearch.arl.${validationMessageKeys(validation).title}`)
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -123,50 +105,20 @@ export default function ARLPanel() {
             onPermission={respondPermission}
             onPermissions={respondPermissions}
             validation={validation}
-            onSyncValidation={syncValidation}
+            validatorStarted={panes.validator.items.length > 0}
+            onLoadOlder={loadOlder}
+            onFetchSubagentTimeline={fetchSubagentTimeline}
+            onFetchPeerTimeline={fetchPeerTimeline}
+            onReset={resetAgent}
           />
         ))}
 
         {/* Seam between the panes: a gradient hairline that fades out at
-            both ends, with the handoff button at composer height. */}
+            both ends. */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-y-6 left-1/2 w-px -translate-x-1/2 bg-linear-to-b from-transparent via-border to-transparent"
         />
-        <button
-          type="button"
-          onClick={syncValidation}
-          disabled={!connected || !syncable || syncing}
-          title={handoffTitle}
-          aria-label={handoffTitle}
-          className={cn(
-            "group absolute bottom-[60px] left-1/2 z-10 grid size-8 -translate-x-1/2 translate-y-1/2 place-items-center rounded-full border bg-background shadow-md transition-[color,border-color,transform,box-shadow]",
-            "enabled:hover:scale-110 enabled:active:scale-95 disabled:cursor-not-allowed",
-            synced
-              ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-              : syncable
-                ? "border-amber-500/50 text-amber-600 shadow-amber-500/20 dark:text-amber-400"
-                : "border-border/70 text-muted-foreground/40 shadow-sm",
-          )}
-        >
-          {syncing ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : synced ? (
-            <>
-              <Check
-                className="size-3.5 group-hover:hidden"
-                strokeWidth={2.5}
-              />
-              <RotateCw className="hidden size-3.5 group-hover:block" />
-            </>
-          ) : (
-            <ArrowRight className="size-3.5" />
-          )}
-          {/* Ready but never synced: ping to pull the eye over. */}
-          {syncable && !synced && !syncing && (
-            <span className="pointer-events-none absolute inset-0 animate-ping rounded-full border border-amber-500/60" />
-          )}
-        </button>
       </div>
     </div>
   )

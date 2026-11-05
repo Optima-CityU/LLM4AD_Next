@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from loguru import logger
-from sqlmodel import Session, func, select
+from sqlmodel import Session, func, or_, select
 
 from app import models
 from app.core.config import settings
@@ -274,8 +274,8 @@ def copy_task(
     current_user: models.User,
     is_child: bool = False,
     activate_child: bool = True,
-    copy_logs: bool = True,
-    inherit_reports: bool = True,
+    copy_logs: bool = False,
+    inherit_reports: bool = False,
 ) -> models.Task:
     """复制任务：名称加后缀，数据存在则在 S3 中复制一份，状态重置为 UNINITIALIZED。
 
@@ -378,11 +378,28 @@ def update_task(
     task = get_task_with_auth(db, task_id, current_user)
 
     update_data = task_update.model_dump(exclude_unset=True)
+    if "input_args" in update_data:
+        from .auth import require_unstarted_task
+
+        db.refresh(task, with_for_update=True)
+        if update_data["input_args"] != task.input_args:
+            require_unstarted_task(task)
+    inputs_changed = "input_args" in update_data and update_data["input_args"] != task.input_args
     task.sqlmodel_update(update_data)
     task.updated_time = datetime.now(UTC)
     # input_args 变更时更新版本时间
-    if "input_args" in update_data:
+    if inputs_changed:
         task.version_time = datetime.now(UTC)
+    if "name" in update_data:
+        workspaces = db.exec(
+            select(models.PaperWorkspace).join(
+                models.AutoDesignSession, models.AutoDesignSession.workspace_id == models.PaperWorkspace.id,
+            ).where(models.AutoDesignSession.task_id == task.id)
+        ).all()
+        for workspace in workspaces:
+            workspace.title = task.name
+            workspace.updated_time = task.updated_time
+            db.add(workspace)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -498,35 +515,61 @@ def get_task_tree(
 
 
 def delete_task(db: Session, task_id: uuid.UUID, current_user: models.User) -> Message:
-    """删除任务及其关联的 S3 数据。
+    """Delete a version or root family together with its Agent workspaces.
 
     Args:
-        db: 数据库会话
-        task_id: 任务 ID
-        current_user: 当前登录用户
+        db: Database session.
+        task_id: Root task or individual child version to delete.
+        current_user: Authenticated user requesting deletion.
 
     Returns:
-        成功消息
+        Confirmation after metadata deletion and resource cleanup.
 
     Raises:
-        HTTPException: 任务处于 PENDING/RUNNING 状态时（409）需先停止任务。
+        HTTPException: An affected version is still pending or running.
     """
     task = get_task_with_auth(db, task_id, current_user)
 
-    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+    targets = [task]
+    if task.parent_id is None:
+        targets = list(db.exec(select(models.Task).where(
+            models.Task.project_id == task.project_id,
+            or_(models.Task.id == task.id, models.Task.group_id == task.id),
+        )).all())
+    if any(target.status in (TaskStatus.PENDING, TaskStatus.RUNNING) for target in targets):
         raise HTTPException(
             status_code=409,
             detail="任务正在运行中，请先停止任务再删除",
         )
 
-    if task.input_data_path:
+    from app.services import paper_service
+
+    task_ids = [target.id for target in targets]
+    workspaces = db.exec(select(models.PaperWorkspace).join(
+        models.AutoDesignSession, models.AutoDesignSession.workspace_id == models.PaperWorkspace.id,
+    ).where(or_(
+        models.AutoDesignSession.task_id.in_(task_ids),
+        models.AutoDesignSession.task_id.is_(None) & models.AutoDesignSession.published_task_id.in_(task_ids),
+    ))).all()
+    jobs = [paper_service.prepare_workspace_deletion(db, workspace) for workspace in workspaces]
+    input_paths = [(target.id, target.input_data_path) for target in targets if target.input_data_path]
+    if task.group_id:
+        root = db.get(models.Task, task.group_id)
+        if root is not None and root.active_child_id in task_ids:
+            root.active_child_id = root.id
+            db.add(root)
+    for target in targets:
+        db.delete(target)
+    db.commit()
+
+    for deleted_id, input_path in input_paths:
         try:
-            keys = storage.list_objects(prefix=task.input_data_path)
+            keys = storage.list_objects(prefix=input_path)
             for key in keys:
                 storage.delete(key)
         except Exception as e:
-            logger.warning(f"清理任务 {task_id} 存储数据失败: {e}")
+            logger.warning(f"清理任务 {deleted_id} 存储数据失败: {e}")
 
-    db.delete(task)
-    db.commit()
+    for job in jobs:
+        paper_service.cleanup_workspace_deletion(db, job)
     return Message(message="任务已删除")

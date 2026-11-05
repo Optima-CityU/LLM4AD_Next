@@ -88,9 +88,9 @@ def _extract_package(source: BinaryIO, destination: Path) -> tuple[Path, list[Pa
     return root, [destination.joinpath(*path.parts) for path in files]
 
 
-def _read_config(root: Path) -> dict:
+def _read_config(root: Path, *, contents: bytes | None = None) -> dict:
     """Parse portable settings while preserving explicit tuning parameters."""
-    config = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load(contents.decode("utf-8-sig") if contents is not None else (root / "config.yaml").read_text(encoding="utf-8"))
     if not isinstance(config, dict):
         raise ValueError("config.yaml must contain a mapping")
     # Task parameters are JSON in the database; reject YAML-only values early.

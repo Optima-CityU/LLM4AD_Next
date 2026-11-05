@@ -12,32 +12,27 @@ from llm4ad.evaluator.base import BaseEvaluator, MetricType
 
 def _upper_bound(coefficients: np.ndarray) -> float:
     """Apply the benchmark's symbolic Hermite construction and root test."""
-    x = sympy.symbols("x")
+    x = sympy.symbols('x')
     degrees = np.arange(0, 4 * len(coefficients) + 4, 4)
     polynomials = [sympy.polys.orthopolys.hermite_poly(n=int(degree), x=x, polys=False) for degree in degrees]
     rational = [sympy.Rational(value) for value in coefficients]
-    partial = sum(rational[index] * polynomials[index] for index in range(len(rational)))
+    partial = sum((rational[index] * polynomials[index] for index in range(len(rational))))
     rational.append(sympy.Rational(-partial.subs(x, 0) / polynomials[-1].subs(x, 0)))
-    expression = sum(rational[index] * polynomials[index] for index in range(len(rational)))
-
+    expression = sum((rational[index] * polynomials[index] for index in range(len(rational))))
     if sympy.limit(expression, x, sympy.oo) < 0:
         expression = -expression
     if expression.subs(x, 0) != 0:
         return 0.0
     if sympy.limit(expression, x, sympy.oo) <= 0:
         return 0.0
-
-    quotient = sympy.exquo(expression, x**2)
-    largest_sign_change = 0
-    for root in sympy.real_roots(quotient, x):
-        approximate = root.eval_rational(n=200)
-        right = approximate + sympy.Rational(1e-198)
-        left = approximate - sympy.Rational(1e-198)
-        if (quotient.subs(x, right) > 0 and quotient.subs(x, left) < 0) or (
-            quotient.subs(x, right) < 0 and quotient.subs(x, left) > 0
-        ):
-            largest_sign_change = max(largest_sign_change, approximate)
-    return float(largest_sign_change**2) / (2 * math.pi)
+    quotient = sympy.exquo(expression, x ** 2)
+    # A real polynomial changes sign exactly at roots of odd multiplicity.
+    # This exact test handles Rational/radical roots as well as CRootOf, and
+    # cannot miss a sign change by sampling on the wrong side of a rounded root.
+    sign_changes = [root for root, multiplicity in sympy.Poly(quotient, x).real_roots(multiple=False)
+                    if multiplicity % 2 and root > 0]
+    largest_sign_change = max(sign_changes, default=sympy.Integer(0))
+    return float(sympy.N(largest_sign_change ** 2, 80)) / (2 * math.pi)
 
 
 @BaseEvaluator.register("alphaevolve_uncertainty_evaluator")

@@ -10,7 +10,6 @@ import {
   Database,
   Eye,
   FileText,
-  GitBranch,
   History,
   Info,
   Loader2,
@@ -70,6 +69,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useCopyBeforeRun } from "@/hooks/useCopyBeforeRun"
+import { isDemoTaskId } from "@/data/demoFixtures"
 import { useEvolution } from "@/hooks/useEvolution"
 import { useTaskLogsList } from "@/hooks/useTaskLogs"
 import { INPUT_LIMITS } from "@/lib/inputLimits"
@@ -141,7 +141,7 @@ function SectionHeader({
   )
 }
 
-type ConfirmAction = "run" | "copyRun" | "copyConfig" | "adjustChoice" | null
+type ConfirmAction = "run" | "copyRun" | "copyConfig" | null
 
 /**
  * Shared task action logic (mutations, derived status flags, confirm-dialog
@@ -160,6 +160,7 @@ function useTaskActions(task: TaskResponse) {
     setIsViewingAiBuildHistory,
     setForceManualConfigTaskId,
     updateTaskStatus,
+    setTaskView,
   } = useEvolution()
   const queryClient = useQueryClient()
   const { t } = useTranslation()
@@ -167,7 +168,9 @@ function useTaskActions(task: TaskResponse) {
 
   const { data: effectiveTask } = useQuery({
     queryKey: taskKeys.detail(effectiveTaskId!),
-    queryFn: () => Llm4AdTasksService.getTask({ taskId: effectiveTaskId! }),
+    queryFn: () => isDemoTaskId(effectiveTaskId)
+      ? Promise.resolve(task)
+      : Llm4AdTasksService.getTask({ taskId: effectiveTaskId! }),
     enabled: !!effectiveTaskId,
   })
 
@@ -184,7 +187,7 @@ function useTaskActions(task: TaskResponse) {
     queryKey: ["taskDataTree", displayTask.id],
     queryFn: () =>
       Llm4AdTasksService.getTaskDataTree({ taskId: displayTask.id }),
-    enabled: !!displayTask.id,
+    enabled: !!displayTask.id && !isDemoTaskId(displayTask.id),
   })
   const hasFile = (
     nodes: { type: string; children?: unknown[] | null }[],
@@ -280,37 +283,32 @@ function useTaskActions(task: TaskResponse) {
     },
   }
 
-  // Which secondary actions apply. Adjust: uninitialized → edit directly;
-  // otherwise prompt edit-current vs. clone-child. Running tasks expose "view".
+  // Edit unstarted versions directly; executed versions use a clean child.
   const showAdjust = (isUninitialized || canRerun) && !isConfiguring
   const showViewParams = !isConfiguring
   const showAiBuildHistory = !!displayTask.ai_built && !isConfiguring
 
   const viewParams = () => {
+    setTaskView("workbench")
+    setIsViewingAiBuildHistory(false)
     setIsConfiguring(false)
     setIsViewingParams(true)
   }
   const adjustParams = () => {
+    setTaskView("workbench")
+    setIsViewingAiBuildHistory(false)
     if (isUninitialized) {
       setIsViewingParams(false)
       setIsConfiguring(true)
     } else {
-      setConfirmAction("adjustChoice")
+      setConfirmAction("copyConfig")
     }
   }
   const openAiBuildHistory = () => {
+    setTaskView("workbench")
     setIsConfiguring(false)
     setIsViewingParams(false)
     setIsViewingAiBuildHistory(true)
-  }
-  const adjustCurrent = () => {
-    setConfirmAction(null)
-    setIsViewingParams(false)
-    setIsConfiguring(true)
-  }
-  const adjustChild = () => {
-    setConfirmAction(null)
-    copyAndConfigMutation.mutate()
   }
 
   return {
@@ -337,8 +335,6 @@ function useTaskActions(task: TaskResponse) {
     viewParams,
     adjustParams,
     openAiBuildHistory,
-    adjustCurrent,
-    adjustChild,
   }
 }
 
@@ -353,94 +349,32 @@ function TaskActionDialogs({ actions }: { actions: TaskActions }) {
     handleConfirm,
     confirmMessages,
     isActionPending,
-    copyAndConfigMutation,
-    adjustCurrent,
-    adjustChild,
   } = actions
 
   return (
-    <>
-      <AlertDialog
-        open={!!confirmAction && confirmAction !== "adjustChoice"}
-        onOpenChange={(open) => {
-          if (!open) setConfirmAction(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmAction && confirmMessages[confirmAction]?.title}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmAction && confirmMessages[confirmAction]?.desc}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm}>
-              {t("common.confirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Adjust params: two-choice dialog. Lets the user pick between editing
-       * the current task in place vs. cloning a child task to tune. */}
-      <AlertDialog
-        open={confirmAction === "adjustChoice"}
-        onOpenChange={(open) => {
-          if (!open) setConfirmAction(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("evolution.confirm.adjustChoiceTitle")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("evolution.confirm.adjustChoiceDesc")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="flex flex-col gap-2 py-1">
-            <button
-              type="button"
-              disabled={isActionPending}
-              onClick={adjustCurrent}
-              className="flex flex-col items-start gap-1 rounded-lg border-2 border-border/60 hover:border-primary/60 hover:bg-accent/40 p-3 text-left transition-colors disabled:opacity-50"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <Settings2 className="size-4 text-primary shrink-0" />
-                {t("evolution.confirm.adjustCurrentTitle")}
-              </span>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {t("evolution.confirm.adjustCurrentDesc")}
-              </p>
-            </button>
-            <button
-              type="button"
-              disabled={isActionPending}
-              onClick={adjustChild}
-              className="flex flex-col items-start gap-1 rounded-lg border-2 border-border/60 hover:border-primary/60 hover:bg-accent/40 p-3 text-left transition-colors disabled:opacity-50"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-                {copyAndConfigMutation.isPending ? (
-                  <Loader2 className="size-4 animate-spin text-primary shrink-0" />
-                ) : (
-                  <GitBranch className="size-4 text-primary shrink-0" />
-                )}
-                {t("evolution.confirm.adjustChildTitle")}
-              </span>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {t("evolution.confirm.adjustChildDesc")}
-              </p>
-            </button>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <AlertDialog
+      open={!!confirmAction}
+      onOpenChange={(open) => {
+        if (!open) setConfirmAction(null)
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {confirmAction && confirmMessages[confirmAction]?.title}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {confirmAction && confirmMessages[confirmAction]?.desc}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirm} disabled={isActionPending}>
+            {t("common.confirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -1393,6 +1327,7 @@ function CollapsedTaskActionButtons({
   const {
     isCopying,
     dataEmpty,
+    isConfiguring,
     stopMutation,
     runMutation,
     copyAndRunMutation,
@@ -1449,7 +1384,7 @@ function CollapsedTaskActionButtons({
           </span>
         </Button>
       )}
-      {isUninitialized && (
+      {isUninitialized && !isConfiguring && (
         <Button
           size="sm"
           className="h-8 gap-1.5 text-xs"

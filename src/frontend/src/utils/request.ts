@@ -6,7 +6,7 @@ import { handleUnauthorized } from "./auth"
 import { showMaintenanceOverlay } from "./maintenance"
 
 export const initOpenApi = () => {
-  OpenAPI.BASE = import.meta.env.VITE_API_URL
+  OpenAPI.BASE = import.meta.env.VITE_API_URL || ""
   OpenAPI.TOKEN = async () => {
     return localStorage.getItem("access_token") || ""
   }

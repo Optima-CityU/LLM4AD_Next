@@ -27,7 +27,6 @@ import type { ReportType, TaskResponse, TaskStatus } from "@/client"
 import { Llm4AdProjectsService, Llm4AdTasksService } from "@/client"
 import LanguageToggle from "@/components/Common/LanguageToggle"
 import ThemeToggle from "@/components/Common/ThemeToggle"
-import AIChatFloating from "@/components/Evolution/AIChatFloating"
 import ConnectionStatus from "@/components/Evolution/ConnectionStatus"
 import EvolutionRightPanel, {
   CollapsedRightPanelActions,
@@ -36,12 +35,12 @@ import EvolutionTaskList, {
   CreateTaskDialog,
   useInfiniteTasks,
 } from "@/components/Evolution/EvolutionTaskList"
-import { resolvePanelTask } from "@/components/Evolution/task-panel-task"
-import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import ShortcutsHelp from "@/components/Evolution/ShortcutsHelp"
 import TechBackground from "@/components/Evolution/TechBackground"
 import TechCorner from "@/components/Evolution/TechCorner"
 import TechPanel from "@/components/Evolution/TechPanel"
+import { resolvePanelTask } from "@/components/Evolution/task-panel-task"
+import ProjectMemoryDialog from "@/components/Memory/ProjectMemoryDialog"
 import DemoEvolutionTour from "@/components/Onboarding/DemoEvolutionTour"
 import { getProjectIcon } from "@/components/Projects/ProjectIcons"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -75,18 +74,23 @@ import {
 import type { SelectedNodeInfo } from "@/hooks/useEvolution"
 import { EvolutionContext } from "@/hooks/useEvolution"
 import { useEvolutionNodes } from "@/hooks/useEvolutionNodes"
+import { useIsMobile } from "@/hooks/useMobile"
 import { usePersistentState } from "@/hooks/usePersistentState"
 import {
   providersQueryOptions,
   userDefaultModelsQueryOptions,
 } from "@/hooks/useProviders"
 import { useTaskLogs } from "@/hooks/useTaskLogs"
+import { canUseTaskAgent, type TaskWorkbenchView } from "@/lib/autoDesign"
 import { resetTaskCaches, taskKeys } from "@/lib/task-queries"
+import { cn } from "@/lib/utils"
 import { getInitials } from "@/utils"
 import icon from "/assets/images/logo.svg"
 
 const searchSchema = z.object({
   projectId: z.string().optional(),
+  taskId: z.string().optional(),
+  designSessionId: z.string().optional(),
 })
 
 const LEFT_PANEL_WIDTH = 256
@@ -162,8 +166,9 @@ function CollapsedTaskSelector({
               border border-border/50 bg-card/60 hover:border-primary/40 hover:bg-primary/5
               transition-colors text-xs min-w-0 max-w-[260px]"
             title={selectedTask?.name}
+            aria-label={`${t("evolution.currentTask")}: ${selectedTask?.name ?? t("evolution.selectTask")}`}
           >
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80 shrink-0">
+            <span className="hidden shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/80 2xl:inline">
               {t("evolution.currentTask")}
             </span>
             {selectedTask ? (
@@ -172,12 +177,12 @@ function CollapsedTaskSelector({
                   className="size-1.5 rounded-full shrink-0"
                   style={{ backgroundColor: selectedColor }}
                 />
-                <span className="text-primary truncate max-w-[150px]">
+                <span className="hidden max-w-24 truncate text-primary xl:inline 2xl:max-w-[150px]">
                   {selectedTask.name}
                 </span>
               </>
             ) : (
-              <span className="text-muted-foreground italic">
+              <span className="hidden text-muted-foreground italic xl:inline">
                 {t("evolution.selectTask")}
               </span>
             )}
@@ -283,14 +288,17 @@ function CollapsedTaskSelector({
         </DropdownMenuContent>
       </DropdownMenu>
       {projectValid && (
-        <CreateTaskDialog
-          projectId={projectId}
-          onCreated={(task) => {
-            setSelectedTask(task)
-            if (window.innerWidth < AUTO_COLLAPSE_WIDTH) setLeftCollapsed(true)
-          }}
-          variant="iconOnly"
-        />
+        <div className="hidden sm:block">
+          <CreateTaskDialog
+            projectId={projectId}
+            onCreated={(task) => {
+              setSelectedTask(task)
+              if (window.innerWidth < AUTO_COLLAPSE_WIDTH)
+                setLeftCollapsed(true)
+            }}
+            variant="iconOnly"
+          />
+        </div>
       )}
     </div>
   )
@@ -308,7 +316,7 @@ export const Route = createFileRoute("/_layout_evolution")({
   },
 })
 
-function UserAvatarMenu() {
+function UserAvatarMenu({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -329,7 +337,12 @@ function UserAvatarMenu() {
               {getInitials(user.full_name || "U")}
             </AvatarFallback>
           </Avatar>
-          <span className="text-xs text-muted-foreground max-w-[80px] truncate hidden sm:inline">
+          <span
+            className={cn(
+              "text-xs text-muted-foreground max-w-[80px] truncate hidden",
+              compact ? "2xl:inline" : "sm:inline",
+            )}
+          >
             {user.full_name}
           </span>
         </button>
@@ -369,7 +382,8 @@ function UserAvatarMenu() {
 
 function Layout() {
   const { t } = useTranslation()
-  const { projectId } = Route.useSearch()
+  const { projectId, taskId: linkedTaskId, designSessionId } = Route.useSearch()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const isDemo = isDemoProjectId(projectId)
   const demoState = useDemoState()
@@ -446,13 +460,22 @@ function Layout() {
   // resolved active child) when the user clicks a task in the list.
   const selectedTaskRefForSetter = useRef<TaskResponse | null>(null)
   selectedTaskRefForSetter.current = selectedTask
-  const setSelectedTask = useCallback((task: TaskResponse | null) => {
-    const prev = selectedTaskRefForSetter.current
-    const prevRoot = prev ? prev.group_id || prev.id : null
-    const nextRoot = task ? task.group_id || task.id : null
-    setSelectedTaskRaw(task)
-    if (prevRoot !== nextRoot) setSelectedChildTaskId(null)
-  }, [])
+  const setSelectedTask = useCallback(
+    (task: TaskResponse | null) => {
+      if (designSessionId && task) {
+        void navigate({
+          to: "/evolution",
+          search: { projectId: task.project_id, taskId: task.id },
+        })
+      }
+      const prev = selectedTaskRefForSetter.current
+      const prevRoot = prev ? prev.group_id || prev.id : null
+      const nextRoot = task ? task.group_id || task.id : null
+      setSelectedTaskRaw(task)
+      if (prevRoot !== nextRoot) setSelectedChildTaskId(null)
+    },
+    [designSessionId, navigate],
+  )
   const [selectedNodes, setSelectedNodes] = useState<SelectedNodeInfo[]>([])
   const [leftCollapsed, setLeftCollapsed] = usePersistentState(
     "evo:leftCollapsed",
@@ -539,15 +562,56 @@ function Layout() {
   //   3. selectedTask.id — when active_child_id is null, the active version IS
   //      the root task itself.
   const effectiveTaskId = useMemo(() => {
-    if (!selectedTask) return null
+    if (designSessionId || !selectedTask) return null
     if (selectedChildTaskId) return selectedChildTaskId
     return selectedTask.active_child_id ?? selectedTask.id
-  }, [selectedChildTaskId, selectedTask])
+  }, [selectedChildTaskId, selectedTask, designSessionId])
+
+  const linkedTask = useQuery({
+    queryKey: ["getTask", linkedTaskId],
+    queryFn: () => Llm4AdTasksService.getTask({ taskId: linkedTaskId! }),
+    enabled: Boolean(linkedTaskId && projectId && !isDemo),
+  })
+  const linkedSelectionRef = useRef<string | null>(null)
+  useEffect(() => {
+    const selection = `${projectId}:${linkedTaskId}`
+    if (
+      !linkedTask.data ||
+      linkedTask.data.project_id !== projectId ||
+      linkedSelectionRef.current === selection
+    )
+      return
+    linkedSelectionRef.current = selection
+    setSelectedTask(linkedTask.data)
+    setSelectedChildTaskId(linkedTask.data.id)
+  }, [linkedTask.data, linkedTaskId, projectId, setSelectedTask])
 
   // Visualization state
   const [currentGeneration, setCurrentGeneration] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [activeTab, setActiveTab] = useState("overview")
+  const [taskViewSelection, setTaskViewSelection] = useState<{
+    taskId: string | null
+    view: TaskWorkbenchView
+  }>({ taskId: null, view: "workbench" })
+  const taskView =
+    taskViewSelection.taskId === effectiveTaskId
+      ? taskViewSelection.view
+      : "workbench"
+  const setTaskView = useCallback(
+    (view: TaskWorkbenchView) => {
+      setTaskViewSelection({ taskId: effectiveTaskId, view })
+    },
+    [effectiveTaskId],
+  )
+  const compactTaskHeader = Boolean(
+    effectiveTaskId && !isDemo && !isDemoTaskId(effectiveTaskId),
+  )
+  const isMobile = useIsMobile()
+  useEffect(() => {
+    if (isMobile && (designSessionId || taskView === "agent"))
+      setLeftCollapsed(true)
+  }, [isMobile, designSessionId, taskView, setLeftCollapsed])
   const [isConfiguring, setIsConfiguring] = useState(false)
   const [isViewingParams, setIsViewingParams] = useState(false)
   const [isViewingAiBuildHistory, setIsViewingAiBuildHistory] = useState(false)
@@ -647,6 +711,7 @@ function Layout() {
     setIsPlaying(false)
     setSelectedNodes([])
     setActiveTab("overview")
+    setTaskView("workbench")
     setIsViewingParams(false)
     setTaskMemoryInjectedSignal(null)
   }, [effectiveTaskId])
@@ -710,6 +775,30 @@ function Layout() {
 
   const effectiveStatus =
     effectiveTask?.status ?? selectedTask?.status ?? "uninitialized"
+
+  const familyId = selectedTask?.group_id ?? selectedTask?.id ?? ""
+  const family = useQuery({
+    queryKey: taskKeys.tree(familyId),
+    queryFn: () => Llm4AdTasksService.getTaskTree({ taskId: familyId }),
+    enabled: Boolean(effectiveTaskId && familyId && !isDemo),
+    refetchInterval: 5000,
+  })
+  const taskAgentAvailable =
+    !family.isError &&
+    canUseTaskAgent(effectiveTaskId, effectiveTask, family.data)
+
+  const runningFamilyTaskId = family.data
+    ? [family.data.root, ...family.data.children].find(
+        (version) => version.status === "pending" || version.status === "running",
+      )?.id
+    : undefined
+  useEffect(() => {
+    if (taskView !== "agent" || !runningFamilyTaskId) return
+    setSelectedChildTaskId(runningFamilyTaskId)
+    setIsViewingParams(false)
+    setIsConfiguring(false)
+    setTaskView("workbench")
+  }, [taskView, runningFamilyTaskId, setTaskView])
 
   // Initialize isConfiguring once per effective task: uninitialized → configuring.
   // User can subsequently toggle off via UI; we don't re-derive on every render.
@@ -826,6 +915,7 @@ function Layout() {
       value={{
         projectId,
         projectValid,
+        designSessionId,
         selectedTask,
         setSelectedTask,
         selectedChildTaskId,
@@ -845,6 +935,9 @@ function Layout() {
         logEntries,
         logLoading,
         logError,
+        taskView,
+        setTaskView,
+        taskAgentAvailable,
         activeTab,
         setActiveTab,
         isConfiguring,
@@ -906,10 +999,20 @@ function Layout() {
                 />
                 <div className="absolute inset-0 rounded-full bg-primary/20 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
               </div>
-              <span className="text-base font-bold tracking-wider landing-gradient-animated shrink-0">
+              <span
+                className={cn(
+                  "text-base font-bold tracking-wider landing-gradient-animated shrink-0",
+                  compactTaskHeader && "hidden md:inline",
+                )}
+              >
                 OpenLoopX
               </span>
-              <span className="hidden lg:inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">
+              <span
+                className={cn(
+                  "hidden text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0",
+                  compactTaskHeader ? "2xl:inline-block" : "lg:inline-block",
+                )}
+              >
                 {t("evolution.simulationTitle")}
               </span>
             </Link>
@@ -925,65 +1028,63 @@ function Layout() {
             )}
           </div>
 
-          {/* Center: project name, absolutely centered relative to viewport.
-              Width is capped so a long name never overlaps the left/right
-              header columns. When the project has a description, hovering the
-              title shows a tooltip card; otherwise it falls back to a native
-              name tooltip. */}
-          <div className="flex items-center justify-center min-w-0">
-            {projectName &&
-              (() => {
-                const Icon = getProjectIcon(project?.icon)
-                const description = project?.description?.trim()
-                const titleInner = (
-                  <>
-                    <Icon className="size-5 shrink-0 text-primary glow-primary" />
-                    <span className="text-base tracking-wide truncate text-primary glow-primary">
-                      {projectName}
-                    </span>
-                  </>
-                )
-
-                if (!description) {
-                  return (
-                    <div
-                      className="flex items-center gap-2 min-w-0 max-w-[min(38vw,440px)]"
-                      title={projectName}
-                    >
-                      {titleInner}
-                    </div>
+          {/* Keep project identity in the page header; task actions belong to their workflows. */}
+          <div className="flex min-w-0 items-center justify-center gap-3">
+            <div className="min-w-0">
+              {projectName &&
+                (() => {
+                  const Icon = getProjectIcon(project?.icon)
+                  const description = project?.description?.trim()
+                  const titleInner = (
+                    <>
+                      <Icon className="size-5 shrink-0 text-primary glow-primary" />
+                      <span className="text-base tracking-wide truncate text-primary glow-primary">
+                        {projectName}
+                      </span>
+                    </>
                   )
-                }
 
-                return (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-2 min-w-0 max-w-[min(38vw,440px)] cursor-help">
+                  if (!description) {
+                    return (
+                      <div
+                        className="flex items-center gap-2 min-w-0 max-w-[min(38vw,440px)]"
+                        title={projectName}
+                      >
                         {titleInner}
                       </div>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      sideOffset={8}
-                      className="max-w-[340px] space-y-1 px-3 py-2"
-                    >
-                      <p className="font-semibold leading-snug">
-                        {projectName}
-                      </p>
-                      <p className="text-background/80 leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">
-                        {description}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              })()}
+                    )
+                  }
+
+                  return (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-2 min-w-0 max-w-[min(38vw,440px)] cursor-help">
+                          {titleInner}
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side="bottom"
+                        sideOffset={8}
+                        className="max-w-[340px] space-y-1 px-3 py-2"
+                      >
+                        <p className="font-semibold leading-snug">
+                          {projectName}
+                        </p>
+                        <p className="text-background/80 leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">
+                          {description}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )
+                })()}
+            </div>
           </div>
 
           {/* Right: actions. Sized by content (auto column) so the buttons are
               always fully visible and never overlapped by the center title. */}
-          <div className="flex items-center justify-end gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground sm:gap-3">
             {/* Collapsed right panel → surface its task actions in the top bar */}
-            {rightCollapsed && (
+            {rightCollapsed && !designSessionId && taskView === "workbench" && (
               <>
                 <CollapsedRightPanelActions
                   task={selectedTask}
@@ -1009,16 +1110,19 @@ function Layout() {
               <ProjectMemoryDialog
                 projectId={projectId}
                 projectName={projectName}
+                compact={compactTaskHeader}
               />
             )}
             <ConnectionStatus />
-            <ShortcutsHelp />
+            <div className="hidden sm:block">
+              <ShortcutsHelp />
+            </div>
             <div className="hidden sm:flex items-center gap-3">
               <LanguageToggle />
               <ThemeToggle />
               <div className="w-px h-5 bg-border/40" />
             </div>
-            <UserAvatarMenu />
+            <UserAvatarMenu compact={compactTaskHeader} />
           </div>
         </header>
 
@@ -1072,62 +1176,63 @@ function Layout() {
           </main>
 
           {/* Right collapse toggle — click toggles, drag resizes (when expanded) */}
-          <button
-            type="button"
-            onMouseDown={handleRightControlMouseDown}
-            aria-label={
-              rightCollapsed
-                ? t("evolution.expandPanel")
-                : t("evolution.collapsePanel")
-            }
-            aria-valuemin={RIGHT_PANEL_MIN_WIDTH}
-            aria-valuemax={Math.floor(window.innerWidth / 2)}
-            aria-valuenow={rightCollapsed ? 0 : rightWidth}
-            className={`group relative z-20 shrink-0 flex items-center justify-center w-6
+          {!designSessionId && (
+            <div className={cn("contents", taskView === "agent" && "hidden")}>
+              <button
+                type="button"
+                onMouseDown={handleRightControlMouseDown}
+                aria-label={
+                  rightCollapsed
+                    ? t("evolution.expandPanel")
+                    : t("evolution.collapsePanel")
+                }
+                aria-expanded={!rightCollapsed}
+                className={`group relative z-20 shrink-0 flex items-center justify-center w-6
               hover:bg-primary/10 transition-colors text-muted-foreground hover:text-primary
               border-l border-r border-border/40 hover:border-primary/30
               ${isResizingRight ? "bg-primary/15 border-primary/50 text-primary" : ""}
               ${rightCollapsed ? "cursor-pointer" : "cursor-ew-resize"}`}
-            title={
-              rightCollapsed
-                ? t("evolution.expandPanel")
-                : t("evolution.dragOrClickRight", {
-                    defaultValue: "Drag to resize · Click to collapse",
-                  })
-            }
-          >
-            {rightCollapsed ? (
-              <ChevronLeft className="size-4" />
-            ) : (
-              <ChevronRight className="size-4" />
-            )}
-          </button>
+                title={
+                  rightCollapsed
+                    ? t("evolution.expandPanel")
+                    : t("evolution.dragOrClickRight", {
+                        defaultValue: "Drag to resize · Click to collapse",
+                      })
+                }
+              >
+                {rightCollapsed ? (
+                  <ChevronLeft className="size-4" />
+                ) : (
+                  <ChevronRight className="size-4" />
+                )}
+              </button>
 
-          {/* Right panel */}
-          <aside
-            className={`relative shrink-0 flex flex-col overflow-hidden bg-background/95 ${
-              isResizingRight
-                ? ""
-                : "transition-[width] duration-300 ease-in-out"
-            }`}
-            style={{
-              width: rightCollapsed ? "0px" : `${rightWidth}px`,
-            }}
-            {...(rightCollapsed ? { inert: true } : {})}
-          >
-            <div
-              className="h-full shrink-0"
-              style={{ width: `${rightWidth}px` }}
-            >
-              <TechPanel className="h-full flex flex-col">
-                <EvolutionRightPanel task={resolvePanelTask(selectedTask, effectiveTask)} />
-              </TechPanel>
+              {/* Right panel */}
+              <aside
+                className={`relative shrink-0 flex flex-col overflow-hidden bg-background/95 ${
+                  isResizingRight
+                    ? ""
+                    : "transition-[width] duration-300 ease-in-out"
+                }`}
+                style={{
+                  width: rightCollapsed ? "0px" : `${rightWidth}px`,
+                }}
+                {...(rightCollapsed ? { inert: true } : {})}
+              >
+                <div
+                  className="h-full shrink-0"
+                  style={{ width: `${rightWidth}px` }}
+                >
+                  <TechPanel className="h-full flex flex-col">
+                    <EvolutionRightPanel
+                      task={resolvePanelTask(selectedTask, effectiveTask)}
+                    />
+                  </TechPanel>
+                </div>
+              </aside>
             </div>
-          </aside>
+          )}
         </div>
-
-        {/* Floating AI Chat */}
-        <AIChatFloating />
 
         {/* Demo walkthrough — only renders in demo mode */}
         {isDemo && <DemoEvolutionTour />}

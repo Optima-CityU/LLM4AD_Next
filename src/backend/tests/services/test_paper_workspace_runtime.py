@@ -350,3 +350,39 @@ def test_idle_sweep_returns_zero_when_activity_cannot_be_read(monkeypatch) -> No
     harness.redis_error = True
 
     assert paper_workspace_runtime.stop_idle_paper_workspace_containers() == 0
+
+
+def test_runtime_prepares_description_only_workspace_before_start(monkeypatch, tmp_path):
+    """The unprivileged runtime can create its home without a source upload."""
+    root = tmp_path / 'new-workspace'
+    source = root / 'source'
+    source.mkdir(parents=True)
+    root.chmod(0o755)
+    source.chmod(0o755)
+
+    class Containers(_Containers):
+        def get(self, _name):
+            raise paper_workspace_runtime.NotFound('No container yet')
+
+        def run(self, *args, **kwargs):
+            assert root.stat().st_mode & 0o002
+            assert source.stat().st_mode & 0o002
+            return super().run(*args, **kwargs)
+
+    client = SimpleNamespace(containers=Containers(), images=SimpleNamespace(get=lambda _name: SimpleNamespace(id='image-id')))
+    monkeypatch.setattr(paper_workspace_runtime, 'get_docker_client', lambda: client)
+    spec = paper_workspace_runtime.PaperWorkspaceExecSpec(uuid.uuid4(), uuid.uuid4(), str(root))
+    paper_workspace_runtime.ensure_paper_workspace_container(spec)
+
+
+def test_preparing_runtime_paths_preserves_readonly_review_evidence(tmp_path):
+    """Only managed writable paths change; immutable reviews stay read-only."""
+    root = tmp_path / 'workspace'
+    evidence = root / '.research/reviews/reviewer.md'
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text('Original review')
+    evidence.chmod(0o444)
+    paper_workspace_runtime.prepare_paper_workspace_path(root)
+    paper_workspace_runtime.prepare_paper_workspace_path(root / 'source')
+    assert evidence.read_text() == 'Original review'
+    assert evidence.stat().st_mode & 0o777 == 0o444

@@ -55,6 +55,10 @@ import {
 import TemplatePicker from "./TemplatePicker"
 import { SectionLabel } from "./tech"
 
+/** 新建弹框的实验类型选项：两个常规画像 + ARL 会话。 */
+const EXPERIMENT_OPTIONS = [...PROFILE_OPTIONS, "arl"] as const
+type ExperimentOption = (typeof EXPERIMENT_OPTIONS)[number]
+
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -93,6 +97,18 @@ export default function CreateSessionDialog({
   const [workerModel, setWorkerModel] = useState("")
   const [validatorProviderId, setValidatorProviderId] = useState("")
   const [validatorModel, setValidatorModel] = useState("")
+  // 界面上的「实验类型」三选一由 sessionType + profile 两个 state 派生，
+  // 不新增字段：ARL 只改 sessionType，另外两项只改 profile。
+  const experiment: ExperimentOption =
+    sessionType === "arl" ? "arl" : profile
+  const selectExperiment = (opt: ExperimentOption) => {
+    if (opt === "arl") {
+      setSessionType("arl")
+      return
+    }
+    setSessionType("normal")
+    setProfile(opt)
+  }
   /**
    * 课题模板浮层的挂载节点（DialogContent 内部的绝对定位层）。存 state 而非 ref：
    * 浮层需要「节点出现后」才渲染，ref 变化不会触发重渲染，挂载点会一直是 null。
@@ -178,23 +194,15 @@ export default function CreateSessionDialog({
         return
       }
 
-      // Worker 必需（不允许 default/mock）
+      // Worker 供应商必需（不允许 default/mock）；模型留空则用供应商默认模型
       if (!workerProviderId || workerProviderId === "default" || workerProviderId === "mock") {
         toast.error(t("autoResearch.create.arlWorkerProviderRequired"))
         return
       }
-      if (!workerModel?.trim()) {
-        toast.error(t("autoResearch.create.arlWorkerModelRequired"))
-        return
-      }
 
-      // Validator 必需（不允许 default/mock）
+      // Validator 供应商必需（不允许 default/mock）；模型留空则用供应商默认模型
       if (!validatorProviderId || validatorProviderId === "default" || validatorProviderId === "mock") {
         toast.error(t("autoResearch.create.arlValidatorProviderRequired"))
-        return
-      }
-      if (!validatorModel?.trim()) {
-        toast.error(t("autoResearch.create.arlValidatorModelRequired"))
         return
       }
     } else {
@@ -370,101 +378,74 @@ export default function CreateSessionDialog({
         </DialogHeader>
 
         <div className="-mx-1 space-y-2.5 overflow-y-auto px-1 py-2">
-          {/* 1. 会话类型（第一个字段） */}
-          <Field label={t("autoResearch.create.sessionTypeLabel")}>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setSessionType("normal")}
-                className={cn(
-                  "group relative rounded-lg px-3 py-2.5 text-left transition-all",
-                  "border-l border-r border-border/60",
-                  sessionType === "normal"
-                    ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
-                    : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  <div
+          {/* 1. 实验类型（第一个字段）：llm4ad / autoresearch / ARL 三选一。
+              只是把原来的「会话类型」和「实验类型」两排合成一排，选中项仍然
+              落回 sessionType + profile 两个 state，请求参数与之前完全一致。 */}
+          <Field label={t("autoResearch.create.profileLabel")}>
+            <div className="grid grid-cols-3 gap-3">
+              {EXPERIMENT_OPTIONS.map((opt) => {
+                const selected = experiment === opt
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => selectExperiment(opt)}
                     className={cn(
-                      "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
-                      sessionType === "normal"
-                        ? "border-primary bg-primary"
-                        : "border-muted-foreground/40 bg-background",
+                      "group relative rounded-lg px-3 py-2.5 text-left transition-all",
+                      "border-l border-r border-border/60",
+                      selected
+                        ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
+                        : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
                     )}
                   >
-                    {sessionType === "normal" && (
-                      <div className="size-full flex items-center justify-center">
-                        <div className="size-1.5 rounded-full bg-primary-foreground" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <span
+                    <div className="flex items-start gap-2">
+                      {/* 选中指示器 */}
+                      <div
                         className={cn(
-                          "text-sm font-medium transition-colors",
-                          sessionType === "normal"
-                            ? "text-foreground"
-                            : "text-foreground/80 group-hover:text-foreground",
+                          "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
+                          selected
+                            ? "border-primary bg-primary"
+                            : "border-muted-foreground/40 bg-background",
                         )}
                       >
-                        {t("autoResearch.create.sessionTypeNormal")}
-                      </span>
-                      <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                        {t("autoResearch.create.recommendedMark")}
-                      </span>
-                    </div>
-                    <div className="text-xs leading-snug text-muted-foreground">
-                      {t("autoResearch.create.sessionTypeNormalDesc")}
-                    </div>
-                  </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSessionType("arl")}
-                className={cn(
-                  "group relative rounded-lg px-3 py-2.5 text-left transition-all",
-                  "border-l border-r border-border/60",
-                  sessionType === "arl"
-                    ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
-                    : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  <div
-                    className={cn(
-                      "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
-                      sessionType === "arl"
-                        ? "border-primary bg-primary"
-                        : "border-muted-foreground/40 bg-background",
-                    )}
-                  >
-                    {sessionType === "arl" && (
-                      <div className="size-full flex items-center justify-center">
-                        <div className="size-1.5 rounded-full bg-primary-foreground" />
+                        {selected && (
+                          <div className="size-full flex items-center justify-center">
+                            <div className="size-1.5 rounded-full bg-primary-foreground" />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <span
-                      className={cn(
-                        "text-sm font-medium transition-colors",
-                        sessionType === "arl"
-                          ? "text-foreground"
-                          : "text-foreground/80 group-hover:text-foreground",
-                      )}
-                    >
-                      {t("autoResearch.create.sessionTypeArl")}
-                    </span>
-                    <div className="text-xs leading-snug text-muted-foreground">
-                      {t("autoResearch.create.sessionTypeArlDesc")}
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "text-sm font-medium transition-colors",
+                              selected
+                                ? "text-foreground"
+                                : "text-foreground/80 group-hover:text-foreground",
+                            )}
+                          >
+                            {opt === "arl"
+                              ? t("autoResearch.create.sessionTypeArl")
+                              : t(`autoResearch.profile.${opt}`)}
+                          </span>
+                          {/* llm4ad 是默认推荐画像：与 autoresearch 走原生 ARC 不同，
+                              它把 9-13 阶段接到 LLM4AD 演化引擎上，是这里的主推路径。 */}
+                          {opt === "algorithm_evolution" && (
+                            <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                              {t("autoResearch.create.recommendedMark")}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs leading-snug text-muted-foreground">
+                          {opt === "arl"
+                            ? t("autoResearch.create.sessionTypeArlDesc")
+                            : t(`autoResearch.profileDesc.${opt}`)}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              </button>
+                  </button>
+                )
+              })}
             </div>
           </Field>
 
@@ -588,68 +569,6 @@ export default function CreateSessionDialog({
             </div>
           </Field>
 
-          <Field label={t("autoResearch.create.profileLabel")}>
-            <div className="grid grid-cols-2 gap-3">
-              {PROFILE_OPTIONS.map((p) => {
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setProfile(p as ResearchProfile)}
-                    className={cn(
-                      "group relative rounded-lg px-3 py-2.5 text-left transition-all",
-                      "border-l border-r border-border/60",
-                      profile === p
-                        ? "border-t border-b border-primary/60 bg-primary/10 shadow-sm"
-                        : "border-t border-b border-border/60 hover:border-primary/60 hover:bg-primary/5",
-                    )}
-                  >
-                    <div className="flex items-start gap-2">
-                      {/* 选中指示器 */}
-                      <div
-                        className={cn(
-                          "mt-0.5 size-3.5 shrink-0 rounded-full border-2 transition-all",
-                          profile === p
-                            ? "border-primary bg-primary"
-                            : "border-muted-foreground/40 bg-background",
-                        )}
-                      >
-                        {profile === p && (
-                          <div className="size-full flex items-center justify-center">
-                            <div className="size-1.5 rounded-full bg-primary-foreground" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0 space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={cn(
-                              "text-sm font-medium transition-colors",
-                              profile === p
-                                ? "text-foreground"
-                                : "text-foreground/80 group-hover:text-foreground",
-                            )}
-                          >
-                            {t(`autoResearch.profile.${p}`)}
-                          </span>
-                          {/* llm4ad 是默认推荐画像：与 autoresearch 走原生 ARC 不同，
-                              它把 9-13 阶段接到 LLM4AD 演化引擎上，是这里的主推路径。 */}
-                          {p === "algorithm_evolution" && (
-                            <span className="shrink-0 rounded bg-amber-500/15 px-1 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                              {t("autoResearch.create.recommendedMark")}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs leading-snug text-muted-foreground">
-                          {t(`autoResearch.profileDesc.${p}`)}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </Field>
 
           {/* 指标名与优化方向本来就描述同一个指标（叫什么 + 越大越好还是越小越好），
               拆成两块要上下读两遍，合成一行：左边填名字，右边选方向，一眼是一件事。

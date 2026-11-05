@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
@@ -32,11 +34,7 @@ from app.models.user import User
 from app.services.arl.daemon_client import PaseoDaemonClient
 from app.services.arl.runtime import daemon_endpoints, get_arl_runtime
 from app.services.arl.types import ARLDaemonConfig
-from app.services.arl.validation import (
-    ValidationStatus,
-    probe_validation,
-    sync_to_worker,
-)
+from app.services.arl.validation import ValidationStatus, probe_validation
 from app.tasks.research_runner.config_builder import resolve_provider_for_arc
 
 router = APIRouter(prefix="/research")
@@ -57,6 +55,12 @@ ROLES = ("worker", "validator")
 #: 历史回填时每个 agent 最多拉取的条目数（daemon 侧上限为 200）
 HISTORY_LIMIT = 200
 
+#: 向上翻页时每页拉取的条目数。比首屏小一些，滚到顶部时加载更快
+HISTORY_PAGE_LIMIT = 100
+
+#: 两次因缺口重拉历史之间的最短间隔（秒），见 :func:`_reconcile_event`
+RESYNC_COOLDOWN_SECONDS = 5.0
+
 #: 前端允许发送的消息类型。白名单之外一律回 error 帧，不做静默忽略。
 KNOWN_MESSAGE_TYPES = frozenset(
     {
@@ -67,9 +71,12 @@ KNOWN_MESSAGE_TYPES = frozenset(
         "file_write",
         "file_list",
         "permission_response",
-        "sync_validation",
         "list_commands",
         "fs_request",
+        "timeline_fetch_older",
+        "subagent_timeline",
+        "peer_timeline",
+        "agent_reset",
     }
 )
 
@@ -153,6 +160,31 @@ async def _push(
     await websocket.send_json(frame)
 
 
+async def _fail_and_close(
+    websocket: WebSocket, session_id: uuid.UUID, message: str
+) -> None:
+    """Report a setup failure to the frontend, then close the socket.
+
+    The frontend may already be gone (e.g. a page refresh during a container
+    cold start). Starlette raises ``WebSocketDisconnect`` on the first send to
+    a dead peer and ``RuntimeError`` on every send after that, so both are
+    expected here and must not escape to the ASGI layer.
+
+    Args:
+        websocket: Frontend connection.
+        session_id: Session the socket belongs to, for logging.
+        message: Error text shown to the user.
+    """
+    try:
+        await _push(websocket, "error", {"message": message})
+        await websocket.close()
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        logger.info(
+            f"🔌 [Session {session_id}] Frontend already gone, "
+            f"dropped error {message!r}: {exc!r}"
+        )
+
+
 def _agent_title(role: str) -> str:
     """本角色创建的 agent 使用的标题。
 
@@ -194,14 +226,15 @@ def _pick_agent_entry(
 
     刻意不做严格的状态过滤：daemon 对归档/状态字段的全部取值尚未确认，
     过滤写窄了会导致每次连接都新建 agent，容器里越堆越多。故匹配不到标题
-    时仍回落到首个条目，与原行为一致。
+    时仍回落到首个条目，与原行为一致。唯一的例外是带 :data:`PEER_AGENT_LABEL`
+    的 agent：它们是验证流程派生的同级 agent，绝不能被当成主 agent 复用。
 
     Args:
         entries: ``fetch_agents`` 返回的目录条目
         role: 容器角色（worker / validator）
 
     Returns:
-        该复用的条目；目录为空时返回 None。
+        该复用的条目；目录为空（或只剩同级 agent）时返回 None。
     """
     if not entries:
         return None
@@ -211,13 +244,142 @@ def _pick_agent_entry(
         if _agent_snapshot(entry).get("title") == expected:
             return entry
 
+    candidates = [e for e in entries if not _has_peer_label(_agent_snapshot(e))]
+    if not candidates:
+        logger.info(
+            "ℹ️ [{}] agent 目录里只有 {} 个同级 agent，新建主 agent", role, len(entries)
+        )
+        return None
     logger.warning(
         "⚠️ [{}] agent 目录里没有标题为 {} 的条目（共 {} 个），回落到首个",
         role,
         expected,
         len(entries),
     )
-    return entries[0]
+    return candidates[0]
+
+
+#: ARIS 验证流程用 ``paseo run --label aris.role=...`` 派生的 agent 带这个标签。
+#: 它们与主 agent 同级（``parentAgentId`` 为空），不会出现在 provider 子 agent
+#: 列表里，只能从 agent 目录里按标签挑出来。
+PEER_AGENT_LABEL = "aris.role"
+
+
+def _has_peer_label(agent: dict[str, Any]) -> bool:
+    """agent 是否带 :data:`PEER_AGENT_LABEL` 标签。
+
+    Args:
+        agent: agent 快照
+
+    Returns:
+        True 表示由验证流程派生
+    """
+    labels = agent.get("labels")
+    return isinstance(labels, dict) and bool(labels.get(PEER_AGENT_LABEL))
+
+
+def _is_peer_agent(agent: dict[str, Any], main_agent_id: str | None) -> bool:
+    """agent 是否应作为同级 agent 展示在子任务栏里。
+
+    Args:
+        agent: agent 快照
+        main_agent_id: 该角色当前的主 agent ID
+
+    Returns:
+        带标签、不是主 agent、未归档且非 daemon 内部 agent 时为 True
+    """
+    return (
+        _has_peer_label(agent)
+        and agent.get("id") != main_agent_id
+        and not agent.get("archivedAt")
+        and not agent.get("internal")
+    )
+
+
+def _peer_summary(agent: dict[str, Any]) -> dict[str, Any]:
+    """把同级 agent 快照压成子任务栏需要的字段（沿用 daemon 的字段名）。
+
+    前端用同一个归一化函数处理这里的摘要和 ``agent_update`` 里的完整快照，
+    故字段名保持 daemon 原样。
+
+    Args:
+        agent: agent 快照
+
+    Returns:
+        ``peer_agent_list`` 帧里的单个条目
+    """
+    return {
+        "id": agent.get("id"),
+        "title": agent.get("title"),
+        "status": agent.get("status"),
+        "labels": agent.get("labels") or {},
+        "createdAt": agent.get("createdAt"),
+        "updatedAt": agent.get("updatedAt"),
+    }
+
+
+#: codex 找不到线程 rollout 文件时的报错片段：线程从没收到过消息就不会落盘，
+#: 这种 agent 永远恢复不了，只能换一个新的。
+UNRECOVERABLE_THREAD_ERROR = "no rollout found"
+
+
+async def _revive_closed_agent(
+    client: PaseoDaemonClient, role: str, agent: dict[str, Any]
+) -> dict[str, Any] | None:
+    """让容器重启后处于 ``closed`` 的 agent 重新可用。
+
+    daemon 重启后磁盘上的 agent 先以 ``closed`` 出现，provider 会话要另行
+    恢复。claude 一般能自动恢复；codex 只在第一条消息后才写线程的 rollout
+    文件，从没收到过消息的 agent 重启后就再也恢复不了（``no rollout found
+    for thread id``）。这种 agent 发消息没反应、停止报 ``agent not found``，
+    复用它会让整个面板失灵。
+
+    故先显式 ``refresh`` 一次。只有报错明确是 provider 会话已不存在
+    （:data:`UNRECOVERABLE_THREAD_ERROR`）才归档它，由调用方新建一个；这种
+    agent 本来就无法继续对话，归档只是把它从目录里挪走，记录仍在磁盘上。
+    其他失败（超时等）可能是暂时的，原样复用，下次连接再试。
+
+    Args:
+        client: 已完成握手的 daemon 客户端
+        role: 容器角色（worker / validator）
+        agent: 目录里挑中的 agent 快照
+
+    Returns:
+        可用的 agent 快照；恢复失败时返回 None，表示应新建。
+    """
+    agent_id = agent.get("id")
+    if agent.get("status") != "closed" or not agent_id:
+        return agent
+
+    logger.info("🔄 [{}] agent {} 处于 closed，尝试重新加载", role, agent_id)
+    try:
+        await client.refresh_agent(agent_id)
+        entries = await client.fetch_agents(subscribe=False)
+    except Exception as e:
+        if UNRECOVERABLE_THREAD_ERROR not in str(e):
+            # 超时等可能是暂时性的失败：不归档，免得把一段还能恢复的对话挪走。
+            # 沿用旧行为复用它，下次连接再试
+            logger.warning("⚠️ [{}] agent {} 重新加载失败，暂按原样复用: {}", role, agent_id, e)
+            return agent
+        logger.warning(
+            "⚠️ [{}] agent {} 的 provider 会话已不存在，归档后新建: {}", role, agent_id, e
+        )
+        try:
+            await client.archive_agent(agent_id)
+        except Exception as archive_err:
+            # 归档失败也照样新建：旧 agent 反正用不了，面板至少能恢复工作
+            logger.warning("⚠️ [{}] 归档 agent {} 失败: {}", role, agent_id, archive_err)
+        return None
+
+    for entry in entries:
+        snapshot = _agent_snapshot(entry)
+        if snapshot.get("id") == agent_id:
+            logger.info(
+                "✅ [{}] agent {} 已重新加载: status={}", role, agent_id, snapshot.get("status")
+            )
+            return snapshot
+    agent["status"] = "idle"
+    return agent
 
 
 async def _ensure_agent(
@@ -249,7 +411,10 @@ async def _ensure_agent(
     agents = await client.fetch_agents(subscribe=True)
     entry = _pick_agent_entry(agents, role)
     if entry is not None:
-        agent = _agent_snapshot(entry)
+        agent = await _revive_closed_agent(client, role, _agent_snapshot(entry))
+    else:
+        agent = None
+    if agent is not None:
         agent_id = agent.get("id")
         logger.info(
             "♻️ [{}] 复用已有 agent: id={}, status={}, mode={}",
@@ -344,47 +509,433 @@ def _persist_role_mode(session_id: uuid.UUID, role: str, mode_id: str) -> None:
         logger.warning("⚠️ [{}] 保存权限模式失败: {}", role, e)
 
 
-async def _backfill_history(
+@dataclass
+class _RoleStream:
+    """一个角色的实时事件流，以及它与已推给前端的历史之间的对账位置。
+
+    ``epoch`` / ``end_seq`` 是前端手里最新一条时间线行的位置（来自最近一次
+    历史回填，或之后放行的实时事件）。daemon 给每条时间线行一个按 agent
+    连续递增的 ``seq``，据此即可判断一条实时事件是重复（已在历史里）、
+    正好接上，还是中间缺了一段——与原生客户端
+    （``session-stream-reducers.ts`` 的 ``classifySessionTimelineSeq``）一致。
+
+    Attributes:
+        role: 容器角色（worker / validator）
+        client: 该角色的 daemon 客户端
+        agent_id: 当前主 agent；``agent_reset`` 后会被换掉
+        queue: :meth:`PaseoDaemonClient.open_event_queue` 返回的事件队列
+        epoch: 对账位置所在的时间线 epoch；``None`` 表示尚无基准
+        end_seq: 对账位置的 seq
+    """
+
+    role: str
+    client: PaseoDaemonClient
+    agent_id: str
+    queue: asyncio.Queue
+    epoch: str | None = None
+    end_seq: int | None = None
+    #: 上一次因缺口重拉历史的时间（``time.monotonic``）
+    last_resync: float = 0.0
+
+    def reset_cursor(self) -> None:
+        """丢掉对账基准，下一条时间线事件直接作为新起点。"""
+        self.epoch = None
+        self.end_seq = None
+
+
+def _end_cursor(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """取一页历史最新一条的位置。
+
+    优先用 daemon 给的 ``endCursor``；没有时按末条的 ``seqEnd`` 拼出来。
+
+    Args:
+        payload: daemon 的 ``fetch_agent_timeline_response`` payload
+
+    Returns:
+        ``{"epoch": str, "seq": int}``；历史为空时返回 None。
+    """
+    end = payload.get("endCursor")
+    if (
+        isinstance(end, dict)
+        and isinstance(end.get("epoch"), str)
+        and isinstance(end.get("seq"), int)
+    ):
+        return {"epoch": end["epoch"], "seq": end["seq"]}
+    entries = payload.get("entries") or []
+    epoch = payload.get("epoch")
+    if entries and isinstance(epoch, str):
+        last = entries[-1].get("seqEnd")
+        if isinstance(last, int):
+            return {"epoch": epoch, "seq": last}
+    return None
+
+
+async def _sync_history(websocket: WebSocket, stream: _RoleStream) -> bool:
+    """拉一次 tail 历史推给前端（整体替换），并把对账基准移到历史末尾。
+
+    用在三处：建连回填（daemon 只推订阅之后的增量，不补发历史）、实时
+    事件出现缺口、daemon 重建了时间线。历史条目与实时事件的 item 结构
+    一致，只是已在服务端折叠好。
+
+    Args:
+        websocket: 前端连接
+        stream: 目标角色的事件流
+
+    Returns:
+        是否成功推送。失败时对账基准保持不变。
+    """
+    if not stream.agent_id:
+        return False
+    try:
+        payload = await stream.client.fetch_agent_timeline(
+            stream.agent_id, limit=HISTORY_LIMIT
+        )
+    except Exception as e:
+        # 历史拉取失败不该阻断实时流，前端至少还能拿到后续增量
+        logger.warning(f"⚠️ [{stream.role}] 拉取历史失败，跳过回填: {e}")
+        return False
+
+    cursor = _end_cursor(payload)
+    stream.epoch = cursor["epoch"] if cursor else None
+    stream.end_seq = cursor["seq"] if cursor else None
+    await _push(
+        websocket,
+        "timeline_history",
+        _timeline_page(stream.agent_id, payload),
+        role=stream.role,
+    )
+    return True
+
+
+def _classify_seq(stream: _RoleStream, epoch: str, seq: int) -> str:
+    """判断一条实时时间线事件与对账基准的关系。
+
+    Args:
+        stream: 目标角色的事件流
+        epoch: 事件的 epoch
+        seq: 事件的 seq
+
+    Returns:
+        ``accept``（接上或尚无基准）、``drop``（已在历史里）、
+        ``resync``（缺了一段，或 epoch 已变）。
+    """
+    if stream.epoch is None or stream.end_seq is None:
+        return "accept"
+    if epoch != stream.epoch:
+        return "resync"
+    if seq <= stream.end_seq:
+        return "drop"
+    if seq == stream.end_seq + 1:
+        return "accept"
+    return "resync"
+
+
+async def _reconcile_event(
+    websocket: WebSocket, stream: _RoleStream, event: Any
+) -> bool:
+    """按 seq 对账一条 daemon 推送，决定是否转发给前端。
+
+    只管当前主 agent 的时间线事件；其余推送（回合状态、权限、子 agent、
+    其他 agent）原样放行，由前端按 ``agentId`` 自行过滤。
+
+    缺口与 epoch 变化都靠重拉 tail 历史修复，而不是按游标补拉增量：
+    增量页里折叠好的条目可能与前端已有的流式片段重叠，拼接会叠出重复
+    文本；整体替换则一定正确，代价只是向上翻页加载过的更早消息需要
+    重新翻。
+
+    Args:
+        websocket: 前端连接
+        stream: 目标角色的事件流
+        event: daemon 推送的 session 内层消息
+
+    Returns:
+        True 表示转发给前端。
+    """
+    if not isinstance(event, dict):
+        return True
+    msg_type = event.get("type")
+    payload = event.get("payload")
+    if not isinstance(payload, dict) or payload.get("agentId") != stream.agent_id:
+        return True
+
+    if msg_type == "agent.timeline.replacement":
+        # 时间线被重建（例如 rewind）：旧 epoch 的一切都作废，以新历史为准。
+        # 这一帧本身不转发，前端收到的是随后的 timeline_history。
+        logger.info(f"🔁 [{stream.role}] daemon 重建了时间线，重拉历史")
+        await _sync_history(websocket, stream)
+        return False
+
+    inner = payload.get("event")
+    if msg_type != "agent_stream" or not isinstance(inner, dict):
+        return True
+    if inner.get("type") != "timeline":
+        return True
+    seq = payload.get("seq")
+    epoch = payload.get("epoch")
+    # bool 是 int 的子类，单独排除；没带位置的事件无从对账，直接放行
+    if not isinstance(seq, int) or isinstance(seq, bool) or not isinstance(epoch, str):
+        return True
+
+    decision = _classify_seq(stream, epoch, seq)
+    if decision == "drop":
+        return False
+    if (
+        decision == "resync"
+        and time.monotonic() - stream.last_resync < RESYNC_COOLDOWN_SECONDS
+    ):
+        # 冷却期内不再重拉：以这条事件为新基准继续。若 daemon 的 seq 出现
+        # 系统性跳号，没有这道闸每条事件都会触发一次整页历史拉取
+        decision = "accept"
+    if decision == "resync":
+        stream.last_resync = time.monotonic()
+        logger.warning(
+            "⚠️ [{}] 时间线不连续（基准 {}#{}，收到 {}#{}），重拉历史",
+            stream.role,
+            stream.epoch,
+            stream.end_seq,
+            epoch,
+            seq,
+        )
+        await _sync_history(websocket, stream)
+        # 重拉成功时这条事件通常已含在新历史里；重拉失败或基准仍对不上时
+        # 宁可放行并以它为新基准，也不能让后续事件全被当作缺口反复重拉。
+        if _classify_seq(stream, epoch, seq) == "drop":
+            return False
+    stream.epoch = epoch
+    stream.end_seq = seq
+    return True
+
+
+def _timeline_page(agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """把 ``fetch_agent_timeline`` 的响应压成推给前端的一页历史。
+
+    ``start_cursor`` 是这一页最早一条的位置，前端向上翻页时原样带回来，
+    作为下一次 ``direction=before`` 请求的游标。daemon 没给 ``startCursor``
+    时按首条的 ``seqStart`` 自行拼出来。
+
+    Args:
+        agent_id: 目标 agent ID
+        payload: daemon 的 ``fetch_agent_timeline_response`` payload
+
+    Returns:
+        ``timeline_history`` / ``timeline_older`` 帧的数据部分。
+    """
+    entries = payload.get("entries") or []
+    epoch = payload.get("epoch")
+    start_cursor = payload.get("startCursor")
+    if not start_cursor and entries and epoch:
+        first_seq = entries[0].get("seqStart")
+        if isinstance(first_seq, int):
+            start_cursor = {"epoch": epoch, "seq": first_seq}
+    agent = payload.get("agent") if isinstance(payload.get("agent"), dict) else {}
+    return {
+        "agent_id": agent_id,
+        "entries": entries,
+        "has_older": bool(payload.get("hasOlder")),
+        "epoch": epoch,
+        "start_cursor": start_cursor,
+        # 回合仍在进行时，末条文本还会被后续实时片段续写，前端据此保持它
+        # 处于流式状态，而不是另起一行
+        "active_turn": bool(agent.get("activeTurn")),
+    }
+
+
+def _parse_cursor(raw: Any) -> dict[str, Any]:
+    """校验前端带回来的时间线游标。
+
+    Args:
+        raw: 前端 payload 里的 ``cursor``
+
+    Returns:
+        ``{"epoch": str, "seq": int}``
+
+    Raises:
+        ValueError: 游标缺字段或类型不对。
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("cursor is required")
+    epoch = raw.get("epoch")
+    seq = raw.get("seq")
+    if not isinstance(epoch, str) or not epoch:
+        raise ValueError("cursor.epoch must be a non-empty string")
+    # bool 是 int 的子类，单独排除
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        raise ValueError("cursor.seq must be a non-negative integer")
+    return {"epoch": epoch, "seq": seq}
+
+
+async def _push_subagents(
     websocket: WebSocket,
     client: PaseoDaemonClient,
     role: str,
     agent_id: str,
 ) -> None:
-    """把容器里已有的聊天记录回填给前端。
+    """把某个 agent 当前的子 agent 列表推给前端（刷新/重连后恢复子任务栏）。
 
-    Paseo daemon 只在订阅后推送增量事件，不会补发历史，所以刷新页面
-    或重连后面板会是空的。这里主动拉一次 tail 历史。
-
-    历史条目与实时 ``agent_stream`` 事件里的 item 结构一致，只是服务端
-    已折叠好（``collapsed``），前端按 ``agentId`` 分流即可。
+    之后的增量由 daemon 的 ``agent.provider_subagents.update`` 推送，经
+    ``timeline_event`` 原样转发。列表拉取失败只记日志：子任务栏是辅助信息，
+    不该拦住主对话。
 
     Args:
         websocket: 前端连接
         client: 已握手的 daemon 客户端
         role: 容器角色（worker / validator）
-        agent_id: 目标 agent ID
+        agent_id: 父 agent ID
     """
     if not agent_id:
         return
-
     try:
-        payload = await client.fetch_agent_timeline(agent_id, limit=HISTORY_LIMIT)
+        subagents = await client.list_provider_subagents(agent_id)
     except Exception as e:
-        # 历史拉取失败不该阻断实时流，前端至少还能拿到后续增量
-        logger.warning(f"⚠️ [{role}] 拉取历史失败，跳过回填: {e}")
+        logger.warning(f"⚠️ [{role}] 拉取子 agent 列表失败，跳过: {e}")
         return
-
     await _push(
         websocket,
-        "timeline_history",
-        {
-            "agent_id": agent_id,
-            "entries": payload.get("entries") or [],
-            "has_older": bool(payload.get("hasOlder")),
-            "epoch": payload.get("epoch"),
-        },
+        "subagent_list",
+        {"agent_id": agent_id, "subagents": subagents},
         role=role,
     )
+
+
+async def _push_peer_agents(
+    websocket: WebSocket,
+    client: PaseoDaemonClient,
+    role: str,
+    agent_id: str,
+) -> None:
+    """把容器里的同级 agent 列表推给前端（见 :data:`PEER_AGENT_LABEL`）。
+
+    之后的状态变化由已订阅的 ``agent_update`` 推送，经 ``timeline_event``
+    原样转发，前端据此增量更新。拉取失败只记日志：这是辅助信息，不该拦住
+    主对话。
+
+    Args:
+        websocket: 前端连接
+        client: 已握手的 daemon 客户端
+        role: 容器角色（worker / validator）
+        agent_id: 该角色的主 agent ID（排除用）
+    """
+    try:
+        entries = await client.fetch_agents(subscribe=False)
+    except Exception as e:
+        logger.warning(f"⚠️ [{role}] 拉取同级 agent 列表失败，跳过: {e}")
+        return
+    peers = [
+        _peer_summary(agent)
+        for agent in (_agent_snapshot(entry) for entry in entries)
+        if _is_peer_agent(agent, agent_id)
+    ]
+    await _push(
+        websocket,
+        "peer_agent_list",
+        {"agent_id": agent_id, "peers": peers},
+        role=role,
+    )
+
+
+async def _fetch_peer_timeline(
+    client: PaseoDaemonClient, main_agent_id: str, peer_id: str
+) -> dict[str, Any]:
+    """拉一个同级 agent 的 tail 历史，只允许已加载在内存里的 agent。
+
+    daemon 处理 ``fetch_agent_timeline_request`` 时会先 ``ensureAgentLoaded``：
+    不在内存里的 agent（容器重启后显示为 ``closed``）会被从磁盘恢复、重新
+    拉起一个 provider 进程。仅为查看就唤醒它不划算，故先查目录确认状态。
+    前端也会置灰 ``closed`` 卡片，这里是兜底，防止过期状态或手工构造的帧。
+
+    Args:
+        client: 该角色的 daemon 客户端
+        main_agent_id: 该角色的主 agent ID
+        peer_id: 要查看的同级 agent ID
+
+    Returns:
+        daemon 的 ``fetch_agent_timeline_response`` payload
+
+    Raises:
+        ValueError: 目标不是同级 agent，或已不在内存里。
+    """
+    entries = await client.fetch_agents(subscribe=False)
+    agent = next(
+        (
+            snapshot
+            for snapshot in (_agent_snapshot(entry) for entry in entries)
+            if snapshot.get("id") == peer_id
+        ),
+        None,
+    )
+    if agent is None or not _is_peer_agent(agent, main_agent_id):
+        raise ValueError(f"not a peer agent: {peer_id}")
+    if agent.get("status") == "closed":
+        raise ValueError("agent is closed; its transcript is unavailable")
+    return await client.fetch_agent_timeline(peer_id, limit=HISTORY_LIMIT)
+
+
+def _load_role_mode(session_id: uuid.UUID, role: str) -> str:
+    """读出会话里该角色当前的权限模式（阻塞，供 ``to_thread`` 调用）。
+
+    每次切换模式都会经 :func:`_persist_role_mode` 写回，所以这里拿到的
+    就是用户最近一次的选择；没存过则用角色默认值。
+
+    Args:
+        session_id: 会话 ID
+        role: 容器角色（worker / validator）
+
+    Returns:
+        模式 ID
+    """
+    try:
+        with Session(engine) as db:
+            session = db.get(ResearchSession, session_id)
+            arl_config = (session.arl_config or {}) if session else {}
+            mode_id = (arl_config.get(role) or {}).get("mode_id")
+            if mode_id:
+                return str(mode_id)
+    except Exception as e:
+        logger.warning("⚠️ [{}] 读取权限模式失败，用默认值: {}", role, e)
+    return ROLE_DEFAULT_MODES[role]
+
+
+async def _reset_agent(
+    *,
+    session_id: uuid.UUID,
+    client: PaseoDaemonClient,
+    role: str,
+    agent_id: str,
+    model: str | None,
+) -> dict[str, Any]:
+    """``/clear``：归档当前 agent，再用同样的 provider / 模型 / 模式新建一个。
+
+    与原生 UI 的 ``/clear`` 一致（归档旧 agent、开一个空白会话）。容器和
+    工作区文件不动，只是对话上下文从零开始。先归档再新建：归档失败时
+    旧 agent 原样保留，会话不会落到「两个同名 agent」的状态。
+
+    Args:
+        session_id: 会话 ID（读权限模式用）
+        client: 该角色的 daemon 客户端
+        role: 容器角色（worker / validator）
+        agent_id: 要归档的 agent ID
+        model: 新 agent 使用的模型名
+
+    Returns:
+        新 agent 的快照。
+    """
+    mode_id = await asyncio.to_thread(_load_role_mode, session_id, role)
+    await client.archive_agent(agent_id)
+    agent = await client.create_agent(
+        provider=ROLE_PROVIDERS.get(role, "claude"),
+        title=_agent_title(role),
+        model=model,
+        mode_id=mode_id,
+    )
+    logger.info(
+        "🧹 [{}] 已重置 agent: old={}, new={}, model={}, mode={}",
+        role,
+        agent_id,
+        agent.get("id"),
+        model,
+        mode_id,
+    )
+    return agent
 
 
 def _load_session_context(
@@ -447,10 +998,10 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
     """轮询 Validator 的验证服务状态，变化时推给前端的 worker 角色。
 
     验证服务是用户在 Validator 侧交互后由 agent 自行拉起的，daemon 不感知，
-    没有事件可订阅，只能轮询文件（见 :mod:`app.services.arl.validation`）。
+    没有事件可订阅，只能轮询它的 ``/health``（见 :mod:`app.services.arl.validation`）。
 
     只在**前端可见状态发生变化**时推帧：每轮都推会把前端的消息处理和日志
-    刷满，而用户关心的只有「按钮该不该出现」。首轮无论如何推一次，让界面
+    刷满，而用户关心的只有「Worker 能不能开始」。首轮无论如何推一次，让界面
     在连接建立后立刻有确定状态，而不是空着等第一次变化。
 
     探测异常只记日志不外抛：这是个辅助功能，它失败不该把整条会话拆掉
@@ -466,11 +1017,10 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
             status = await asyncio.to_thread(probe_validation, str(session_id))
             if not status.same_state_as(last):
                 logger.info(
-                    "🔎 [Session {}] 验证服务状态变化: configured={}, url={}, has_task={}, reason={}",
+                    "🔎 [Session {}] 验证服务状态变化: configured={}, url={}, reason={}",
                     session_id,
                     status.configured,
                     status.url,
-                    status.has_task,
                     status.reason,
                 )
                 if status.detail:
@@ -534,7 +1084,8 @@ async def arl_websocket(
     {
       "type": "agent_send" | "agent_cancel" | "set_agent_mode"
             | "file_read" | "file_write" | "file_list" | "permission_response"
-            | "list_commands" | "fs_request",
+            | "list_commands" | "fs_request" | "timeline_fetch_older"
+            | "subagent_timeline" | "peer_timeline" | "agent_reset",
       "role": "worker" | "validator",
       "payload": { ... }
     }
@@ -545,7 +1096,9 @@ async def arl_websocket(
     {
       "type": "timeline_history" | "timeline_event" | "agents_ready"
             | "agent_cancel_result" | "agent_mode_result" | "command_list"
-            | "fs_result"
+            | "fs_result" | "timeline_older" | "subagent_list"
+            | "subagent_timeline" | "agent_reset_result"
+            | "peer_agent_list" | "peer_timeline"
             | "file_content" | "file_list" | "error" | "system",
       "role": "worker" | "validator",
       "data": { ... }
@@ -597,20 +1150,18 @@ async def arl_websocket(
     #    停着就原地拉起、在跑就复用，返回前一定按真实可达路径探活过。
     if not arl_config:
         logger.error(f"❌ [Session {session_id}] ARL config not found in database")
-        await _push(websocket, "error", {"message": "ARL config not found"})
-        await websocket.close()
+        await _fail_and_close(websocket, session_id, "ARL config not found")
         return
 
     # 没有可用凭证时容器起来也调不通大模型，提前失败
     missing = [role for role in ROLES if not _credential(role_providers[role])]
     if missing:
         logger.error(f"❌ [Session {session_id}] No usable credential for: {missing}")
-        await _push(
+        await _fail_and_close(
             websocket,
-            "error",
-            {"message": f"Incomplete ARL config: no credential for {', '.join(missing)}"},
+            session_id,
+            f"Incomplete ARL config: no credential for {', '.join(missing)}",
         )
-        await websocket.close()
         return
 
     runtime = get_arl_runtime()
@@ -644,10 +1195,14 @@ async def arl_websocket(
             folder_id=folder_id,
         )
         await _push(websocket, "system", {"message": "ARL session ready"})
+    except WebSocketDisconnect:
+        # Expected on a refresh during cold start: the containers stay up and
+        # the replacement connection, queued on the session lock, reuses them.
+        logger.info(f"🔌 [Session {session_id}] Frontend left during session setup")
+        return
     except Exception as e:
         logger.error(f"❌ [Session {session_id}] Failed to prepare ARL session: {e}")
-        await _push(websocket, "error", {"message": f"Failed to start: {e}"})
-        await websocket.close()
+        await _fail_and_close(websocket, session_id, f"Failed to start: {e}")
         return
 
     # 4. 连接两个 daemon
@@ -683,6 +1238,11 @@ async def arl_websocket(
         await validator_client.connect()
         logger.info("✅ [Validator] Connected successfully")
 
+        # 在订阅（_ensure_agent 里的 fetch_agents）之前就开始缓存推送，
+        # 覆盖「订阅已生效、转发任务还没启动」的窗口，见 open_event_queue
+        worker_queue = worker_client.open_event_queue()
+        validator_queue = validator_client.open_event_queue()
+
         # 确保两个容器里都有 agent，并订阅其事件
         # model 用会话 provider 解析出的 primary_model，否则新建的 agent
         # 会退回 CLI 默认模型，和会话里选的模型不一致。
@@ -716,10 +1276,19 @@ async def arl_websocket(
                 f"worker={worker_agent_id!r}, validator={validator_agent_id!r}"
             )
 
+        streams = {
+            "worker": _RoleStream("worker", worker_client, worker_agent_id, worker_queue),
+            "validator": _RoleStream(
+                "validator", validator_client, validator_agent_id, validator_queue
+            ),
+        }
+
         # 先把已有的聊天记录回填给前端（刷新/重连后靠它恢复消息列表），
         # 再广播 agents_ready，避免前端在 agent id 就绪前先收到历史。
-        await _backfill_history(websocket, worker_client, "worker", worker_agent_id)
-        await _backfill_history(websocket, validator_client, "validator", validator_agent_id)
+        # 这期间到达的推送都在队列里，转发任务启动后按 seq 对账：已含在
+        # 历史里的丢掉，其余照常转发。
+        await _sync_history(websocket, streams["worker"])
+        await _sync_history(websocket, streams["validator"])
 
         await websocket.send_json({
             "type": "agents_ready",
@@ -728,6 +1297,13 @@ async def arl_websocket(
                 "validator": _agent_summary(validator_agent),
             },
         })
+
+        # 子任务栏的初始列表，增量随后经 timeline_event 到达
+        await _push_subagents(websocket, worker_client, "worker", worker_agent_id)
+        await _push_subagents(websocket, validator_client, "validator", validator_agent_id)
+        # 验证流程派生的同级 agent，同样进子任务栏
+        await _push_peer_agents(websocket, worker_client, "worker", worker_agent_id)
+        await _push_peer_agents(websocket, validator_client, "validator", validator_agent_id)
 
         logger.info(f"✅ [Session {session_id}] All daemons connected, starting message forwarding...")
 
@@ -741,15 +1317,26 @@ async def arl_websocket(
                     validator_client,
                     worker_agent_id,
                     validator_agent_id,
+                    agent_models={
+                        role: role_providers[role]["primary_model"] for role in ROLES
+                    },
+                    streams=streams,
                 ),
                 name="arl-frontend",
             ),
             asyncio.create_task(
-                _forward_timeline(websocket, worker_client, "worker"),
+                _forward_timeline(
+                    websocket, worker_client, "worker", stream=streams["worker"]
+                ),
                 name="arl-timeline-worker",
             ),
             asyncio.create_task(
-                _forward_timeline(websocket, validator_client, "validator"),
+                _forward_timeline(
+                    websocket,
+                    validator_client,
+                    "validator",
+                    stream=streams["validator"],
+                ),
                 name="arl-timeline-validator",
             ),
             asyncio.create_task(_heartbeat(session_id), name="arl-heartbeat"),
@@ -816,6 +1403,8 @@ async def _forward_from_frontend(
     validator_client: PaseoDaemonClient,
     worker_agent_id: str,
     validator_agent_id: str,
+    agent_models: dict[str, str | None] | None = None,
+    streams: dict[str, _RoleStream] | None = None,
 ):
     """转发前端消息到对应的 daemon。
 
@@ -823,7 +1412,20 @@ async def _forward_from_frontend(
     ``error`` 给前端，**不中断连接**：一个畸形帧或一次失败的文件读取不该
     把两个容器的会话一起拆掉。只有前端断开或 ``receive_json`` 本身失效
     （连接已不可用）才退出循环。
+
+    Args:
+        websocket: 前端连接
+        session_id: 会话 ID
+        worker_client: Worker 容器的 daemon 客户端
+        validator_client: Validator 容器的 daemon 客户端
+        worker_agent_id: Worker 当前的 agent ID
+        validator_agent_id: Validator 当前的 agent ID
+        agent_models: 每个角色新建 agent 时用的模型（``agent_reset`` 用）
+        streams: 每个角色的事件流；``agent_reset`` 换掉 agent 后要同步过去
     """
+    # ``agent_reset`` 会换掉某个角色的 agent，后续消息必须投给新 agent
+    agent_ids = {"worker": worker_agent_id, "validator": validator_agent_id}
+    models = agent_models or {}
     try:
         while True:
             try:
@@ -876,8 +1478,41 @@ async def _forward_from_frontend(
 
             is_worker = role == "worker"
             client = worker_client if is_worker else validator_client
-            agent_id = worker_agent_id if is_worker else validator_agent_id
+            agent_id = agent_ids[role]
             target_name = role
+
+            if msg_type == "agent_reset":
+                # 有专门的结果帧；成功后切换本角色的 agent ID
+                try:
+                    agent = await _reset_agent(
+                        session_id=session_id,
+                        client=client,
+                        role=role,
+                        agent_id=agent_id,
+                        model=models.get(role),
+                    )
+                    agent_ids[role] = agent["id"]
+                    if streams and role in streams:
+                        # 新 agent 的时间线从零开始，旧基准已无意义
+                        streams[role].agent_id = agent["id"]
+                        streams[role].reset_cursor()
+                    await _push(
+                        websocket,
+                        "agent_reset_result",
+                        {"ok": True, "agent": _agent_summary(agent)},
+                        role=role,
+                    )
+                except WebSocketDisconnect:
+                    raise
+                except Exception as e:
+                    logger.warning(f"⚠️ [Backend → {target_name}] Reset agent failed: {e}")
+                    await _push(
+                        websocket,
+                        "agent_reset_result",
+                        {"ok": False, "message": str(e)},
+                        role=role,
+                    )
+                continue
 
             try:
                 await _handle_frontend_message(
@@ -1022,63 +1657,6 @@ async def _handle_frontend_message(
                 role=role,
             )
 
-    elif msg_type == "sync_validation":
-        # 把 Validator 的 task.md 与验证服务凭据同步到 Worker 工作目录。
-        # 有专门的结果帧，失败就地处理——前端靠它解开按钮 loading 状态。
-        logger.info(f"📤 [Backend → {target_name}] 同步验证产物到 Worker")
-        try:
-            # 现场重新探测，不信前端传来的状态：用户可能在按钮出现后
-            # 又把 Validator 的服务停了，拿旧状态写进连接信息文件会让
-            # Worker 带着一个连不上的地址干跑一整轮
-            status_now = await asyncio.to_thread(probe_validation, str(session_id))
-            if not status_now.configured:
-                await _push(
-                    websocket,
-                    "validation_sync_result",
-                    {
-                        "ok": False,
-                        "message": status_now.reason or "验证服务尚未就绪",
-                    },
-                    role="worker",
-                )
-                # 顺带把最新状态推回去，让界面与实际一致
-                await _push(
-                    websocket,
-                    "validation_status",
-                    status_now.to_payload(),
-                    role="worker",
-                )
-                return
-            if not status_now.has_task:
-                await _push(
-                    websocket,
-                    "validation_sync_result",
-                    {"ok": False, "message": "Validator 尚未生成 task.md"},
-                    role="worker",
-                )
-                return
-
-            result = await asyncio.to_thread(
-                sync_to_worker, str(session_id), status_now
-            )
-            await _push(
-                websocket,
-                "validation_sync_result",
-                {"ok": True, **result},
-                role="worker",
-            )
-            logger.info(f"✅ [Backend → {target_name}] 验证产物同步完成: {result}")
-        except Exception as e:
-            logger.warning(
-                f"⚠️ [Backend → {target_name}] 验证产物同步失败: {e}", exc_info=True
-            )
-            await _push(
-                websocket,
-                "validation_sync_result",
-                {"ok": False, "message": str(e)},
-                role="worker",
-            )
-
     elif msg_type == "list_commands":
         # 斜杠命令补全（前端输入框键入 "/" 时触发）。有专门的结果帧，
         # 失败就地处理——前端靠它结束菜单的加载状态，不弹通用 error toast。
@@ -1127,6 +1705,98 @@ async def _handle_frontend_message(
                 websocket,
                 "fs_result",
                 {"request_id": request_id, "op": op, "ok": False, "message": str(e)},
+                role=role,
+            )
+
+    elif msg_type == "timeline_fetch_older":
+        # 向上翻页：从前端当前最早一条往前再取一页。有专门的结果帧，失败
+        # 就地处理——前端靠它结束顶部的加载状态。
+        try:
+            cursor = _parse_cursor(payload.get("cursor"))
+            page = await client.fetch_agent_timeline(
+                target_agent,
+                limit=HISTORY_PAGE_LIMIT,
+                direction="before",
+                cursor=cursor,
+            )
+            await _push(
+                websocket,
+                "timeline_older",
+                {
+                    "ok": True,
+                    # 游标失效说明 daemon 已重建时间线，前端据此丢弃这一页
+                    "stale": bool(page.get("staleCursor") or page.get("reset")),
+                    **_timeline_page(target_agent, page),
+                },
+                role=role,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [Backend → {target_name}] Fetch older history failed: {e}")
+            await _push(
+                websocket,
+                "timeline_older",
+                {"ok": False, "agent_id": target_agent, "message": str(e)},
+                role=role,
+            )
+
+    elif msg_type == "subagent_timeline":
+        # 前端点开某个子任务时按需拉它的对话。有专门的结果帧，失败就地处理。
+        subagent_id = payload.get("subagent_id")
+        try:
+            if not isinstance(subagent_id, str) or not subagent_id:
+                raise ValueError("subagent_id is required")
+            page = await client.fetch_subagent_timeline(target_agent, subagent_id)
+            await _push(
+                websocket,
+                "subagent_timeline",
+                {
+                    "ok": True,
+                    "agent_id": target_agent,
+                    "subagent_id": subagent_id,
+                    "rows": page.get("rows") or [],
+                    "has_older": bool(page.get("hasOlder")),
+                },
+                role=role,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [Backend → {target_name}] Fetch subagent timeline failed: {e}")
+            await _push(
+                websocket,
+                "subagent_timeline",
+                {
+                    "ok": False,
+                    "agent_id": target_agent,
+                    "subagent_id": subagent_id,
+                    "message": str(e),
+                },
+                role=role,
+            )
+
+    elif msg_type == "peer_timeline":
+        # 前端点开某个同级 agent 时按需拉它的对话。复用 subagent_timeline 的
+        # 结果帧结构（rows），失败就地处理。
+        peer_id = payload.get("peer_id")
+        try:
+            if not isinstance(peer_id, str) or not peer_id:
+                raise ValueError("peer_id is required")
+            page = await _fetch_peer_timeline(client, agent_id, peer_id)
+            await _push(
+                websocket,
+                "peer_timeline",
+                {
+                    "ok": True,
+                    "peer_id": peer_id,
+                    "rows": page.get("entries") or [],
+                    "has_older": bool(page.get("hasOlder")),
+                },
+                role=role,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [Backend → {target_name}] Fetch peer timeline failed: {e}")
+            await _push(
+                websocket,
+                "peer_timeline",
+                {"ok": False, "peer_id": peer_id, "message": str(e)},
                 role=role,
             )
 
@@ -1222,15 +1892,30 @@ async def _forward_timeline(
     websocket: WebSocket,
     client: PaseoDaemonClient,
     role: str,
+    stream: _RoleStream | None = None,
 ):
     """订阅 daemon 的 agent 事件并转发给前端。
 
     事件是 Paseo 的 session 内层消息，形如
     ``{"type": "agent_stream", "payload": {...}}``。
+
+    Args:
+        websocket: 前端连接
+        client: 该角色的 daemon 客户端
+        role: 容器角色（worker / validator）
+        stream: 建连时就开始缓存的事件流。给了就从它的队列消费并按 seq
+            对账（见 :func:`_reconcile_event`）；不给则从此刻起订阅、不对账。
     """
     try:
         logger.info(f"📡 [{role}] Started timeline subscription")
-        async for event in client.subscribe_timeline_async():
+        events = (
+            client.iter_event_queue(stream.queue)
+            if stream is not None
+            else client.subscribe_timeline_async()
+        )
+        async for event in events:
+            if stream is not None and not await _reconcile_event(websocket, stream, event):
+                continue
             event_type = event.get("type", "unknown") if isinstance(event, dict) else "unknown"
             logger.debug(f"📨 [{role} → Frontend] Timeline event: type={event_type}")
             await websocket.send_json({

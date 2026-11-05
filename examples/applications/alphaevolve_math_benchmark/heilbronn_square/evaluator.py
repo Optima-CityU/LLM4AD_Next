@@ -1,4 +1,4 @@
-"""Evaluator for the 13-point unit-square Heilbronn problem."""
+"""Evaluator for the 13-point convex-region Heilbronn problem."""
 
 import itertools
 import math
@@ -9,6 +9,9 @@ from _shared.runtime import JsonBenchmarkEvaluator, finite_array
 from scipy.spatial import ConvexHull
 
 from llm4ad.evaluator.base import BaseEvaluator
+
+
+GEOMETRY_TOL = 1e-12
 
 
 def _minimum_area(points: np.ndarray) -> float:
@@ -22,18 +25,19 @@ def _minimum_area(points: np.ndarray) -> float:
 
 @BaseEvaluator.register("alphaevolve_heilbronn_square_evaluator")
 class HeilbronnSquareEvaluator(JsonBenchmarkEvaluator):
-    """Evaluate normalized minimum triangle area for 13 square points."""
+    """Evaluate minimum triangle area normalized by convex-hull area."""
 
     metric_name = "best_area_ratio"
     target_value = 0.0309
     score_mode = "objective_over_target"
     registry_key = "alphaevolve_heilbronn_square_evaluator"
+    # Keep the legacy result identifier; the scored region is the convex hull.
     benchmark_key = "heilbronn_13_points_unit_square"
 
     def measure(self, payload: dict[str, Any]) -> float:
         """Validate points and return minimum triangle area per hull area."""
         points = finite_array(payload, "points", (13, 2))
-        if np.any(points < 0) or np.any(points > 1):
+        if np.any(points < -GEOMETRY_TOL) or np.any(points > 1 + GEOMETRY_TOL):
             raise ValueError("points must lie inside the unit square")
         for first, second in itertools.combinations(range(len(points)), 2):
             difference = points[first] - points[second]

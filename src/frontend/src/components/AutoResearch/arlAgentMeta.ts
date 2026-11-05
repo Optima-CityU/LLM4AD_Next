@@ -1,7 +1,9 @@
+import type { TFunction } from "i18next"
 import type { IconType } from "react-icons"
 import { SiClaude, SiOpenai } from "react-icons/si"
 
 import type {
+  ARLAgentMode,
   ARLRole,
   ARLRoleState,
   ARLValidationState,
@@ -90,6 +92,11 @@ export function describeAgent(
   const ready = connected && state.ready
   const booting = (connected || connecting) && !state.ready
   const running = state.turnStatus === "running"
+  // The main turn can end while subagents it spawned keep going (e.g. ones
+  // created through MCP). Shown as its own status rather than "idle", but
+  // `running` stays tied to the main turn: that is what the stop button
+  // interrupts, same as the native client.
+  const subagentsRunning = state.subagents.some((s) => s.status === "running")
 
   const statusKey = booting
     ? "booting"
@@ -99,17 +106,19 @@ export function describeAgent(
         ? "statusRunning"
         : state.turnStatus === "failed"
           ? "statusFailed"
-          : state.turnStatus === "canceled"
-            ? "statusCanceled"
-            : state.turnStatus === "completed"
-              ? "statusCompleted"
-              : state.agentStatus === "running"
-                ? "statusRunning"
-                : "statusIdle"
+          : subagentsRunning
+            ? "statusSubagentsRunning"
+            : state.turnStatus === "canceled"
+              ? "statusCanceled"
+              : state.turnStatus === "completed"
+                ? "statusCompleted"
+                : state.agentStatus === "running"
+                  ? "statusRunning"
+                  : "statusIdle"
 
   const tone: ARLAgentTone = booting
     ? "booting"
-    : running || state.agentStatus === "running"
+    : running || subagentsRunning || state.agentStatus === "running"
       ? "running"
       : state.turnStatus === "failed"
         ? "failed"
@@ -137,32 +146,64 @@ export function connectionStatusKey(status: string, booting: boolean): string {
 }
 
 /**
- * Whether the validation handoff can run: it needs both an address to write
- * into the Worker's `CLAUDE.md` and a `task.md` to copy.
+ * Whether the Worker can start: the Validator's validation service answers
+ * its health check. The connection details are already in the Worker's
+ * `CLAUDE.md`, so there is nothing to hand over.
  *
- * @param state - Validation handoff state.
- * @returns True when the sync action is meaningful.
+ * @param state - Validation service state.
+ * @returns True when the service is up.
  */
-export function canSyncValidation(state: ARLValidationState): boolean {
-  return state.configured && state.hasTask
+export function isValidationReady(state: ARLValidationState): boolean {
+  return state.configured
 }
 
 /**
- * i18n keys (under `autoResearch.arl.`) for the handoff headline and hint.
+ * i18n key of the hint shown while the validation service is not ready.
  *
- * The two halves land at different times, so each missing piece gets its own
- * message.
+ * Before the Validator conversation starts the hint points at its start
+ * button; once it has started that button is gone, so the hint says to
+ * finish the setup in the conversation instead.
  *
- * @param state - Validation handoff state.
- * @returns The title and hint keys.
+ * @param validatorStarted - Whether the Validator pane has any messages.
+ * @returns Full i18n key.
  */
-export function validationMessageKeys(state: ARLValidationState): {
-  title: string
-  hint: string
-} {
-  if (!state.configured)
-    return { title: "validationMissing", hint: "validationMissingHint" }
-  if (!state.hasTask)
-    return { title: "validationNoTask", hint: "validationNoTaskHint" }
-  return { title: "validationReady", hint: "validationReadyHint" }
+export function workerWaitKey(validatorStarted: boolean): string {
+  return validatorStarted
+    ? "autoResearch.arl.guide.workerWaitBusy"
+    : "autoResearch.arl.guide.workerWait"
+}
+
+/**
+ * Paseo provider per role. Mode IDs are only unique within a provider (both
+ * Claude and Codex have an `auto` mode), so translations are keyed by it.
+ */
+const ARL_ROLE_PROVIDER: Record<ARLRole, string> = {
+  validator: "codex",
+  worker: "claude",
+}
+
+/**
+ * Localized label and description of a permission mode.
+ *
+ * The daemon only ships English text from Paseo's provider manifest. Known
+ * modes are translated by provider + mode ID; unknown ones (e.g. a mode a
+ * newer Paseo adds) fall back to the daemon's text.
+ *
+ * @param t - i18next translate function.
+ * @param role - Container role, which determines the provider.
+ * @param mode - Mode as reported by the daemon.
+ * @returns Display-ready label and optional description.
+ */
+export function modeText(
+  t: TFunction,
+  role: ARLRole,
+  mode: ARLAgentMode,
+): { label: string; description?: string } {
+  const base = `autoResearch.arl.modes.${ARL_ROLE_PROVIDER[role]}.${mode.id}`
+  return {
+    label: t(`${base}.label`, { defaultValue: mode.label }),
+    description: mode.description
+      ? t(`${base}.description`, { defaultValue: mode.description })
+      : undefined,
+  }
 }

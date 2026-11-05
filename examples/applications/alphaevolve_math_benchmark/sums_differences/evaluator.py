@@ -1,4 +1,4 @@
-"""Evaluator for the finite-set sums-and-differences problem."""
+"""Evaluator for LoongFlow's first sums-and-differences problem."""
 
 import math
 from typing import Any
@@ -10,7 +10,7 @@ from llm4ad.evaluator.base import BaseEvaluator
 
 @BaseEvaluator.register("alphaevolve_sums_differences_evaluator")
 class SumsDifferencesEvaluator(JsonBenchmarkEvaluator):
-    """Evaluate the logarithmic sums-and-differences objective."""
+    """Evaluate LoongFlow problem 1, including its finite-size correction."""
 
     metric_name = "get_score_result"
     target_value = 1.1319033750264975

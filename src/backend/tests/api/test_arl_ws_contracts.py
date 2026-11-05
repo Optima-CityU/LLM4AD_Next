@@ -56,8 +56,9 @@ class _FakeDaemonClient:
         if name in self.fail:
             raise RuntimeError(f"{name} boom")
 
-    async def send_agent_message(self, **_kwargs):
+    async def send_agent_message(self, **kwargs):
         await self._maybe_fail("send_agent_message")
+        self.sent_to = kwargs.get("agent_id")
 
     async def read_file(self, path, cwd=None):
         await self._maybe_fail("read_file")
@@ -113,6 +114,36 @@ class _FakeDaemonClient:
 
     async def delete_entry(self, path):
         await self._maybe_fail("delete_entry")
+
+    async def fetch_agent_timeline(self, agent_id, **kwargs):
+        await self._maybe_fail("fetch_agent_timeline")
+        self.last_timeline = (agent_id, kwargs)
+        return {
+            "epoch": "e1",
+            "hasOlder": True,
+            "startCursor": {"epoch": "e1", "seq": 40},
+            "entries": [{"item": {"type": "user_message", "text": "hi"}, "seqStart": 40}],
+        }
+
+    async def fetch_subagent_timeline(self, parent_agent_id, subagent_id, **_kwargs):
+        await self._maybe_fail("fetch_subagent_timeline")
+        return {"rows": [{"item": {"type": "assistant_message", "text": "x"}}], "hasOlder": False}
+
+    async def archive_agent(self, agent_id):
+        await self._maybe_fail("archive_agent")
+        self.archived = agent_id
+
+    async def create_agent(self, **kwargs):
+        await self._maybe_fail("create_agent")
+        self.created = kwargs
+        return {"id": "new-agent", "status": "idle", "currentModeId": kwargs.get("mode_id")}
+
+    #: Agent directory returned by fetch_agents; tests override per case
+    directory: list[dict] = []
+
+    async def fetch_agents(self, subscribe: bool = True):
+        await self._maybe_fail("fetch_agents")
+        return [{"agent": dict(agent)} for agent in self.directory]
 
     async def close(self):
         self.closed = True
@@ -599,3 +630,420 @@ async def test_ensure_agent_model_switch_failure_is_not_fatal() -> None:
 
     assert agent["id"] == "a1"
     assert agent["model"] == "old"
+
+
+# ---- closed agent recovery after a container restart ----
+
+
+class _ClosedAgentClient:
+    """Directory with one ``closed`` agent; refresh succeeds or fails."""
+
+    def __init__(self, *, refresh_ok: bool):
+        self.refresh_ok = refresh_ok
+        self.status = "closed"
+        self.calls: list[str] = []
+
+    async def fetch_agents(self, subscribe: bool = True):
+        return [{"agent": {"id": "v1", "title": "arl-validator", "status": self.status}}]
+
+    async def refresh_agent(self, agent_id):
+        self.calls.append(f"refresh:{agent_id}")
+        if not self.refresh_ok:
+            raise RuntimeError("RPC 失败(None): no rollout found for thread id t1")
+        self.status = "idle"
+        return {"status": "agent_refreshed"}
+
+    async def archive_agent(self, agent_id):
+        self.calls.append(f"archive:{agent_id}")
+        return {}
+
+    async def create_agent(self, **kwargs):
+        self.calls.append(f"create:{kwargs['title']}")
+        return {"id": "v2", "status": "idle"}
+
+    async def set_agent_mode(self, _agent_id, _mode_id):
+        return {}
+
+    async def set_agent_model(self, _agent_id, _model_id):
+        return {}
+
+
+@pytest.mark.asyncio
+async def test_closed_agent_is_refreshed_and_reused() -> None:
+    client = _ClosedAgentClient(refresh_ok=True)
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v1"
+    assert agent["status"] == "idle"
+    assert client.calls == ["refresh:v1"]
+
+
+@pytest.mark.asyncio
+async def test_unrecoverable_closed_agent_is_archived_and_replaced() -> None:
+    """Codex never wrote a rollout for an unused thread: resume can never work."""
+    client = _ClosedAgentClient(refresh_ok=False)
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v2"
+    assert client.calls == ["refresh:v1", "archive:v1", "create:arl-validator"]
+
+
+@pytest.mark.asyncio
+async def test_transient_refresh_failure_keeps_the_agent() -> None:
+    """A timeout may clear up later: never archive a conversation that might resume."""
+    client = _ClosedAgentClient(refresh_ok=True)
+
+    async def _timeout(agent_id):
+        client.calls.append(f"refresh:{agent_id}")
+        raise TimeoutError("RPC 调用超时: refresh_agent_request")
+
+    client.refresh_agent = _timeout
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v1"
+    assert client.calls == ["refresh:v1"]
+
+
+@pytest.mark.asyncio
+async def test_live_agent_is_not_refreshed() -> None:
+    client = _ClosedAgentClient(refresh_ok=False)
+    client.status = "idle"
+
+    agent = await arl_ws._ensure_agent(client, "validator")
+
+    assert agent["id"] == "v1"
+    assert client.calls == []
+
+
+# ---- 历史翻页 / 子 agent / 重置 ----
+
+
+@pytest.mark.asyncio
+async def test_fetch_older_uses_before_cursor_and_returns_page() -> None:
+    """向上翻页带着前端的游标走 direction=before，结果帧带新的 start_cursor。"""
+    websocket, worker = await _run_messages(
+        [
+            {
+                "type": "timeline_fetch_older",
+                "role": "worker",
+                "payload": {"cursor": {"epoch": "e1", "seq": 100}},
+            }
+        ]
+    )
+
+    agent_id, kwargs = worker.last_timeline
+    assert agent_id == "wa"
+    assert kwargs["direction"] == "before"
+    assert kwargs["cursor"] == {"epoch": "e1", "seq": 100}
+    frames = websocket.frames("timeline_older")
+    assert len(frames) == 1
+    data = frames[0]["data"]
+    assert data["ok"] is True
+    assert data["stale"] is False
+    assert data["has_older"] is True
+    assert data["start_cursor"] == {"epoch": "e1", "seq": 40}
+    assert len(data["entries"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_older_rejects_bad_cursor_with_result_frame() -> None:
+    """游标不合法时回 timeline_older(ok=False)，不调 daemon、不推通用 error。"""
+    websocket, worker = await _run_messages(
+        [
+            {
+                "type": "timeline_fetch_older",
+                "role": "worker",
+                "payload": {"cursor": {"epoch": "e1", "seq": True}},
+            }
+        ]
+    )
+
+    assert "fetch_agent_timeline" not in worker.calls
+    frames = websocket.frames("timeline_older")
+    assert frames[0]["data"]["ok"] is False
+    assert websocket.frames("error") == []
+
+
+def test_timeline_page_derives_cursor_from_first_entry() -> None:
+    """daemon 没给 startCursor 时，用首条的 seqStart 拼出游标。"""
+    page = arl_ws._timeline_page(
+        "a1", {"epoch": "e2", "entries": [{"seqStart": 7}, {"seqStart": 9}]}
+    )
+    assert page["start_cursor"] == {"epoch": "e2", "seq": 7}
+    assert arl_ws._timeline_page("a1", {"epoch": "e2", "entries": []})["start_cursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_subagent_timeline_requires_id_and_replies() -> None:
+    websocket, _ = await _run_messages(
+        [
+            {"type": "subagent_timeline", "role": "worker", "payload": {}},
+            {"type": "subagent_timeline", "role": "worker", "payload": {"subagent_id": "s1"}},
+        ]
+    )
+
+    frames = websocket.frames("subagent_timeline")
+    assert [f["data"]["ok"] for f in frames] == [False, True]
+    assert frames[1]["data"]["subagent_id"] == "s1"
+    assert len(frames[1]["data"]["rows"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_reset_switches_target_agent(monkeypatch) -> None:
+    """重置后旧 agent 被归档，后续消息投给新 agent。"""
+    monkeypatch.setattr(arl_ws, "_load_role_mode", lambda _sid, _role: "bypassPermissions")
+    websocket = _FakeWebSocket(
+        [
+            {"type": "agent_reset", "role": "worker", "payload": {}},
+            {"type": "agent_send", "role": "worker", "payload": {"content": "hi"}},
+        ]
+    )
+    worker = _FakeDaemonClient()
+    validator = _FakeDaemonClient()
+
+    await arl_ws._forward_from_frontend(
+        websocket, uuid.uuid4(), worker, validator, "wa", "va",
+        agent_models={"worker": "m1", "validator": None},
+    )
+
+    assert worker.archived == "wa"
+    assert worker.created["model"] == "m1"
+    assert worker.created["mode_id"] == "bypassPermissions"
+    frames = websocket.frames("agent_reset_result")
+    assert frames[0]["data"]["ok"] is True
+    assert frames[0]["data"]["agent"]["agent_id"] == "new-agent"
+    assert worker.sent_to == "new-agent"
+
+
+@pytest.mark.asyncio
+async def test_agent_reset_archive_failure_keeps_old_agent(monkeypatch) -> None:
+    """归档失败时不新建 agent，后续消息仍投给旧 agent。"""
+    monkeypatch.setattr(arl_ws, "_load_role_mode", lambda _sid, _role: "bypassPermissions")
+    websocket = _FakeWebSocket(
+        [
+            {"type": "agent_reset", "role": "worker", "payload": {}},
+            {"type": "agent_send", "role": "worker", "payload": {"content": "hi"}},
+        ]
+    )
+    worker = _FakeDaemonClient(fail={"archive_agent"})
+
+    await arl_ws._forward_from_frontend(
+        websocket, uuid.uuid4(), worker, _FakeDaemonClient(), "wa", "va"
+    )
+
+    assert "create_agent" not in worker.calls
+    assert websocket.frames("agent_reset_result")[0]["data"]["ok"] is False
+    assert worker.sent_to == "wa"
+
+
+# ---- peer agents (validation runs spawned with an aris.role label) ----
+
+
+def _peer(agent_id: str, **extra) -> dict:
+    """Build a peer agent snapshot as the daemon directory returns it."""
+    return {
+        "id": agent_id,
+        "title": f"ARIS validation {agent_id}",
+        "status": "idle",
+        "labels": {"aris.role": "validator", "aris.submission": agent_id},
+        **extra,
+    }
+
+
+def test_pick_agent_fallback_skips_peer_agents() -> None:
+    """The fallback must never reuse a peer agent as the main agent."""
+    entries = [{"agent": _peer("s001")}, {"agent": {"id": "legacy", "title": None}}]
+
+    picked = arl_ws._pick_agent_entry(entries, "validator")
+
+    assert arl_ws._agent_snapshot(picked)["id"] == "legacy"
+
+
+def test_pick_agent_only_peers_creates_new() -> None:
+    """A directory holding only peers yields None so a main agent is created."""
+    assert arl_ws._pick_agent_entry([{"agent": _peer("s001")}], "validator") is None
+
+
+def test_is_peer_agent_filters() -> None:
+    """Only labelled, non-main, non-archived, non-internal agents are peers."""
+    assert arl_ws._is_peer_agent(_peer("p"), "main")
+    assert not arl_ws._is_peer_agent(_peer("main"), "main")
+    assert not arl_ws._is_peer_agent(_peer("p", archivedAt="2026-01-01"), "main")
+    assert not arl_ws._is_peer_agent(_peer("p", internal=True), "main")
+    assert not arl_ws._is_peer_agent({"id": "u", "labels": {}}, "main")
+
+
+@pytest.mark.asyncio
+async def test_push_peer_agents_lists_only_peers() -> None:
+    websocket = _FakeWebSocket([])
+    client = _FakeDaemonClient()
+    client.directory = [
+        {"id": "va", "title": "arl-validator", "labels": {}},
+        _peer("s001"),
+        {"id": "manual", "title": "mine", "labels": {}},
+    ]
+
+    await arl_ws._push_peer_agents(websocket, client, "validator", "va")
+
+    frame = websocket.frames("peer_agent_list")[0]
+    assert [p["id"] for p in frame["data"]["peers"]] == ["s001"]
+    assert frame["data"]["peers"][0]["labels"]["aris.submission"] == "s001"
+
+
+@pytest.mark.asyncio
+async def test_push_peer_agents_failure_is_silent() -> None:
+    websocket = _FakeWebSocket([])
+    client = _FakeDaemonClient(fail={"fetch_agents"})
+
+    await arl_ws._push_peer_agents(websocket, client, "validator", "va")
+
+    assert websocket.frames("peer_agent_list") == []
+
+
+@pytest.mark.asyncio
+async def test_peer_timeline_replies_and_refuses_closed_or_foreign() -> None:
+    """Live peers return rows; closed or non-peer ids are refused without loading."""
+    websocket = _FakeWebSocket(
+        [
+            {"type": "peer_timeline", "role": "worker", "payload": {}},
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "live"}},
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "dead"}},
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "wa"}},
+        ]
+    )
+    worker = _FakeDaemonClient()
+    worker.directory = [
+        {"id": "wa", "title": "arl-worker", "labels": {}},
+        _peer("live"),
+        _peer("dead", status="closed"),
+    ]
+
+    await arl_ws._forward_from_frontend(
+        websocket, uuid.uuid4(), worker, _FakeDaemonClient(), "wa", "va"
+    )
+
+    frames = websocket.frames("peer_timeline")
+    assert [f["data"]["ok"] for f in frames] == [False, True, False, False]
+    assert frames[1]["data"]["peer_id"] == "live"
+    assert len(frames[1]["data"]["rows"]) == 1
+    # Only the live peer's timeline was fetched: viewing never resumes a closed one
+    assert worker.calls.count("fetch_agent_timeline") == 1
+    assert worker.last_timeline[0] == "live"
+
+
+# ---- frontend disconnects while containers are being prepared ----
+
+
+class _SetupWebSocket:
+    """Frontend socket mimicking Starlette's behaviour after a disconnect.
+
+    Args:
+        gone_after: Frames accepted before the peer is gone; ``None`` keeps the
+            socket alive. The first send to a gone peer raises
+            ``WebSocketDisconnect``, later ones raise ``RuntimeError``.
+    """
+
+    def __init__(self, gone_after: int | None = None):
+        self.gone_after = gone_after
+        self.sent: list[dict] = []
+        self.closed = False
+        self._marked_disconnected = False
+
+    async def accept(self):
+        return None
+
+    async def send_json(self, frame: dict):
+        if self._marked_disconnected:
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+        if self.gone_after is not None and len(self.sent) >= self.gone_after:
+            self._marked_disconnected = True
+            raise WebSocketDisconnect(code=1006)
+        self.sent.append(frame)
+
+    async def close(self, code: int = 1000, reason: str | None = None):
+        if self._marked_disconnected:
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+        self.closed = True
+
+
+class _SetupRuntime:
+    """Runtime whose ``ensure_session`` optionally fails."""
+
+    def __init__(self, error: Exception | None = None):
+        self.error = error
+        self.calls = 0
+
+    async def ensure_session(self, **kwargs):
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return object()
+
+
+def _patch_setup(monkeypatch, runtime: _SetupRuntime) -> None:
+    """Stub everything ``arl_websocket`` touches before it dials the daemons."""
+    provider = {
+        "provider": "openai",
+        "base_url": "https://example.test/v1",
+        "primary_model": "model",
+        "api_key": "key",
+    }
+    config = {"worker": {}, "validator": {}}
+    monkeypatch.setattr(
+        arl_ws,
+        "_load_session_context",
+        lambda token, session_id: (uuid.uuid4(), "user@example.test", None, config),
+    )
+    monkeypatch.setattr(
+        arl_ws,
+        "_resolve_role_providers",
+        lambda arl_config, user_id: dict.fromkeys(arl_ws.ROLES, provider),
+    )
+    monkeypatch.setattr(arl_ws, "get_arl_runtime", lambda: runtime)
+
+    def _no_daemon(*_args, **_kwargs):
+        raise AssertionError("must not dial daemons for a gone frontend")
+
+    monkeypatch.setattr(arl_ws, "PaseoDaemonClient", _no_daemon)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_during_setup_returns_quietly(monkeypatch) -> None:
+    """A refresh mid cold start must not surface as an ASGI crash."""
+    runtime = _SetupRuntime()
+    _patch_setup(monkeypatch, runtime)
+    websocket = _SetupWebSocket(gone_after=1)
+
+    await arl_ws.arl_websocket(websocket, uuid.uuid4(), token="t")
+
+    assert runtime.calls == 1
+    assert [f["data"]["message"] for f in websocket.sent] == [
+        "Preparing ARL containers..."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_after_disconnect_returns_quietly(monkeypatch) -> None:
+    """A real setup failure must not crash when nobody is left to tell."""
+    _patch_setup(monkeypatch, _SetupRuntime(error=RuntimeError("docker down")))
+    websocket = _SetupWebSocket(gone_after=1)
+
+    await arl_ws.arl_websocket(websocket, uuid.uuid4(), token="t")
+
+    assert not websocket.closed
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_is_reported_to_live_frontend(monkeypatch) -> None:
+    """The error frame and close still reach a frontend that is listening."""
+    _patch_setup(monkeypatch, _SetupRuntime(error=RuntimeError("docker down")))
+    websocket = _SetupWebSocket()
+
+    await arl_ws.arl_websocket(websocket, uuid.uuid4(), token="t")
+
+    errors = [f for f in websocket.sent if f["type"] == "error"]
+    assert [f["data"]["message"] for f in errors] == ["Failed to start: docker down"]
+    assert websocket.closed

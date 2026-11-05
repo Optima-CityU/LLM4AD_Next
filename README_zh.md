@@ -202,6 +202,8 @@ Read the skill, read the task package, run [N] generations, give me the best alg
 
 Agent 需要完整的 Skill 目录，包括引用文档、脚本和示例文件。另见[支持的进化算法](skills/llm4ad-cloud-package/references/algorithms.md)和[导入说明](skills/llm4ad-cloud-package/references/web-import.md)。
 
+也可以在网页的**算法演化项目 → 新建任务**中选择 **AI 构建（AutoDesign）**。直接对话描述需求，或在右侧上传可选参考文件；助手构建并真实验证 Cloud 项目后，点击**启动任务**才会创建任务工作台并运行。已有任务仍可切换到 **AutoDesign 助手**，读取真实运行文件、分析结果和调整子任务。
+
 ## 教程视频
 
 <div align="center">
@@ -307,7 +309,10 @@ LLM4AD_Next/
 │   └── frontend/         # React/Vite 前端与界面测试
 ├── skills/               # 智能体技能
 │   ├── algo-design/      # 算法设计方法
-│   ├── autodiscovery/    # 从论文发现可进化任务
+│   ├── autodesign/       # 算法任务设计、操作与真实运行结果分析
+│   │   ├── autodesign/   # Cloud 任务构建与子任务调整
+│   │   └── run-analysis/ # 运行文件、指标与结果解读
+│   ├── autodiscovery/    # 旧版论文到任务工作流
 │   ├── autorebuttal/     # 审稿回复与 AC 总结
 │   ├── document-knowledge-organizer/ # Markdown 知识整理
 │   ├── llm4ad-task-builder/ # 可运行任务包构建

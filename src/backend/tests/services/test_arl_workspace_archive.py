@@ -25,8 +25,8 @@ def _zip_names(chunks) -> list[str]:
 
 def _workspace(root: Path, role: str) -> Path:
     ws = root / role
-    (ws / ".aris").mkdir(parents=True)
-    (ws / ".aris" / "install.json").write_text("{}")
+    (ws / ".contrejour").mkdir(parents=True)
+    (ws / ".contrejour" / "install.json").write_text("{}")
     (ws / "__pycache__").mkdir()
     (ws / "__pycache__" / "m.cpython-312.pyc").write_bytes(b"x")
     (ws / "src").mkdir()
@@ -49,7 +49,7 @@ def test_workspace_entries_keep_dotfiles_and_drop_caches(tmp_path: Path) -> None
 
     names = [rel for rel, _ in arl_archive.iter_workspace_entries(ws, "worker/")]
 
-    assert names == ["worker/.aris/install.json", "worker/src/main.py"]
+    assert names == ["worker/.contrejour/install.json", "worker/src/main.py"]
 
 
 def test_workspace_entries_skip_symlinks(tmp_path: Path) -> None:
@@ -64,7 +64,7 @@ def test_workspace_entries_skip_symlinks(tmp_path: Path) -> None:
 
     names = [rel for rel, _ in arl_archive.iter_workspace_entries(ws)]
 
-    assert names == [".aris/install.json", "src/main.py"]
+    assert names == [".contrejour/install.json", "src/main.py"]
 
 
 @pytest.fixture
@@ -87,9 +87,9 @@ def test_archive_all_prefixes_roles(tmp_path: Path) -> None:
 
     assert filename == "我的_研究-1afab57a.zip"
     assert _zip_names(stream) == [
-        "validator/.aris/install.json",
+        "validator/.contrejour/install.json",
         "validator/src/main.py",
-        "worker/.aris/install.json",
+        "worker/.contrejour/install.json",
         "worker/src/main.py",
     ]
 
@@ -103,7 +103,7 @@ def test_archive_single_role_has_no_prefix(tmp_path: Path) -> None:
     )
 
     assert filename.endswith("-worker.zip")
-    assert _zip_names(stream) == [".aris/install.json", "src/main.py"]
+    assert _zip_names(stream) == [".contrejour/install.json", "src/main.py"]
 
 
 def test_archive_rejects_bad_requests(tmp_path: Path, arl_session) -> None:

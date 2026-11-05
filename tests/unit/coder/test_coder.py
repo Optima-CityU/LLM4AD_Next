@@ -48,6 +48,32 @@ def coder(custom_config, mock_provider):
     return CustomNaiveCoder(config=custom_config, provider=mock_provider)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", [False, True])
+async def test_empty_output_reports_budget_exhaustion_without_changing_source(coder, mock_provider, tmp_path, mutation):
+    """Report reasoning/output exhaustion rather than suggesting missing input context."""
+    original = "# EVOLVE_START\ndef solve():\n    return 1\n# EVOLVE_END\n"
+    if mutation:
+        (tmp_path / "solve.py").write_text(original)
+    mock_provider.generate.return_value = GenerationResult(
+        text="", model="reasoning-model", finish_reason="length",
+        prompt_tokens=3000, completion_tokens=8192, total_tokens=11192,
+        metadata={"reasoning_tokens": 8192},
+    )
+    result = await coder.generate(
+        prompt="Improve the candidate", context={"language": "python"}, working_dir=str(tmp_path),
+    )
+    assert result.status in (GenerateStatus.FAILED, GenerateStatus.PARTIAL)
+    assert not result.is_success
+    assert "output token budget exhausted" in result.error_message
+    assert "completion_tokens=8192" in result.error_message
+    assert "reasoning_tokens=8192" in result.error_message
+    if mutation:
+        assert (tmp_path / "solve.py").read_text() == original
+    else:
+        assert result.generated_files == []
+
+
 # ---------------------------------------------------------------------------
 # GenerateStatus
 # ---------------------------------------------------------------------------

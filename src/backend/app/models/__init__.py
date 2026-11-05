@@ -10,6 +10,8 @@
 
 from sqlmodel import SQLModel  # noqa: F401
 
+from app.models.autodesign import AutoDesignSession  # noqa: F401
+
 # 基础模型
 from app.models.base import Message, NewPassword, TimeMixin, Token  # noqa: F401
 

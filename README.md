@@ -202,6 +202,8 @@ Use a coding agent with local file and command access to prepare your task, then
 
 The agent needs the full Skill directory, including its references, scripts, and example files. See [supported evolution methods](skills/llm4ad-cloud-package/references/algorithms.md) and the [import guide](skills/llm4ad-cloud-package/references/web-import.md).
 
+In the web app, open **Algorithm Evolution Projects → New Task → AI Build (AutoDesign)**. Describe your goal in the conversation and optionally upload references on the right. After real Cloud project validation passes, choose **Start task** to create the task workbench and run it. Existing tasks can still switch to the **AutoDesign Agent** to inspect actual run files, analyze results, and adjust child experiments.
+
 ## Instruction Video
 
 <div align="center">
@@ -307,7 +309,10 @@ LLM4AD_Next/
 │   └── frontend/         # React/Vite web app and UI tests
 ├── skills/               # Agent skills
 │   ├── algo-design/      # Algorithm design methods
-│   ├── autodiscovery/    # Paper-to-evolvable-task workflow
+│   ├── autodesign/       # Task design, scoped operations and real run analysis
+│   │   ├── autodesign/   # Cloud task authoring and child experiments
+│   │   └── run-analysis/ # Runtime files, metrics and result interpretation
+│   ├── autodiscovery/    # Legacy paper-to-task workflow
 │   ├── autorebuttal/     # Reviewer response and AC summary workflow
 │   ├── document-knowledge-organizer/ # Markdown knowledge organization
 │   ├── llm4ad-task-builder/ # Runnable task-package creation

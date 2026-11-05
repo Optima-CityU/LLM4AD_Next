@@ -3,6 +3,7 @@ import type { ReportType, TaskResponse, TaskStatus } from "@/client"
 import type { IslandGAData } from "@/components/Evolution/TaskDetail/island-ga-mock-data"
 import { EMPTY_DATA } from "@/components/Evolution/TaskDetail/island-ga-mock-data"
 import type { LogEntry } from "@/hooks/useTaskLogs"
+import type { TaskWorkbenchView } from "@/lib/autoDesign"
 
 export interface SelectedNodeInfo {
   id: string
@@ -29,6 +30,7 @@ export interface TaskMemoryInjectedSignal {
 interface EvolutionContextValue {
   projectId: string | undefined
   projectValid: boolean
+  designSessionId?: string
   selectedTask: TaskResponse | null
   setSelectedTask: (task: TaskResponse | null) => void
 
@@ -62,6 +64,10 @@ interface EvolutionContextValue {
   logEntries: LogEntry[]
   logLoading: boolean
   logError: string | null
+
+  taskView?: TaskWorkbenchView
+  setTaskView?: (view: TaskWorkbenchView) => void
+  taskAgentAvailable?: boolean
 
   // Active tab in InitializedView
   activeTab: string
@@ -118,6 +124,7 @@ interface EvolutionContextValue {
 export const EvolutionContext = createContext<EvolutionContextValue>({
   projectId: undefined,
   projectValid: false,
+  designSessionId: undefined,
   selectedTask: null,
   setSelectedTask: () => {},
   selectedChildTaskId: null,
@@ -137,6 +144,8 @@ export const EvolutionContext = createContext<EvolutionContextValue>({
   logEntries: [],
   logLoading: false,
   logError: null,
+  taskView: "workbench",
+  setTaskView: () => {},
   activeTab: "overview",
   setActiveTab: () => {},
   isConfiguring: false,
@@ -164,5 +173,10 @@ export const EvolutionContext = createContext<EvolutionContextValue>({
 })
 
 export function useEvolution() {
-  return useContext(EvolutionContext)
+  const context = useContext(EvolutionContext)
+  return {
+    ...context,
+    taskView: context.taskView ?? "workbench",
+    setTaskView: context.setTaskView ?? (() => {}),
+  }
 }

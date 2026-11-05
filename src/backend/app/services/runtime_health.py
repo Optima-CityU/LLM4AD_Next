@@ -15,7 +15,7 @@ import uuid
 import httpx
 from loguru import logger
 
-from app.core.redis import get_sync_redis
+from app.core.redis import get_async_redis, get_sync_redis
 from app.services.paper_workspace_runtime import (
     paper_workspace_container_name,
     paper_workspace_runtime_token,
@@ -56,6 +56,78 @@ def _notice_lock_key(session_id: str) -> str:
     return f"{_NOTICE_LOCK_PREFIX}:{session_id}"
 
 
+def _control_key(workspace_id: str, session_id: str) -> str:
+    """Scope cancellation across API workers to one native conversation."""
+    return f"{_STATE_PREFIX}:{workspace_id}:control:{session_id}"
+
+
+def _request_cancelled(control: dict, request_started_at: float) -> bool:
+    """Keep old requests cancelled when a new turn starts in the same session."""
+    values = {
+        key.decode() if isinstance(key, bytes) else key:
+        value.decode() if isinstance(value, bytes) else value
+        for key, value in control.items()
+    }
+    stopped = float(values.get("cancelled_at", 0) or 0)
+    started = float(values.get("started_at", 0) or 0)
+    return stopped > 0 and (stopped >= started or stopped >= request_started_at)
+
+
+async def runtime_request_cancelled(workspace_id: str, session_id: str, request_started_at: float) -> bool:
+    """Check shared turn cancellation without blocking the proxy event loop.
+
+    Args:
+        workspace_id: Authenticated research workspace.
+        session_id: Native conversation associated with the credential token.
+        request_started_at: Wall-clock start of this individual model request.
+
+    Returns:
+        Whether the request belongs to a cancelled turn.
+    """
+    try:
+        client = await get_async_redis()
+        return _request_cancelled(await client.hgetall(_control_key(workspace_id, session_id)), request_started_at)
+    except Exception:
+        logger.warning("Could not read research cancellation state for {}", workspace_id)
+        return False
+
+
+def record_runtime_chat_control(workspace_id: str, message: str | bytes) -> None:
+    """Track authenticated chat starts and stops at the WebSocket boundary.
+
+    Args:
+        workspace_id: Workspace whose owner was authenticated by the proxy.
+        message: Unmodified browser command.
+    """
+    try:
+        payload = json.loads(message)
+        if not isinstance(payload, dict):
+            return
+        command = payload.get("type")
+        cancelled = command == "chat.abort"
+        if not cancelled and command not in {"chat.send", "chat.edit-send"}:
+            return
+        session_id = payload.get("sessionId")
+        if not isinstance(session_id, str) or not session_id.strip():
+            return
+        session_id = session_id.strip()
+        client = get_sync_redis()
+        timestamp = time.time()
+        client.hset(_control_key(workspace_id, session_id), mapping={"cancelled_at" if cancelled else "started_at": timestamp})
+        client.expire(_control_key(workspace_id, session_id), _STATE_TTL_SECONDS)
+        state = client.hgetall(_state_key(workspace_id))
+        owner = state.get("session_id", state.get(b"session_id"))
+        if isinstance(owner, bytes):
+            owner = owner.decode()
+        if owner in {None, session_id}:
+            client.delete(_state_key(workspace_id), f"{_state_key(workspace_id)}:failures", _notice_lock_key(session_id))
+            _publish(workspace_id, {"type": "proxy_cancelled" if cancelled else "proxy_started", "session_id": session_id, "ts": timestamp})
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return
+    except Exception:
+        logger.warning("Could not record research turn control for {}", workspace_id)
+
+
 def classify_upstream_error(exception: Exception | None, status_code: int | None) -> str:
     """把一次上游失败归类为稳定的 reason 码。
 
@@ -73,6 +145,10 @@ def classify_upstream_error(exception: Exception | None, status_code: int | None
         return "auth"
     if status_code is not None and status_code >= 500:
         return "upstream_error"
+    if isinstance(exception, (httpx.TimeoutException, TimeoutError)):
+        return "timeout"
+    if isinstance(exception, (httpx.NetworkError, httpx.RemoteProtocolError)):
+        return "disconnected"
     text = str(exception or "").lower()
     if "timed out" in text or "timeout" in text:
         return "timeout"
@@ -88,15 +164,22 @@ def runtime_snapshot(workspace_id: str | uuid.UUID) -> dict:
         raw = r.hgetall(_state_key(workspace_id))
         if not raw:
             return {"state": "ok", "failures": 0}
-        def dec(v):
-            return v.decode() if isinstance(v, bytes) else v
+        raw = {
+            key.decode() if isinstance(key, bytes) else key:
+            value.decode() if isinstance(value, bytes) else value
+            for key, value in raw.items()
+        }
         return {
             "state": "failing",
-            "failures": int(dec(raw.get(b"failures", b"0")) or 0),
-            "reason": dec(raw.get(b"reason", b"other")),
-            "status": int(dec(raw.get(b"status", b"0")) or 0),
-            "message": dec(raw.get(b"message", b"")),
-            "ts": float(dec(raw.get(b"ts", b"0")) or 0),
+            "failures": int(raw.get("failures", 0) or 0),
+            "reason": raw.get("reason", "other"),
+            "status": int(raw.get("status", 0) or 0),
+            "message": raw.get("message", ""),
+            "ts": float(raw.get("ts", 0) or 0),
+            "attempt": int(raw.get("attempt", 0) or 0),
+            "max_attempts": int(raw.get("max_attempts", 0) or 0),
+            "retrying": raw.get("retrying") == "1",
+            "retry_in": float(raw.get("retry_in", 0) or 0),
         }
     except Exception:
         logger.warning("科研工作区运行时状态读取失败", exc_info=True)
@@ -123,18 +206,32 @@ def record_runtime_failure(
     status_code: int | None,
     message: str,
     notify: bool = True,
+    attempt: int = 0,
+    max_attempts: int = 0,
+    retrying: bool = False,
+    retry_in: float = 0,
+    request_started_at: float | None = None,
 ) -> int:
     """记录一次上游失败：计数 + 状态哈希 + SSE 事件 + 防抖内联通知。
 
     Args:
         notify: 是否投递会话内联通知。流式中途断流时传 False，避免每次断流都
             刷一条通知——重试后的请求阶段失败会再触发完整上报。
+        attempt: Next attempt while retrying, or the failed terminal attempt.
+        max_attempts: Total allowed attempts for this request.
+        retrying: Whether a bounded automatic retry is scheduled.
+        retry_in: Delay before the next attempt, in seconds.
+        request_started_at: Request start used to discard late cancelled failures.
 
     Returns:
         当前连续失败次数（读取失败时返回 0）。
     """
     try:
         r = get_sync_redis()
+        if request_started_at is not None and _request_cancelled(
+            r.hgetall(_control_key(workspace_id, session_id)), request_started_at,
+        ):
+            return 0
         count = int(r.incr(f"{_state_key(workspace_id)}:failures"))
         r.expire(f"{_state_key(workspace_id)}:failures", _STATE_TTL_SECONDS)
         ts = time.time()
@@ -142,10 +239,15 @@ def record_runtime_failure(
             _state_key(workspace_id),
             mapping={
                 "failures": count,
+                "session_id": session_id,
                 "reason": reason,
                 "status": status_code or 0,
                 "message": (message or "")[:500],
                 "ts": ts,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "retrying": int(retrying),
+                "retry_in": retry_in,
             },
         )
         r.expire(_state_key(workspace_id), _STATE_TTL_SECONDS)
@@ -162,6 +264,10 @@ def record_runtime_failure(
             "message": (message or "")[:500],
             "count": count,
             "ts": time.time(),
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+            "retrying": retrying,
+            "retry_in": retry_in,
         },
     )
     if notify:

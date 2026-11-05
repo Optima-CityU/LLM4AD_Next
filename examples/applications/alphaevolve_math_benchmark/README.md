@@ -1,14 +1,14 @@
 # AlphaEvolve Mathematics Benchmark Suite
 
-This directory provides 11 mathematical optimization cases adapted to LLM4AD Next. Each case has its own directory containing the task configuration, initial algorithm, and evaluator adapter. Model-visible prompts contain only the problem definition, output contract, and constraints; they do not contain published targets or external best-solution code.
+This directory provides 11 mathematical optimization cases adapted from LoongFlow examples to LLM4AD Next. Each case has its own directory containing the task configuration, initial algorithm, and evaluator adapter. Model-visible prompts contain only the problem definition, output contract, and constraints; they do not contain published targets or external best-solution code.
 
 When running a YAML file directly with the CLI, use this suite directory as the working directory so its case-relative paths and shared process runtime resolve consistently.
 
-Evaluators validate candidate outputs directly and retain the original mathematical metric. For minimization problems, LLM4AD Next uses the negated raw metric internally so that a larger evolution score remains better; reported metrics and result files keep the original value.
+Evaluators validate candidate outputs directly and retain the original mathematical metric. Internal fitness follows each evaluator's documented monotone scoring rule; most existing cases use a target-normalized ratio. Reported metrics retain the raw mathematical value. Compare raw objectives rather than fitness values across different frameworks.
 
 ## Comparison results
 
-The table lists the suite's current competitive LLM4AD Next results. The final comparison uses the better published value from AlphaEvolve and LoongFlow for each objective. Positive gaps indicate an improvement, while negative gaps show the remaining difference. Each result includes the evolved implementation, all active excellent-experience cards retained by the memory system, and a machine-readable objective record.
+The table retains historical LLM4AD Next results and their original published comparisons. These runs have not been reevaluated with the v3 contract described below, so the gaps are historical records rather than audited v3 comparison results. Positive gaps indicate an improvement in the original comparison, while negative gaps show the remaining difference. Each result includes the evolved implementation, all active excellent-experience cards retained by the memory system, and a machine-readable objective record.
 
 | Case | Direction | AlphaEvolve | LoongFlow | LLM4AD Next | Gap to best published | Artifacts |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -33,3 +33,26 @@ Comparison tables and retained result artifacts are excluded from task templates
 | Runtime | Containerized LLM4AD Next environment |
 | Evaluation | Case-local evaluator and original benchmark objective |
 | Reporting | Raw benchmark objective; no target normalization in the comparison table |
+
+## Objective provenance
+
+| Local case | LoongFlow source | Objective |
+| --- | --- | --- |
+| `heilbronn_square` | [`heilbronn_problem_for_convex_regions`](https://github.com/baidu-baige/LoongFlow/tree/main/agents/math_agent/examples/heilbronn_problem_for_convex_regions) | Maximize minimum triangle area divided by convex-hull area for 13 points. The square is only a coordinate convention; the directory, registry and result identifiers retain their legacy names. |
+| `sums_differences` | [`sums_and_differences_problems_1/eval_program.py`](https://github.com/baidu-baige/LoongFlow/blob/main/agents/math_agent/examples/sums_and_differences_problems_1/eval_program.py) | Maximize `log(S/n) / log(D/n) + (1-1/n)/100`, where `n=|A|`, `S=|A+A|` and `D=|A-A|`. Both the candidate helper and evaluator retain this upstream formula. |
+
+LoongFlow also provides [`sums_and_differences_problems_2/eval_program.py`](https://github.com/baidu-baige/LoongFlow/blob/main/agents/math_agent/examples/sums_and_differences_problems_2/eval_program.py), whose `compute_lower_bound` uses `1 + log(D/S) / log(2*max(U)+1)`. This is the C6 construction bound in [AlphaEvolve Appendix B.6](https://storage.googleapis.com/deepmind-media/DeepMind.com/Blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/AlphaEvolve.pdf#page=41), for a nonnegative integer set containing zero. It is a separate objective and is not implemented by the local `sums_differences` case. Targets and results from the two objectives are not interchangeable. The local target `1.1319033750264975` is retained from LoongFlow problem 1's evaluator, not presented as a C6 result.
+
+The upstream problem 1 task text asks for a large difference set and a small sumset, although its scorer rewards the opposite direction at fixed cardinality. Its Heilbronn task text describes absolute area in a fixed square, although its returned score is normalized by convex-hull area. The local statements correct these inconsistencies while retaining the scoring objectives; the Heilbronn objective agrees with [AlphaEvolve Appendix B.10](https://storage.googleapis.com/deepmind-media/DeepMind.com/Blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/AlphaEvolve.pdf#page=42).
+
+## Audited task and evaluation contract (v3)
+
+The task statements now match the actual candidate entry points, JSON wrappers, and raw objectives documented above. The uncertainty case supports the variable-length Hermite vector actually accepted by its verifier.
+
+Numerical verification repairs cover large-coordinate cancellation, circle and hexagon contacts, scale-invariant distance ratios, recomputed autocorrelation values, and exact Hermite sign-changing roots. Valid raw objective formulas remain unchanged. Use the same repaired evaluator and audited statements for all new comparisons; historical results should be checked again with the same contract.
+
+All 12 launch configurations now allow at most 20 population evolution steps, after generation-zero initialization. Patience 21 prevents plateau stopping within these 20 steps. With three islands, five members and one elite per island this is nominally 15 initial candidates plus 240 children, or 255 total; failures and duplicate filtering can reduce completed evaluations. Framework-native outer iterations are a different budget unit, so also report actual evaluations, requests and tokens.
+
+Install numerical evaluation dependencies with `uv sync --extra eval` before using these cases. For the SCIP-based `circle_packing/solver_config.yaml` case, use `uv sync --extra eval --extra scip` to install PySCIPOpt as well. Task statements do not prescribe a code transport format: the native coder selects its block-replacement or complete-file contract from the actual candidate files.
+
+V3 adds bounded contact/containment roundoff tolerances (circle distances and full rectangle perimeter 1e-12; square coordinates and triangle half-space residuals 1e-12; existing hexagon contact tolerance 1e-9). It also fixes huge-angle hexagon directions and mixed-scale distance differences. Nonfinite data, negative radii and genuine violations remain invalid. All providers and coders now use temperature 1.0 and a 600-second API timeout. Historical search runs need the same revised contract before new comparisons.

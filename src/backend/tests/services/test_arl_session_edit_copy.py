@@ -53,7 +53,7 @@ def test_validate_arl_config_normalizes_and_checks_access(
         {"worker": {"provider_id": str(uuid.uuid4()), "model_name": "m"}},
         _cfg("not-a-uuid", str(uuid.uuid4())),
         {
-            "worker": {"provider_id": str(uuid.uuid4()), "model_name": "  "},
+            "worker": {"model_name": "m"},
             "validator": {"provider_id": str(uuid.uuid4()), "model_name": "m"},
         },
     ],
@@ -63,6 +63,22 @@ def test_validate_arl_config_rejects_malformed(config: dict) -> None:
     with pytest.raises(HTTPException) as exc:
         sessions._validate_arl_config(None, config, None)
     assert exc.value.status_code == 400
+
+
+@pytest.mark.usefixtures("allow_providers")
+def test_validate_arl_config_allows_empty_model() -> None:
+    wid, vid = uuid.uuid4(), uuid.uuid4()
+    config = {
+        "worker": {"provider_id": str(wid), "model_name": "  "},
+        "validator": {"provider_id": str(vid)},
+    }
+
+    result = sessions._validate_arl_config(None, config, None)
+
+    assert result == {
+        "worker": {"provider_id": str(wid), "model_name": ""},
+        "validator": {"provider_id": str(vid), "model_name": ""},
+    }
 
 
 def test_merge_arl_config_keeps_runtime_keys() -> None:

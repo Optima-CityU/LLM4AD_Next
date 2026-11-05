@@ -132,6 +132,45 @@ export function isUnattendedMode(modeId: string | null | undefined): boolean {
   return !!modeId && UNATTENDED_MODE_IDS.has(modeId)
 }
 
+/** Position in a daemon timeline, used to page further back. */
+export interface ARLTimelineCursor {
+  epoch: string
+  seq: number
+}
+
+/** Lifecycle of a provider-owned subagent (e.g. a Claude `Task`). */
+export type ARLSubagentStatus = "running" | "completed" | "failed" | "canceled"
+
+/** A subagent spawned by a container's main agent. */
+export interface ARLSubagent {
+  id: string
+  title: string | null
+  description: string | null
+  /** Provider-formatted context line (model, usage...); display only. */
+  subtitle: string | null
+  status: ARLSubagentStatus
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * A top-level agent in the same container that the validation flow spawned
+ * (`paseo run --label aris.role=...`). Unlike a subagent it has no parent, so
+ * it only shows up in the agent directory.
+ */
+export interface ARLPeerAgent {
+  id: string
+  title: string | null
+  /** `aris.role` label, e.g. `validator` / `leak-review`. */
+  peerRole: string
+  /** `aris.submission` label, e.g. `s001`. */
+  submission: string | null
+  /** Daemon lifecycle status: initializing / idle / running / error / closed. */
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
 /** Everything the left/right pane needs for one container. */
 export interface ARLRoleState {
   agentId: string | null
@@ -148,6 +187,18 @@ export interface ARLRoleState {
   permissions: ARLPermissionRequest[]
   /** True once the daemon history backfill for this role has landed. */
   historyLoaded: boolean
+  /** Cursor of the oldest loaded row; `null` until history lands. */
+  historyCursor: ARLTimelineCursor | null
+  /** The daemon has rows older than `historyCursor`. */
+  hasOlder: boolean
+  /** A `timeline_fetch_older` request is in flight. */
+  loadingOlder: boolean
+  /** Subagents of the current main agent, oldest first. */
+  subagents: ARLSubagent[]
+  /** Peer agents the validation flow spawned in this container. */
+  peers: ARLPeerAgent[]
+  /** True between confirming `/clear` and the backend's reset result. */
+  resetting: boolean
   /**
    * True once `agents_ready` has arrived for this container.
    *
@@ -171,44 +222,20 @@ export interface ARLRoleState {
  * this state whenever it changes.
  */
 export interface ARLValidationState {
-  /** True once the service address *and* its token are both readable. */
+  /** True once the service answers its health check. */
   configured: boolean
   /** Worker-reachable address, `http://<validator container>:<port>`. */
   url: string | null
-  /**
-   * Whether a token was found. The token itself never crosses to the browser:
-   * the caller is the agent inside the container, which receives it through a
-   * generated `CLAUDE.md`, and WS frames end up in the devtools console.
-   */
-  hasToken: boolean
-  /** Whether the Validator has written `task.md` yet. */
-  hasTask: boolean
   /** Why it is not usable yet, phrased for display. */
   reason: string | null
-  /** True between pressing sync and the backend confirming it. */
-  syncing: boolean
-  /** Set once a sync has completed, so the UI can show it already ran. */
-  syncedAt: string | null
 }
 
 export function emptyValidationState(): ARLValidationState {
-  return {
-    configured: false,
-    url: null,
-    hasToken: false,
-    hasTask: false,
-    reason: null,
-    syncing: false,
-    syncedAt: null,
-  }
+  return { configured: false, url: null, reason: null }
 }
 
 /**
  * Fold a `validation_status` frame into local state.
- *
- * `syncing` and `syncedAt` are client-only and must survive the merge: status
- * frames arrive every time the poller sees a change, and dropping `syncing`
- * here would release the button's spinner before the sync result lands.
  */
 export function applyValidationStatus(
   prev: ARLValidationState,
@@ -218,8 +245,6 @@ export function applyValidationStatus(
     ...prev,
     configured: Boolean(data?.configured),
     url: data?.url ?? null,
-    hasToken: Boolean(data?.has_token),
-    hasTask: Boolean(data?.has_task),
     reason: data?.reason ?? null,
   }
 }
@@ -235,6 +260,12 @@ export function emptyRoleState(): ARLRoleState {
     items: [],
     permissions: [],
     historyLoaded: false,
+    historyCursor: null,
+    hasOlder: false,
+    loadingOlder: false,
+    subagents: [],
+    peers: [],
+    resetting: false,
     ready: false,
   }
 }
@@ -666,4 +697,303 @@ export function applyAgentSnapshot(
   }
 
   return next
+}
+
+/**
+ * Turn daemon timeline entries (history backfill or an older page) into rows.
+ *
+ * History keeps both halves of a compaction (loading, then completed); they
+ * are folded into one row like the live stream does.
+ */
+export function itemsFromEntries(entries: unknown): ARLStreamItem[] {
+  if (!Array.isArray(entries)) return []
+  let items: ARLStreamItem[] = []
+  for (const entry of entries) {
+    const item = normalizeItem(entry?.item, entry?.timestamp)
+    if (!item) continue
+    if (item.kind === "compaction") items = appendItem(items, item)
+    else items.push(item)
+  }
+  return items
+}
+
+/** Validate a cursor coming off the wire. */
+function parseCursor(raw: any): ARLTimelineCursor | null {
+  if (!raw || typeof raw.epoch !== "string" || !raw.epoch) return null
+  if (typeof raw.seq !== "number" || raw.seq < 0) return null
+  return { epoch: raw.epoch, seq: raw.seq }
+}
+
+/**
+ * Fold a `timeline_history` frame (the tail backfill) into a pane.
+ *
+ * History is authoritative for everything already committed: replace, do not
+ * append, so a reconnect cannot duplicate rows. The cursor of its first row
+ * is what the next "load older" request pages back from.
+ *
+ * The backend also re-sends history mid-session when the live stream has a
+ * gap. If a turn is still in flight, the newest text row is reopened for
+ * streaming: the next live chunk continues that same message, and appending
+ * it to a closed row would split one paragraph into two.
+ */
+export function applyHistory(state: ARLRoleState, data: any): ARLRoleState {
+  const historyCursor = parseCursor(data?.start_cursor)
+  let items = itemsFromEntries(data?.entries)
+  const last = items[items.length - 1]
+  if (
+    data?.active_turn &&
+    (last?.kind === "assistant_message" || last?.kind === "thought")
+  ) {
+    items = [...items.slice(0, -1), { ...last, streaming: true }]
+  }
+  return {
+    ...state,
+    items,
+    historyLoaded: true,
+    historyCursor,
+    hasOlder: Boolean(data?.has_older) && historyCursor !== null,
+    loadingOlder: false,
+  }
+}
+
+/**
+ * Fold a `timeline_older` frame (one page before the oldest loaded row) into
+ * a pane by prepending it.
+ *
+ * A page is dropped when the daemon flags the cursor as stale (the timeline
+ * was rebuilt) or when it was requested from a cursor that is no longer ours
+ * (a reconnect replaced history in the meantime): splicing either in would
+ * duplicate or reorder rows. Paging stops in both cases; the next tail
+ * backfill re-arms it.
+ *
+ * @param state - Current pane state.
+ * @param data - The frame data.
+ * @param requestedFrom - Cursor the request was sent with.
+ */
+export function applyOlderPage(
+  state: ARLRoleState,
+  data: any,
+  requestedFrom: ARLTimelineCursor | null,
+): ARLRoleState {
+  const released = { ...state, loadingOlder: false }
+  if (!data?.ok) return released
+  const current = state.historyCursor
+  const sameOrigin =
+    !!current &&
+    !!requestedFrom &&
+    current.epoch === requestedFrom.epoch &&
+    current.seq === requestedFrom.seq
+  if (data.stale || !sameOrigin) return { ...released, hasOlder: false }
+  const older = itemsFromEntries(data.entries)
+  const historyCursor = parseCursor(data.start_cursor)
+  return {
+    ...released,
+    items: older.length ? [...older, ...state.items] : state.items,
+    historyCursor: historyCursor ?? current,
+    // An empty page means there is nothing further back, whatever the flag.
+    hasOlder:
+      Boolean(data.has_older) && older.length > 0 && historyCursor !== null,
+  }
+}
+
+const SUBAGENT_STATUSES = new Set<string>([
+  "running",
+  "completed",
+  "failed",
+  "canceled",
+])
+
+/** Coerce a daemon subagent descriptor; `null` when it has no id. */
+export function normalizeSubagent(raw: any): ARLSubagent | null {
+  if (!raw || typeof raw.id !== "string" || !raw.id) return null
+  const str = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value : null
+  return {
+    id: raw.id,
+    title: str(raw.title),
+    description: str(raw.description),
+    subtitle: str(raw.subtitle),
+    status: SUBAGENT_STATUSES.has(raw.status)
+      ? (raw.status as ARLSubagentStatus)
+      : "running",
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+  }
+}
+
+/** Replace a pane's subagent list with a `subagent_list` snapshot. */
+export function applySubagentList(
+  state: ARLRoleState,
+  data: any,
+): ARLRoleState {
+  // A snapshot for an agent we have already replaced (`/clear`) is stale.
+  if (state.agentId && data?.agent_id && data.agent_id !== state.agentId)
+    return state
+  const raw: unknown[] = Array.isArray(data?.subagents) ? data.subagents : []
+  const subagents = raw
+    .map(normalizeSubagent)
+    .filter((subagent): subagent is ARLSubagent => subagent !== null)
+  return { ...state, subagents }
+}
+
+/**
+ * Fold an `agent.provider_subagents.update` upsert/remove into a pane.
+ *
+ * Updates for another parent (an archived agent, a user-created one) are
+ * ignored. `timeline` updates are not part of the pane state; the subagent
+ * detail view fetches its own transcript.
+ */
+export function applySubagentUpdate(
+  state: ARLRoleState,
+  payload: any,
+): ARLRoleState {
+  if (payload?.kind === "upsert") {
+    const parent = payload.subagent?.parentAgentId
+    if (state.agentId && parent && parent !== state.agentId) return state
+    const subagent = normalizeSubagent(payload.subagent)
+    if (!subagent) return state
+    const index = state.subagents.findIndex((s) => s.id === subagent.id)
+    const subagents =
+      index < 0
+        ? [...state.subagents, subagent]
+        : state.subagents.map((s, i) => (i === index ? subagent : s))
+    return { ...state, subagents }
+  }
+  if (payload?.kind === "remove") {
+    if (state.agentId && payload.parentAgentId !== state.agentId) return state
+    const subagents = state.subagents.filter((s) => s.id !== payload.subagentId)
+    return subagents.length === state.subagents.length
+      ? state
+      : { ...state, subagents }
+  }
+  return state
+}
+
+/** Label the validation flow puts on the peer agents it spawns. */
+export const PEER_AGENT_LABEL = "aris.role"
+
+/** True when a daemon agent snapshot carries the peer label. */
+export function hasPeerLabel(raw: any): boolean {
+  const value = raw?.labels?.[PEER_AGENT_LABEL]
+  return typeof value === "string" && value.length > 0
+}
+
+/**
+ * Coerce a daemon agent snapshot into a peer agent.
+ *
+ * @param raw - Full snapshot (`agent_update`) or backend summary (`peer_agent_list`).
+ * @param mainAgentId - The pane's main agent, which is never a peer.
+ * @returns The peer, or `null` when the agent is not one (no label, the main
+ *   agent, archived, or daemon-internal).
+ */
+export function normalizePeer(
+  raw: any,
+  mainAgentId: string | null,
+): ARLPeerAgent | null {
+  if (!raw || typeof raw.id !== "string" || !raw.id) return null
+  if (raw.id === mainAgentId || raw.archivedAt || raw.internal) return null
+  const labels = raw.labels && typeof raw.labels === "object" ? raw.labels : {}
+  const peerRole = labels[PEER_AGENT_LABEL]
+  if (typeof peerRole !== "string" || !peerRole) return null
+  const submission = labels["aris.submission"]
+  return {
+    id: raw.id,
+    title: typeof raw.title === "string" && raw.title.trim() ? raw.title : null,
+    peerRole,
+    submission:
+      typeof submission === "string" && submission ? submission : null,
+    status: typeof raw.status === "string" ? raw.status : "idle",
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+  }
+}
+
+/** Replace a pane's peer list with a `peer_agent_list` snapshot. */
+export function applyPeerList(state: ARLRoleState, data: any): ARLRoleState {
+  const raw: unknown[] = Array.isArray(data?.peers) ? data.peers : []
+  const peers = raw
+    .map((peer) => normalizePeer(peer, state.agentId))
+    .filter((peer): peer is ARLPeerAgent => peer !== null)
+  return { ...state, peers }
+}
+
+/**
+ * Fold an `agent_update` for an agent other than the pane's main one.
+ *
+ * Upserts of a peer replace or add it; an upsert that no longer qualifies
+ * (archived) or a `remove` drops it. Updates for unrelated agents leave the
+ * state untouched, so callers can route every foreign update here.
+ */
+export function applyPeerUpdate(
+  state: ARLRoleState,
+  payload: any,
+): ARLRoleState {
+  const drop = (id: unknown) => {
+    const peers = state.peers.filter((peer) => peer.id !== id)
+    return peers.length === state.peers.length ? state : { ...state, peers }
+  }
+  if (payload?.kind === "remove") return drop(payload.agentId)
+  if (payload?.kind !== "upsert") return state
+  const peer = normalizePeer(payload.agent, state.agentId)
+  if (!peer) return drop(payload.agent?.id)
+  const index = state.peers.findIndex((p) => p.id === peer.id)
+  const peers =
+    index < 0
+      ? [...state.peers, peer]
+      : state.peers.map((p, i) => (i === index ? peer : p))
+  return { ...state, peers }
+}
+
+/**
+ * Map a peer's daemon status onto the strip's status icons.
+ *
+ * `idle` means its turn finished, which for a one-shot validation run is
+ * "completed". `closed` (not loaded after a container restart) shows as
+ * canceled; the strip also greys it out.
+ */
+export function peerDisplayStatus(peer: ARLPeerAgent): ARLSubagentStatus {
+  switch (peer.status) {
+    case "running":
+    case "initializing":
+      return "running"
+    case "error":
+      return "failed"
+    case "closed":
+      return "canceled"
+    default:
+      return "completed"
+  }
+}
+
+/** Number of subagents still running in a pane. */
+export function runningSubagents(state: ARLRoleState): number {
+  return state.subagents.filter((s) => s.status === "running").length
+}
+
+/**
+ * Fold an `agent_reset_result` frame (`/clear`) into a pane.
+ *
+ * On success the pane starts over on the new agent: transcript, approvals,
+ * subagents and paging all belonged to the archived one. Readiness is kept,
+ * since the backend is still reading our frames.
+ */
+export function applyAgentReset(state: ARLRoleState, data: any): ARLRoleState {
+  if (!data?.ok) return { ...state, resetting: false }
+  const info = data.agent ?? {}
+  const fresh = applyAgentSnapshot(
+    { ...emptyRoleState(), modes: state.modes, modeId: state.modeId },
+    {
+      id: info.agent_id,
+      status: info.status,
+      currentModeId: info.mode_id,
+      availableModes: info.modes,
+    },
+  )
+  // Peers belong to the container, not to the archived agent: keep them.
+  return {
+    ...fresh,
+    historyLoaded: true,
+    ready: state.ready,
+    peers: state.peers,
+  }
 }

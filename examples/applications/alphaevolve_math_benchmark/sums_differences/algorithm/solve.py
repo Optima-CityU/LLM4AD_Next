@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initial integer set for the sums-and-differences problem."""
+"""Initial integer set for LoongFlow's first sums-and-differences problem."""
 
 import json
 import math
@@ -16,7 +16,7 @@ def search_for_best_set():
 
 
 def get_score(values: Iterable[object]) -> float:
-    """Calculate the exact objective used by the benchmark evaluator.
+    """Calculate LoongFlow problem 1's fixed logarithmic-ratio objective.
 
     Args:
         values: Integer-convertible values in the candidate set.

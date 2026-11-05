@@ -75,28 +75,29 @@ class CirclePackingEvaluator(BaseEvaluator):
         return parsed
 
     @staticmethod
-    def _validate_geometry(
-        centers: np.ndarray,
-        radii: np.ndarray,
-    ) -> str | None:
+    def _validate_geometry(centers: np.ndarray, radii: np.ndarray) -> str | None:
         if centers.shape != (NUM_CIRCLES, 2):
-            return f"centers must have shape ({NUM_CIRCLES}, 2), got {centers.shape}"
+            return f'centers must have shape ({NUM_CIRCLES}, 2), got {centers.shape}'
         if radii.shape != (NUM_CIRCLES,):
-            return f"radii must have shape ({NUM_CIRCLES},), got {radii.shape}"
+            return f'radii must have shape ({NUM_CIRCLES},), got {radii.shape}'
         if not np.isfinite(centers).all() or not np.isfinite(radii).all():
-            return "centers and radii must contain only finite values"
+            return 'centers and radii must contain only finite values'
         if np.any(radii < 0):
-            return "radii must be non-negative"
-
-        is_contained = ((radii[:, None] <= centers) & (centers <= 1.0 - radii[:, None])).all(axis=1)
+            return 'radii must be non-negative'
+        # Unit-scale feasibility tolerates arithmetic roundoff, not real overlap.
+        tolerance = 1e-12
+        is_contained = (
+            (radii[:, None] - tolerance <= centers)
+            & (centers <= 1.0 - radii[:, None] + tolerance)
+        ).all(axis=1)
         if not is_contained.all():
-            return "one or more circles lie outside the unit square"
-
+            return 'one or more circles lie outside the unit square'
         for i in range(NUM_CIRCLES):
             for j in range(i + 1, NUM_CIRCLES):
-                distance = float(np.linalg.norm(centers[i] - centers[j]))
-                if float(radii[i] + radii[j]) > distance:
-                    return f"circles {i} and {j} overlap"
+                difference = centers[i] - centers[j]
+                distance = float(np.hypot(difference[0], difference[1]))
+                if float(radii[i] + radii[j]) - distance > tolerance:
+                    return f'circles {i} and {j} overlap'
         return None
 
     async def evaluate(self, cfg: EvalContext) -> EvaluationResult:

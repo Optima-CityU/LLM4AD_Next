@@ -50,6 +50,7 @@ function usePageTitle() {
   const path = router.location.pathname
   const PAGE_TITLES: Record<string, string> = {
     "/projects": t("layout.projectManagement"),
+    "/autodesign": t("autodesign.title"),
     "/config_template": t("layout.configTemplate"),
     "/llm_rovider": t("layout.llmProvider"),
     "/live-codes": t("layout.liveCode"),

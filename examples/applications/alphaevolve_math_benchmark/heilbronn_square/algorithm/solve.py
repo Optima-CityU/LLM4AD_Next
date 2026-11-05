@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initial 13-point construction in a unit square."""
+"""Initial convex-region construction stored in unit-square coordinates."""
 
 import itertools
 import json

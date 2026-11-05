@@ -22,7 +22,7 @@ from app.models import TaskStatus
 from app.schemas import task as schemas
 from app.tasks.evolution import run_evolution
 
-from .auth import get_task_with_auth
+from .auth import get_task_with_auth, require_unstarted_task
 
 
 def _resolve_providers(
@@ -433,8 +433,8 @@ def run_task(
     """
     task = get_task_with_auth(db, task_id, current_user)
 
-    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-        raise HTTPException(status_code=409, detail="任务正在运行中，请勿重复提交")
+    db.refresh(task, with_for_update=True)
+    require_unstarted_task(task)
 
     from app.services.container_service import validate_task_container_host_path
 
@@ -512,6 +512,11 @@ def run_task(
     celery_task_id = str(uuid.uuid4())
     task.celery_task_id = celery_task_id
     task.updated_time = datetime.now(UTC)
+    root = db.get(models.Task, task.group_id or task.id)
+    if root is not None:
+        root.active_child_id = task.id
+        root.updated_time = task.updated_time
+        db.add(root)
     db.add(task)
     db.commit()
 

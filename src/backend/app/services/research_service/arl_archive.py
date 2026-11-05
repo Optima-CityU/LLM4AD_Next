@@ -5,7 +5,7 @@ backend 直接遍历宿主目录打 zip 即可，不必经 daemon 一个个读�
 
 与普通会话的产物包（:func:`.artifacts.iter_artifacts_archive`）口径不同：
 
-- **保留点文件**：ARL 文件面板默认展示隐藏文件，``.aris/`` / ``.claude/`` 这类配置
+- **保留点文件**：ARL 文件面板默认展示隐藏文件，``.contrejour/`` / ``.claude/`` 这类配置
   也是用户想带走的；只剔除 ``__pycache__`` / ``.pyc`` 等缓存。
 - **不跟随符号链接**：工作区由 agent 随意写，软链可能指向容器外乃至 backend 宿主的
   任意路径，跟进去就等于把宿主文件打包给用户。

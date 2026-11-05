@@ -1,3 +1,4 @@
+import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "@/lib/researchModels"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   ArrowRight,
@@ -8,17 +9,13 @@ import {
   ChevronDown,
   ChevronUp,
   FileCheck2,
-  FilePlus2,
   FileText,
   Folder,
-  FolderPlus,
   GitBranch,
   ListChecks,
   Loader2,
   MessagesSquare,
   Microscope,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   PenLine,
   Plus,
@@ -48,14 +45,16 @@ import {
 import { toast } from "sonner"
 
 import type {
-  FileTreeNode,
   PaperConversationPreferences,
   ProposalStageState,
   ProviderResponse,
 } from "@/client"
 import ArtifactCodeEditor from "@/components/AutoResearch/ArtifactCodeEditor"
 import WorkflowStepper from "@/components/Common/WorkflowStepper"
-import FileTreeView from "@/components/Evolution/TaskDetail/steps/FileTreeView"
+import SourceNavigator, {
+  EDITABLE_SUFFIXES,
+  PAPER_DIRECTORY_MARKER,
+} from "@/components/Common/SourceNavigator"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -284,26 +283,13 @@ const REBUTTAL_STAGE_PREREQUISITES: Record<RebuttalStage, RebuttalStage[]> = {
   autorebuttal: ["rebuttal_baseline"],
   ac_summary: ["autorebuttal"],
 }
-const DISCOVERY_STAGE_PREREQUISITES: Record<DiscoveryStage, DiscoveryStage[]> = {
-  discovery_baseline: [],
-  discovery_candidates: ["discovery_baseline"],
-  discovery_evaluation: ["discovery_candidates"],
-  discovery: ["discovery_evaluation"],
-}
-const PAPER_DIRECTORY_MARKER = ".llm4ad-directory"
-const CREATABLE_PAPER_FILE_SUFFIXES = [
-  ".typ",
-  ".tex",
-  ".bib",
-  ".md",
-  ".markdown",
-  ".txt",
-  ".csv",
-  ".json",
-  ".yaml",
-  ".yml",
-]
-
+const DISCOVERY_STAGE_PREREQUISITES: Record<DiscoveryStage, DiscoveryStage[]> =
+  {
+    discovery_baseline: [],
+    discovery_candidates: ["discovery_baseline"],
+    discovery_evaluation: ["discovery_candidates"],
+    discovery: ["discovery_evaluation"],
+  }
 function isProposalStage(value: PaperTool): value is ProposalStage {
   return PROPOSAL_STAGES.includes(value as ProposalStage)
 }
@@ -416,28 +402,8 @@ function PaperWorkflowStepper({
 
 const CONTEXT_PRESETS = [32_000, 64_000, 128_000, 200_000]
 const OUTPUT_PRESETS = [4_096, 8_192, 16_384, 32_000]
-const EDITABLE_SUFFIXES = [
-  ".typ",
-  ".tex",
-  ".bib",
-  ".bst",
-  ".cls",
-  ".sty",
-  ".md",
-  ".markdown",
-  ".txt",
-  ".csv",
-  ".json",
-  ".yaml",
-  ".yml",
-]
 const PAPER_MARKDOWN_THEME =
   "dark:prose-invert prose-headings:text-foreground prose-p:text-foreground/90 prose-strong:text-foreground prose-li:text-foreground/90 prose-a:text-primary prose-blockquote:border-border prose-blockquote:text-muted-foreground prose-code:text-primary prose-pre:border prose-pre:border-border/50 prose-pre:bg-code-block-bg prose-pre:text-foreground prose-th:text-foreground prose-td:text-foreground prose-hr:border-border/50"
-const CLAUDE_RUNTIME_PROVIDER_TYPES = new Set([
-  "anthropic",
-  "openai",
-  "openai_compatible",
-])
 
 function providerModels(provider: ProviderResponse | undefined) {
   return (provider?.model ?? "")
@@ -632,7 +598,12 @@ function PaperProjectManager({
 }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
+  const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
+  const startDesign = () => {
+    if (mode === "algorithm") void navigate({ to: "/autodesign" })
+    else setCreateOpen(true)
+  }
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const workspacesQuery = usePaperWorkspaces(search)
@@ -660,7 +631,7 @@ function PaperProjectManager({
               {t(`paper.workspace.modeDescription.${mode}`)}
             </p>
           </div>
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={startDesign}>
             <Plus className="size-4" /> {t("paper.workspace.create")}
           </Button>
         </div>
@@ -779,7 +750,7 @@ function PaperProjectManager({
               filtered={Boolean(search.trim())}
               mode={mode}
               onClear={() => setSearch("")}
-              onCreate={() => setCreateOpen(true)}
+              onCreate={startDesign}
             />
           )}
         </div>
@@ -829,281 +800,6 @@ function PaperProjectManager({
               }}
             >
               {t("paper.workspace.create")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-function buildPaperFileTree(paths: string[]): FileTreeNode[] {
-  const root: FileTreeNode[] = []
-  for (const sourcePath of paths) {
-    const parts = sourcePath.split("/").filter(Boolean)
-    let children = root
-    let currentPath = ""
-    parts.forEach((part, index) => {
-      currentPath = currentPath ? `${currentPath}/${part}` : part
-      const isFile = index === parts.length - 1
-      if (isFile && part === PAPER_DIRECTORY_MARKER) return
-      let node = children.find((item) => item.name === part)
-      if (!node) {
-        node = {
-          name: part,
-          path: currentPath,
-          type: isFile ? "file" : "directory",
-          children: isFile ? null : [],
-        }
-        children.push(node)
-      }
-      if (!isFile) {
-        node.children ??= []
-        children = node.children
-      }
-    })
-  }
-  return root
-}
-
-function SourceNavigator({
-  manifest,
-  selectedPath,
-  onSelect,
-  onDelete,
-  onCreateFile,
-  onCreateFolder,
-  onUpload,
-  uploading,
-  locked,
-  collapsed,
-  onToggle,
-  collapsible = true,
-  canDeletePath,
-}: {
-  manifest: string[]
-  selectedPath: string | null
-  onSelect: (path: string) => void
-  onDelete: (path: string) => void
-  onCreateFile: (path: string) => Promise<void>
-  onCreateFolder: (path: string) => Promise<void>
-  onUpload: () => void
-  uploading: boolean
-  locked: boolean
-  collapsed: boolean
-  onToggle: () => void
-  collapsible?: boolean
-  canDeletePath?: (path: string, isDirectory: boolean) => boolean
-}) {
-  const { t } = useTranslation()
-  const [treeTarget, setTreeTarget] = useState<{
-    path: string
-    isDirectory: boolean
-  } | null>(null)
-  const [createKind, setCreateKind] = useState<"file" | "folder" | null>(null)
-  const [newEntryName, setNewEntryName] = useState("")
-  const tree = useMemo(() => buildPaperFileTree(manifest), [manifest])
-  useEffect(() => {
-    if (selectedPath) setTreeTarget({ path: selectedPath, isDirectory: false })
-  }, [selectedPath])
-  const parentPath = treeTarget
-    ? treeTarget.isDirectory
-      ? treeTarget.path
-      : treeTarget.path.includes("/")
-        ? treeTarget.path.slice(0, treeTarget.path.lastIndexOf("/"))
-        : ""
-    : ""
-  const trimmedEntryName = newEntryName.trim()
-  const targetEntryPath = parentPath
-    ? `${parentPath}/${trimmedEntryName}`
-    : trimmedEntryName
-  const entryExists =
-    manifest.includes(targetEntryPath) ||
-    manifest.some((path) => path.startsWith(`${targetEntryPath}/`))
-  const invalidEntryName =
-    !trimmedEntryName ||
-    trimmedEntryName === "." ||
-    trimmedEntryName === ".." ||
-    trimmedEntryName === PAPER_DIRECTORY_MARKER ||
-    /[/\\]/.test(trimmedEntryName) ||
-    entryExists ||
-    (createKind === "file" &&
-      !CREATABLE_PAPER_FILE_SUFFIXES.some((suffix) =>
-        trimmedEntryName.toLowerCase().endsWith(suffix),
-      ))
-  const createEntry = async () => {
-    if (!createKind || invalidEntryName) return
-    try {
-      if (createKind === "file") await onCreateFile(targetEntryPath)
-      else await onCreateFolder(targetEntryPath)
-      toast.success(
-        t(
-          createKind === "file"
-            ? "paper.source.fileCreated"
-            : "paper.source.folderCreated",
-        ),
-      )
-      setCreateKind(null)
-      setNewEntryName("")
-    } catch (error) {
-      toast.error(errorMessage(error, t("paper.source.createFailed")))
-    }
-  }
-  if (collapsed && collapsible) {
-    return (
-      <section className="flex h-full flex-col items-center border-r bg-muted/10 py-2">
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8"
-          title={t("paper.editor.expandFiles")}
-          onClick={onToggle}
-        >
-          <PanelLeftOpen className="size-4" />
-        </Button>
-      </section>
-    )
-  }
-  return (
-    <>
-      <section className="flex h-full w-full min-w-0 flex-col overflow-hidden border-r bg-muted/10">
-        <div className="flex h-11 items-center justify-between border-b px-2.5">
-          <span className="truncate text-xs font-semibold text-foreground">
-            {t("paper.editor.files")}
-          </span>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7 shrink-0 text-primary"
-              title={t("paper.source.createFile")}
-              disabled={uploading || locked}
-              onClick={() => {
-                setNewEntryName("section.typ")
-                setCreateKind("file")
-              }}
-            >
-              <FilePlus2 className="size-3.5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7 shrink-0 text-primary"
-              title={t("paper.source.createFolder")}
-              disabled={uploading || locked}
-              onClick={() => {
-                setNewEntryName("")
-                setCreateKind("folder")
-              }}
-            >
-              <FolderPlus className="size-3.5" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7 shrink-0 text-muted-foreground"
-              title={t("paper.source.import")}
-              disabled={uploading || locked}
-              onClick={onUpload}
-            >
-              <Upload className="size-3.5" />
-            </Button>
-            {collapsible && (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7 shrink-0"
-                title={t("paper.editor.collapseFiles")}
-                onClick={onToggle}
-              >
-                <PanelLeftClose className="size-3.5" />
-              </Button>
-            )}
-          </div>
-        </div>
-        <ScrollArea className="min-h-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full">
-          <div className="min-h-full p-2 text-xs">
-            <FileTreeView
-              tree={tree}
-              selectedPath={treeTarget?.path ?? selectedPath}
-              onSelectFile={(path, isDirectory) => {
-                setTreeTarget({ path, isDirectory })
-                if (
-                  !isDirectory &&
-                  EDITABLE_SUFFIXES.some((suffix) =>
-                    path.toLowerCase().endsWith(suffix),
-                  )
-                )
-                  onSelect(path)
-              }}
-              onDeleteFile={locked ? undefined : onDelete}
-              onDeleteFolder={locked ? undefined : onDelete}
-              protectTopLevelDirectories={false}
-              confirmDelete={false}
-              canDeletePath={canDeletePath}
-            />
-          </div>
-        </ScrollArea>
-      </section>
-      <Dialog
-        open={Boolean(createKind)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setCreateKind(null)
-            setNewEntryName("")
-          }
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              {t(
-                createKind === "folder"
-                  ? "paper.source.createFolder"
-                  : "paper.source.createFile",
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              {parentPath
-                ? t("paper.source.createIn", { path: parentPath })
-                : t("paper.source.createAtRoot")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-1">
-            <Label htmlFor="paper-source-entry-name">
-              {t("paper.source.name")}
-            </Label>
-            <Input
-              id="paper-source-entry-name"
-              autoFocus
-              value={newEntryName}
-              placeholder={
-                createKind === "folder"
-                  ? t("paper.source.folderPlaceholder")
-                  : t("paper.source.filePlaceholder")
-              }
-              onChange={(event) => setNewEntryName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void createEntry()
-              }}
-            />
-            {entryExists ? (
-              <p className="text-xs text-destructive">
-                {t("paper.source.nameExists")}
-              </p>
-            ) : createKind === "file" && invalidEntryName && newEntryName ? (
-              <p className="text-xs text-muted-foreground">
-                {t("paper.source.fileNameHint")}
-              </p>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button
-              disabled={invalidEntryName || uploading}
-              onClick={() => void createEntry()}
-            >
-              {uploading && <Loader2 className="size-4 animate-spin" />}
-              {t("common.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2334,7 +2030,8 @@ export function PaperWorkbench({
       })) &&
     (!discoveryActiveStage ||
       DISCOVERY_STAGE_PREREQUISITES[discoveryActiveStage].every(
-        (stage) => workspace?.proposal_stage_states?.[stage]?.status === "ready",
+        (stage) =>
+          workspace?.proposal_stage_states?.[stage]?.status === "ready",
       ))
   const modelReady = Boolean(
     workspace?.analysis_provider_id &&
@@ -2605,7 +2302,8 @@ export function PaperWorkbench({
         }
       />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {workspace.mode === "algorithm" && algorithmIntakeOpen &&
+        {workspace.mode === "algorithm" &&
+        algorithmIntakeOpen &&
         !workspace.proposal_stage_states?.discovery_baseline ? (
           <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
             <section className="flex min-h-0 min-w-0 flex-col border-r bg-muted/[0.07]">
@@ -2616,6 +2314,12 @@ export function PaperWorkbench({
                 prerequisiteReady
                 artifactPaths={[]}
                 modelName={workspace.analysis_model_name}
+                modelProviderId={workspace.analysis_provider_id}
+                contextWindowTokens={workspace.analysis_context_window_tokens}
+                maxOutputTokens={workspace.analysis_max_output_tokens}
+                conversationPreferences={
+                  workspace.conversation_preferences ?? {}
+                }
                 onConfigureModel={openModelSettings}
                 onConfigurePreferences={openPreferences}
                 onOpenArtifact={() => {}}
@@ -2631,24 +2335,38 @@ export function PaperWorkbench({
             </section>
             <aside className="flex min-h-0 min-w-0 flex-col justify-center overflow-y-auto bg-card/30 px-6 py-8 sm:px-10">
               <div className="mx-auto max-w-lg">
-                <span className="font-serif text-sm text-primary">01 / AutoDiscovery</span>
+                <span className="font-serif text-sm text-primary">
+                  01 / AutoDesign
+                </span>
                 <h2 className="mt-3 font-serif text-2xl font-semibold tracking-tight">
-                  {t(activeSource ? "paper.source.arxivImportedTitle" : "paper.source.arxivPendingTitle")}
+                  {t(
+                    activeSource
+                      ? "paper.source.arxivImportedTitle"
+                      : "paper.source.arxivPendingTitle",
+                  )}
                 </h2>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">
-                  {t(activeSource ? "paper.source.arxivImportedDescription" : "paper.source.arxivPendingDescription")}
+                  {t(
+                    activeSource
+                      ? "paper.source.arxivImportedDescription"
+                      : "paper.source.arxivPendingDescription",
+                  )}
                 </p>
-                {!activeSource && <div className="mt-6 border-t pt-5">
-                  <p className="text-sm font-medium">{t("paper.source.arxivManualTitle")}</p>
-                  <Button
-                    className="mt-3"
-                    variant="outline"
-                    onClick={openSourceUpload}
-                  >
-                    <Upload data-icon="inline-start" />
-                    {t("paper.source.upload")}
-                  </Button>
-                </div>}
+                {!activeSource && (
+                  <div className="mt-6 border-t pt-5">
+                    <p className="text-sm font-medium">
+                      {t("paper.source.arxivManualTitle")}
+                    </p>
+                    <Button
+                      className="mt-3"
+                      variant="outline"
+                      onClick={openSourceUpload}
+                    >
+                      <Upload data-icon="inline-start" />
+                      {t("paper.source.upload")}
+                    </Button>
+                  </div>
+                )}
               </div>
             </aside>
           </div>
@@ -2804,7 +2522,11 @@ export function PaperWorkbench({
                     aria-hidden="true"
                     className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
                   >
-                    {workspace.mode === "proposal" ? "04" : workspace.mode === "algorithm" ? "02" : "03"}
+                    {workspace.mode === "proposal"
+                      ? "04"
+                      : workspace.mode === "algorithm"
+                        ? "02"
+                        : "03"}
                   </span>
                   <div className="min-w-0 flex-1">
                     <h3 className="font-serif text-lg font-semibold">
@@ -2861,22 +2583,22 @@ export function PaperWorkbench({
           <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]">
             <section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">
               {workspace.workflow_available && (
-                  <PaperWorkflowStepper
-                    stages={workflowStages}
-                    activeStage={nativeStage}
-                    completedStages={completedStages}
-                    stageStates={workspace.proposal_stage_states ?? {}}
-                    onSelect={(stage) => {
-                      setActiveStage(stage)
-                      if (workspace.mode === "proposal")
-                        setProposalEditorState({
-                          workspaceId,
-                          stage,
-                          open: false,
-                        })
-                    }}
-                  />
-                )}
+                <PaperWorkflowStepper
+                  stages={workflowStages}
+                  activeStage={nativeStage}
+                  completedStages={completedStages}
+                  stageStates={workspace.proposal_stage_states ?? {}}
+                  onSelect={(stage) => {
+                    setActiveStage(stage)
+                    if (workspace.mode === "proposal")
+                      setProposalEditorState({
+                        workspaceId,
+                        stage,
+                        open: false,
+                      })
+                  }}
+                />
+              )}
               {workspace.workflow_available ? (
                 <PaperNativeRuntime
                   workspaceId={workspace.id}
@@ -2886,6 +2608,12 @@ export function PaperWorkbench({
                   artifactPaths={nativeArtifactPaths}
                   stageState={workspace.proposal_stage_states?.[nativeStage]}
                   modelName={workspace.analysis_model_name}
+                  modelProviderId={workspace.analysis_provider_id}
+                  contextWindowTokens={workspace.analysis_context_window_tokens}
+                  maxOutputTokens={workspace.analysis_max_output_tokens}
+                  conversationPreferences={
+                    workspace.conversation_preferences ?? {}
+                  }
                   onConfigureModel={openModelSettings}
                   onConfigurePreferences={openPreferences}
                   showProjectContextPrompt={showProjectContextPrompt}
@@ -3039,7 +2767,9 @@ export function PaperWorkbench({
                       workspaceId={workspace.id}
                       sourceVersionId={activeSource.id}
                       stage={nativeStage as DiscoveryStage}
-                      stageState={workspace.proposal_stage_states?.[nativeStage]}
+                      stageState={
+                        workspace.proposal_stage_states?.[nativeStage]
+                      }
                       onOpenSource={(path) => {
                         setSelectedPath(path)
                         setAlgorithmTab("source")

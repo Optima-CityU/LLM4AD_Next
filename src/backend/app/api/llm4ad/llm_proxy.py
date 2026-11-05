@@ -19,16 +19,20 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 from fastapi import APIRouter, Request, Response
 from starlette.background import BackgroundTask
 from starlette.responses import JSONResponse, StreamingResponse
 
+from app.core.config import settings
 from app.services import credential_broker
+from app.services.research_llm_transport import ResearchRequestCancelled, iter_research_response, open_research_response
 from app.services.runtime_health import (
     classify_upstream_error,
     record_runtime_failure,
-    record_runtime_recovery,
+    runtime_request_cancelled,
 )
 
 router = APIRouter(prefix="/llmproxy", tags=["llm4ad.llmproxy"])
@@ -151,10 +155,23 @@ async def proxy_llm(path: str, request: Request) -> Response:
 
     body = await request.body()
 
-    timeout = httpx.Timeout(creds.get("timeout") or 60.0, connect=30.0)
+    runtime = bool(runtime_workspace_id and runtime_session_id)
+    timeout = httpx.Timeout(
+        settings.PAPER_MODEL_STREAM_IDLE_TIMEOUT_SECONDS if runtime else creds.get("timeout") or 60.0,
+        connect=10.0 if runtime else 30.0,
+    )
     client = httpx.AsyncClient(timeout=timeout)
-    try:
-        upstream_req = client.build_request(
+    request_started_at = time.time()
+
+    async def cancelled() -> bool:
+        """Stop old requests even when a protocol adapter keeps its socket open."""
+        return await request.is_disconnected() or await runtime_request_cancelled(
+            runtime_workspace_id, runtime_session_id, request_started_at,
+        )
+
+    def build_request() -> httpx.Request:
+        """Build a fresh request without changing its body or provider credentials."""
+        return client.build_request(
             request.method,
             upstream_url,
             headers=fwd_headers,
@@ -162,33 +179,28 @@ async def proxy_llm(path: str, request: Request) -> Response:
             params=list(request.query_params.multi_items()),
             content=body,
         )
-        upstream_resp = await client.send(upstream_req, stream=True)
-    except httpx.HTTPError as exc:
-        await client.aclose()
-        if runtime_workspace_id and runtime_session_id:
-            record_runtime_failure(
-                runtime_workspace_id,
-                runtime_session_id,
-                reason=classify_upstream_error(exc, None),
-                status_code=None,
-                message=str(exc),
-            )
-        return JSONResponse(
-            {"error": f"upstream request failed: {exc}"},
-            status_code=502,
-        )
-
-    if runtime_workspace_id and runtime_session_id:
-        if upstream_resp.status_code >= 400:
-            record_runtime_failure(
-                runtime_workspace_id,
-                runtime_session_id,
-                reason=classify_upstream_error(None, upstream_resp.status_code),
-                status_code=upstream_resp.status_code,
-                message=upstream_resp.reason_phrase or "",
+    try:
+        if runtime:
+            upstream_resp, iterator, first_chunk = await open_research_response(
+                client, build_request, workspace_id=runtime_workspace_id, session_id=runtime_session_id,
+                cancelled=cancelled, request_started_at=request_started_at,
             )
         else:
-            record_runtime_recovery(runtime_workspace_id, runtime_session_id)
+            upstream_resp = await client.send(build_request(), stream=True)
+            iterator, first_chunk = upstream_resp.aiter_bytes(), None
+    except ResearchRequestCancelled:
+        await client.aclose()
+        return Response(status_code=499, headers={"x-should-retry": "false"})
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        return JSONResponse(
+            {"error": f"upstream request failed: {str(exc) or type(exc).__name__}"},
+            status_code=504 if runtime and isinstance(exc, httpx.TimeoutException) else 502,
+            headers={"x-should-retry": "false"} if runtime else {},
+        )
+    except BaseException:
+        await client.aclose()
+        raise
 
     resp_headers = {
         k: v
@@ -198,8 +210,15 @@ async def proxy_llm(path: str, request: Request) -> Response:
 
     async def _stream():
         try:
-            async for chunk in upstream_resp.aiter_bytes():
+            if runtime and await cancelled():
+                return
+            if first_chunk is not None:
+                yield first_chunk
+            output = iter_research_response(iterator, cancelled) if runtime else iterator
+            async for chunk in output:
                 yield chunk
+        except ResearchRequestCancelled:
+            return
         except Exception as exc:  # noqa: BLE001
             # 上游在流式响应中途断连/超时：记录失败（不投递通知），并让异常
             # 正常终止本流——客户端会看到截断并重试。
@@ -211,10 +230,12 @@ async def proxy_llm(path: str, request: Request) -> Response:
                     status_code=None,
                     message=str(exc),
                     notify=False,
+                    request_started_at=request_started_at,
                 )
             raise
         finally:
             await upstream_resp.aclose()
+            await client.aclose()
 
     return StreamingResponse(
         _stream(),

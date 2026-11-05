@@ -27,6 +27,7 @@ class ResearchWorkspaceMode(StrEnum):
     PROPOSAL = "proposal"
     MANUSCRIPT = "manuscript"
     ALGORITHM = "algorithm"
+    AUTODESIGN = "autodesign"
 
 
 class PaperAgentRunKind(StrEnum):
@@ -47,6 +48,7 @@ class PaperAgentRunKind(StrEnum):
     DISCOVERY_CANDIDATES = "discovery_candidates"
     DISCOVERY_EVALUATION = "discovery_evaluation"
     ALGORITHM_DISCOVERY = "algorithm_discovery"
+    AUTODESIGN = "autodesign"
     METRIC_SUGGESTION = "metric_suggestion"
     PAPER_REVISION = "paper_revision"
     JUDGE = "judge"
