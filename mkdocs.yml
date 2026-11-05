@@ -175,6 +175,7 @@ nav:
       - Component Customization:
           - Providers: en/guides/providers.md
           - Evaluators: en/guides/evaluators.md
+          - Remote Evaluation: en/guides/remote-evaluation.md
           - Multimodal: en/guides/multimodal.md
           - Embeddings & Trajectory: en/guides/embeddings.md
           - Timing & Metrics: en/guides/timing-metrics.md
@@ -229,6 +230,7 @@ nav:
           - 组件定制:
               - 模型供应商: zh/guides/providers.md
               - 评估器: zh/guides/evaluators.md
+              - 远程评估: zh/guides/remote-evaluation.md
               - 多模态: zh/guides/multimodal.md
               - 嵌入与轨迹: zh/guides/embeddings.md
               - 计时与指标: zh/guides/timing-metrics.md

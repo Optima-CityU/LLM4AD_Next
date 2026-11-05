@@ -110,12 +110,12 @@ class EvaluatorConfig(BaseModel):
     the correct concrete config subclass based on the ``type`` field.
     """
 
-    type: Literal["executable", "custom", "solver"] = Field(
+    type: Literal["executable", "custom", "solver", "remote"] = Field(
         default="custom", description="Evaluator type",
         json_schema_extra=ui(
             label_zh="评估器类型", label_en="Evaluator Type",
-            desc_zh="评估器类型：custom、executable 或 solver",
-            desc_en="Evaluator type: custom, executable, or solver-backed",
+            desc_zh="评估器类型：custom、executable、solver 或远程评估器",
+            desc_en="Evaluator type: custom, executable, solver-backed, or remote",
         ),
     )
     dataset: DatasetConfig = Field(
@@ -349,3 +349,17 @@ class EvalContext(BaseModel):
         default="standard",
         description="Evaluation fidelity requested by the orchestrator.",
     )
+
+
+class RemoteEvaluatorConfig(EvaluatorConfig):
+    """Use an authorized pool of compatible remote gateways."""
+    type: Literal["remote"] = "remote"
+    gateway_ids: list[str] = Field(min_length=1, json_schema_extra=ui(label_zh="评估网关", label_en="Evaluation gateways"))
+    contract: dict = Field(default_factory=dict)
+    parameters: dict = Field(default_factory=dict, json_schema_extra=ui(label_zh="评估器参数", label_en="Evaluator parameters"))
+    candidate_paths: list[str] = Field(default_factory=list, json_schema_extra=ui(
+        label_zh="候选文件范围", label_en="Candidate file patterns",
+        desc_zh="可选的相对 glob；留空时传输识别到的源代码和构建清单。数据集保留在网关本地。",
+        desc_en="Optional relative globs. Empty uses recognized sources and build manifests. Datasets remain on the gateway.",
+    ))
+    model_config = ConfigDict(json_schema_extra=ui(label_zh="远程评估器", label_en="Remote evaluator"))

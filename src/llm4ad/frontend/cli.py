@@ -22,6 +22,7 @@ from llm4ad.infra.provider.base import BaseProvider
 from llm4ad.memory.cli_commands import app as memory_app
 from llm4ad.orchestrator.base import BaseOrchestrator
 from llm4ad.planner.base import BasePlanner
+from llm4ad.remote.cli import app as gateway_app
 
 app = typer.Typer(
     name="llm4ad",
@@ -43,6 +44,7 @@ app.add_typer(evolve_app, name="evolve")
 
 # Register memory management commands (interactive TUI).
 app.add_typer(memory_app, name="memory")
+app.add_typer(gateway_app, name="evaluator-gateway")
 
 load_dotenv()
 

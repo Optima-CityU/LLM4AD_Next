@@ -198,7 +198,6 @@
         "请读取现有回复与阶段成果，继续完善尚未完成的工作，并说明哪些证据需要我补充。",
         "请根据我补充的实验结果更新相关回复，再同步检查给 AC 的总结。"
       ],
-
       "tab": "执行进度",
       "coordinator": "科研主代理",
       "worker": "阶段子代理",
@@ -5473,6 +5472,46 @@
         "diagnose": "结合当前版本的配置、日志和候选代码，分析失败或停滞的原因；不要修改任务或启动新实验。",
         "apply": "根据当前实验给出改进建议，说明依据和取舍；先给建议，不要自动创建子任务或运行。"
       }
+    }
+  },
+  "remoteEvaluation": {
+    "type": "评估方式",
+    "local": "本地评估器",
+    "remote": "远程评估器",
+    "gateways": "选择评估网关",
+    "poolHint": "同一候选只交给一个网关评估。多选网关分担任务，评估器、数据版本和指标需一致。",
+    "refresh": "刷新网关",
+    "loadError": "无法获取远程评估状态，请稍后刷新。",
+    "loading": "正在加载…",
+    "online": "在线",
+    "offline": "离线",
+    "capacity": "执行中 {{running}} / 并发 {{capacity}} · 待领取 {{queued}}",
+    "incompatible": "与已选网关的评估契约不同",
+    "unavailable": "部分已选网关已不可访问，请移除或请网关管理员重新授权。",
+    "removeUnavailable": "移除不可访问的网关",
+    "empty": "尚无授权给你的网关。请先在本地通过 CLI 启动评估网关，并使用下方用户 ID 授权。",
+    "offlineHint": "所选网关当前均离线。启动后会等待网关连接，等待时间不计入评估超时。",
+    "userId": "我的用户 ID",
+    "copyId": "复制用户 ID",
+    "userIdHint": "启动网关时通过 --allow-user 指定此 ID；可重复传入以授权多人。",
+    "progress": "远程评估",
+    "progressHint": "最近 100 个候选评估。断线保留任务归属和结果，恢复连接后继续同步。",
+    "noJobs": "尚未提交候选评估，任务启动后会在这里更新。",
+    "candidate": "候选",
+    "gateway": "网关",
+    "status": "状态",
+    "score": "得分 {{score}}",
+    "states": {
+      "queued": "排队中",
+      "waiting_gateway": "等待网关上线",
+      "accepted": "已领取",
+      "running": "评估中",
+      "reconnecting": "等待重新连接",
+      "recovery_required": "等待恢复确认",
+      "cancel_requested": "等待取消确认",
+      "completed": "已完成",
+      "failed": "执行失败",
+      "cancelled": "已取消"
     }
   }
 }

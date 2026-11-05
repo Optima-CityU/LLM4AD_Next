@@ -31,6 +31,7 @@ celery_app.conf.update(
 
 # 队列路由：把不同类型任务拆到独立队列，配合多 worker 实现槽位硬隔离。
 celery_app.conf.task_routes = {
+    "app.tasks.evolution.run_remote_evolution": {"queue": "remote_evaluation"},
     "app.tasks.evolution.*": {"queue": "evolution"},
     "research.run_turn": {"queue": "research"},
     "research.run_collab_turn": {"queue": "research"},

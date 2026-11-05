@@ -14,6 +14,7 @@ from llm4ad.config.coder import ClaudeCodeConfig, CustomCoderConfig, OpenCodeCon
 from llm4ad.config.evaluator import (
     CustomEvaluatorConfig,
     ExecutableEvaluatorConfig,
+    RemoteEvaluatorConfig,
     SolverEvaluatorConfig,
 )
 from llm4ad.config.evolution import (
@@ -445,13 +446,13 @@ class AppConfig(BaseModel):
         ),
     )
 
-    evaluator: CustomEvaluatorConfig | ExecutableEvaluatorConfig | SolverEvaluatorConfig = Field(
+    evaluator: CustomEvaluatorConfig | ExecutableEvaluatorConfig | SolverEvaluatorConfig | RemoteEvaluatorConfig = Field(
         discriminator="type", default_factory=CustomEvaluatorConfig,
         description="Evaluator configuration",
         json_schema_extra=ui(
             label_zh="评估器", label_en="Evaluator",
-            desc_zh="配置算法评估方式，支持自定义、可执行文件或求解器评估器",
-            desc_en="Configure evaluation using custom, executable, or solver-backed evaluators",
+            desc_zh="配置算法评估方式，支持自定义、可执行文件、求解器和远程评估器",
+            desc_en="Configure evaluation using custom, executable, solver-backed, or remote evaluators",
         ),
     )
     evolution: IslandGAConfig | DiverseIslandGAConfig | DyCAConfig | MEoHConfig | EoHConfig | ReEvoConfig | MCTSAHDConfig = Field(

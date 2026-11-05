@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from "lucide-react"
 import { useFieldArray, useFormContext } from "react-hook-form"
 import { useTranslation } from "react-i18next"
-
+import GatewayPoolPicker from "@/components/EvaluationGateway/GatewayPoolPicker"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -24,7 +24,7 @@ import CollapsibleSection from "./CollapsibleSection"
 
 const datasetModes = ["files", "directory", "glob"] as const
 
-export default function EvaluatorSection() {
+function LocalEvaluatorFields() {
   const { control } = useFormContext()
   const { t } = useTranslation()
   const { fields, append, remove } = useFieldArray({
@@ -42,7 +42,10 @@ export default function EvaluatorSection() {
             <FormItem className="col-span-2">
               <FormLabel>{t("configForm.evaluator.module")}</FormLabel>
               <FormControl>
-                <Input placeholder={t("configForm.evaluator.modulePlaceholder")} {...field} />
+                <Input
+                  placeholder={t("configForm.evaluator.modulePlaceholder")}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -98,14 +101,18 @@ export default function EvaluatorSection() {
                   onCheckedChange={field.onChange}
                 />
               </FormControl>
-              <FormLabel className="font-normal">{t("configForm.evaluator.parallel")}</FormLabel>
+              <FormLabel className="font-normal">
+                {t("configForm.evaluator.parallel")}
+              </FormLabel>
             </FormItem>
           )}
         />
       </div>
 
       <div className="space-y-2">
-        <span className="text-sm font-medium">{t("configForm.evaluator.metrics")}</span>
+        <span className="text-sm font-medium">
+          {t("configForm.evaluator.metrics")}
+        </span>
         {fields.map((field, index) => (
           <div key={field.id} className="flex items-center gap-2">
             <FormField
@@ -114,7 +121,10 @@ export default function EvaluatorSection() {
               render={({ field }) => (
                 <FormItem className="flex-1">
                   <FormControl>
-                    <Input placeholder={t("configForm.evaluator.metricPlaceholder")} {...field} />
+                    <Input
+                      placeholder={t("configForm.evaluator.metricPlaceholder")}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -212,12 +222,67 @@ export default function EvaluatorSection() {
                     onCheckedChange={field.onChange}
                   />
                 </FormControl>
-                <FormLabel className="font-normal">{t("configForm.evaluator.recursive")}</FormLabel>
+                <FormLabel className="font-normal">
+                  {t("configForm.evaluator.recursive")}
+                </FormLabel>
               </FormItem>
             )}
           />
         </div>
       </CollapsibleSection>
+    </div>
+  )
+}
+
+export default function EvaluatorSection() {
+  const { watch, setValue, control } = useFormContext()
+  const { t } = useTranslation()
+  const value = watch("evaluator") ?? {}
+  const remote = value.type === "remote"
+  return (
+    <div className="space-y-4">
+      <Select
+        value={remote ? "remote" : "custom"}
+        onValueChange={(type) =>
+          setValue("evaluator", { ...value, type }, { shouldDirty: true })
+        }
+      >
+        <SelectTrigger aria-label={t("remoteEvaluation.type")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="custom">{t("remoteEvaluation.local")}</SelectItem>
+          <SelectItem value="remote">{t("remoteEvaluation.remote")}</SelectItem>
+        </SelectContent>
+      </Select>
+      {remote ? (
+        <>
+          <GatewayPoolPicker
+            value={value}
+            onChange={(next) =>
+              setValue("evaluator", next, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          />
+          <FormField
+            control={control}
+            name="evaluator.timeout"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("configForm.evaluator.timeout")}</FormLabel>
+                <FormControl>
+                  <Input type="number" min={0.1} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </>
+      ) : (
+        <LocalEvaluatorFields />
+      )}
     </div>
   )
 }

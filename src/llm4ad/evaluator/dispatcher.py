@@ -15,6 +15,7 @@ from llm4ad.config.schema import (
     CustomEvaluatorConfig,
     EvalContext,
     EvaluatorConfig,
+    RemoteEvaluatorConfig,
     SolverEvaluatorConfig,
 )
 from llm4ad.evaluator.base import BaseEvaluator, EvaluationResult
@@ -80,8 +81,8 @@ class EvaluationDispatcher:
         self._max_workers = effective_workers
 
         # Resolve evaluator class and register if needed
-        self._eval_cls: type[BaseEvaluator] = self._resolve_evaluator_class()
-        self._data_files = self._get_data_files()
+        self._eval_cls = None if isinstance(config, RemoteEvaluatorConfig) else self._resolve_evaluator_class()
+        self._data_files = [] if isinstance(config, RemoteEvaluatorConfig) else self._get_data_files()
 
         logger.info(
             "EvaluationDispatcher: max_workers=%d, parallel=%s",
@@ -106,9 +107,7 @@ class EvaluationDispatcher:
         if isinstance(self.config, CustomEvaluatorConfig):
             registry_name = f"custom:{self.config.module}"
             if registry_name not in BaseEvaluator.list():
-                cls = self._import_custom_evaluator(
-                    self.config.module, config_dir=self._config_dir
-                )
+                cls = self._import_custom_evaluator(self.config.module, config_dir=self._config_dir)
                 BaseEvaluator.register(registry_name, cls)
             return BaseEvaluator.get(registry_name)
 
@@ -116,9 +115,7 @@ class EvaluationDispatcher:
         return BaseEvaluator.get(eval_type)
 
     @staticmethod
-    def _import_custom_evaluator(
-        module_path: str, config_dir: str | None = None
-    ) -> type[BaseEvaluator]:
+    def _import_custom_evaluator(module_path: str, config_dir: str | None = None) -> type[BaseEvaluator]:
         """Dynamically import a custom evaluator class.
 
         Args:
@@ -149,11 +146,7 @@ class EvaluationDispatcher:
                 raise FileNotFoundError(f"Custom evaluator file not found: {file_path}")
 
             module_dir = str(file_path.parent)
-            project_root = str(
-                Path(config_dir).expanduser().resolve()
-                if config_dir
-                else Path.cwd().resolve()
-            )
+            project_root = str(Path(config_dir).expanduser().resolve() if config_dir else Path.cwd().resolve())
             for import_path in (project_root, module_dir):
                 if import_path not in sys.path:
                     sys.path.insert(0, import_path)
@@ -255,12 +248,15 @@ class EvaluationDispatcher:
         Returns:
             Dictionary of metric definitions.
         """
+        if isinstance(self.config, RemoteEvaluatorConfig):
+            from llm4ad.remote.contracts import EvaluationContract
+
+            contract = EvaluationContract.model_validate(self.config.contract)
+            return {metric.name: metric for metric in contract.metrics}
         evaluator = self._create_evaluator()
         return {metric.name: metric for metric in evaluator.metrics}
 
-    def _aggregate_results(
-        self, results: list[EvaluationResult]
-    ) -> EvaluationResult:
+    def _aggregate_results(self, results: list[EvaluationResult]) -> EvaluationResult:
         """Aggregate multiple per-instance results into a single result.
 
         For a single result, returns it unchanged (zero overhead for evaluators
@@ -297,10 +293,7 @@ class EvaluationDispatcher:
                 score=0.0,
                 metrics={},
                 success=False,
-                error_message=(
-                    f"All {len(results)} instances failed. "
-                    f"Errors: {'; '.join(errors[:3])}"
-                ),
+                error_message=(f"All {len(results)} instances failed. Errors: {'; '.join(errors[:3])}"),
                 metadata={
                     "num_instances": len(results),
                     "successful_instances": 0,
@@ -327,11 +320,13 @@ class EvaluationDispatcher:
         # Build per-instance summary for metadata (lightweight)
         per_instance: list[dict[str, Any]] = []
         for r in results:
-            per_instance.append({
-                "score": r.score,
-                "success": r.success,
-                "error_message": r.error_message,
-            })
+            per_instance.append(
+                {
+                    "score": r.score,
+                    "success": r.success,
+                    "error_message": r.error_message,
+                }
+            )
 
         # Aggregate behavior data: pick the best instance's behavior as primary
         best_behavior = None
@@ -383,6 +378,23 @@ class EvaluationDispatcher:
         TODO: Now → Means, maybe can update to more configuration（算术平均，几何平均，最大值，最小值之类的）
         """
         kwargs.setdefault("timeout", self.config.timeout)
+        if isinstance(self.config, RemoteEvaluatorConfig):
+            from llm4ad.remote.client import evaluate_remote
+
+            async def remote(alg):
+                async with self._semaphore:
+                    return await evaluate_remote(
+                        self.config,
+                        EvalContext(
+                            project_root=alg.worktree.path if alg.worktree else "",
+                            behavior_storage=self._behavior_storage,
+                            **kwargs,
+                        ),
+                    )
+
+            if self._parallel:
+                return list(await asyncio.gather(*(remote(alg) for alg in algorithms)))
+            return [await remote(alg) for alg in algorithms]
         n_files = len(self._data_files)
 
         if n_files == 0:
@@ -416,9 +428,7 @@ class EvaluationDispatcher:
         if self._parallel:
             semaphore = self._semaphore
 
-            async def _limited_eval(
-                evaluator: BaseEvaluator, cfg: EvalContext
-            ) -> EvaluationResult:
+            async def _limited_eval(evaluator: BaseEvaluator, cfg: EvalContext) -> EvaluationResult:
                 async with semaphore:
                     return await evaluator.evaluate(cfg)
 

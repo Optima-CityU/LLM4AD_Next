@@ -258,3 +258,7 @@ refefence_superpowers/
 # Internal release script for the test servers (192.168.8.181 / 10.121.17.44);
 # contains internal addresses and must not be committed
 /scripts/deploy-test-server.sh
+
+# Local evaluation gateway credentials, journals and candidate workspaces
+.llm4ad-gateway/
+.remote-evaluation/

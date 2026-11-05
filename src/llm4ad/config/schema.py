@@ -32,6 +32,7 @@ from llm4ad.config.evaluator import (  # noqa: F401
     EvaluatorConfig,
     ExecutableEvaluatorConfig,
     MetricPatternConfig,
+    RemoteEvaluatorConfig,
     SolverEvaluatorConfig,
     SolverMetricConfig,
 )

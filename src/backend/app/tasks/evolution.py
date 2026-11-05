@@ -6,6 +6,7 @@
 """
 
 import os
+import threading
 import traceback
 import uuid
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ from app.core.redis import (
     push_log_entry,
     read_all_logs,
     release_task_execution_lock,
+    renew_task_execution_lock,
 )
 from app.models import Task, TaskStatus
 
@@ -127,6 +129,10 @@ def _finalize_task(celery_task_id: str, status: TaskStatus) -> None:
                 return
 
             biz_task_id = str(task.id)
+            if (task.input_args or {}).get("evaluator", {}).get("type") == "remote":
+                from app.services.remote_evaluation import cancel_task_jobs
+
+                cancel_task_jobs(session, task.id)
 
             if result.rowcount == 0:
                 # 另一个调用者已完成 finalize，跳过日志持久化
@@ -266,6 +272,22 @@ def run_evolution(self, data: dict):
         )
         return
 
+    stop_renewal = threading.Event()
+    renewal = None
+    if data.get("run_args", {}).get("evaluator", {}).get("type") == "remote":
+        def renew():
+            """Keep the running task lease and its proxy credentials alive."""
+            from app.services.credential_broker import extend_task_tokens
+
+            while not stop_renewal.wait(60):
+                try:
+                    renew_task_execution_lock(task_id, lock_owner_token, lock_ttl_seconds)
+                    extend_task_tokens(task_id, lock_ttl_seconds, user_id=data.get("user_id"))
+                except Exception:
+                    logger.exception("Could not renew remote evolution execution lease")
+
+        renewal = threading.Thread(target=renew, daemon=True)
+        renewal.start()
     execution_claimed = False
     try:
         # 状态变更必须发生在取得执行锁后，避免延迟的重复消息重置已结束任务。
@@ -300,4 +322,17 @@ def run_evolution(self, data: dict):
             if execution_claimed:
                 _finalize_task(self.request.id, final_status)
         finally:
+            stop_renewal.set()
+            if renewal is not None:
+                renewal.join(timeout=2)
             release_task_execution_lock(task_id, lock_owner_token)
+
+
+@celery_app.task(bind=True, base=celery.contrib.abortable.AbortableTask, time_limit=0, soft_time_limit=0)
+def run_remote_evolution(self, data: dict):
+    """Run remote evaluations without timing out their offline waiting period."""
+    run_evolution.push_request(id=self.request.id)
+    try:
+        return run_evolution.run(data)
+    finally:
+        run_evolution.pop_request()

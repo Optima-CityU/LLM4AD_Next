@@ -198,7 +198,6 @@
         "Read the current responses and stage deliverables, continue unfinished work, and explain any evidence you need from me.",
         "Update the affected responses using my new experimental results, then bring the AC summary into agreement."
       ],
-
       "tab": "Progress",
       "coordinator": "Research coordinator",
       "worker": "Stage agent",
@@ -5472,6 +5471,46 @@
         "diagnose": "Diagnose failures or stagnation using this version’s configuration, logs and candidate code without modifying or running tasks.",
         "apply": "Recommend improvements grounded in this experiment and explain tradeoffs without automatically creating or running a child."
       }
+    }
+  },
+  "remoteEvaluation": {
+    "type": "Evaluation mode",
+    "local": "Local evaluator",
+    "remote": "Remote evaluator",
+    "gateways": "Evaluation gateways",
+    "poolHint": "One gateway evaluates each candidate. Select compatible gateways to share the load; evaluator, data version and metrics must match.",
+    "refresh": "Refresh gateways",
+    "loadError": "Could not load remote evaluation status. Please refresh.",
+    "loading": "Loading…",
+    "online": "Online",
+    "offline": "Offline",
+    "capacity": "Running {{running}} / capacity {{capacity}} · queued {{queued}}",
+    "incompatible": "Evaluation contract differs from the selected pool",
+    "unavailable": "Some selected gateways are no longer available. Remove them or ask their operator to restore access.",
+    "removeUnavailable": "Remove unavailable gateways",
+    "empty": "No gateways are shared with you yet. Start a local gateway with the CLI and authorize the user ID below.",
+    "offlineHint": "All selected gateways are offline. The task will wait for reconnection; waiting does not consume its evaluation timeout.",
+    "userId": "My user ID",
+    "copyId": "Copy user ID",
+    "userIdHint": "Pass this ID with --allow-user when starting the gateway. Repeat the option to allow multiple users.",
+    "progress": "Remote evaluation",
+    "progressHint": "The latest 100 candidate evaluations. Assignments and results survive disconnections and synchronize after reconnection.",
+    "noJobs": "No candidate evaluations submitted yet. Progress will appear after the task starts.",
+    "candidate": "Candidate",
+    "gateway": "Gateway",
+    "status": "Status",
+    "score": "Score {{score}}",
+    "states": {
+      "queued": "Queued",
+      "waiting_gateway": "Waiting for gateway",
+      "accepted": "Accepted",
+      "running": "Evaluating",
+      "reconnecting": "Awaiting reconnection",
+      "recovery_required": "Recovery confirmation needed",
+      "cancel_requested": "Cancellation pending",
+      "completed": "Completed",
+      "failed": "Execution failed",
+      "cancelled": "Cancelled"
     }
   }
 }

@@ -553,6 +553,10 @@ def delete_task(db: Session, task_id: uuid.UUID, current_user: models.User) -> M
     ))).all()
     jobs = [paper_service.prepare_workspace_deletion(db, workspace) for workspace in workspaces]
     input_paths = [(target.id, target.input_data_path) for target in targets if target.input_data_path]
+    input_paths.extend(
+        (target.id, f"remote-evaluation/{target.id}/")
+        for target in targets if (target.input_args or {}).get("evaluator", {}).get("type") == "remote"
+    )
     if task.group_id:
         root = db.get(models.Task, task.group_id)
         if root is not None and root.active_child_id in task_ids:

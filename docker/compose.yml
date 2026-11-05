@@ -194,6 +194,18 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
 
+  remote-evaluation-worker:
+    <<: *backend-common
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    # Remote tasks may wait for disconnected gateways without a wall-clock limit.
+    command: celery -A app.core.celery worker -Q remote_evaluation -n remote-eval@%h --loglevel=info --concurrency=${REMOTE_EVALUATION_CONCURRENCY:-10} --time-limit=0 --soft-time-limit=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
+
   research-worker:
     <<: *backend-common
     restart: always

@@ -23,15 +23,37 @@ export const datasetConfigSchema = z.object({
 })
 
 // --- Evaluator ---
-export const evaluatorConfigSchema = z.object({
-  module: z.string().min(1, "Module is required"),
-  dataset: datasetConfigSchema.optional(),
-  metrics: z.array(z.string()).default([]),
-  timeout: z.coerce.number().positive().default(60),
-  max_retries: z.coerce.number().int().min(0).default(1),
-  parallel: z.boolean().default(true),
-  batch_size: z.coerce.number().int().positive().default(10),
-})
+export const evaluatorConfigSchema = z
+  .object({
+    type: z.string().default("custom"),
+    module: z.string().optional(),
+    gateway_ids: z.array(z.string().uuid()).default([]),
+    contract: z.record(z.string(), z.unknown()).default({}),
+    parameters: z.record(z.string(), z.unknown()).default({}),
+    candidate_paths: z.array(z.string()).default([]),
+    dataset: datasetConfigSchema.optional(),
+    metrics: z.array(z.string()).default([]),
+    timeout: z.coerce.number().positive().default(60),
+    max_retries: z.coerce.number().int().min(0).default(1),
+    parallel: z.boolean().default(true),
+    batch_size: z.coerce.number().int().positive().default(10),
+  })
+  .superRefine((value, ctx) => {
+    if (value.type === "remote" && value.gateway_ids.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["gateway_ids"],
+        message: "Select at least one remote evaluation gateway",
+      })
+    }
+    if (value.type !== "remote" && !value.module) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["module"],
+        message: "Module is required",
+      })
+    }
+  })
 
 // --- Evolution ---
 export const evolutionConfigSchema = z.object({
@@ -113,14 +135,25 @@ export const memoryConfigSchema = z.object({
   mindmemos_project_id: z.string().default(""),
   mindmemos_search_strategy: z.string().default("fast"),
   mindmemos_rerank: z.boolean().default(false),
-  mindmemos_score_threshold: z.coerce.number().min(0).max(1).nullable().default(0.65),
+  mindmemos_score_threshold: z.coerce
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .default(0.65),
   mindmemos_fail_open: z.boolean().default(true),
   mindmemos_request_timeout: z.coerce.number().min(0).default(300),
   mindmemos_add_timeout: z.coerce.number().min(0).default(300),
   mindmemos_context_char_budget: z.coerce.number().int().min(0).default(20000),
   mindmemos_elite_code_slots: z.coerce.number().int().min(0).max(5).default(1),
-  mindmemos_elite_code_char_budget: z.coerce.number().int().min(0).default(12000),
-  mindmemos_extraction_prompt_language: z.enum(["auto", "ZH", "EN"]).default("auto"),
+  mindmemos_elite_code_char_budget: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(12000),
+  mindmemos_extraction_prompt_language: z
+    .enum(["auto", "ZH", "EN"])
+    .default("auto"),
   mindmemos_sync_static_cards: z.boolean().default(false),
   include_user_memory: z.boolean().default(false),
   include_project_memory: z.boolean().default(false),

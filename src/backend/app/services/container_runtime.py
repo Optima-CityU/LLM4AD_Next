@@ -95,6 +95,7 @@ class ContainerJobSpec:
     labels: dict[str, str] = field(default_factory=dict)
     events_file: str | None = None
     timeout: int | None = None
+    enforce_timeout: bool = True
 
     def __post_init__(self) -> None:
         if not self.image or not self.image.strip():
@@ -481,7 +482,7 @@ class ContainerJob:
                 logger.warning(f"容器 {cid[:12]} 异常退出: exit_code={exit_code}")
                 return ContainerJobResult(ContainerJobStatus.FAILED, exit_code, f"异常退出，退出码 {exit_code}", cid)
 
-            if time.monotonic() - start > timeout:
+            if self._spec.enforce_timeout and time.monotonic() - start > timeout:
                 logger.warning(f"容器 {cid[:12]} 执行超时 ({timeout}s)，正在终止")
                 self._safe_container_action(container, "kill")
                 return ContainerJobResult(ContainerJobStatus.TIMED_OUT, -1, f"执行超时（{timeout}s）", cid)

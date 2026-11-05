@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next"
 import { z } from "zod"
 
 import { UsersService, type UserUpdateMe } from "@/client"
+import GatewayUserId from "@/components/EvaluationGateway/GatewayUserId"
 import { Button } from "@/components/ui/button"
 import {
   Form,
@@ -87,6 +88,9 @@ const UserInformation = () => {
       <h3 className="text-lg font-semibold py-4">
         {t("settings.userInfoTitle")}
       </h3>
+      <div className="mb-5 rounded-lg border p-3">
+        <GatewayUserId />
+      </div>
       <Form {...form}>
         <form
           onSubmit={form.handleSubmit(onSubmit)}

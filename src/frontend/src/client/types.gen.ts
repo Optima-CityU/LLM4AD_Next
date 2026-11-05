@@ -1228,8 +1228,40 @@ export type FolderRenameRequest = {
     new_path: string;
 };
 
+/**
+ * Public metadata visible only to allowed users.
+ */
+export type GatewayView = {
+    id: string;
+    name: string;
+    contract: {
+        [key: string]: unknown;
+    };
+    contract_key: string;
+    capacity: number;
+    online: boolean;
+    last_seen: string;
+    running: number;
+    queued: number;
+};
+
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
+};
+
+/**
+ * Recent evaluation progress, without runtime channels or storage keys.
+ */
+export type JobView = {
+    id: string;
+    state: string;
+    gateway_id: (string | null);
+    gateway_name: (string | null);
+    gateway_online: boolean;
+    report: {
+        [key: string]: unknown;
+    };
+    updated_at: string;
 };
 
 export type knowledge_add_source_files = {
@@ -5169,6 +5201,14 @@ export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderData = {
 };
 
 export type Llm4AdEmbeddingProvidersTestStoredEmbeddingProviderResponse = (EmbeddingProviderTestResponse);
+
+export type Llm4AdEvaluationGatewaysListGatewaysResponse = (Array<GatewayView>);
+
+export type Llm4AdEvaluationGatewaysTaskJobsData = {
+    taskId: string;
+};
+
+export type Llm4AdEvaluationGatewaysTaskJobsResponse = (Array<JobView>);
 
 export type Llm4AdKnowledgeGetParserBindingResponse = (KnowledgeParserBindingResponse);
 

@@ -65,10 +65,16 @@ def _build_spec(data: dict, config_key: str) -> ContainerJobSpec:
         "LLM4AD_CONFIG_KEY": config_key,
         "TASK_DEP_INSTALL_TIMEOUT": str(settings.TASK_DEP_INSTALL_TIMEOUT),
     }
+    remote = data["run_args"].get("evaluator", {}).get("type") == "remote"
+    if remote:
+        from app.services.remote_evaluation import runtime_token
+        env.update({"LLM4AD_REMOTE_URL": f"http://backend:8000{settings.API_V1_STR}/llm4ad/evaluation-gateways",
+                    "LLM4AD_REMOTE_TOKEN": runtime_token(task_id), "LLM4AD_REMOTE_TASK_ID": task_id})
     if uv_index := os.environ.get("UV_INDEX_URL"):
         env["UV_INDEX_URL"] = uv_index
     return ContainerJobSpec(
         name=container_name(task_id),
+        enforce_timeout=not remote,
         image=settings.TASK_RUNNER_IMAGE,
         mounts={resolve_host_path(run_dir): TASK_CONTAINER_DATA_DIR},
         env=env,

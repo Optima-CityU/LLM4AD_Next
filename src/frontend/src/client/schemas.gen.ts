@@ -3534,6 +3534,54 @@ export const FolderRenameRequestSchema = {
     description: '文件夹重命名请求。'
 } as const;
 
+export const GatewayViewSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        contract: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Contract'
+        },
+        contract_key: {
+            type: 'string',
+            title: 'Contract Key'
+        },
+        capacity: {
+            type: 'integer',
+            title: 'Capacity'
+        },
+        online: {
+            type: 'boolean',
+            title: 'Online'
+        },
+        last_seen: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Last Seen'
+        },
+        running: {
+            type: 'integer',
+            title: 'Running'
+        },
+        queued: {
+            type: 'integer',
+            title: 'Queued'
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'contract', 'contract_key', 'capacity', 'online', 'last_seen', 'running', 'queued'],
+    title: 'GatewayView',
+    description: 'Public metadata visible only to allowed users.'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {
@@ -3546,6 +3594,61 @@ export const HTTPValidationErrorSchema = {
     },
     type: 'object',
     title: 'HTTPValidationError'
+} as const;
+
+export const JobViewSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        state: {
+            type: 'string',
+            title: 'State'
+        },
+        gateway_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Id'
+        },
+        gateway_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Name'
+        },
+        gateway_online: {
+            type: 'boolean',
+            title: 'Gateway Online'
+        },
+        report: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Report'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['id', 'state', 'gateway_id', 'gateway_name', 'gateway_online', 'report', 'updated_at'],
+    title: 'JobView',
+    description: 'Recent evaluation progress, without runtime channels or storage keys.'
 } as const;
 
 export const KnowledgeContentResponseSchema = {

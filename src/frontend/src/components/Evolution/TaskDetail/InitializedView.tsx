@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { TaskResponse } from "@/client"
 import { UtilsCodeServerService } from "@/client"
+import RemoteEvaluationProgress from "@/components/EvaluationGateway/RemoteEvaluationProgress"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { useTheme } from "@/components/theme-provider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -50,6 +51,9 @@ interface InitializedViewProps {
 
 export default function InitializedView({ task }: InitializedViewProps) {
   const { t } = useTranslation()
+  const remote =
+    (task.input_args?.evaluator as Record<string, unknown> | undefined)
+      ?.type === "remote"
   const [ideState, setIdeState] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle")
@@ -132,15 +136,18 @@ export default function InitializedView({ task }: InitializedViewProps) {
       const a = document.createElement("a")
       a.href = url
       a.download =
-        filenameFromContentDisposition(response.headers.get("Content-Disposition")) ??
-        "LLM4AD-workspace.zip"
+        filenameFromContentDisposition(
+          response.headers.get("Content-Disposition"),
+        ) ?? "LLM4AD-workspace.zip"
       document.body.appendChild(a)
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : t("evolution.ideDownload.failed"),
+        error instanceof Error
+          ? error.message
+          : t("evolution.ideDownload.failed"),
       )
     } finally {
       setIsDownloadingWorkspace(false)
@@ -195,6 +202,11 @@ export default function InitializedView({ task }: InitializedViewProps) {
             <Eye className="size-3.5" />
             {t("evolution.tabs.render")}
           </TabsTrigger>
+          {remote && (
+            <TabsTrigger value="remote-evaluation">
+              {t("remoteEvaluation.progress")}
+            </TabsTrigger>
+          )}
           <TabsTrigger
             value="insights"
             className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
@@ -283,6 +295,15 @@ export default function InitializedView({ task }: InitializedViewProps) {
           <MultiPanelLayout task={task} />
         </div>
       </TabsContent>
+
+      {remote && (
+        <TabsContent value="remote-evaluation" className="min-h-0 flex-1">
+          <RemoteEvaluationProgress
+            taskId={task.id}
+            active={task.status === "running" || task.status === "pending"}
+          />
+        </TabsContent>
+      )}
 
       <TabsContent
         value="render"

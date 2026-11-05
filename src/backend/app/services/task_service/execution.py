@@ -5,6 +5,7 @@
 """
 
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 
 from celery.result import AsyncResult
@@ -93,6 +94,8 @@ def _resolve_providers(
                 "timeout": p.timeout,
                 "max_retries": p.max_retries,
             }
+            if input_args.get("evaluator", {}).get("type") == "remote" and p.is_builtin and "{accessToken}" in (p.base_url or ""):
+                model_data["_upstream_url_template"] = p.base_url
             provider_configs.append(model_data)
             provider_configs_map[name] = model_data
     # 添加mock供应商
@@ -147,7 +150,9 @@ def _resolve_providers(
         coder_config["provider"] = f"{coder_provider}{coder_model}"
 
     # 评估器无专属默认槽位，回退到用户的“其它”默认模型（other）
-    if not evaluator_provider or evaluator_provider == "default":
+    if evaluator_config.get("type") == "remote":
+        evaluator_config.pop("provider", None)
+    elif not evaluator_provider or evaluator_provider == "default":
         if defaults and defaults.other_provider_id and defaults.other_model_name:
             evaluator_config["provider"] = f"{defaults.other_provider_id}{defaults.other_model_name}"
         else:
@@ -335,6 +340,7 @@ def _apply_credential_proxy(
             auth_token=provider_cfg.get("auth_token") or "",
             model=provider_cfg.get("model", ""),
             timeout=provider_cfg.get("timeout") or 60.0,
+            upstream_url_template=provider_cfg.pop("_upstream_url_template", ""),
         )
         provider_cfg["api_key"] = token
         provider_cfg["auth_token"] = ""
@@ -441,7 +447,11 @@ def run_task(
     validate_task_container_host_path()
 
     # 解析供应商列表及 evolution 中的供应商引用
-    input_args = dict(task.input_args) if task.input_args else {}
+    input_args = deepcopy(task.input_args) if task.input_args else {}
+    remote = input_args.get("evaluator", {}).get("type") == "remote"
+    if remote:
+        from app.services.remote_evaluation import validate_pool
+        input_args["evaluator"]["contract"] = validate_pool(db, current_user.id, input_args["evaluator"])
     input_args = _resolve_providers(db, input_args, current_user, access_token, task_id=task_id)
 
     # 准备运行参数
@@ -530,7 +540,11 @@ def run_task(
     )
 
     # 使用预生成的 ID 派发 Celery 异步任务
-    celery_result = run_evolution.apply_async(args=[task_args], task_id=celery_task_id)
+    if remote:
+        from app.tasks.evolution import run_remote_evolution
+        celery_result = run_remote_evolution.apply_async(args=[task_args], task_id=celery_task_id, queue="remote_evaluation")
+    else:
+        celery_result = run_evolution.apply_async(args=[task_args], task_id=celery_task_id)
     db.refresh(task)
 
     return schemas.TaskRunResponse(

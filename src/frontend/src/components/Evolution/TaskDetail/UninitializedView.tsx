@@ -387,7 +387,9 @@ export default function UninitializedView({
                   handleSchemaChange("coder", coder)
                 }}
               />
-            ) : schemaKey === "evaluator" ? (
+            ) : schemaKey === "evaluator" &&
+              (configValues.evaluator as Record<string, unknown>)?.type !==
+                "remote" ? (
               <EvaluatorProviderSelect
                 evaluatorProvider={
                   ((configValues.evaluator as Record<string, unknown>)

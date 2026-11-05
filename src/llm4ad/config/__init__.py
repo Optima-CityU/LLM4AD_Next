@@ -23,6 +23,7 @@ from llm4ad.config.evaluator import (
     EvaluatorConfig,
     ExecutableEvaluatorConfig,
     MetricPatternConfig,
+    RemoteEvaluatorConfig,
     SolverEvaluatorConfig,
     SolverMetricConfig,
 )
@@ -63,6 +64,7 @@ __all__ = [
     "EvaluatorConfig",
     "CustomEvaluatorConfig",
     "ExecutableEvaluatorConfig",
+    "RemoteEvaluatorConfig",
     "SolverEvaluatorConfig",
     "SolverMetricConfig",
     "EvalContext",
