@@ -183,6 +183,55 @@
     "liveCode": "Group QR"
   },
   "paper": {
+    "agentProgress": {
+      "resultsTab": "Results",
+      "responsesTab": "Responses",
+      "filesTab": "Files",
+      "helpers": "Supporting agents",
+      "proposalExamples": [
+        "Use the project brief and reference materials to complete the proposal workflow, then summarize any inputs still needed from me.",
+        "Inspect the published deliverables and continue from the stages that need work, reusing results that are already current.",
+        "Revise the relevant sections using my additional research ideas, then check consistency between the literature, objectives and methods."
+      ],
+      "rebuttalExamples": [
+        "Analyze the paper and every review, then complete the concern baseline, reviewer responses and AC summary.",
+        "Read the current responses and stage deliverables, continue unfinished work, and explain any evidence you need from me.",
+        "Update the affected responses using my new experimental results, then bring the AC summary into agreement."
+      ],
+
+      "tab": "Progress",
+      "coordinator": "Research coordinator",
+      "worker": "Stage agent",
+      "description": "The coordinator advances the workflow and brings together each agent’s findings. You can redirect or stop it in the conversation.",
+      "timeline": "Research workflow execution",
+      "published": "{{count}} of {{total}} stages published",
+      "openResult": "View deliverable",
+      "toolCount": "{{count}} tool calls",
+      "status": {
+        "ready": "Ready to begin",
+        "running": "Working",
+        "waiting": "Waiting for agents",
+        "idle": "Awaiting your direction",
+        "completed": "Published",
+        "pending": "Not started",
+        "failed": "Needs attention",
+        "interrupted": "Interrupted",
+        "needsInput": "Author input needed",
+        "stale": "Update needed",
+        "reviewing": "Preparing publication"
+      },
+      "tools": {
+        "Read": "Reading materials",
+        "Glob": "Finding files",
+        "Grep": "Searching evidence",
+        "Write": "Writing content",
+        "Edit": "Revising content",
+        "Skill": "Consulting the stage method",
+        "Agent": "Delegating a stage",
+        "Task": "Delegating a stage",
+        "other": "Using research tools"
+      }
+    },
     "workspace": {
       "title": "Research Studio",
       "subtitle": "Manage research materials and connect proposal ideation, manuscript refinement, and algorithm discovery",

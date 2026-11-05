@@ -55,6 +55,7 @@ export function usePaperRuntimeSession(
   workflowStage: PaperRuntimeSessionCreate["workflow_stage"],
   enabled: boolean,
   profileKey: string,
+  autoWorkflow = false,
 ) {
   const browserLanguage =
     typeof navigator === "undefined"
@@ -67,11 +68,15 @@ export function usePaperRuntimeSession(
       workspaceId,
       workflowStage,
       runtimeProfileKey,
+      autoWorkflow,
     ],
     queryFn: async () => ({
       ...(await Llm4AdPapersService.createRuntimeSession({
         workspaceId,
-        requestBody: { workflow_stage: workflowStage },
+        requestBody: {
+          workflow_stage: workflowStage,
+          auto_workflow: autoWorkflow,
+        },
       })),
       runtimeProfileKey,
     }),

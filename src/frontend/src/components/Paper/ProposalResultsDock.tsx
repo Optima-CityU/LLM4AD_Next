@@ -73,6 +73,9 @@ type ProposalResultsDockProps = {
   onOpenFile: (path: string) => void
   onUploadProjectContext: () => void
   children: ReactNode
+  progress?: ReactNode
+  view?: string
+  onViewChange?: (view: string) => void
 }
 
 const markdownClass =
@@ -421,32 +424,64 @@ export default function ProposalResultsDock({
   onOpenFile,
   onUploadProjectContext,
   children,
+  progress,
+  view = "progress",
+  onViewChange,
 }: ProposalResultsDockProps) {
   const { t } = useTranslation()
 
   return (
     <aside
       data-testid="proposal-results-dock"
-      className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background lg:flex"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background"
     >
       <Tabs
-        value={editorOpen ? "editor" : "result"}
-        onValueChange={(value) => onEditorOpenChange(value === "editor")}
+        value={editorOpen ? "editor" : progress ? view : "result"}
+        onValueChange={(value) => {
+          onEditorOpenChange(value === "editor")
+          onViewChange?.(value)
+        }}
         className="h-full min-h-0 gap-0"
       >
         <div className="shrink-0 border-b bg-card/55 p-3">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList
+            className={
+              progress ? "grid w-full grid-cols-3" : "grid w-full grid-cols-2"
+            }
+          >
+            {progress && (
+              <TabsTrigger value="progress">
+                <GitBranch data-icon="inline-start" />
+                {t("paper.agentProgress.tab")}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="result">
               <BookOpen data-icon="inline-start" />
-              {t("paper.proposalResults.title")}
+              {t(
+                progress
+                  ? "paper.agentProgress.resultsTab"
+                  : "paper.proposalResults.title",
+              )}
             </TabsTrigger>
             <TabsTrigger value="editor">
               <FileText data-icon="inline-start" />
-              {t("paper.proposalResults.editor")}
+              {t(
+                progress
+                  ? "paper.agentProgress.filesTab"
+                  : "paper.proposalResults.editor",
+              )}
             </TabsTrigger>
           </TabsList>
         </div>
 
+        {progress && (
+          <TabsContent
+            value="progress"
+            className="mt-0 min-h-0 flex-1 overflow-hidden"
+          >
+            {progress}
+          </TabsContent>
+        )}
         <TabsContent
           value="result"
           className="mt-0 min-h-0 flex-1 overflow-hidden"

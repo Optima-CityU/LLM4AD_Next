@@ -401,14 +401,14 @@ test("stage blockers stay compact and use stage-specific guidance", () => {
   expect(zh.paper.runtime.revisionRequired).not.toContain("终审")
 })
 
-test("editing a prior turn invalidates only the displayed stage revision", () => {
+test("editing a prior turn invalidates its stage or the automatic workflow", () => {
   expect(cloudCliComposerSource).toContain(
     "type: 'llm4ad:conversation-rewound'",
   )
   expect(nativeRuntimeSource).toContain('"llm4ad:conversation-rewound"')
   expect(nativeRuntimeSource).toContain("useInvalidatePaperWorkflowStage")
   expect(nativeRuntimeSource).toContain(
-    "expected_iteration: stageState?.iteration",
+    "expected_iteration: autoWorkflow ? undefined : stageState?.iteration",
   )
 })
 
@@ -468,7 +468,7 @@ test("autodiscovery separates research decisions from the final runnable task", 
 
 test("all paper workflows show model settings below the setup guidance", () => {
   expect(nativeRuntimeSource).toContain(
-    "if (!modelReady || !prerequisiteReady)",
+    "if (!modelReady || (!prerequisiteReady && !autoWorkflow))",
   )
   expect(nativeRuntimeSource).toContain("!modelReady &&")
   expect(nativeRuntimeSource).toContain("onClick={onConfigureModel}")
@@ -618,7 +618,7 @@ test("blocking final review returns to the owning stage without failing publicat
   expect(nativeRuntimeSource).toContain("stageState.findings")
   expect(paperRouteSource).toContain('"needsRevision"')
   expect(nativeRuntimeSource).toContain(
-    "expected_iteration: stageState?.iteration",
+    "expected_iteration: autoWorkflow ? undefined : stageState?.iteration",
   )
   expect(paperRouteSource).toContain("stagePublished")
   expect(openAirProposalAttribution).toContain("review-and-return loop")

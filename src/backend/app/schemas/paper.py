@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PaperSourceKind = Literal["markdown", "latex_zip", "source_bundle"]
 PaperRunKind = Literal[
+    "research_workflow",
     "autodesign",
     "proposal_formatting",
     "proposal_literature",
@@ -730,9 +731,10 @@ class PaperLinkedTaskChangeResponse(BaseModel):
 
 
 class PaperRuntimeSessionCreate(BaseModel):
-    """Select the backend-owned stage profile for a native session."""
+    """Select a native stage or the automatic research coordinator."""
 
     workflow_stage: ResearchWorkflowStage
+    auto_workflow: bool = False
 
 
 class PaperStageInvalidateRequest(BaseModel):

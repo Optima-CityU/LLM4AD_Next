@@ -6278,7 +6278,7 @@ export const PaperAgentRunResponseSchema = {
         },
         run_kind: {
             type: 'string',
-            enum: ['autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
+            enum: ['research_workflow', 'autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
             title: 'Run Kind'
         },
         status: {
@@ -8049,12 +8049,17 @@ export const PaperRuntimeSessionCreateSchema = {
             type: 'string',
             enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
+        },
+        auto_workflow: {
+            type: 'boolean',
+            title: 'Auto Workflow',
+            default: false
         }
     },
     type: 'object',
     required: ['workflow_stage'],
     title: 'PaperRuntimeSessionCreate',
-    description: 'Select the backend-owned stage profile for a native session.'
+    description: 'Select a native stage or the automatic research coordinator.'
 } as const;
 
 export const PaperRuntimeSessionResponseSchema = {
@@ -8592,7 +8597,7 @@ export const PaperWorkspaceDetailSchema = {
         available_run_kinds: {
             items: {
                 type: 'string',
-                enum: ['autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
+                enum: ['research_workflow', 'autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
             },
             type: 'array',
             title: 'Available Run Kinds'

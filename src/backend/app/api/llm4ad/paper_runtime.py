@@ -61,6 +61,9 @@ from app.services import (
     paper_workflow,
     runtime_health,
 )
+from app.services import (
+    paper_workflow_coordinator as coordinator,
+)
 from app.services.paper_workspace_runtime import (
     CONTAINER_SOURCE_ROOT,
     PAPER_PROTOCOL_ADAPTER_PORT,
@@ -98,6 +101,7 @@ class _StagePublicationRequest(BaseModel):
     run_id: uuid.UUID
     idempotency_key: str = Field(min_length=1, max_length=128)
     artifact: dict
+    workflow_stage: ResearchWorkflowStage | None = None
 
 
 class _ArxivImportRequest(BaseModel):
@@ -137,7 +141,7 @@ def _stage_publication_key(request: _StagePublicationRequest) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     artifact_digest = hashlib.sha256(canonical_artifact).hexdigest()
-    return f"paper_runtime_publication:{request.run_id}:{request.idempotency_key}:{artifact_digest}"
+    return f"paper_runtime_publication:{request.run_id}:{request.workflow_stage or "stage"}:{request.idempotency_key}:{artifact_digest}"
 
 
 def _runtime_cookie_name(workspace_id: uuid.UUID) -> str:
@@ -400,7 +404,9 @@ async def create_runtime_session(
             ((workspace.proposal_stage_states or {}).get(stage) or {}).get("status"),
         )
     ]
-    if missing_prerequisites:
+    if request.auto_workflow and workspace.mode not in {"proposal", "manuscript"}:
+        raise HTTPException(status_code=409, detail="Automatic workflow is unavailable for this workspace")
+    if missing_prerequisites and not request.auto_workflow:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Complete prerequisite stages first: {', '.join(missing_prerequisites)}",
@@ -432,15 +438,16 @@ async def create_runtime_session(
         paper_service.sync_paper_workspace_reviews(db, workspace, source)
         paper_service.sync_paper_workspace_rebuttal_context(workspace)
 
-    session_id = f"{workspace_id.hex}-{request.workflow_stage}"
-    run_id = _native_run_id(workspace_id, request.workflow_stage)
+    session_stage = "workflow" if request.auto_workflow else request.workflow_stage
+    session_id = f"{workspace_id.hex}-{session_stage}"
+    run_id = _native_run_id(workspace_id, session_stage)
     run = db.get(PaperAgentRun, run_id)
     if run is None:
         run = PaperAgentRun(
             id=run_id,
             workspace_id=workspace.id,
             source_version_id=source.id if source else None,
-            run_kind=run_kind,
+            run_kind="research_workflow" if request.auto_workflow else run_kind,
             status=PaperAgentRunStatus.READY.value,
             progress=0,
             stage="native_session",
@@ -455,6 +462,12 @@ async def create_runtime_session(
         request.workflow_stage,
         run_kind,
     )
+    if request.auto_workflow:
+        run.request_payload = {**run.request_payload, "auto_workflow": True}
+        run.request_payload["writable_paths"] = list(dict.fromkeys(
+            path for stage in workflow.stages
+            for path in coordinator.stage_paths(workflow, stage, workspace.proposal_entry_path or "proposal.typ")
+        ))
     db.add(run)
     db.commit()
 
@@ -509,12 +522,17 @@ async def create_runtime_session(
             detail="Research model protocol adapter could not be started",
         ) from exc
     allowed_tools = _runtime_allowed_tools(workspace.mode)
+    allowed_tools.extend(["Agent", "Task"])
     mcp_servers: dict[str, object] = {
         "llm4ad_stage": {
             "type": "stdio",
             "command": "/app/backend/.venv/bin/python",
             "args": ["/app/paper-agent/stage_bridge.py"],
             "env": {
+                "LLM4AD_WORKFLOW_CONTEXT_URL": (
+                    f"http://backend:8000{settings.API_V1_STR}/llm4ad/papers/runtime/workflow-context"
+                ),
+                "LLM4AD_AUTO_WORKFLOW": "true" if request.auto_workflow else "false",
                 "LLM4AD_STAGE_PUBLISH_URL": (
                     f"http://backend:8000{settings.API_V1_STR}/llm4ad/papers/runtime/stage-results"
                 ),
@@ -531,6 +549,7 @@ async def create_runtime_session(
                 "LLM4AD_STAGE_WORKSPACE_ID": str(workspace_id),
                 "LLM4AD_STAGE_RUN_ID": str(run_id),
                 "LLM4AD_STAGE_NAME": request.workflow_stage,
+                "LLM4AD_STAGE_PROPOSAL_ENTRY": workspace.proposal_entry_path or "proposal.typ",
                 "LLM4AD_STAGE_REQUIRES_TYPST": "true" if workspace.mode == "proposal" else "false",
                 "LLM4AD_BUILDER_API_KEY": "llm4ad-local-proxy",
                 "LLM4AD_BUILDER_BASE_URL": f"http://127.0.0.1:{PAPER_PROTOCOL_ADAPTER_PORT}",
@@ -561,6 +580,8 @@ async def create_runtime_session(
         )
     if workspace.mode == "proposal":
         allowed_tools.append("mcp__llm4ad_stage__check_typst")
+    if request.auto_workflow:
+        allowed_tools.append("mcp__llm4ad_stage__get_workflow_context")
     autodesign_context = ""
     if workspace.mode == "autodesign":
         from app.services import autodesign_service
@@ -590,7 +611,7 @@ async def create_runtime_session(
             "validate_project", "prepare_task", "start_task", "stop_task",
             "get_memory_context", "list_memory_cards", "save_memory_card", "patch_task_parameters", "sync_task_draft",
         ))
-    external_mcp_servers, external_mcp_tools = _runtime_stage_mcp_configuration(request.workflow_stage)
+    external_mcp_servers, external_mcp_tools = _runtime_stage_mcp_configuration("literature" if request.auto_workflow and workspace.mode == "proposal" else request.workflow_stage)
     mcp_servers.update(external_mcp_servers)
     allowed_tools.extend(external_mcp_tools)
     profile = {
@@ -610,7 +631,7 @@ async def create_runtime_session(
             # The gateway owns bounded retries before any response is forwarded.
             "CLAUDE_CODE_MAX_RETRIES": "0",
         },
-        "skills": list(workflow.skills_by_run_kind[run_kind]),
+        "skills": coordinator.coordinator_skills(workflow) if request.auto_workflow else list(workflow.skills_by_run_kind[run_kind]),
         "mcpServers": mcp_servers,
         "toolsSettings": {
             "allowedTools": allowed_tools,
@@ -624,7 +645,7 @@ async def create_runtime_session(
         "writablePaths": run.request_payload["writable_paths"],
         "systemPromptAppend": (
             f"{workflow.prompt_preamble}\n"
-            f"The active backend-owned workflow stage is {request.workflow_stage}. "
+            f"The active backend-owned workflow stage is {'coordinator' if request.auto_workflow else request.workflow_stage}. "
             "Use the installed stage Skills as the method and stay within the current project workspace."
             + (
                 "\nAuthor-supplied proposal brief (project context, not a replacement for stage Skills):\n"
@@ -644,6 +665,18 @@ async def create_runtime_session(
             + autodesign_context
         ),
     }
+    if request.auto_workflow:
+        profile["mainSkills"] = [coordinator.COORDINATOR_SKILL]
+        profile["agents"] = coordinator.coordinator_agents(
+            workspace, _conversation_preferences_prompt(workspace, http_request.headers.get("accept-language")), external_mcp_tools
+        )
+        profile["systemPromptAppend"] += (
+            "\nYou coordinate the entire workflow in one conversation. Follow research-workflow-coordinator. "
+            "Read get_workflow_context, delegate each next stage to its named stage agent, "
+            "publish its result with workflow_stage, and continue automatically when evidence is sufficient. "
+            "Wait for child reports before publishing; user messages may redirect or stop the work. "
+            "Do not ask the user to select workflow steps. Current state comes from the workflow tool, not an old reply."
+        )
     async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
         configured = await client.put(
             _runtime_upstream_url(workspace_id, "internal/runtime-profile"),
@@ -713,6 +746,22 @@ async def workspace_runtime_events(
             heartbeat_interval=15,
         )
     )
+
+
+@router.get("/runtime/workflow-context", include_in_schema=False)
+def read_runtime_workflow_context(workspace_id: uuid.UUID, run_id: uuid.UUID, http_request: Request) -> dict:
+    """Read current workflow state from an authenticated coordinator or its workers."""
+    supplied = http_request.headers.get("x-llm4ad-runtime-token", "")
+    if not secrets.compare_digest(supplied, paper_workspace_runtime_token(workspace_id)):
+        raise HTTPException(status_code=401, detail="Invalid runtime service token")
+    with Session(engine) as db:
+        workspace = db.get(PaperWorkspace, workspace_id)
+        run = db.get(PaperAgentRun, run_id)
+        if workspace is None or run is None or run.workspace_id != workspace.id:
+            raise HTTPException(status_code=404, detail="Research workflow not found")
+        if not (run.request_payload or {}).get("auto_workflow") or workspace.mode not in {"proposal", "manuscript"}:
+            raise HTTPException(status_code=403, detail="This session is not a research coordinator")
+        return coordinator.workflow_context(db, workspace)
 
 
 @router.post("/runtime/arxiv-import", include_in_schema=False)
@@ -927,6 +976,9 @@ async def publish_runtime_stage_result(
             ]
             if missing:
                 raise HTTPException(status_code=409, detail=f"Predecessor stage changed: {', '.join(missing)}")
+        if (run.request_payload or {}).get("auto_workflow"):
+            run = coordinator.publication_run(db, workspace, run, request.workflow_stage)
+        publication_run_id = run.id
         run.source_version_id = workspace.active_source_version_id
         run.status = PaperAgentRunStatus.RUNNING.value
         run.progress = 95
@@ -963,11 +1015,11 @@ async def publish_runtime_stage_result(
             )
             from app.tasks.paper_agent import _persist_output
 
-            source_committed = _persist_output(request.run_id, user_id, Path(temporary_directory))
+            source_committed = _persist_output(publication_run_id, user_id, Path(temporary_directory))
     except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
         await redis.delete(publication_key)
         with Session(engine) as db:
-            run = db.get(PaperAgentRun, request.run_id)
+            run = db.get(PaperAgentRun, publication_run_id)
             if run is not None:
                 run.status = PaperAgentRunStatus.FAILED.value
                 run.stage = "validation_failed"
@@ -982,7 +1034,7 @@ async def publish_runtime_stage_result(
 
     result = {
         "success": True,
-        "run_id": str(request.run_id),
+        "run_id": str(publication_run_id),
         "source_committed": source_committed,
     }
     await redis.set(publication_key, json.dumps(result), ex=_RUNTIME_SESSION_TTL_SECONDS)

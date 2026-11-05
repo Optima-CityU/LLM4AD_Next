@@ -1,4 +1,3 @@
-import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "@/lib/researchModels"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   ArrowRight,
@@ -43,18 +42,17 @@ import {
   usePanelRef,
 } from "react-resizable-panels"
 import { toast } from "sonner"
-
 import type {
   PaperConversationPreferences,
   ProposalStageState,
   ProviderResponse,
 } from "@/client"
 import ArtifactCodeEditor from "@/components/AutoResearch/ArtifactCodeEditor"
-import WorkflowStepper from "@/components/Common/WorkflowStepper"
 import SourceNavigator, {
   EDITABLE_SUFFIXES,
   PAPER_DIRECTORY_MARKER,
 } from "@/components/Common/SourceNavigator"
+import WorkflowStepper from "@/components/Common/WorkflowStepper"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -65,6 +63,7 @@ import PaperNativeRuntime from "@/components/Paper/PaperNativeRuntime"
 import type { ProposalResultStage } from "@/components/Paper/ProposalResultsDock"
 import ProposalResultsDock from "@/components/Paper/ProposalResultsDock"
 import RebuttalEntriesPanel from "@/components/Paper/RebuttalEntriesPanel"
+import ResearchAgentProgressPanel from "@/components/Paper/ResearchAgentProgressPanel"
 import TypstLivePreview from "@/components/Paper/TypstLivePreview"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -119,6 +118,8 @@ import {
   parseProposalBasics,
   serializeProposalBasics,
 } from "@/lib/proposalBasics"
+import type { ResearchAgentProgress } from "@/lib/researchAgentProgress"
+import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "@/lib/researchModels"
 import {
   parseResearchWorkspaceMode,
   type ResearchWorkspaceMode,
@@ -1853,6 +1854,54 @@ export function PaperWorkbench({
       ),
     [workspace?.workflow_stages],
   )
+  const autoWorkflow =
+    workspace?.mode === "proposal" || workspace?.mode === "manuscript"
+  const [researchView, setResearchView] = useState("progress")
+  const [agentActivity, setAgentActivity] = useState<{
+    workspaceId: string
+    progress: ResearchAgentProgress
+  } | null>(null)
+  const agentProgress =
+    agentActivity?.workspaceId === workspaceId ? agentActivity.progress : null
+  const receiveAgentProgress = useCallback(
+    (progress: ResearchAgentProgress) => {
+      setAgentActivity({ workspaceId, progress })
+      const active = [...progress.agents]
+        .reverse()
+        .find((agent) => agent.status === "running")
+      if (
+        active &&
+        researchView === "progress" &&
+        !proposalEditorState.open &&
+        workflowStages.includes(active.stage as PaperTool)
+      )
+        setActiveStage(active.stage as PaperTool)
+    },
+    [
+      workspaceId,
+      workflowStages,
+      setActiveStage,
+      researchView,
+      proposalEditorState.open,
+    ],
+  )
+  const openStageResult = (stage: string) => {
+    setActiveStage(stage as PaperTool)
+    setResearchView("result")
+    setProposalEditorState({
+      workspaceId,
+      stage: stage as PaperTool,
+      open: false,
+    })
+  }
+  const progressPanel = (
+    <ResearchAgentProgressPanel
+      stages={workflowStages}
+      stageStates={workspace?.proposal_stage_states ?? {}}
+      progress={agentProgress}
+      onOpenStage={openStageResult}
+    />
+  )
   const nativeStage = workflowStages.includes(activeStage)
     ? activeStage
     : (workflowStages[0] ?? "formatting")
@@ -2580,9 +2629,15 @@ export function PaperWorkbench({
             </div>
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]">
+          <div
+            className={cn(
+              "grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]",
+              autoWorkflow &&
+                "max-lg:grid-rows-[minmax(26rem,70dvh)_minmax(26rem,70dvh)] max-lg:overflow-y-auto",
+            )}
+          >
             <section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">
-              {workspace.workflow_available && (
+              {workspace.workflow_available && !autoWorkflow && (
                 <PaperWorkflowStepper
                   stages={workflowStages}
                   activeStage={nativeStage}
@@ -2602,6 +2657,8 @@ export function PaperWorkbench({
               {workspace.workflow_available ? (
                 <PaperNativeRuntime
                   workspaceId={workspace.id}
+                  autoWorkflow={autoWorkflow}
+                  onAgentProgress={receiveAgentProgress}
                   stage={nativeStage}
                   modelReady={modelReady}
                   prerequisiteReady={workflowPrerequisitesReady}
@@ -2648,31 +2705,36 @@ export function PaperWorkbench({
               )}
             </section>
             {workspace.mode === "manuscript" ? (
-              <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-card/30 lg:flex">
+              <aside className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-card/30">
                 <Tabs
-                  defaultValue="rebuttal"
+                  value={researchView}
+                  onValueChange={setResearchView}
                   className="flex min-h-0 flex-1 flex-col"
                 >
-                  <div className="shrink-0 border-b bg-background/65 px-5 pt-2">
-                    <TabsList className="grid h-11 w-full grid-cols-2 rounded-none bg-transparent p-0">
-                      <TabsTrigger
-                        value="rebuttal"
-                        className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 font-serif text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent"
-                      >
-                        <MessagesSquare aria-hidden="true" />
-                        {t("paper.rebuttal.tabs.entries")}
+                  <div className="shrink-0 border-b bg-card/55 p-3">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="progress">
+                        <GitBranch data-icon="inline-start" />
+                        {t("paper.agentProgress.tab")}
                       </TabsTrigger>
-                      <TabsTrigger
-                        value="source"
-                        className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 font-serif text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent"
-                      >
+                      <TabsTrigger value="result">
+                        <MessagesSquare aria-hidden="true" />
+                        {t("paper.agentProgress.responsesTab")}
+                      </TabsTrigger>
+                      <TabsTrigger value="source">
                         <FileText aria-hidden="true" />
                         {t("paper.rebuttal.tabs.source")}
                       </TabsTrigger>
                     </TabsList>
                   </div>
                   <TabsContent
-                    value="rebuttal"
+                    value="progress"
+                    className="mt-0 min-h-0 flex-1 overflow-hidden"
+                  >
+                    {progressPanel}
+                  </TabsContent>
+                  <TabsContent
+                    value="result"
                     className="mt-0 min-h-0 flex-1 overflow-hidden"
                   >
                     <RebuttalEntriesPanel
@@ -2819,6 +2881,9 @@ export function PaperWorkbench({
               </aside>
             ) : (
               <ProposalResultsDock
+                progress={progressPanel}
+                view={researchView}
+                onViewChange={setResearchView}
                 stage={proposalResultStage}
                 editorOpen={proposalEditorOpen}
                 onEditorOpenChange={setProposalEditorOpen}

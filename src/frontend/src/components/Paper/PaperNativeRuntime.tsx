@@ -40,12 +40,18 @@ import {
   cssColorToHslChannels,
   observeEmbeddedTheme,
 } from "@/lib/embeddedAppearance"
+import {
+  type ResearchAgentProgress,
+  researchAgentProgressSchema,
+} from "@/lib/researchAgentProgress"
 import { cn } from "@/lib/utils"
 
 type PaperWorkflowStage = PaperRuntimeSessionCreate["workflow_stage"]
 
 type PaperNativeRuntimeProps = {
   workspaceId: string
+  autoWorkflow?: boolean
+  onAgentProgress?: (progress: ResearchAgentProgress) => void
   stage: PaperWorkflowStage
   modelReady: boolean
   prerequisiteReady: boolean
@@ -135,6 +141,8 @@ const EMBEDDED_COLOR_TOKENS = [
 
 export default function PaperNativeRuntime({
   workspaceId,
+  autoWorkflow = false,
+  onAgentProgress,
   stage,
   modelReady,
   prerequisiteReady,
@@ -185,9 +193,16 @@ export default function PaperNativeRuntime({
     useInvalidatePaperWorkflowStage(workspaceId)
   const session = usePaperRuntimeSession(
     workspaceId,
-    stage,
-    modelReady && prerequisiteReady,
+    autoWorkflow
+      ? stage === "rebuttal_baseline" ||
+        stage === "autorebuttal" ||
+        stage === "ac_summary"
+        ? "rebuttal_baseline"
+        : "formatting"
+      : stage,
+    modelReady && (autoWorkflow || prerequisiteReady),
     profileKey,
+    autoWorkflow,
   )
   const frameKey = session.data
     ? `${session.data.session_id}:${session.data.runtimeProfileKey}`
@@ -205,12 +220,20 @@ export default function PaperNativeRuntime({
     )
     setArxivQuery("")
   }
-  const stageTitle = guidance?.title ?? t(`paper.workflow.stage.${stage}`)
-  const stageDescription =
-    guidance?.description ?? t(`paper.workflow.stage.${stage}Hint`)
+  const stageTitle = autoWorkflow
+    ? t("paper.agentProgress.coordinator")
+    : (guidance?.title ?? t(`paper.workflow.stage.${stage}`))
+  const stageDescription = autoWorkflow
+    ? t("paper.agentProgress.description")
+    : (guidance?.description ?? t(`paper.workflow.stage.${stage}Hint`))
   const stageExamples = useMemo(() => {
     const translated =
-      guidance?.examples ??
+      (autoWorkflow
+        ? t(
+            `paper.agentProgress.${stage === "rebuttal_baseline" || stage === "autorebuttal" || stage === "ac_summary" ? "rebuttalExamples" : "proposalExamples"}`,
+            { returnObjects: true },
+          )
+        : guidance?.examples) ??
       t(`paper.workflow.stage.${stage}Examples`, {
         returnObjects: true,
       })
@@ -219,9 +242,10 @@ export default function PaperNativeRuntime({
           .filter((example): example is string => typeof example === "string")
           .slice(0, 3)
       : []
-  }, [guidance?.examples, stage, t])
+  }, [autoWorkflow, guidance?.examples, stage, t])
   const needsRevision = stageState?.status === "needs_revision"
-  const showRevisionSummary = needsRevision && stage !== "autorebuttal"
+  const showRevisionSummary =
+    needsRevision && !autoWorkflow && stage !== "autorebuttal"
   const revisionTitle = t(
     stage === "rebuttal_baseline"
       ? "paper.runtime.rebuttalBaselineRevisionRequired"
@@ -306,6 +330,17 @@ export default function PaperNativeRuntime({
       ) {
         return
       }
+      if (event.data?.type === "llm4ad:agent-progress") {
+        const parsed = researchAgentProgressSchema.safeParse(
+          event.data.progress,
+        )
+        if (
+          parsed.success &&
+          parsed.data.sessionId === session.data?.session_id
+        )
+          onAgentProgress?.(parsed.data)
+        return
+      }
       if (event.data?.type === "llm4ad:update-model-binding") {
         if (!modelUpdating && !preferencesUpdating)
           selectModel(event.data.binding)
@@ -322,14 +357,23 @@ export default function PaperNativeRuntime({
         return
       }
       invalidateStage({
-        workflow_stage: stage,
-        expected_iteration: stageState?.iteration,
+        workflow_stage: autoWorkflow
+          ? stage === "rebuttal_baseline" ||
+            stage === "autorebuttal" ||
+            stage === "ac_summary"
+            ? "rebuttal_baseline"
+            : "formatting"
+          : stage,
+        expected_iteration: autoWorkflow ? undefined : stageState?.iteration,
       })
     }
     window.addEventListener("message", handleConversationRewind)
     return () => window.removeEventListener("message", handleConversationRewind)
   }, [
     invalidateStage,
+    autoWorkflow,
+    onAgentProgress,
+    session.data?.session_id,
     onConversationRewind,
     stage,
     stageState?.iteration,
@@ -339,7 +383,7 @@ export default function PaperNativeRuntime({
     selectPreferences,
   ])
 
-  if (!modelReady || !prerequisiteReady) {
+  if (!modelReady || (!prerequisiteReady && !autoWorkflow)) {
     return (
       <div className="grid min-h-0 flex-1 place-items-center p-8">
         <div className="max-w-lg border-y bg-background/70 px-8 py-10 text-center shadow-sm">

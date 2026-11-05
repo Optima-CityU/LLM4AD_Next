@@ -33,7 +33,7 @@ mcp = FastMCP("llm4ad-stage")
 _WORKSPACE_SOURCE_ROOT = Path(os.environ.get("LLM4AD_WORKSPACE_ROOT", "/workspace/source"))
 _WORKSPACE_ROOT = _WORKSPACE_SOURCE_ROOT.parent
 _AUTODISCOVERY_PACKAGES_ROOT = _WORKSPACE_ROOT / ".research" / "autodiscovery" / "packages"
-_PROPOSAL_ENTRY = "proposal.typ"
+_PROPOSAL_ENTRY = os.environ.get("LLM4AD_STAGE_PROPOSAL_ENTRY", "proposal.typ")
 _SAFE_PROJECT_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
@@ -395,7 +395,28 @@ async def stop_linked_task(proposal_id: str, task_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def publish_stage_result(artifact: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+async def get_workflow_context() -> dict[str, Any]:
+    """Read current stages, their methods, inputs and full published artifacts.
+
+    Use this at the start of the coordinator and each stage worker, and again
+    after publication or a user correction. Published state is authoritative;
+    a prior chat reply may refer to an obsolete source revision.
+    """
+    if os.environ.get("LLM4AD_AUTO_WORKFLOW") != "true":
+        raise ValueError("Workflow context belongs to the research coordinator")
+    async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
+        response = await client.get(
+            _required_environment("LLM4AD_WORKFLOW_CONTEXT_URL"),
+            params={"workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+                    "run_id": _required_environment("LLM4AD_STAGE_RUN_ID")},
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+async def publish_stage_result(artifact: dict[str, Any], idempotency_key: str, workflow_stage: str | None = None) -> dict[str, Any]:
     """Publish the completed stage artifact after all stage work is final.
 
     Proposal stages refuse publication while Typst does not compile. Read-only
@@ -407,9 +428,12 @@ async def publish_stage_result(artifact: dict[str, Any], idempotency_key: str) -
             raise RuntimeError(
                 f"Typst compile check failed before publication: {_format_check(check)}"
             )
+    if os.environ.get("LLM4AD_AUTO_WORKFLOW") == "true" and not workflow_stage:
+        raise ValueError("The coordinator must name the workflow_stage being published")
     payload = {
         "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
         "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+        "workflow_stage": workflow_stage,
         "idempotency_key": idempotency_key,
         "artifact": artifact,
     }

@@ -209,6 +209,7 @@ COPY ./skills/llm4ad-cloud-package                            /app/skills/llm4ad
 COPY ./skills/autodesign/autodesign                          /app/skills/autodesign
 COPY ./skills/autodesign/run-analysis                        /app/skills/llm4ad-run-analysis
 COPY ./skills/autodesign/task-memory                         /app/skills/llm4ad-task-memory
+COPY ./skills/research-workflow-coordinator                   /app/skills/research-workflow-coordinator
 COPY ./skills/research-stage-publication                      /app/skills/research-stage-publication
 COPY ./skills/autodiscovery/algorithm-discovery               /app/skills/algorithm-discovery
 COPY ./skills/autodiscovery/discovery-baseline                 /app/skills/discovery-baseline

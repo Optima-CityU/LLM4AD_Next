@@ -183,6 +183,55 @@
     "liveCode": "群活码"
   },
   "paper": {
+    "agentProgress": {
+      "resultsTab": "阶段成果",
+      "responsesTab": "审稿回复",
+      "filesTab": "文件编辑",
+      "helpers": "辅助子代理",
+      "proposalExamples": [
+        "请根据项目说明和参考资料，自动完成基金申请书的各阶段工作，并汇总需要我补充的信息。",
+        "请先检查现有阶段成果，从需要更新的地方继续完成申请书，不要重复已经完成的工作。",
+        "请结合我补充的研究思路修订相关章节，再检查文献、研究目标与方法是否一致。"
+      ],
+      "rebuttalExamples": [
+        "请分析论文与全部审稿意见，自动完成问题基准、逐条回复及给 AC 的总结。",
+        "请读取现有回复与阶段成果，继续完善尚未完成的工作，并说明哪些证据需要我补充。",
+        "请根据我补充的实验结果更新相关回复，再同步检查给 AC 的总结。"
+      ],
+
+      "tab": "执行进度",
+      "coordinator": "科研主代理",
+      "worker": "阶段子代理",
+      "description": "主代理会自动推进流程，汇总各子代理的工作。你可以随时在对话中补充、调整或停止。",
+      "timeline": "科研流程执行状态",
+      "published": "已发布 {{count}} / {{total}} 个阶段成果",
+      "openResult": "查看成果",
+      "toolCount": "已调用 {{count}} 次工具",
+      "status": {
+        "ready": "准备就绪",
+        "running": "正在执行",
+        "waiting": "等待子代理",
+        "idle": "等待你的指示",
+        "completed": "已发布",
+        "pending": "尚未开始",
+        "failed": "需要处理",
+        "interrupted": "已中断",
+        "needsInput": "需作者补充",
+        "stale": "需要更新",
+        "reviewing": "整理发布中"
+      },
+      "tools": {
+        "Read": "阅读材料",
+        "Glob": "查找文件",
+        "Grep": "检索证据",
+        "Write": "撰写内容",
+        "Edit": "修订内容",
+        "Skill": "参考阶段方法",
+        "Agent": "委派阶段任务",
+        "Task": "委派阶段任务",
+        "other": "使用科研工具"
+      }
+    },
     "workspace": {
       "title": "科研工作台",
       "subtitle": "集中管理研究材料，并衔接提案构思、论文优化与算法发现流程",
