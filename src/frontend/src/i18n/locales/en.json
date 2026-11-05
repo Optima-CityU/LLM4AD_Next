@@ -3316,6 +3316,21 @@
     "prev": "Previous",
     "next": "Next",
     "finish": "Done",
+    "arl": {
+      "replay": "ARL guided tour",
+      "validatorTitle": "Step 1 · Validator builds the validation service",
+      "validatorContent": "The left pane is the Validator (Codex). In a new session, click “Build validation service” first: it sets up the evaluation service and writes the task brief from your research goal. The Worker needs it to submit results.",
+      "workerTitle": "Step 2 · Worker runs the research",
+      "workerContent": "The right pane is the Worker (Claude Code). Once validation is ready, click “Start auto research”: it implements ideas, submits them for validation and improves based on the score. The two agents chat independently, so you can watch both.",
+      "modeTitle": "Permission mode: let it run on its own",
+      "modeContent": "By default every tool call asks for your approval. To run unattended for a long time, switch to the auto mode (lightning icon) here, or click “Stop asking” on an approval card.",
+      "composerTitle": "Step in at any time",
+      "composerContent": "Send extra instructions or questions here: Enter to send, Shift+Enter for a new line, / for commands (e.g. /clear starts a fresh conversation). You can stop the current turn while it runs.",
+      "statusTitle": "Validation service status",
+      "statusContent": "Shows whether the validation service is ready. The Worker can start research once it reads “Healthy”.",
+      "filesTitle": "Workspace files",
+      "filesContent": "Both containers' workspaces live here. Switch between them to preview and edit code, logs and results. You can reopen this tour later from the “?” menu at the top right."
+    },
     "projects": {
       "demoTitle": "Try the example project first",
       "demoContent": "Click this read-only example to walk through a full algorithm-design run in seconds. No LLM keys needed.",

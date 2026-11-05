@@ -241,6 +241,54 @@ async def test_proxy_disabled_passes_credentials_through(captured_run, monkeypat
     assert env["OPENAI_BASE_URL"] == "https://gateway.example.com/v1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_type", "expected_format", "expected_small_model"),
+    [
+        ("anthropic", "anthropic", "claude-haiku-4-5-20251001"),
+        ("openai", "openai_chat", "deepseek-v4.1-flash"),
+        ("openai-compatible", "openai_chat", "deepseek-v4.1-flash"),
+    ],
+)
+async def test_worker_env_selects_protocol_by_provider_type(
+    captured_run, monkeypatch, provider_type, expected_format, expected_small_model
+) -> None:
+    """非 Anthropic 供应商的 Worker 走 cc-switch；快速模型不回落到 Claude 型号。"""
+    monkeypatch.setattr(runtime, "use_container_network", lambda: True)
+    monkeypatch.setattr(settings, "LLM_PROXY_ENABLE", False)
+    service = runtime.ARLRuntimeService()
+
+    await service._start_container(
+        role=ARLRole.WORKER,
+        session=_session(),
+        daemon_config=_daemon_config(
+            provider_type=provider_type, model="deepseek-v4.1-flash"
+        ),
+        fingerprint="fp",
+    )
+    env = captured_run.kwargs["environment"]
+
+    assert env["LLM4AD_UPSTREAM_API_FORMAT"] == expected_format
+    assert env["ANTHROPIC_SMALL_FAST_MODEL"] == expected_small_model
+    # 上游地址照旧下发，由 entrypoint 决定交给 Claude Code 还是 cc-switch
+    assert env["ANTHROPIC_BASE_URL"] == "https://gateway.example.com"
+
+
+@pytest.mark.asyncio
+async def test_validator_env_has_no_protocol_adapter(captured_run, monkeypatch) -> None:
+    """Codex 原生说 OpenAI 协议，Validator 不需要转换器。"""
+    monkeypatch.setattr(runtime, "use_container_network", lambda: True)
+    service = runtime.ARLRuntimeService()
+
+    await service._start_container(
+        role=ARLRole.VALIDATOR,
+        session=_session(),
+        daemon_config=_daemon_config(provider_type="openai"),
+        fingerprint="fp",
+    )
+    assert "LLM4AD_UPSTREAM_API_FORMAT" not in captured_run.kwargs["environment"]
+
+
 def test_worker_base_url_drops_v1_suffix() -> None:
     """Claude CLI 自行拼 /v1/messages，base URL 不能带 /v1。"""
     assert (
@@ -269,6 +317,13 @@ def test_fingerprint_changes_when_credentials_change() -> None:
     assert (
         runtime._config_fingerprint(_daemon_config(validator_api_key="other")) != base
     )
+
+
+def test_fingerprint_tracks_worker_protocol() -> None:
+    """切换供应商类型会决定是否起 cc-switch，必须触发重建。"""
+    anthropic = runtime._config_fingerprint(_daemon_config(provider_type="anthropic"))
+    openai = runtime._config_fingerprint(_daemon_config(provider_type="openai"))
+    assert anthropic != openai
 
 
 def test_fingerprint_is_stable_for_equivalent_config() -> None:

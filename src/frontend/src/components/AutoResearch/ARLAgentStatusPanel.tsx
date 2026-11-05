@@ -27,7 +27,10 @@ export default function ARLAgentStatusPanel() {
   const ready = isValidationReady(validation)
 
   return (
-    <section className="shrink-0 border-b border-border/40 px-3 py-2">
+    <section
+      data-tour="arl-agent-status"
+      className="shrink-0 border-b border-border/40 px-3 py-2"
+    >
       <div className="flex items-center gap-2 text-[12px]">
         {workerReady ? (
           <span

@@ -278,7 +278,7 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       }
 
       if (type === "agent_update") {
-        // Peer agents (validation runs spawned with an `aris.role` label) go
+        // Peer agents (validation runs spawned with a `contrejour.role` label) go
         // to the peer list. Checked by label first, so a peer can never be
         // mistaken for the main agent even before `agents_ready` sets its id.
         if (payload.kind === "remove") {

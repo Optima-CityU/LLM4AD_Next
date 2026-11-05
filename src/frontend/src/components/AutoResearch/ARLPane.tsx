@@ -418,6 +418,7 @@ export default function ARLPane({
   return (
     <section
       aria-label={roleLabel}
+      data-tour={`arl-pane-${role}`}
       className={cn(
         arlRoleClass(role),
         "relative isolate flex min-h-0 min-w-0 flex-1 flex-col",
@@ -486,6 +487,7 @@ export default function ARLPane({
               size="sm"
               variant="ghost"
               disabled={!ready || state.modes.length === 0}
+              data-tour={`arl-mode-${role}`}
               className={cn(
                 "h-7 shrink-0 gap-1 rounded-full border border-border/60 bg-background/60 px-2.5 text-[11.5px] font-normal shadow-xs backdrop-blur hover:bg-background",
                 autoMode &&
@@ -791,6 +793,7 @@ export default function ARLPane({
             </div>
           )}
           <div
+            data-tour={`arl-composer-${role}`}
             className={cn(
               "rounded-2xl border border-border/60 bg-background/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.12)] backdrop-blur transition-[border-color,box-shadow] dark:bg-background/50",
               "focus-within:border-(--arl-accent)/45 focus-within:shadow-[0_0_0_4px_color-mix(in_srgb,var(--arl-accent)_12%,transparent),0_8px_24px_-12px_rgba(0,0,0,0.18)]",

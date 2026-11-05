@@ -839,18 +839,24 @@ async def test_agent_reset_archive_failure_keeps_old_agent(monkeypatch) -> None:
     assert worker.sent_to == "wa"
 
 
-# ---- peer agents (validation runs spawned with an aris.role label) ----
+# ---- peer agents (validation runs spawned with a contrejour.role label) ----
 
 
-def _peer(agent_id: str, **extra) -> dict:
+def _peer(agent_id: str, prefix: str = "contrejour", **extra) -> dict:
     """Build a peer agent snapshot as the daemon directory returns it."""
     return {
         "id": agent_id,
-        "title": f"ARIS validation {agent_id}",
+        "title": f"Contrejour validation {agent_id}",
         "status": "idle",
-        "labels": {"aris.role": "validator", "aris.submission": agent_id},
+        "labels": {f"{prefix}.role": "validator", f"{prefix}.submission": agent_id},
         **extra,
     }
+
+
+def test_legacy_aris_label_is_still_a_peer() -> None:
+    """Agents spawned by the older ARIS release keep showing up as peers."""
+    assert arl_ws._is_peer_agent(_peer("old", prefix="aris"), "main")
+    assert arl_ws._pick_agent_entry([{"agent": _peer("old", prefix="aris")}], "validator") is None
 
 
 def test_pick_agent_fallback_skips_peer_agents() -> None:
@@ -890,7 +896,7 @@ async def test_push_peer_agents_lists_only_peers() -> None:
 
     frame = websocket.frames("peer_agent_list")[0]
     assert [p["id"] for p in frame["data"]["peers"]] == ["s001"]
-    assert frame["data"]["peers"][0]["labels"]["aris.submission"] == "s001"
+    assert frame["data"]["peers"][0]["labels"]["contrejour.submission"] == "s001"
 
 
 @pytest.mark.asyncio

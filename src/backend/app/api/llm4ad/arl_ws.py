@@ -226,7 +226,7 @@ def _pick_agent_entry(
 
     刻意不做严格的状态过滤：daemon 对归档/状态字段的全部取值尚未确认，
     过滤写窄了会导致每次连接都新建 agent，容器里越堆越多。故匹配不到标题
-    时仍回落到首个条目，与原行为一致。唯一的例外是带 :data:`PEER_AGENT_LABEL`
+    时仍回落到首个条目，与原行为一致。唯一的例外是带 :data:`PEER_AGENT_LABELS`
     的 agent：它们是验证流程派生的同级 agent，绝不能被当成主 agent 复用。
 
     Args:
@@ -259,14 +259,16 @@ def _pick_agent_entry(
     return candidates[0]
 
 
-#: ARIS 验证流程用 ``paseo run --label aris.role=...`` 派生的 agent 带这个标签。
-#: 它们与主 agent 同级（``parentAgentId`` 为空），不会出现在 provider 子 agent
-#: 列表里，只能从 agent 目录里按标签挑出来。
-PEER_AGENT_LABEL = "aris.role"
+#: 验证流程用 ``paseo run --label contrejour.role=...`` 派生的 agent 带这个标签
+#: （见 auto-dl-loop ``src/tools/validation/dispatch.ts``）。它们与主 agent 同级
+#: （``parentAgentId`` 为空），不会出现在 provider 子 agent 列表里，只能从 agent
+#: 目录里按标签挑出来。旧版 ARIS 用 ``aris.role``，长期运行的容器里可能还有这类
+#: agent，一并识别。
+PEER_AGENT_LABELS = ("contrejour.role", "aris.role")
 
 
 def _has_peer_label(agent: dict[str, Any]) -> bool:
-    """agent 是否带 :data:`PEER_AGENT_LABEL` 标签。
+    """agent 是否带 :data:`PEER_AGENT_LABELS` 中的任一标签。
 
     Args:
         agent: agent 快照
@@ -275,7 +277,7 @@ def _has_peer_label(agent: dict[str, Any]) -> bool:
         True 表示由验证流程派生
     """
     labels = agent.get("labels")
-    return isinstance(labels, dict) and bool(labels.get(PEER_AGENT_LABEL))
+    return isinstance(labels, dict) and any(labels.get(key) for key in PEER_AGENT_LABELS)
 
 
 def _is_peer_agent(agent: dict[str, Any], main_agent_id: str | None) -> bool:
@@ -803,7 +805,7 @@ async def _push_peer_agents(
     role: str,
     agent_id: str,
 ) -> None:
-    """把容器里的同级 agent 列表推给前端（见 :data:`PEER_AGENT_LABEL`）。
+    """把容器里的同级 agent 列表推给前端（见 :data:`PEER_AGENT_LABELS`）。
 
     之后的状态变化由已订阅的 ``agent_update`` 推送，经 ``timeline_event``
     原样转发，前端据此增量更新。拉取失败只记日志：这是辅助信息，不该拦住

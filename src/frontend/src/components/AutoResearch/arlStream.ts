@@ -155,15 +155,16 @@ export interface ARLSubagent {
 
 /**
  * A top-level agent in the same container that the validation flow spawned
- * (`paseo run --label aris.role=...`). Unlike a subagent it has no parent, so
- * it only shows up in the agent directory.
+ * (`paseo run --label contrejour.role=...`; older ARIS runs use `aris.role`).
+ * Unlike a subagent it has no parent, so it only shows up in the agent
+ * directory.
  */
 export interface ARLPeerAgent {
   id: string
   title: string | null
-  /** `aris.role` label, e.g. `validator` / `leak-review`. */
+  /** `contrejour.role` label, e.g. `validator` / `leak-review`. */
   peerRole: string
-  /** `aris.submission` label, e.g. `s001`. */
+  /** `contrejour.submission` label, e.g. `s001`. */
   submission: string | null
   /** Daemon lifecycle status: initializing / idle / running / error / closed. */
   status: string
@@ -869,13 +870,33 @@ export function applySubagentUpdate(
   return state
 }
 
-/** Label the validation flow puts on the peer agents it spawns. */
-export const PEER_AGENT_LABEL = "aris.role"
+/**
+ * Label prefixes the validation flow puts on the peer agents it spawns, newest
+ * first. Contrejour labels runs `contrejour.role` / `contrejour.submission`;
+ * agents spawned by the older ARIS release carry `aris.*` and still exist in
+ * long-lived containers.
+ */
+export const PEER_LABEL_PREFIXES = ["contrejour", "aris"] as const
+
+/**
+ * Read a peer label, trying each known prefix.
+ *
+ * @param labels - Agent labels.
+ * @param key - Label key without prefix, e.g. `role` or `submission`.
+ * @returns The first non-empty value, or `null`.
+ */
+function peerLabel(labels: any, key: string): string | null {
+  if (!labels || typeof labels !== "object") return null
+  for (const prefix of PEER_LABEL_PREFIXES) {
+    const value = labels[`${prefix}.${key}`]
+    if (typeof value === "string" && value) return value
+  }
+  return null
+}
 
 /** True when a daemon agent snapshot carries the peer label. */
 export function hasPeerLabel(raw: any): boolean {
-  const value = raw?.labels?.[PEER_AGENT_LABEL]
-  return typeof value === "string" && value.length > 0
+  return peerLabel(raw?.labels, "role") !== null
 }
 
 /**
@@ -893,15 +914,14 @@ export function normalizePeer(
   if (!raw || typeof raw.id !== "string" || !raw.id) return null
   if (raw.id === mainAgentId || raw.archivedAt || raw.internal) return null
   const labels = raw.labels && typeof raw.labels === "object" ? raw.labels : {}
-  const peerRole = labels[PEER_AGENT_LABEL]
-  if (typeof peerRole !== "string" || !peerRole) return null
-  const submission = labels["aris.submission"]
+  const peerRole = peerLabel(labels, "role")
+  if (!peerRole) return null
+  const submission = peerLabel(labels, "submission")
   return {
     id: raw.id,
     title: typeof raw.title === "string" && raw.title.trim() ? raw.title : null,
     peerRole,
-    submission:
-      typeof submission === "string" && submission ? submission : null,
+    submission,
     status: typeof raw.status === "string" ? raw.status : "idle",
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",

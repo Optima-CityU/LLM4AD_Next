@@ -3317,6 +3317,21 @@
     "prev": "上一步",
     "next": "下一步",
     "finish": "完成",
+    "arl": {
+      "replay": "ARL 使用引导",
+      "validatorTitle": "第 1 步 · Validator 搭建验证服务",
+      "validatorContent": "左侧是 Validator（基于 Codex）。新会话先点击中间的「开始搭建验证服务」，它会根据研究目标搭好评测服务并生成任务说明——这是 Worker 能提交结果的前提。",
+      "workerTitle": "第 2 步 · Worker 自动研究",
+      "workerContent": "右侧是 Worker（基于 Claude Code）。验证服务就绪后点击「开始自动研究」，它会反复实现方案、提交验证、根据得分改进。两个智能体各自独立对话，可以同时观察。",
+      "modeTitle": "权限模式：让它自己跑",
+      "modeContent": "默认每次调用工具都会弹出授权请求。想无人值守地长时间运行，可在这里切换到带闪电图标的自动模式；也可以在授权卡片上点「不再询问」。",
+      "composerTitle": "随时插话、纠偏",
+      "composerContent": "在输入框给智能体追加指令或提问：Enter 发送，Shift+Enter 换行，输入 / 调出命令（如 /clear 新建对话）。运行中可随时停止当前回合。",
+      "statusTitle": "验证服务状态",
+      "statusContent": "这里实时显示验证服务是否就绪。变为「状态良好」后，Worker 才能开始自动研究。",
+      "filesTitle": "工作区文件",
+      "filesContent": "两个容器的工作区文件都在这里，可切换容器查看，并预览、编辑代码、日志与实验结果。之后可从右上角「?」菜单重新打开本引导。"
+    },
     "projects": {
       "demoTitle": "先试试示例项目",
       "demoContent": "点击这个只读的示例项目，几秒钟跟着走完一次完整的算法设计流程。无需配置 LLM，立刻就能上手。",

@@ -30,6 +30,9 @@ RESIDENT = [
     "node .contrejour/dist/tools/validation-cli.js serve --project .",
     "/bin/sh",
     "bash",
+    # Worker 的 cc-switch 协议转换器及其守护循环
+    "cc-switch proxy serve --listen-address 127.0.0.1 --listen-port 17821",
+    "bash /usr/local/bin/arl-protocol-adapter serve",
     "[python] <defunct>",
     "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
     "/bin/sh -c node -e \"const listen=process.env.PASEO_LISTEN||'0.0.0.0:6767'; "

@@ -1,4 +1,10 @@
-import { BookOpen, HelpCircle, MessageSquarePlus, Users } from "lucide-react"
+import {
+  BookOpen,
+  Compass,
+  HelpCircle,
+  MessageSquarePlus,
+  Users,
+} from "lucide-react"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -12,6 +18,8 @@ import {
 import { UserManualDialog } from "@/components/Guide/UserManualDialog"
 import { GITHUB_ISSUES_URL } from "@/lib/siteMetadata"
 
+import { replayARLTour, useARLTourAvailable } from "./ARLTour"
+
 /**
  * AutoResearch 顶栏右上角的「帮助」入口。全局悬浮问号球（FeedbackFAB）在本页
  * 隐藏，改由此下拉承接同样的三项：提交反馈 / 使用手册 / 联系我们，复用同一批
@@ -21,6 +29,7 @@ export function AutoResearchHelpMenu() {
   const { t } = useTranslation()
   const [manualOpen, setManualOpen] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
+  const arlTourAvailable = useARLTourAvailable()
 
   return (
     <>
@@ -54,6 +63,17 @@ export function AutoResearchHelpMenu() {
             <BookOpen className="size-4 mr-2 text-primary" />
             {t("feedback.fab.userManual")}
           </DropdownMenuItem>
+          {/* Only offered while an ARL session is open: that is the page the
+              tour points at. */}
+          {arlTourAvailable && (
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={replayARLTour}
+            >
+              <Compass className="size-4 mr-2 text-primary" />
+              {t("tour.arl.replay")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             className="cursor-pointer"
             onClick={() => setContactOpen(true)}
