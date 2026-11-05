@@ -43,6 +43,9 @@ services:
   worker:
     profiles: ["disabled"]
 
+  remote-evaluation-worker:
+    profiles: ["disabled"]
+
   research-worker:
     profiles: ["disabled"]
 
