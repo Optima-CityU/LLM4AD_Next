@@ -22,6 +22,7 @@ from llm4ad.config.app import (  # noqa: F401
 from llm4ad.config.coder import (  # noqa: F401
     ClaudeCodeConfig,
     CoderConfig,
+    CodexCLIConfig,
     CustomCoderConfig,
     OpenCodeConfig,
 )

@@ -105,7 +105,7 @@ providers:
 ```
 
 #### `providers[].type`
-- **类型**: `enum ["openai", "anthropic", "openai_compatible"]`
+- **类型**: `enum ["openai", "anthropic", "openai_compatible", "codex_cli"]`
 - **必需**: 是
 - **默认值**: `"openai"`
 - **描述**: LLM 提供商类型
@@ -116,6 +116,90 @@ providers:
   - type: "anthropic"           # Anthropic API
   - type: "openai_compatible"   # OpenAI 兼容 API（如本地模型）
 ```
+
+#### 本机 Codex CLI（规划与代码生成）
+
+个人本机实验可使用 `codex_cli`，复用官方 Codex CLI 的 ChatGPT 登录。
+先在运行 LLM4AD 的同一用户账号下执行 `codex login status`，应显示
+`Logged in using ChatGPT`；尚未登录时执行 `codex login`。
+无需设置 API Key，也不要把登录令牌填写到配置中。
+
+```yaml
+providers:
+  - name: local_codex
+    type: codex_cli
+    model: ""       # 留空使用本机 Codex 的默认模型
+    timeout: 600
+planner:
+  provider: local_codex
+coder:
+  type: codex_cli
+  binary_path: codex
+  model: ""       # 可为代码生成单独指定模型
+  timeout: 600
+```
+
+将以上字段合并到已有任务配置中，保留原有评估器、数据集和算法仓库设置。
+`coder.type: codex_cli` 不需要 `coder.provider`。如果使用
+`coder.type: custom`，也可以将它的 `provider` 指向 `local_codex`，
+此时由已有编码器解析 Codex 返回的代码文本并写入文件。
+自定义评估器的 `provider` 字段仍需指向已声明的提供者；
+评估器若自行构造 API 客户端，还需要独立适配。
+
+仓库根目录下可运行这个小规模 TSP 示例（会使用套餐额度）：
+
+```bash
+uv run llm4ad run examples/applications/tsp_benchmark_python_mock/config.codex.yaml --skip-install
+```
+
+虽然资源目录沿用 mock 示例，`config.codex.yaml` 中的规划和编码都是真实
+Codex 调用；评估使用现有本地数据和 Python 评估器。
+示例关闭记忆提取、嵌入和多模态采样，无需另外配置模型服务。
+
+运行行为与限制：
+
+- 规划在临时只读目录运行，编码使用候选算法目录的 workspace-write 沙箱。
+- 复用本机 CLI 配置和登录目录；子进程清除 API Key 等身份覆盖变量，并检查
+  ChatGPT 登录，不会自动切换 API 付费。配置中的 API 凭据会被拒绝。
+- 同一 LLM4AD 进程内的调用按顺序执行。套餐限制仍然适用；超时、额度耗尽或
+  未完成的调用会报告错误，由实验已有的错误处理逻辑处理。
+- Provider 支持文本和结构化 JSON；流式接口在完成后一次返回最终文本。
+  不支持图片输入、应用层 function calling、嵌入；API 的 temperature、
+  max_tokens 等采样参数不会传给 Codex。
+- 使用同一台主机、同一用户运行命令。Docker 部署通过下面的本机连接服务
+  使用 CLI，不需要把登录文件复制到容器。
+
+#### 在 Web 界面绑定本机 Codex
+
+打开 **模型供应商 → 绑定本机 Codex**，点击 **检测连接**。
+检测到 ChatGPT 登录后，点击 **绑定 Codex**。默认勾选“设为规划和代码生成
+的默认模型”。模型下拉框通过 Codex 的 model/list 接口读取选项，选择具体模型后
+点击“更新绑定”保存；也可选择“跟随本机配置”，界面会显示当前默认模型。
+模型列表读取失败时仍可手动输入模型 ID。解除绑定只删除项目内
+的供应商配置，不会退出本机 Codex 登录。
+
+宿主机需要先启动连接服务（仓库根目录，已安装 Python 依赖）：
+
+```bash
+bash docker/start-codex-bridge.sh --host 127.0.0.1
+```
+
+首次启动会生成仅当前用户可读的 `docker/.codex-bridge-token`。
+后端配置 `LOCAL_CODEX_BRIDGE_URL=http://127.0.0.1:18143` 和
+`LOCAL_CODEX_BRIDGE_TOKEN`（值为该文件内容），随后重启后端。
+在 Linux Docker 部署中，通过 `docker network inspect <网络名>` 查看后端容器
+所在网络的网关，以 `--host <网关地址>` 启动服务，并将后端 URL 配置为
+`http://<网关地址>:18143`；容器内的回环地址无法访问宿主机。
+连接服务必须由已执行 `codex login` 的系统用户运行，且 PATH 能找到 Codex。
+仅 `ENVIRONMENT=local` 的管理员可绑定，浏览器不会收到连接密钥或账号令牌。
+
+Web 实验的规划与代码生成都经本机 CLI 调用；代码生成自动使用 `custom`
+编码器解析返回的代码并在实验容器内写入文件。新任务选用默认模型即可；
+已有任务若指定了其他供应商，需在任务模型配置中切换为本机 Codex。
+此模式支持文本实验；图片输入、function calling 和 embeddings 仍需其他服务。
+检测连接不消耗模型调用额度，实验推理受 Codex 套餐额度和速率限制。
+
+CLI 参数和登录行为参见 [官方非交互模式文档](https://learn.chatgpt.com/docs/non-interactive-mode)。
 
 #### `providers[].api_key`
 - **类型**: `string`
@@ -500,7 +584,7 @@ evolution:
 配置代码生成设置。
 
 #### `coder.type`
-- **类型**: `enum ["claude_code", "opencode", "custom"]`
+- **类型**: `enum ["claude_code", "opencode", "codex_cli", "custom"]`
 - **必需**: 否
 - **默认值**: `"claude_code"`
 - **描述**: 要使用的编码器类型

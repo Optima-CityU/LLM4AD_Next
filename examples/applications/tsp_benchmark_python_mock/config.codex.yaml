@@ -1,0 +1,74 @@
+# Local Codex experiment using the existing TSP baseline, evaluator, and data.
+# Both planning and code generation consume the logged-in ChatGPT account's usage.
+project_name: tsp_codex_local
+background: |
+  Improve the travelling salesman solver in solve.py. Return a valid tour
+  visiting every node exactly once, minimizing total Euclidean tour length.
+  Preserve the JSON input/output interface and code outside EVOLVE markers.
+random_seed: 42
+base_dir: ./runs
+
+providers:
+  - name: local_codex
+    type: codex_cli
+    model: ""  # Use the locally configured Codex model.
+    timeout: 600
+    # No API key, auth token, or base URL is needed.
+
+planner:
+  type: llm_evolution
+  provider: local_codex
+  samplers:
+    - name: init_sampler
+    - name: mutation_sampler
+    - name: crossover_sampler
+
+coder:
+  type: codex_cli
+  binary_path: codex
+  model: ""  # Independent optional override for coding.
+  timeout: 600
+
+evaluator:
+  type: custom
+  provider: local_codex
+  module: tsp_evaluator.py:PythonTSPEvaluator
+  timeout: 60
+  parallel: false
+  batch_size: 1
+  dataset:
+    mode: directory
+    path: data/small
+    recursive: false
+  metrics: [tour_length, execution_time_ms]
+
+evolution:
+  type: island_ga
+  num_islands: 1
+  island_population_size: 2
+  max_generations: 1
+  parallel_islands: false
+  tournament_size: 2
+
+memory:
+  enabled: false
+  type: local_yaml
+  persist: false
+  auto_extraction:
+    enabled: false
+embedding:
+  type: null
+multimodal:
+  enabled: false
+
+version_control:
+  enabled: true
+  type: git_worktree
+  local_path: tsp_algorithm
+  auto_initialize: true
+  auto_cleanup: true
+
+repo_analyzer:
+  type: evolve_detector
+  include: ["*.py"]
+  exclude: [".git/**", "__pycache__/**"]
