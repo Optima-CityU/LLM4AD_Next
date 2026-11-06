@@ -125,6 +125,16 @@ class _FakeDaemonClient:
             "entries": [{"item": {"type": "user_message", "text": "hi"}, "seqStart": 40}],
         }
 
+    #: Error raised by refresh_agent, None for success; tests override per case
+    refresh_error: str | None = None
+
+    async def refresh_agent(self, agent_id):
+        await self._maybe_fail("refresh_agent")
+        if self.refresh_error:
+            raise RuntimeError(self.refresh_error)
+        self.refreshed = agent_id
+        return {"status": "agent_refreshed"}
+
     async def fetch_subagent_timeline(self, parent_agent_id, subagent_id, **_kwargs):
         await self._maybe_fail("fetch_subagent_timeline")
         return {"rows": [{"item": {"type": "assistant_message", "text": "x"}}], "hasOlder": False}
@@ -909,35 +919,106 @@ async def test_push_peer_agents_failure_is_silent() -> None:
     assert websocket.frames("peer_agent_list") == []
 
 
-@pytest.mark.asyncio
-async def test_peer_timeline_replies_and_refuses_closed_or_foreign() -> None:
-    """Live peers return rows; closed or non-peer ids are refused without loading."""
-    websocket = _FakeWebSocket(
-        [
-            {"type": "peer_timeline", "role": "worker", "payload": {}},
-            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "live"}},
-            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "dead"}},
-            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "wa"}},
-        ]
+async def _peer_request(client: _FakeDaemonClient, payload: dict) -> dict:
+    """Handle one ``peer_timeline`` frame and return the reply's data."""
+    websocket = _FakeWebSocket([])
+    await arl_ws._handle_frontend_message(
+        websocket=websocket,
+        session_id=uuid.uuid4(),
+        client=client,
+        role="worker",
+        target_name="Worker",
+        agent_id="wa",
+        msg_type="peer_timeline",
+        payload=payload,
     )
-    worker = _FakeDaemonClient()
-    worker.directory = [
+    return websocket.frames("peer_timeline")[0]["data"]
+
+
+def _peer_client(**kwargs) -> _FakeDaemonClient:
+    client = _FakeDaemonClient(**kwargs)
+    client.directory = [
         {"id": "wa", "title": "arl-worker", "labels": {}},
         _peer("live"),
         _peer("dead", status="closed"),
     ]
+    return client
 
-    await arl_ws._forward_from_frontend(
-        websocket, uuid.uuid4(), worker, _FakeDaemonClient(), "wa", "va"
+
+@pytest.mark.asyncio
+async def test_peer_timeline_replies_and_refuses_foreign() -> None:
+    """Live peers return rows; a missing id or a non-peer agent is refused."""
+    client = _peer_client()
+
+    assert (await _peer_request(client, {}))["ok"] is False
+    assert (await _peer_request(client, {"peer_id": "wa"}))["ok"] is False
+    live = await _peer_request(client, {"peer_id": "live"})
+
+    assert live["ok"] is True and len(live["rows"]) == 1
+    # A live peer is read as is; only it was fetched, nothing was resumed
+    assert client.calls.count("fetch_agent_timeline") == 1
+    assert "refresh_agent" not in client.calls
+
+
+@pytest.mark.asyncio
+async def test_closed_peer_is_resumed_on_demand() -> None:
+    """Opening a closed peer resumes it first, then returns its transcript."""
+    client = _peer_client()
+
+    data = await _peer_request(client, {"peer_id": "dead"})
+
+    assert data["ok"] is True
+    assert client.calls == ["fetch_agents", "refresh_agent", "fetch_agent_timeline"]
+    assert client.refreshed == "dead"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        ("RPC 失败(None): no rollout found for thread id t1", "peer_unrecoverable"),
+        ("RPC 调用超时: refresh_agent_request", "peer_resume_failed"),
+    ],
+)
+async def test_closed_peer_resume_failure_has_code(error: str, code: str) -> None:
+    """A failed resume answers with a translatable code and skips the fetch."""
+    client = _peer_client()
+    client.refresh_error = error
+
+    data = await _peer_request(client, {"peer_id": "dead"})
+
+    assert data["ok"] is False
+    assert data["code"] == code
+    assert "fetch_agent_timeline" not in client.calls
+
+
+@pytest.mark.asyncio
+async def test_peer_timeline_does_not_block_the_message_loop() -> None:
+    """A slow peer resume runs in the background; later frames still go through."""
+    client = _peer_client()
+    resumed = asyncio.Event()
+
+    async def _slow_refresh(_agent_id):
+        client.calls.append("refresh_agent")
+        await resumed.wait()
+
+    client.refresh_agent = _slow_refresh
+    websocket = _FakeWebSocket(
+        [
+            {"type": "peer_timeline", "role": "worker", "payload": {"peer_id": "dead"}},
+            {"type": "agent_send", "role": "worker", "payload": {"content": "hi"}},
+        ]
     )
 
-    frames = websocket.frames("peer_timeline")
-    assert [f["data"]["ok"] for f in frames] == [False, True, False, False]
-    assert frames[1]["data"]["peer_id"] == "live"
-    assert len(frames[1]["data"]["rows"]) == 1
-    # Only the live peer's timeline was fetched: viewing never resumes a closed one
-    assert worker.calls.count("fetch_agent_timeline") == 1
-    assert worker.last_timeline[0] == "live"
+    await asyncio.wait_for(
+        arl_ws._forward_from_frontend(
+            websocket, uuid.uuid4(), client, _FakeDaemonClient(), "wa", "va"
+        ),
+        timeout=2,
+    )
+
+    assert "send_agent_message" in client.calls
+    resumed.set()
 
 
 # ---- frontend disconnects while containers are being prepared ----

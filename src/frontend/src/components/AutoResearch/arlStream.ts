@@ -229,10 +229,37 @@ export interface ARLValidationState {
   url: string | null
   /** Why it is not usable yet, phrased for display. */
   reason: string | null
+  /**
+   * The Validator has set the service up (frozen config plus the `contrejour`
+   * script in `paseo.json`), so it can be (re)started. Only then is a restart
+   * offered: before setup there is nothing to restart.
+   */
+  declared: boolean
+  /** A start was just issued and the service is still coming up. */
+  starting: boolean
+}
+
+/** Reply to a `validation_restart` request. */
+export interface ARLValidationRestartResult {
+  /** The service is up, being started, or was started just now. */
+  ok: boolean
+  /**
+   * `started` | `starting` | `healthy` | `not_declared` | `failed`, plus
+   * `disconnected` when the socket dropped before the reply arrived.
+   */
+  action: string
+  /** Backend detail for failures, untranslated. */
+  message: string | null
 }
 
 export function emptyValidationState(): ARLValidationState {
-  return { configured: false, url: null, reason: null }
+  return {
+    configured: false,
+    url: null,
+    reason: null,
+    declared: false,
+    starting: false,
+  }
 }
 
 /**
@@ -247,6 +274,21 @@ export function applyValidationStatus(
     configured: Boolean(data?.configured),
     url: data?.url ?? null,
     reason: data?.reason ?? null,
+    declared: Boolean(data?.declared),
+    starting: Boolean(data?.starting),
+  }
+}
+
+/**
+ * Normalize a `validation_restart_result` frame.
+ */
+export function parseValidationRestartResult(
+  data: any,
+): ARLValidationRestartResult {
+  return {
+    ok: Boolean(data?.ok),
+    action: typeof data?.action === "string" ? data.action : "failed",
+    message: typeof data?.message === "string" ? data.message : null,
   }
 }
 

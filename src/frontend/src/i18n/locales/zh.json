@@ -4754,7 +4754,13 @@
       "subagentEmpty": "这个子任务还没有消息",
       "subagentLive": "仍在运行，状态变化时自动刷新",
       "peerBadge": "同级",
-      "peerClosed": "agent 已结束，容器重启后无法查看对话",
+      "peerClosed": "agent 已结束（容器重启后未加载），点击会先恢复再加载对话",
+      "peerClosedStatus": "已结束，未加载",
+      "peerResuming": "正在恢复该 agent 并加载对话，可能需要几十秒…",
+      "peerLoadError": {
+        "peer_unrecoverable": "这个 agent 的会话已无法恢复（从未产生过对话记录），无法查看",
+        "peer_resume_failed": "恢复该 agent 失败，请稍后重试"
+      },
       "peerUntitled": "未命名验证任务",
       "subagentStatus": {
         "running": "运行中",
@@ -4777,6 +4783,14 @@
       "validationLabel": "验证服务",
       "validationOk": "状态正常",
       "validationNotReady": "未就绪",
+      "validationStarting": "启动中…",
+      "validationStopped": "已停止",
+      "validationStartingHint": "正在启动验证服务，通常几秒内完成",
+      "validationStoppedHint": "验证服务已搭建，但当前没有运行（容器休眠恢复后需要重新启动）",
+      "validationRestart": "重新启动",
+      "validationRestartFailed": "验证服务启动失败",
+      "validationRestartNotDeclared": "验证服务尚未搭建，请先在 Validator 中完成搭建",
+      "validationRestartDisconnected": "与 ARL 会话的连接已断开，请重连后再试",
       "scrollToLatest": "回到最新",
       "placeholderShort": "给 {{role}} 发消息…",
       "composerHint": "Enter 发送 · Shift+Enter 换行 · / 命令",
@@ -4784,7 +4798,9 @@
         "validatorStart": "开始搭建验证服务",
         "workerStart": "开始自动研究",
         "workerWait": "请先在左侧 Validator 点击「开始搭建验证服务」",
-        "workerWaitBusy": "验证服务尚未就绪，请在左侧 Validator 对话中完成搭建"
+        "workerWaitBusy": "验证服务尚未就绪，请在左侧 Validator 对话中完成搭建",
+        "workerWaitStopped": "验证服务已停止，请在右侧「验证服务」处重新启动",
+        "workerWaitStarting": "验证服务正在启动，请稍候"
       }
     },
     "gate": {

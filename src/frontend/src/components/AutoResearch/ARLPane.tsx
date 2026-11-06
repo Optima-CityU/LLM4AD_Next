@@ -953,7 +953,7 @@ function EmptyState({
           className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-[13px] text-amber-700 dark:text-amber-400"
         >
           <TriangleAlert className="size-4 shrink-0" />
-          {t(workerWaitKey(validatorStarted))}
+          {t(workerWaitKey(validatorStarted, validation))}
         </p>
       </div>
     )

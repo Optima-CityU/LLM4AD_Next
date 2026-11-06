@@ -49,7 +49,6 @@ from app.core.redis import (
     acquire_arl_session_lock,
     forget_arl_session_active,
     get_arl_session_last_active,
-    list_arl_session_last_active,
     pop_idle_arl_sessions,
     release_arl_session_lock,
     touch_arl_session_active,
@@ -1591,7 +1590,6 @@ class ARLRuntimeService:
                         continue
                     container.stop(timeout=10)
                     stopped = True
-                    logger.debug("ARL 空闲回收 [{}] 已停止 {} 容器 {}", session_id, role.value, name)
                 except DockerException:
                     failed = True
                     logger.opt(exception=True).warning(
@@ -1770,21 +1768,10 @@ async def _has_running_turn(session: ARLSession) -> bool:
             if client is not None:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
-        statuses = []
-        running = False
         for entry in entries:
             agent = entry.get("agent") if isinstance(entry.get("agent"), dict) else entry
-            pending = bool(agent.get("pendingPermissions"))
-            statuses.append(
-                f"{agent.get('id')}={agent.get('status')}{'(待授权)' if pending else ''}"
-            )
-            if agent.get("status") == "running" and not pending:
-                running = True
-        logger.debug(
-            "ARL 空闲回收 [{}] {} agent 状态: {}", session.session_id, role.value, statuses
-        )
-        if running:
-            return True
+            if agent.get("status") == "running" and not agent.get("pendingPermissions"):
+                return True
     return False
 
 
@@ -1903,24 +1890,13 @@ def _background_processes_sync(session_id: str) -> list[str]:
             (i for i, title in enumerate(titles) if title in ("CMD", "COMMAND")),
             len(titles) - 1,
         )
-        resident: list[str] = []
-        background: list[str] = []
+        # 后台进程（白名单外）会出现在保活日志里
         for row in table.get("Processes") or []:
             if column < 0 or column >= len(row):
                 continue
             command = row[column]
-            (resident if _is_resident_process(command) else background).append(command)
-        # 常驻进程只在补白名单时有用，放 DEBUG；后台进程会出现在保活日志里
-        logger.debug(
-            "ARL 空闲回收 [{}] {} 常驻 {} 个: {}，后台 {} 个: {}",
-            session_id,
-            role.value,
-            len(resident),
-            [command[:120] for command in resident],
-            len(background),
-            [command[:200] for command in background],
-        )
-        found.extend(background)
+            if not _is_resident_process(command):
+                found.append(command)
     return found
 
 
@@ -1944,14 +1920,7 @@ def _keep_session_alive(session: ARLSession) -> None:
         settings.LLM_PROXY_TOKEN_TTL,
         user_id=session.user_id or None,
     )
-    if extended:
-        logger.debug(
-            "ARL 空闲回收 [{}] 续期 {} 个代理 token（{}s）",
-            session.session_id,
-            extended,
-            settings.LLM_PROXY_TOKEN_TTL,
-        )
-    else:
+    if not extended:
         # Redis 记录已丢（过期或 Redis 重启），续期救不回来，要等用户下次连接重新登记
         logger.warning(
             "ARL 空闲回收 [{}] 已刷新活跃时间，但没有可续期的代理 token，用户重连前调模型会 401",
@@ -1980,24 +1949,12 @@ async def stop_idle_arl_sessions() -> int:
     timeout = settings.ARL_SESSION_IDLE_TIMEOUT_SECONDS
     threshold = now - timeout
     try:
-        tracked = await asyncio.to_thread(list_arl_session_last_active)
         idle = await asyncio.to_thread(pop_idle_arl_sessions, threshold)
     except Exception:
         logger.opt(exception=True).warning("ARL 空闲回收失败：无法读取活跃时间")
         return 0
 
-    # 没到阈值的会话不进入检查；排查「为什么没回收」时打开 DEBUG 看离阈值还差多久
-    for session_id, last_active in sorted(tracked.items(), key=lambda kv: kv[1]):
-        if session_id not in idle:
-            idle_for = int(now - last_active)
-            logger.debug(
-                "ARL 空闲回收 [{}] 未到阈值：已空闲 {}s，还差 {}s",
-                session_id,
-                idle_for,
-                max(timeout - idle_for, 0),
-            )
     if not idle:
-        logger.debug("ARL 空闲回收：跟踪 {} 个会话，没有超过 {}s 的", len(tracked), timeout)
         return 0
 
     runtime = get_arl_runtime()

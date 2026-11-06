@@ -155,12 +155,6 @@ def idle_env(monkeypatch):
         return True
 
     monkeypatch.setattr(runtime, "pop_idle_arl_sessions", lambda _ts: ["s9"])
-    # s9 已超阈值；s8 还在活跃，只打「未到阈值」日志
-    monkeypatch.setattr(
-        runtime,
-        "list_arl_session_last_active",
-        lambda: {"s9": 0.0, "s8": runtime.time.time()},
-    )
     monkeypatch.setattr(runtime.ARLRuntimeService, "get_session", _get_session)
     monkeypatch.setattr(runtime, "_has_running_turn", _no_turn)
     monkeypatch.setattr(runtime, "_stop_if_still_idle", _stop)

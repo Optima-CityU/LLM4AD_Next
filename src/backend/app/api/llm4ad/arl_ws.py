@@ -34,7 +34,11 @@ from app.models.user import User
 from app.services.arl.daemon_client import PaseoDaemonClient
 from app.services.arl.runtime import daemon_endpoints, get_arl_runtime
 from app.services.arl.types import ARLDaemonConfig
-from app.services.arl.validation import ValidationStatus, probe_validation
+from app.services.arl.validation import (
+    ValidationStatus,
+    probe_validation,
+    start_validation_service,
+)
 from app.tasks.research_runner.config_builder import resolve_provider_for_arc
 
 router = APIRouter(prefix="/research")
@@ -77,6 +81,7 @@ KNOWN_MESSAGE_TYPES = frozenset(
         "subagent_timeline",
         "peer_timeline",
         "agent_reset",
+        "validation_restart",
     }
 )
 
@@ -835,15 +840,36 @@ async def _push_peer_agents(
     )
 
 
+class PeerTimelineError(Exception):
+    """同级 agent 对话加载失败，带一个前端可翻译的错误码。
+
+    Attributes:
+        code: 错误码，前端按 ``autoResearch.arl.peerLoadError.<code>`` 翻译
+    """
+
+    def __init__(self, code: str, message: str):
+        """初始化。
+
+        Args:
+            code: 错误码
+            message: 原始错误信息（进日志，也作为前端兜底文案）
+        """
+        super().__init__(message)
+        self.code = code
+
+
 async def _fetch_peer_timeline(
     client: PaseoDaemonClient, main_agent_id: str, peer_id: str
 ) -> dict[str, Any]:
-    """拉一个同级 agent 的 tail 历史，只允许已加载在内存里的 agent。
+    """拉一个同级 agent 的 tail 历史；``closed`` 的先按需恢复再拉。
 
-    daemon 处理 ``fetch_agent_timeline_request`` 时会先 ``ensureAgentLoaded``：
-    不在内存里的 agent（容器重启后显示为 ``closed``）会被从磁盘恢复、重新
-    拉起一个 provider 进程。仅为查看就唤醒它不划算，故先查目录确认状态。
-    前端也会置灰 ``closed`` 卡片，这里是兜底，防止过期状态或手工构造的帧。
+    容器重启后 daemon 只把磁盘上的 agent 列出来、标成 ``closed``，不加载进
+    内存；而 ``fetch_agent_timeline_request`` 没有只读路径，必然先把 agent
+    恢复（拉起 provider 进程）。所以只在用户**主动点开**时才恢复：先显式
+    ``refresh``（超时更宽，报错也更明确），成功后再拉对话。
+
+    codex 线程从没收到过消息时没有 rollout 文件，永远恢复不了
+    （:data:`UNRECOVERABLE_THREAD_ERROR`），这种情况给出专门的错误码。
 
     Args:
         client: 该角色的 daemon 客户端
@@ -854,7 +880,8 @@ async def _fetch_peer_timeline(
         daemon 的 ``fetch_agent_timeline_response`` payload
 
     Raises:
-        ValueError: 目标不是同级 agent，或已不在内存里。
+        ValueError: 目标不是同级 agent
+        PeerTimelineError: closed 的 agent 恢复失败
     """
     entries = await client.fetch_agents(subscribe=False)
     agent = next(
@@ -868,7 +895,16 @@ async def _fetch_peer_timeline(
     if agent is None or not _is_peer_agent(agent, main_agent_id):
         raise ValueError(f"not a peer agent: {peer_id}")
     if agent.get("status") == "closed":
-        raise ValueError("agent is closed; its transcript is unavailable")
+        logger.info(f"🔄 同级 agent {peer_id} 处于 closed，按用户请求恢复以加载对话")
+        try:
+            await client.refresh_agent(peer_id)
+        except Exception as e:
+            code = (
+                "peer_unrecoverable"
+                if UNRECOVERABLE_THREAD_ERROR in str(e)
+                else "peer_resume_failed"
+            )
+            raise PeerTimelineError(code, str(e)) from e
     return await client.fetch_agent_timeline(peer_id, limit=HISTORY_LIMIT)
 
 
@@ -996,7 +1032,11 @@ def _load_session_context(
         )
 
 
-async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None:
+async def _watch_validation(
+    websocket: WebSocket,
+    session_id: uuid.UUID,
+    validator_client: PaseoDaemonClient | None = None,
+) -> None:
     """轮询 Validator 的验证服务状态，变化时推给前端的 worker 角色。
 
     验证服务是用户在 Validator 侧交互后由 agent 自行拉起的，daemon 不感知，
@@ -1009,14 +1049,25 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
     探测异常只记日志不外抛：这是个辅助功能，它失败不该把整条会话拆掉
     （上层 ``asyncio.wait`` 是 FIRST_COMPLETED，这里一退出整个会话就收摊）。
 
+    首轮探测发现服务已搭建却没在跑（典型场景是容器休眠后恢复：Paseo 不会
+    自动拉起 service 脚本），自动尝试启动一次。之后不再自动重试，避免对一个
+    起不来的服务反复拉起；用户可在界面上手动重启。
+
     Args:
         websocket: 前端连接
         session_id: 会话 ID
+        validator_client: Validator daemon 客户端，自动恢复时用；None 则不恢复
     """
     last: ValidationStatus | None = None
+    auto_start_pending = validator_client is not None
     while True:
         try:
             status = await asyncio.to_thread(probe_validation, str(session_id))
+            if auto_start_pending:
+                auto_start_pending = False
+                status = await _auto_start_validation(
+                    session_id, validator_client, status
+                )
             if not status.same_state_as(last):
                 logger.info(
                     "🔎 [Session {}] 验证服务状态变化: configured={}, url={}, reason={}",
@@ -1034,10 +1085,8 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
                 )
                 last = status
         except asyncio.CancelledError:
-            logger.info(f"🛑 [Session {session_id}] 验证服务轮询已取消")
             raise
         except WebSocketDisconnect:
-            logger.info(f"🔌 [Session {session_id}] 推送验证状态时前端已断开")
             return
         except Exception as e:
             # 不更新 last：下一轮重新探测并重推，不会因这次失败漏掉状态变化
@@ -1046,6 +1095,86 @@ async def _watch_validation(websocket: WebSocket, session_id: uuid.UUID) -> None
             )
 
         await asyncio.sleep(settings.ARL_VALIDATION_POLL_INTERVAL)
+
+
+async def _auto_start_validation(
+    session_id: uuid.UUID,
+    validator_client: PaseoDaemonClient | None,
+    status: ValidationStatus,
+) -> ValidationStatus:
+    """会话连上后，若验证服务已搭建却没在跑，自动启动一次。
+
+    只在已搭建、未在线、也不在启动宽限期内时才动手；结果只记日志，不打扰
+    前端（失败时用户会看到重启按钮）。:func:`start_validation_service` 本身
+    不抛异常。
+
+    Args:
+        session_id: 会话 ID
+        validator_client: Validator daemon 客户端
+        status: 首轮探测结果
+
+    Returns:
+        需要推给前端的状态：发起了启动就重新探测一次（带上 ``starting``），
+        否则原样返回
+    """
+    if (
+        validator_client is None
+        or status.configured
+        or not status.declared
+        or status.starting
+    ):
+        return status
+
+    logger.info(f"🔁 [Session {session_id}] 验证服务已搭建但未运行，自动启动")
+    result = await start_validation_service(validator_client, str(session_id))
+    logger.info(
+        f"🔁 [Session {session_id}] 自动启动验证服务: "
+        f"action={result.action}, message={result.message}"
+    )
+    return await asyncio.to_thread(probe_validation, str(session_id))
+
+
+async def _restart_validation(
+    websocket: WebSocket,
+    session_id: uuid.UUID,
+    validator_client: PaseoDaemonClient,
+) -> None:
+    """处理前端的「重启验证服务」请求，结果回 ``validation_restart_result``。
+
+    幂等与「是否允许重启」都由 :func:`start_validation_service` 判断（未搭建、
+    启动中都会直接返回），这里只负责把结果和最新状态推回前端：先推状态，
+    让重启按钮立刻切成「启动中」，不用等下一轮轮询。
+
+    Args:
+        websocket: 前端连接
+        session_id: 会话 ID
+        validator_client: Validator daemon 客户端
+    """
+    result = await start_validation_service(
+        validator_client, str(session_id), restart=True
+    )
+    logger.info(
+        f"🔁 [Session {session_id}] 手动重启验证服务: "
+        f"action={result.action}, message={result.message}"
+    )
+    # 跑在后台任务里，异常没人接：前端断开或推送失败都只记日志
+    try:
+        try:
+            status = await asyncio.to_thread(probe_validation, str(session_id))
+            await _push(
+                websocket, "validation_status", status.to_payload(), role="worker"
+            )
+        except WebSocketDisconnect:
+            raise
+        except Exception as e:  # noqa: BLE001 - 补推状态失败不影响结果帧
+            logger.warning(f"⚠️ [Session {session_id}] 重启后探测验证服务失败: {e}")
+        await _push(
+            websocket, "validation_restart_result", result.to_payload(), role="worker"
+        )
+    except WebSocketDisconnect:
+        logger.info(f"🔌 [Session {session_id}] 推送重启结果时前端已断开")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"⚠️ [Session {session_id}] 推送重启结果失败: {e}")
 
 
 async def _heartbeat(session_id: uuid.UUID) -> None:
@@ -1111,12 +1240,9 @@ async def arl_websocket(
     自带 worker/validator 两个键）之外，所有帧都带。前端据此把消息
     分流到左边的 Worker 面板或右边的 Validator 面板。
     """
-    logger.info(f"🔌 [Session {session_id}] New WebSocket connection request")
     await websocket.accept()
-    logger.info(f"✅ [Session {session_id}] WebSocket accepted")
 
     # 1. 鉴权（DB 调用下沉到线程池，不阻塞 event loop）
-    logger.info(f"🔐 [Session {session_id}] Authenticating...")
     context = await asyncio.to_thread(_load_session_context, token, session_id)
     if context is None:
         logger.warning(f"❌ [Session {session_id}] Authentication failed")
@@ -1124,10 +1250,8 @@ async def arl_websocket(
             code=status.WS_1008_POLICY_VIOLATION, reason="Auth failed"
         )
         return
-    user_id, user_email, folder_id, arl_config = context
-    logger.info(
-        f"✅ [Session {session_id}] Authenticated: user_id={user_id}, email={user_email}"
-    )
+    user_id, _user_email, folder_id, arl_config = context
+    logger.info(f"🔌 [Session {session_id}] ARL WebSocket connected: user_id={user_id}")
 
     # 2. 解析两个角色的 provider 凭证
     #    容器启动（API base_url/key）与 agent 创建（model）都要用，所以
@@ -1136,16 +1260,15 @@ async def arl_websocket(
     role_providers = await asyncio.to_thread(
         _resolve_role_providers, arl_config, user_id
     )
-    for role in ROLES:
-        provider_config = role_providers[role]
-        logger.info(
-            "📋 [Session {}] {} provider: type={}, base_url={}, model={}",
-            session_id,
-            role,
-            provider_config["provider"],
-            provider_config["base_url"],
-            provider_config["primary_model"],
-        )
+    logger.info(
+        "📋 [Session {}] providers: {}",
+        session_id,
+        ", ".join(
+            f"{role}={role_providers[role]['provider']}/"
+            f"{role_providers[role]['primary_model']}@{role_providers[role]['base_url']}"
+            for role in ROLES
+        ),
+    )
 
     # 3. 确保容器就绪
     #    ensure_session 幂等并自带跨进程互斥：不存在就创建、配置变了就重建、
@@ -1216,10 +1339,6 @@ async def arl_websocket(
         # 端口。与探活用的是同一套地址，不会出现「探通了但连不上」。
         _, worker_url = daemon_endpoints(arl_session.worker)
         _, validator_url = daemon_endpoints(arl_session.validator)
-        logger.info(
-            f"🔌 [Session {session_id}] Connecting daemons: "
-            f"worker={worker_url}, validator={validator_url}"
-        )
 
         worker_client = PaseoDaemonClient(
             url=worker_url,
@@ -1232,13 +1351,8 @@ async def arl_websocket(
             cwd="/workspace/validator",
         )
 
-        logger.info("🔌 [Worker] Connecting...")
         await worker_client.connect()
-        logger.info("✅ [Worker] Connected successfully")
-
-        logger.info("🔌 [Validator] Connecting...")
         await validator_client.connect()
-        logger.info("✅ [Validator] Connected successfully")
 
         # 在订阅（_ensure_agent 里的 fetch_agents）之前就开始缓存推送，
         # 覆盖「订阅已生效、转发任务还没启动」的窗口，见 open_event_queue
@@ -1307,7 +1421,6 @@ async def arl_websocket(
         await _push_peer_agents(websocket, worker_client, "worker", worker_agent_id)
         await _push_peer_agents(websocket, validator_client, "validator", validator_agent_id)
 
-        logger.info(f"✅ [Session {session_id}] All daemons connected, starting message forwarding...")
 
         # 5. 启动并发任务：前端→daemon 转发、两路 timeline 转发、活跃心跳
         tasks = [
@@ -1343,11 +1456,12 @@ async def arl_websocket(
             ),
             asyncio.create_task(_heartbeat(session_id), name="arl-heartbeat"),
             asyncio.create_task(
-                _watch_validation(websocket, session_id), name="arl-validation"
+                _watch_validation(websocket, session_id, validator_client),
+                name="arl-validation",
             ),
         ]
 
-        logger.info(f"🚀 [Session {session_id}] Started {len(tasks)} forwarding tasks")
+        logger.info(f"✅ [Session {session_id}] ARL session ready, forwarding started")
 
         # 任一任务结束即收摊，然后取消其余任务。
         #
@@ -1375,8 +1489,6 @@ async def arl_websocket(
                 )
                 raise exc
 
-        logger.info(f"🏁 [Session {session_id}] Forwarding stopped")
-
     except WebSocketDisconnect:
         logger.info(f"🔌 [Session {session_id}] Frontend WebSocket disconnected normally")
     except Exception as e:
@@ -1386,16 +1498,11 @@ async def arl_websocket(
         except Exception as send_err:
             logger.warning(f"⚠️ [Session {session_id}] Failed to send error to frontend: {send_err}")
     finally:
-        logger.info(f"🧹 [Session {session_id}] Cleaning up daemon connections...")
         if worker_client:
-            logger.info("🔌 [Worker] Closing connection...")
             await worker_client.close()
-            logger.info("✅ [Worker] Connection closed")
         if validator_client:
-            logger.info("🔌 [Validator] Closing connection...")
             await validator_client.close()
-            logger.info("✅ [Validator] Connection closed")
-        logger.info(f"✅ [Session {session_id}] ARL WebSocket fully closed")
+        logger.info(f"🔌 [Session {session_id}] ARL WebSocket closed")
 
 
 async def _forward_from_frontend(
@@ -1428,6 +1535,8 @@ async def _forward_from_frontend(
     # ``agent_reset`` 会换掉某个角色的 agent，后续消息必须投给新 agent
     agent_ids = {"worker": worker_agent_id, "validator": validator_agent_id}
     models = agent_models or {}
+    # 重启验证服务放到后台任务里：daemon 慢的时候不能卡住聊天消息的转发
+    side_tasks: set[asyncio.Task] = set()
     try:
         while True:
             try:
@@ -1450,13 +1559,6 @@ async def _forward_from_frontend(
             if not isinstance(payload, dict):
                 payload = {}
 
-            # Log only payload keys: file_write / fs_request frames carry whole
-            # file bodies that must not end up in logs.
-            logger.info(
-                f"📨 [Frontend → Backend] Received message: type={msg_type}, role={role}, "
-                f"payload_keys={sorted(payload)}"
-            )
-
             # role 必须显式合法：原先 `role == "worker"` 之外的一切（None、
             # 拼错的值）都被当成 validator，会把消息静默投错容器。
             if role not in ROLES:
@@ -1476,6 +1578,16 @@ async def _forward_from_frontend(
                     {"message": f"unknown message type: {msg_type!r}"},
                     role=role,
                 )
+                continue
+
+            if msg_type == "validation_restart":
+                # 不论前端标的是哪个角色，验证服务都在 Validator 容器里
+                task = asyncio.create_task(
+                    _restart_validation(websocket, session_id, validator_client),
+                    name="arl-validation-restart",
+                )
+                side_tasks.add(task)
+                task.add_done_callback(side_tasks.discard)
                 continue
 
             is_worker = role == "worker"
@@ -1516,6 +1628,26 @@ async def _forward_from_frontend(
                     )
                 continue
 
+            if msg_type == "peer_timeline":
+                # 点开 closed 的同级 agent 要先恢复它，可能要几十秒，放后台
+                # 跑，不卡住聊天消息的转发
+                task = asyncio.create_task(
+                    _guarded_frontend_message(
+                        websocket=websocket,
+                        session_id=session_id,
+                        client=client,
+                        role=role,
+                        target_name=target_name,
+                        agent_id=agent_id,
+                        msg_type=msg_type,
+                        payload=payload,
+                    ),
+                    name="arl-peer-timeline",
+                )
+                side_tasks.add(task)
+                task.add_done_callback(side_tasks.discard)
+                continue
+
             try:
                 await _handle_frontend_message(
                     websocket=websocket,
@@ -1542,11 +1674,35 @@ async def _forward_from_frontend(
                 )
 
     except WebSocketDisconnect:
-        logger.info("🔌 [Frontend] WebSocket disconnected")
         # 正常断开：返回后由上层 asyncio.wait 收摊并取消其余任务
+        pass
     except Exception as e:
         logger.error(f"❌ [Frontend → Backend] Error forwarding message: {e}", exc_info=True)
         raise
+    finally:
+        for task in side_tasks:
+            task.cancel()
+
+
+async def _guarded_frontend_message(**kwargs: Any) -> None:
+    """在后台任务里处理一条前端消息，异常只记日志。
+
+    后台任务的异常没人接；而 :func:`_handle_frontend_message` 自身的失败已经
+    回过结果帧，这里只兜住推送时前端已断开之类的情况。
+
+    Args:
+        **kwargs: 原样传给 :func:`_handle_frontend_message`
+    """
+    try:
+        await _handle_frontend_message(**kwargs)
+    except WebSocketDisconnect:
+        logger.info(f"🔌 [Session {kwargs.get('session_id')}] 后台消息处理时前端已断开")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"⚠️ [Session {kwargs.get('session_id')}] 后台处理 "
+            f"{kwargs.get('msg_type')} 失败: {e}",
+            exc_info=True,
+        )
 
 
 async def _handle_frontend_message(
@@ -1585,71 +1741,59 @@ async def _handle_frontend_message(
 
     if msg_type == "agent_send":
         content = payload.get("content", "")
-        logger.info(
-            f"📤 [Backend → {target_name}] Sending agent_send: "
-            f"agent={target_agent}, content_len={len(content)}"
-        )
         await client.send_agent_message(
             agent_id=target_agent,
             text=content,
             active_turn_behavior=payload.get("active_turn_behavior"),
         )
-        logger.info(f"✅ [Backend → {target_name}] agent_send sent successfully")
+        logger.info(
+            f"📤 [Backend → {target_name}] Message sent: "
+            f"agent={target_agent}, content_len={len(content)}"
+        )
 
     elif msg_type == "file_read":
         path = payload["path"]
-        logger.info(f"📤 [Backend → {target_name}] Reading file: path={path}")
         content = await client.read_file(path)
         await _push(
             websocket, "file_content", {"path": path, "content": content}, role=role
-        )
-        logger.info(
-            f"✅ [Backend → Frontend] Sent file_content: path={path}, len={len(content)}"
         )
 
     elif msg_type == "file_write":
         path = payload["path"]
         content = payload["content"]
-        logger.info(
-            f"📤 [Backend → {target_name}] Writing file: path={path}, len={len(content)}"
-        )
         await client.write_file(path, content)
         await _push(websocket, "file_written", {"path": path}, role=role)
-        logger.info(f"✅ [Backend → Frontend] File written: path={path}")
+        logger.info(
+            f"📝 [Backend → {target_name}] File written: path={path}, len={len(content)}"
+        )
 
     elif msg_type == "file_list":
         # 列出目录（空路径表示项目根目录）
         path = payload.get("path", "")
-        logger.info(f"📤 [Backend → {target_name}] Listing files: path={path!r}")
         files = await client.list_files(path)
         await _push(websocket, "file_list", {"path": path, "files": files}, role=role)
-        logger.info(
-            f"✅ [Backend → Frontend] Sent file_list: path={path!r}, count={len(files)}"
-        )
 
     elif msg_type == "permission_response":
         # 响应权限请求；request_id 来自 agent_permission_request 事件
         request_id = payload["request_id"]
         response = payload["response"]
-        logger.info(
-            f"📤 [Backend → {target_name}] Permission response: "
-            f"request_id={request_id}, response={response}"
-        )
         await client.resolve_permission(
             agent_id=target_agent,
             request_id=request_id,
             response=response,
         )
-        logger.info(f"✅ [Backend → {target_name}] Permission response sent")
+        logger.info(
+            f"📤 [Backend → {target_name}] Permission answered: "
+            f"request_id={request_id}, response={response}"
+        )
 
     elif msg_type == "agent_cancel":
         # 停止当前回合（前端「停止」按钮）。失败不致命：只回一帧结果，
         # 让前端把按钮状态解开即可。
-        logger.info(f"📤 [Backend → {target_name}] Cancel turn: agent={target_agent}")
         try:
             await client.cancel_agent(target_agent)
             await _push(websocket, "agent_cancel_result", {"ok": True}, role=role)
-            logger.info(f"✅ [Backend → {target_name}] Cancel sent")
+            logger.info(f"🛑 [Backend → {target_name}] Turn canceled: agent={target_agent}")
         except Exception as e:
             logger.warning(f"⚠️ [Backend → {target_name}] Cancel failed: {e}")
             await _push(
@@ -1662,7 +1806,6 @@ async def _handle_frontend_message(
     elif msg_type == "list_commands":
         # 斜杠命令补全（前端输入框键入 "/" 时触发）。有专门的结果帧，
         # 失败就地处理——前端靠它结束菜单的加载状态，不弹通用 error toast。
-        logger.info(f"📤 [Backend → {target_name}] List commands: agent={target_agent}")
         try:
             commands = await client.list_commands(target_agent)
             await _push(
@@ -1670,9 +1813,6 @@ async def _handle_frontend_message(
                 "command_list",
                 {"ok": True, "agent_id": target_agent, "commands": commands},
                 role=role,
-            )
-            logger.info(
-                f"✅ [Backend → Frontend] Sent command_list: count={len(commands)}"
             )
         except Exception as e:
             logger.warning(f"⚠️ [Backend → {target_name}] List commands failed: {e}")
@@ -1688,9 +1828,6 @@ async def _handle_frontend_message(
         # 结束对应操作的等待，在面板里就地展示错误，不弹通用 error toast。
         request_id = payload.get("request_id")
         op = payload.get("op")
-        logger.info(
-            f"📤 [Backend → {target_name}] fs_request: op={op}, request_id={request_id}"
-        )
         try:
             if op not in FS_OPS:
                 raise ValueError(f"unknown fs op: {op!r}")
@@ -1798,16 +1935,18 @@ async def _handle_frontend_message(
             await _push(
                 websocket,
                 "peer_timeline",
-                {"ok": False, "peer_id": peer_id, "message": str(e)},
+                {
+                    "ok": False,
+                    "peer_id": peer_id,
+                    "message": str(e),
+                    "code": e.code if isinstance(e, PeerTimelineError) else None,
+                },
                 role=role,
             )
 
     elif msg_type == "set_agent_mode":
         # 切换权限模式（auto / bypass / 逐条确认…），并写回会话配置
         mode_id = payload.get("mode_id")
-        logger.info(
-            f"📤 [Backend → {target_name}] Set mode: agent={target_agent}, mode={mode_id}"
-        )
         if not mode_id:
             await _push(
                 websocket,
@@ -1909,7 +2048,6 @@ async def _forward_timeline(
             对账（见 :func:`_reconcile_event`）；不给则从此刻起订阅、不对账。
     """
     try:
-        logger.info(f"📡 [{role}] Started timeline subscription")
         events = (
             client.iter_event_queue(stream.queue)
             if stream is not None
@@ -1918,22 +2056,19 @@ async def _forward_timeline(
         async for event in events:
             if stream is not None and not await _reconcile_event(websocket, stream, event):
                 continue
-            event_type = event.get("type", "unknown") if isinstance(event, dict) else "unknown"
-            logger.debug(f"📨 [{role} → Frontend] Timeline event: type={event_type}")
             await websocket.send_json({
                 "type": "timeline_event",
                 "role": role,
                 "data": event,
             })
-            logger.debug(f"✅ [{role} → Frontend] Timeline event sent")
 
     except asyncio.CancelledError:
-        logger.info(f"🛑 [{role}] Timeline subscription cancelled")
         # 前端断开后由上层主动取消，属正常路径。必须重新抛出：吞掉
         # CancelledError 会让 task 以「正常完成」收尾，破坏取消语义。
         raise
     except WebSocketDisconnect:
-        logger.info(f"🔌 [{role}] Frontend disconnected during timeline forward")
+        # 前端断开属正常收摊，由上层统一记一条关闭日志
+        pass
     except Exception as e:
         logger.error(f"❌ [{role}] Error forwarding timeline: {e}", exc_info=True)
         # 严重错误，抛出异常以关闭连接

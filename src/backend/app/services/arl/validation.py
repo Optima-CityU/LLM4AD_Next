@@ -16,14 +16,21 @@ ARL 的使用流程是**先 Validator 后 Worker**：用户先在 Validator 侧�
 
 状态探测打验证服务的 ``/health``（无鉴权，返回 ``{"status": "ok"}``），而不是
 只看文件是否写好：文件在不代表服务在跑。
+
+验证服务是 ``paseo.json`` 里的 service 脚本，Paseo 不会在 daemon 重启后自动拉起
+它，所以容器休眠恢复后服务是停着的。:func:`start_validation_service` 负责把它
+重新拉起：会话连上时自动尝试一次，前端也可以手动触发。
 """
 
 from __future__ import annotations
 
+import asyncio
 import hmac
+import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from loguru import logger
@@ -31,6 +38,9 @@ from loguru import logger
 from app.core.config import settings
 from app.core.env_detect import use_container_network
 from app.services.arl.types import ARLRole
+
+if TYPE_CHECKING:
+    from app.services.arl.daemon_client import PaseoDaemonClient
 
 #: 验证服务在 Validator 容器内的监听地址。0.0.0.0 才能让 Worker 跨容器访问
 VALIDATION_HOST = "0.0.0.0"
@@ -51,6 +61,33 @@ WORKER_GUIDE_FILENAME = "CLAUDE.md"
 GUIDE_BEGIN_MARKER = "<!-- llm4ad:validation-guide:begin -->"
 GUIDE_END_MARKER = "<!-- llm4ad:validation-guide:end -->"
 
+#: validator-setup 写进 ``paseo.json`` 的验证服务脚本名
+SERVICE_SCRIPT_NAME = "contrejour"
+
+#: Validator 容器内的项目目录（Paseo 工作区按它查找）
+VALIDATOR_PROJECT_DIR = f"/workspace/{ARLRole.VALIDATOR.value}"
+
+#: setup apply 成功后才会写出的冻结配置，相对 Validator 项目目录
+_VALIDATION_CONFIG = Path(".contrejour") / "validation" / "config.json"
+
+#: 发起启动后的宽限期（秒）。期间视为「启动中」：不再重复启动，也不展示重启
+#: 按钮。服务正常一两秒就能通过健康检查；超过宽限期仍不健康就当作启动失败，
+#: 允许再试。
+START_GRACE_SECONDS = 20.0
+
+#: 一次启动流程（查工作区 + 停 + 启）的总超时
+_START_TIMEOUT = 30.0
+
+#: 手动重启时「停止后再启动」的重试：daemon 异步更新脚本状态，刚停完立刻
+#: 启动可能还被判为运行中
+_RESTART_RETRIES = 6
+_RESTART_RETRY_DELAY = 0.5
+
+#: 每个会话的启动锁与最近一次成功发起启动的时间（monotonic）。同一 backend
+#: 进程内的多个标签页、自动恢复与手动点击共用，保证同一时刻只有一次启动。
+_start_locks: dict[str, asyncio.Lock] = {}
+_last_start_at: dict[str, float] = {}
+
 
 @dataclass
 class ValidationStatus:
@@ -60,12 +97,17 @@ class ValidationStatus:
         configured: 验证服务是否在线（``/health`` 返回 200）
         url: Worker 侧使用的服务根地址，形如 ``http://<validator 容器名>:8765``
         reason: 未就绪时的具体原因，直接展示给用户
+        declared: Validator 是否已搭建好验证服务（见 :func:`is_validation_declared`），
+            只有搭建过的服务才能重新启动
+        starting: 是否处于启动宽限期内（见 :func:`is_validation_starting`）
         detail: 诊断用的补充信息，只进日志
     """
 
     configured: bool = False
     url: str | None = None
     reason: str | None = None
+    declared: bool = False
+    starting: bool = False
     detail: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
@@ -80,6 +122,8 @@ class ValidationStatus:
             "configured": self.configured,
             "url": self.url,
             "reason": self.reason,
+            "declared": self.declared,
+            "starting": self.starting,
         }
 
     def same_state_as(self, other: ValidationStatus | None) -> bool:
@@ -99,6 +143,8 @@ class ValidationStatus:
             self.configured == other.configured
             and self.url == other.url
             and self.reason == other.reason
+            and self.declared == other.declared
+            and self.starting == other.starting
         )
 
 
@@ -316,10 +362,209 @@ def probe_validation(session_id: str) -> ValidationStatus:
         healthy = False
         detail = {"probe_url": probe_url, "error": f"{type(exc).__name__}: {exc}"}
 
+    declared = is_validation_declared(session_id)
     if healthy:
-        return ValidationStatus(configured=True, url=url, detail=detail)
+        return ValidationStatus(configured=True, url=url, declared=declared, detail=detail)
     return ValidationStatus(
         url=url,
         reason="验证服务尚未启动（健康检查无响应）",
+        declared=declared,
+        starting=is_validation_starting(session_id),
         detail=detail,
     )
+
+
+def is_validation_declared(session_id: str) -> bool:
+    """判断 Validator 是否已搭建好验证服务，即「有东西可以重新启动」。
+
+    **阻塞函数**（文件 IO），调用方需用 ``asyncio.to_thread`` 下沉。
+
+    两个条件都满足才算：
+
+    - ``.contrejour/validation/config.json`` 存在：validator-setup 的 apply 已
+      成功（benchmark 安装、配置冻结都在它之前完成）；
+    - ``paseo.json`` 的 ``scripts.contrejour`` 是带命令的 ``service`` 脚本：apply
+      最后一步登记的启动命令，重启就是让 Paseo 再跑一次它。
+
+    任何读取或解析错误都按「未搭建」处理并只记日志：宁可不启动，也不对一份
+    半成品配置反复拉服务。
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        True 表示验证服务已搭建，可以（重新）启动
+    """
+    try:
+        project = role_workspace(session_id, ARLRole.VALIDATOR)
+        if not (project / _VALIDATION_CONFIG).is_file():
+            return False
+        paseo_json = project / "paseo.json"
+        if not paseo_json.is_file():
+            return False
+        config = json.loads(paseo_json.read_text(encoding="utf-8"))
+        scripts = config.get("scripts") if isinstance(config, dict) else None
+        script = scripts.get(SERVICE_SCRIPT_NAME) if isinstance(scripts, dict) else None
+        if not isinstance(script, dict) or script.get("type") != "service":
+            return False
+        command = script.get("command")
+        return isinstance(command, str) and bool(command.strip())
+    except Exception as exc:  # noqa: BLE001 - 检查失败只意味着不启动
+        logger.warning("⚠️ [Session {}] 检查验证服务配置失败: {}", session_id, exc)
+        return False
+
+
+def is_validation_starting(session_id: str) -> bool:
+    """验证服务是否正在启动：启动流程进行中，或刚发起启动、仍在宽限期内。
+
+    Args:
+        session_id: 会话 ID
+
+    Returns:
+        True 表示此时不应再次启动，前端显示「启动中」而非重启按钮
+    """
+    lock = _start_locks.get(session_id)
+    if lock is not None and lock.locked():
+        return True
+    started_at = _last_start_at.get(session_id)
+    return started_at is not None and time.monotonic() - started_at < START_GRACE_SECONDS
+
+
+@dataclass
+class ValidationStartResult:
+    """一次（重新）启动验证服务的结果。
+
+    Attributes:
+        ok: 服务已在线、已成功发起启动或正在启动
+        action: ``healthy``（本就在线）/ ``started``（已发起启动）/ ``starting``
+            （启动中，本次跳过）/ ``not_declared``（还没搭建）/ ``failed``
+        message: 失败或跳过的原因，可直接展示给用户
+    """
+
+    ok: bool
+    action: str
+    message: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        """转成推给前端的 payload。
+
+        Returns:
+            结果字典
+        """
+        return {"ok": self.ok, "action": self.action, "message": self.message}
+
+
+async def start_validation_service(
+    client: PaseoDaemonClient,
+    session_id: str,
+    *,
+    restart: bool = False,
+) -> ValidationStartResult:
+    """让 Validator 的 Paseo daemon 把验证服务脚本（重新）启动起来。
+
+    **不抛异常**（取消除外）：检查不通过或任何一步出错都返回失败结果，由调用
+    方决定是只记日志（自动恢复）还是提示用户（手动重启）。
+
+    幂等：同一会话同一时刻只允许一个启动流程；发起启动后的宽限期内再次调用
+    直接返回 ``starting``，避免连点或多个标签页把刚起来的服务又停掉。
+
+    流程：确认已搭建 → 健康检查已通过则什么也不做 → 用项目目录换出 Paseo
+    工作区 ID → 脚本在 Paseo 里仍是 running（进程在但不健康）时，只有
+    ``restart=True`` 才先停再启，否则不打扰它 → 启动。
+
+    Args:
+        client: 已连接的 Validator daemon 客户端
+        session_id: 会话 ID
+        restart: 脚本仍在运行但不健康时是否先停止再启动（手动重启用）
+
+    Returns:
+        启动结果
+    """
+    if is_validation_starting(session_id):
+        return ValidationStartResult(ok=True, action="starting")
+
+    lock = _start_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        try:
+            return await asyncio.wait_for(
+                _start_validation_locked(client, session_id, restart=restart),
+                timeout=_START_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.warning("⏰ [Session {}] 启动验证服务超时", session_id)
+            return ValidationStartResult(
+                ok=False, action="failed", message="Timed out starting the validation service"
+            )
+        except Exception as exc:  # noqa: BLE001 - 失败只体现在结果里，不外抛
+            logger.warning("⚠️ [Session {}] 启动验证服务失败: {}", session_id, exc)
+            return ValidationStartResult(ok=False, action="failed", message=str(exc))
+
+
+async def _start_validation_locked(
+    client: PaseoDaemonClient,
+    session_id: str,
+    *,
+    restart: bool,
+) -> ValidationStartResult:
+    """:func:`start_validation_service` 持锁后的实际流程，异常由调用方兜底。
+
+    Args:
+        client: Validator daemon 客户端
+        session_id: 会话 ID
+        restart: 脚本在运行但不健康时是否先停止
+
+    Returns:
+        启动结果
+    """
+    if not await asyncio.to_thread(is_validation_declared, session_id):
+        return ValidationStartResult(
+            ok=False,
+            action="not_declared",
+            message="The validation service has not been set up yet",
+        )
+
+    status = await asyncio.to_thread(probe_validation, session_id)
+    if status.configured:
+        return ValidationStartResult(ok=True, action="healthy")
+
+    workspace = await client.open_workspace(VALIDATOR_PROJECT_DIR)
+    workspace_id = str(workspace["id"])
+    scripts = workspace.get("scripts")
+    script = next(
+        (
+            item
+            for item in (scripts if isinstance(scripts, list) else [])
+            if isinstance(item, dict) and item.get("scriptName") == SERVICE_SCRIPT_NAME
+        ),
+        None,
+    )
+    running = script is not None and script.get("lifecycle") == "running"
+
+    if running:
+        if not restart:
+            # 进程在但健康检查没过：可能是 agent 刚拉起、还在初始化，不打扰它
+            logger.info(
+                "ℹ️ [Session {}] 验证服务脚本仍在运行但未通过健康检查，跳过自动启动",
+                session_id,
+            )
+            return ValidationStartResult(
+                ok=False,
+                action="failed",
+                message="The validation service process is running but not healthy",
+            )
+        await client.stop_workspace_script(workspace_id, SERVICE_SCRIPT_NAME)
+
+    for attempt in range(_RESTART_RETRIES):
+        try:
+            await client.start_workspace_script(workspace_id, SERVICE_SCRIPT_NAME)
+            break
+        except RuntimeError as exc:
+            # 只在刚停止、daemon 还没把状态改过来时重试
+            last_attempt = attempt == _RESTART_RETRIES - 1
+            if not running or "already running" not in str(exc) or last_attempt:
+                raise
+            await asyncio.sleep(_RESTART_RETRY_DELAY)
+
+    _last_start_at[session_id] = time.monotonic()
+    logger.info("✅ [Session {}] 已发起启动验证服务（restart={}）", session_id, restart)
+    return ValidationStartResult(ok=True, action="started")
