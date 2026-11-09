@@ -1,1 +1,3 @@
 app-data/
+.codex-bridge-token
+.codex-bridge.env

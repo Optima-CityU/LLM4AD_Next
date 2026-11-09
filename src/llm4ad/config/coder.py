@@ -18,12 +18,12 @@ class CoderConfig(BaseModel):
     concrete config subclass based on the `type` field.
     """
 
-    type: Literal["claude_code", "opencode", "custom"] = Field(
+    type: Literal["claude_code", "opencode", "codex_cli", "custom"] = Field(
         default="claude_code", description="Coder type",
         json_schema_extra=ui(
             label_zh="类型", label_en="Type",
-            desc_zh="代码生成器类型：claude_code、opencode 或 custom",
-            desc_en="Code generator type: claude_code, opencode, or custom",
+            desc_zh="代码生成器类型：claude_code、opencode、codex_cli 或 custom",
+            desc_en="Code generator type: claude_code, opencode, codex_cli, or custom",
         ),
     )
     timeout: float = Field(
@@ -59,6 +59,16 @@ class CoderConfig(BaseModel):
             desc_en="Name of the LLM provider for code generation; must be defined in the providers list",
         ),
     )
+
+
+class CodexCLIConfig(CoderConfig):
+    """Codex CLI settings; authentication comes from the local ChatGPT login."""
+
+    type: Literal["codex_cli"] = "codex_cli"
+    binary_path: str = Field(default="codex", description="Codex executable name or absolute path")
+    model: str = Field(default="", description="Optional model override; empty uses the Codex default")
+    timeout: float = Field(default=600.0, gt=0, description="CLI turn timeout in seconds")
+    provider: str = Field(default="", description="Unused: Codex CLI uses its own ChatGPT login")
 
 
 class ClaudeCodeConfig(CoderConfig):

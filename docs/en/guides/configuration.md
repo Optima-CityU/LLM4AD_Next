@@ -105,7 +105,7 @@ providers:
 ```
 
 #### `providers[].type`
-- **Type**: `enum ["openai", "anthropic", "openai_compatible"]`
+- **Type**: `enum ["openai", "anthropic", "openai_compatible", "codex_cli"]`
 - **Required**: Yes
 - **Default**: `"openai"`
 - **Description**: Type of LLM provider
@@ -116,6 +116,93 @@ providers:
   - type: "anthropic"           # Anthropic API
   - type: "openai_compatible"   # OpenAI-compatible API (e.g., local models)
 ```
+
+#### Local Codex CLI for planning and coding
+
+Use `codex_cli` for personal experiments on the host where the official CLI
+is already signed in. Run `codex login status` as the same OS user; it must
+report `Logged in using ChatGPT`. Otherwise, run `codex login`.
+Do not supply API keys, auth tokens, or a base URL.
+
+```yaml
+providers:
+  - name: local_codex
+    type: codex_cli
+    model: ""       # Keep the local Codex default.
+    timeout: 600
+planner:
+  provider: local_codex
+coder:
+  type: codex_cli
+  binary_path: codex
+  model: ""       # Optional separate coding model.
+  timeout: 600
+```
+
+Merge these fields into a task config while preserving its evaluator, dataset,
+and source repository settings. The Codex coder does not require a provider
+reference. Alternatively, the existing `custom` coder can reference the
+`local_codex` provider and parse returned code itself. Custom evaluators still
+need a declared provider reference; evaluators that construct API clients
+directly require separate adaptation.
+
+Run the small TSP example from the repository root:
+
+```bash
+uv run llm4ad run examples/applications/tsp_benchmark_python_mock/config.codex.yaml --skip-install
+```
+
+This configuration uses real Codex planning and coding, with the existing local
+TSP baseline and evaluator. It consumes subscription usage and disables memory
+extraction, embeddings, and multimodal sampling.
+
+Planning runs in a temporary read-only directory; coding uses workspace-write
+sandboxing in the candidate directory. Calls are serialized within each process.
+API authentication overrides are removed from the child environment, and the
+runner requires a ChatGPT login without falling back to API billing. CLI failures,
+timeouts, and incomplete turns propagate to the experiment's error handling.
+
+The provider supports text and structured JSON. Streaming returns the final
+validated text in one chunk. Images, application function calling, and embeddings
+are unsupported; API sampling parameters such as temperature and max_tokens are
+not forwarded. Run on the host as the logged-in user. Docker deployments can
+connect through the local bridge below without copying login files into containers.
+
+#### Bind local Codex in the web UI
+
+Open **LLM Providers → Connect local Codex**, check the connection, then select
+**Bind Codex**. The default option sets both planning and coding to Codex. Leave
+the selection on “Follow local Codex settings” to use the displayed CLI default.
+The picker reads models through Codex model/list; select a model and update the
+binding to save it. Manual model entry remains available if discovery fails.
+Disconnecting removes the provider
+binding without logging out of Codex.
+
+First start the host bridge from the repository root with Python dependencies installed:
+
+```bash
+bash docker/start-codex-bridge.sh --host 127.0.0.1
+```
+
+The first launch creates a private `docker/.codex-bridge-token` file. Configure
+the backend with `LOCAL_CODEX_BRIDGE_URL=http://127.0.0.1:18143` and
+`LOCAL_CODEX_BRIDGE_TOKEN` set to that file's contents, then restart the backend.
+For a Linux Docker deployment, find the gateway of the backend container's network
+with `docker network inspect <network-name>`. Start the bridge with
+`--host <gateway-address>` and configure the backend URL as
+`http://<gateway-address>:18143`; container loopback does not reach the host.
+Run as the OS user signed into Codex, with the CLI on PATH.
+Binding is available to administrators only when `ENVIRONMENT=local`. Neither
+bridge credentials nor account tokens are returned to the browser.
+
+Web experiments use the host CLI for planning and coding. Coding automatically
+uses the `custom` coder to parse generated code and write it inside the experiment
+container. New tasks can use default models; existing tasks with explicit provider
+selections must switch to local Codex in their model settings. Images, function
+calling, and embeddings require other providers. Connection checks make no model
+requests; inference remains subject to Codex subscription usage and rate limits.
+
+See the [official non-interactive documentation](https://learn.chatgpt.com/docs/non-interactive-mode).
 
 #### `providers[].api_key`
 - **Type**: `string`
@@ -500,7 +587,7 @@ evolution:
 Configure code generation settings.
 
 #### `coder.type`
-- **Type**: `enum ["claude_code", "opencode", "custom"]`
+- **Type**: `enum ["claude_code", "opencode", "codex_cli", "custom"]`
 - **Required**: No
 - **Default**: `"claude_code"`
 - **Description**: Type of coder to use
