@@ -3364,6 +3364,21 @@
     "prev": "Previous",
     "next": "Next",
     "finish": "Done",
+    "arl": {
+      "replay": "ARL guided tour",
+      "validatorTitle": "Step 1 · Validator builds the validation service",
+      "validatorContent": "The left pane is the Validator (Codex). In a new session, click “Build validation service” first: it sets up the evaluation service and writes the task brief from your research goal. The Worker needs it to submit results.",
+      "workerTitle": "Step 2 · Worker runs the research",
+      "workerContent": "The right pane is the Worker (Claude Code). Once validation is ready, click “Start auto research”: it implements ideas, submits them for validation and improves based on the score. The two agents chat independently, so you can watch both.",
+      "modeTitle": "Permission mode: let it run on its own",
+      "modeContent": "By default every tool call asks for your approval. To run unattended for a long time, switch to the auto mode (lightning icon) here, or click “Stop asking” on an approval card.",
+      "composerTitle": "Step in at any time",
+      "composerContent": "Send extra instructions or questions here: Enter to send, Shift+Enter for a new line, / for commands (e.g. /clear starts a fresh conversation). You can stop the current turn while it runs.",
+      "statusTitle": "Validation service status",
+      "statusContent": "Shows whether the validation service is ready. The Worker can start research once it reads “Healthy”.",
+      "filesTitle": "Workspace files",
+      "filesContent": "Both containers' workspaces live here. Switch between them to preview and edit code, logs and results. You can reopen this tour later from the “?” menu at the top right."
+    },
     "projects": {
       "demoTitle": "Try the example project first",
       "demoContent": "Click this read-only example to walk through a full algorithm-design run in seconds. No LLM keys needed.",
@@ -4917,7 +4932,13 @@
       "subagentEmpty": "This subtask has no messages yet",
       "subagentLive": "Still running; refreshes when its status changes",
       "peerBadge": "Peer",
-      "peerClosed": "This agent has ended; its transcript is unavailable after a container restart",
+      "peerClosed": "This agent has ended and is not loaded after a container restart. Click to resume it and load the transcript",
+      "peerClosedStatus": "Ended, not loaded",
+      "peerResuming": "Resuming this agent to load its transcript, this may take a few dozen seconds…",
+      "peerLoadError": {
+        "peer_unrecoverable": "This agent's session can no longer be resumed (it never recorded a conversation), so its transcript is unavailable",
+        "peer_resume_failed": "Failed to resume this agent. Please try again later"
+      },
       "peerUntitled": "Untitled validation run",
       "subagentStatus": {
         "running": "Running",
@@ -4940,6 +4961,14 @@
       "validationLabel": "Validation service",
       "validationOk": "Healthy",
       "validationNotReady": "Not ready",
+      "validationStarting": "Starting…",
+      "validationStopped": "Stopped",
+      "validationStartingHint": "Starting the validation service, usually takes a few seconds",
+      "validationStoppedHint": "The validation service is set up but not running (it needs a restart after the container wakes from sleep)",
+      "validationRestart": "Restart",
+      "validationRestartFailed": "Failed to start the validation service",
+      "validationRestartNotDeclared": "The validation service has not been set up yet. Finish setting it up in the Validator first",
+      "validationRestartDisconnected": "Disconnected from the ARL session. Reconnect and try again",
       "scrollToLatest": "Jump to latest",
       "placeholderShort": "Message {{role}}…",
       "composerHint": "Enter to send · Shift+Enter for newline · / commands",
@@ -4947,7 +4976,9 @@
         "validatorStart": "Build validation service",
         "workerStart": "Start auto research",
         "workerWait": "Click \"Build validation service\" in the Validator on the left first",
-        "workerWaitBusy": "The validation service is not ready yet. Finish setting it up in the Validator conversation on the left"
+        "workerWaitBusy": "The validation service is not ready yet. Finish setting it up in the Validator conversation on the left",
+        "workerWaitStopped": "The validation service has stopped. Restart it from \"Validation service\" on the right",
+        "workerWaitStarting": "The validation service is starting, please wait"
       }
     },
     "gate": {

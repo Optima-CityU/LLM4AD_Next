@@ -254,6 +254,7 @@ services:
       network: host
       args:
         DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+        CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://github.com/SaladDay/cc-switch-cli/releases/download}
     restart: "no"
     entrypoint: ["true"]
 

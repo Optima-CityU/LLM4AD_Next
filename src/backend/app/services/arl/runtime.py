@@ -49,7 +49,6 @@ from app.core.redis import (
     acquire_arl_session_lock,
     forget_arl_session_active,
     get_arl_session_last_active,
-    list_arl_session_last_active,
     pop_idle_arl_sessions,
     release_arl_session_lock,
     touch_arl_session_active,
@@ -62,6 +61,7 @@ from app.services.arl.types import (
     ARLSessionStatus,
 )
 from app.services.arl.validation import validator_env, write_worker_guide
+from app.services.claude_protocol import ClaudeUpstreamFormat, provider_api_format
 
 # 会话标签，用于 Docker 容器过滤
 SESSION_LABEL = "llm4ad.arl.session_id"
@@ -77,6 +77,8 @@ CONTAINER_NAME_PREFIX = "llm4ad-arl-"
 
 #: Anthropic 与 OpenAI 对 base URL 的 /v1 后缀要求相反
 V1_SUFFIX = "/v1"
+#: Anthropic 上游未配置快速模型时的默认值
+_DEFAULT_SMALL_FAST_MODEL = "claude-haiku-4-5-20251001"
 
 #: 宿主机模式下分配 daemon 端口的区间。仅本地调试用：backend 在容器内时
 #: 走容器名 DNS，根本不发布端口。区间 5000 个槽位、每会话占 2 个相邻槽，
@@ -254,6 +256,9 @@ def _config_fingerprint(daemon_config: ARLDaemonConfig) -> str:
         daemon_config.model or "",
         daemon_config.small_fast_model or "",
         daemon_config.provider_type or "",
+        # 协议格式决定 Worker 是否起 cc-switch；v1 标记让早期没有转换器的
+        # 容器重建一次
+        f"worker-protocol-v1:{worker_api_format(daemon_config)}",
         _normalize_base_url(daemon_config.validator_base_url, ensure_v1=True) or "",
         _mask(daemon_config.validator_api_key),
         daemon_config.validator_model or "",
@@ -484,6 +489,44 @@ def _upstream_credential(role: ARLRole, daemon_config: ARLDaemonConfig) -> dict[
     }
 
 
+def worker_api_format(daemon_config: ARLDaemonConfig) -> ClaudeUpstreamFormat:
+    """返回 Worker 上游的协议格式。
+
+    Claude Code 只会发 Anthropic Messages。Anthropic 供应商直连；其余类型
+    （openai / openai-compatible / mock）由容器内的 cc-switch 转成 OpenAI
+    Chat Completions。规则与知识库解析、paper-agent 共用一份。
+
+    Args:
+        daemon_config: 真实凭据配置
+
+    Returns:
+        ``anthropic`` 或 ``openai_chat``
+    """
+    return provider_api_format(daemon_config.provider_type)
+
+
+def _worker_small_fast_model(
+    daemon_config: ARLDaemonConfig, api_format: ClaudeUpstreamFormat
+) -> str:
+    """返回 Worker 的快速模型名。
+
+    未配置时 Anthropic 上游回落到 Haiku；OpenAI 协议的上游通常没有 Claude
+    模型，回落到主模型，避免后台小任务（标题、摘要等）请求不存在的模型。
+
+    Args:
+        daemon_config: 真实凭据配置
+        api_format: Worker 上游协议格式
+
+    Returns:
+        快速模型名
+    """
+    if daemon_config.small_fast_model:
+        return daemon_config.small_fast_model
+    if api_format == "anthropic":
+        return _DEFAULT_SMALL_FAST_MODEL
+    return daemon_config.model
+
+
 def _register_proxy_credentials(
     session_id: str, user_id: str, daemon_config: ARLDaemonConfig
 ) -> None:
@@ -551,13 +594,15 @@ def _build_container_env(
             base_url, auth_token = proxy_base, proxy_token
         else:
             base_url, auth_token = upstream["base_url"], upstream["auth_token"]
+        api_format = worker_api_format(daemon_config)
         env.update({
+            # openai_chat 时 entrypoint 把这组地址/凭据交给容器内的 cc-switch，
+            # Claude Code 改连本地转换器（见 docker/protocol-adapter.sh）
+            "LLM4AD_UPSTREAM_API_FORMAT": api_format,
             "ANTHROPIC_BASE_URL": base_url,
             "ANTHROPIC_AUTH_TOKEN": auth_token,
             "ANTHROPIC_MODEL": daemon_config.model,
-            "ANTHROPIC_SMALL_FAST_MODEL": (
-                daemon_config.small_fast_model or "claude-haiku-4-5-20251001"
-            ),
+            "ANTHROPIC_SMALL_FAST_MODEL": _worker_small_fast_model(daemon_config, api_format),
         })
     else:
         if proxy_base:
@@ -1545,7 +1590,6 @@ class ARLRuntimeService:
                         continue
                     container.stop(timeout=10)
                     stopped = True
-                    logger.debug("ARL 空闲回收 [{}] 已停止 {} 容器 {}", session_id, role.value, name)
                 except DockerException:
                     failed = True
                     logger.opt(exception=True).warning(
@@ -1724,21 +1768,10 @@ async def _has_running_turn(session: ARLSession) -> bool:
             if client is not None:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
-        statuses = []
-        running = False
         for entry in entries:
             agent = entry.get("agent") if isinstance(entry.get("agent"), dict) else entry
-            pending = bool(agent.get("pendingPermissions"))
-            statuses.append(
-                f"{agent.get('id')}={agent.get('status')}{'(待授权)' if pending else ''}"
-            )
-            if agent.get("status") == "running" and not pending:
-                running = True
-        logger.debug(
-            "ARL 空闲回收 [{}] {} agent 状态: {}", session.session_id, role.value, statuses
-        )
-        if running:
-            return True
+            if agent.get("status") == "running" and not agent.get("pendingPermissions"):
+                return True
     return False
 
 
@@ -1759,6 +1792,7 @@ _RESIDENT_NAMES = frozenset(
         "claude",
         "codex",
         "codex-code-mode-host",
+        "cc-switch",
         "top",
         "htop",
         "less",
@@ -1781,6 +1815,9 @@ _RESIDENT_NODE_SCRIPTS = frozenset(
 #: 不带参数时视为空闲的 shell：Paseo 终端里空着的提示符，或 ``docker exec``
 #: 进来的会话。带参数（``sh -c ...``、``bash run.sh``）则是在跑东西。
 _SHELL_NAMES = frozenset({"sh", "bash", "-sh", "-bash"})
+#: 镜像自带的常驻 shell 脚本：Worker 的 cc-switch 守护循环
+#: （``bash /usr/local/bin/arl-protocol-adapter serve``）
+_RESIDENT_SHELL_SCRIPTS = frozenset({"arl-protocol-adapter"})
 #: 镜像 HEALTHCHECK 每 30s 起一次 ``/bin/sh -c node -e "...'/api/health'..."``，
 #: 只活几毫秒，但扫描恰好撞上时不能把它当成后台任务。
 _HEALTHCHECK_MARKER = "/api/health"
@@ -1806,8 +1843,13 @@ def _is_resident_process(command: str) -> bool:
     name = posixpath.basename(argv[0]).lower()
     if name in _RESIDENT_NAMES:
         return True
+    if name in _RESIDENT_SHELL_SCRIPTS:
+        return True
     if name in _SHELL_NAMES:
-        return len(argv) == 1 or _HEALTHCHECK_MARKER in command
+        if len(argv) == 1 or _HEALTHCHECK_MARKER in command:
+            return True
+        script = next((arg for arg in argv[1:] if not arg.startswith("-")), "")
+        return posixpath.basename(script).lower() in _RESIDENT_SHELL_SCRIPTS
     if name == "node":
         if _HEALTHCHECK_MARKER in command:
             return True
@@ -1848,24 +1890,13 @@ def _background_processes_sync(session_id: str) -> list[str]:
             (i for i, title in enumerate(titles) if title in ("CMD", "COMMAND")),
             len(titles) - 1,
         )
-        resident: list[str] = []
-        background: list[str] = []
+        # 后台进程（白名单外）会出现在保活日志里
         for row in table.get("Processes") or []:
             if column < 0 or column >= len(row):
                 continue
             command = row[column]
-            (resident if _is_resident_process(command) else background).append(command)
-        # 常驻进程只在补白名单时有用，放 DEBUG；后台进程会出现在保活日志里
-        logger.debug(
-            "ARL 空闲回收 [{}] {} 常驻 {} 个: {}，后台 {} 个: {}",
-            session_id,
-            role.value,
-            len(resident),
-            [command[:120] for command in resident],
-            len(background),
-            [command[:200] for command in background],
-        )
-        found.extend(background)
+            if not _is_resident_process(command):
+                found.append(command)
     return found
 
 
@@ -1889,14 +1920,7 @@ def _keep_session_alive(session: ARLSession) -> None:
         settings.LLM_PROXY_TOKEN_TTL,
         user_id=session.user_id or None,
     )
-    if extended:
-        logger.debug(
-            "ARL 空闲回收 [{}] 续期 {} 个代理 token（{}s）",
-            session.session_id,
-            extended,
-            settings.LLM_PROXY_TOKEN_TTL,
-        )
-    else:
+    if not extended:
         # Redis 记录已丢（过期或 Redis 重启），续期救不回来，要等用户下次连接重新登记
         logger.warning(
             "ARL 空闲回收 [{}] 已刷新活跃时间，但没有可续期的代理 token，用户重连前调模型会 401",
@@ -1925,24 +1949,12 @@ async def stop_idle_arl_sessions() -> int:
     timeout = settings.ARL_SESSION_IDLE_TIMEOUT_SECONDS
     threshold = now - timeout
     try:
-        tracked = await asyncio.to_thread(list_arl_session_last_active)
         idle = await asyncio.to_thread(pop_idle_arl_sessions, threshold)
     except Exception:
         logger.opt(exception=True).warning("ARL 空闲回收失败：无法读取活跃时间")
         return 0
 
-    # 没到阈值的会话不进入检查；排查「为什么没回收」时打开 DEBUG 看离阈值还差多久
-    for session_id, last_active in sorted(tracked.items(), key=lambda kv: kv[1]):
-        if session_id not in idle:
-            idle_for = int(now - last_active)
-            logger.debug(
-                "ARL 空闲回收 [{}] 未到阈值：已空闲 {}s，还差 {}s",
-                session_id,
-                idle_for,
-                max(timeout - idle_for, 0),
-            )
     if not idle:
-        logger.debug("ARL 空闲回收：跟踪 {} 个会话，没有超过 {}s 的", len(tracked), timeout)
         return 0
 
     runtime = get_arl_runtime()

@@ -430,7 +430,10 @@ export default function ARLArtifactsPanel() {
   }
 
   return (
-    <aside className="flex h-full w-full flex-col overflow-hidden bg-transparent">
+    <aside
+      data-tour="arl-files"
+      className="flex h-full w-full flex-col overflow-hidden bg-transparent"
+    >
       {/* 标题行：容器切换（两个工作区各自一棵树） */}
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/40 px-3">
         <FolderOpen className="size-3.5 shrink-0 text-primary/80" />

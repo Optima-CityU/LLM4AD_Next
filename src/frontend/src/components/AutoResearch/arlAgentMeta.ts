@@ -158,16 +158,41 @@ export function isValidationReady(state: ARLValidationState): boolean {
 }
 
 /**
+ * Whether to offer the "restart validation service" action.
+ *
+ * Only for a service the Validator has actually set up that is down and not
+ * already coming up: before setup there is nothing to restart, and during a
+ * start another click would only race it.
+ *
+ * @param state - Validation service state.
+ * @returns True when the restart button should be shown.
+ */
+export function canRestartValidation(state: ARLValidationState): boolean {
+  return state.declared && !state.configured && !state.starting
+}
+
+/**
  * i18n key of the hint shown while the validation service is not ready.
  *
  * Before the Validator conversation starts the hint points at its start
  * button; once it has started that button is gone, so the hint says to
- * finish the setup in the conversation instead.
+ * finish the setup in the conversation instead. A service that was set up
+ * but is no longer running (e.g. after the container slept) points at the
+ * restart action instead.
  *
  * @param validatorStarted - Whether the Validator pane has any messages.
+ * @param validation - Validation service state, when known.
  * @returns Full i18n key.
  */
-export function workerWaitKey(validatorStarted: boolean): string {
+export function workerWaitKey(
+  validatorStarted: boolean,
+  validation?: ARLValidationState,
+): string {
+  if (validation?.declared) {
+    return validation.starting
+      ? "autoResearch.arl.guide.workerWaitStarting"
+      : "autoResearch.arl.guide.workerWaitStopped"
+  }
   return validatorStarted
     ? "autoResearch.arl.guide.workerWaitBusy"
     : "autoResearch.arl.guide.workerWait"

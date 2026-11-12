@@ -30,6 +30,9 @@ RESIDENT = [
     "node .contrejour/dist/tools/validation-cli.js serve --project .",
     "/bin/sh",
     "bash",
+    # Worker 的 cc-switch 协议转换器及其守护循环
+    "cc-switch proxy serve --listen-address 127.0.0.1 --listen-port 17821",
+    "bash /usr/local/bin/arl-protocol-adapter serve",
     "[python] <defunct>",
     "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
     "/bin/sh -c node -e \"const listen=process.env.PASEO_LISTEN||'0.0.0.0:6767'; "
@@ -152,12 +155,6 @@ def idle_env(monkeypatch):
         return True
 
     monkeypatch.setattr(runtime, "pop_idle_arl_sessions", lambda _ts: ["s9"])
-    # s9 已超阈值；s8 还在活跃，只打「未到阈值」日志
-    monkeypatch.setattr(
-        runtime,
-        "list_arl_session_last_active",
-        lambda: {"s9": 0.0, "s8": runtime.time.time()},
-    )
     monkeypatch.setattr(runtime.ARLRuntimeService, "get_session", _get_session)
     monkeypatch.setattr(runtime, "_has_running_turn", _no_turn)
     monkeypatch.setattr(runtime, "_stop_if_still_idle", _stop)

@@ -23,6 +23,7 @@ import type {
   ARLStreamItem,
   ARLTimelineCursor,
   ARLTurnStatus,
+  ARLValidationRestartResult,
   ARLValidationState,
 } from "@/components/AutoResearch/arlStream"
 import {
@@ -45,6 +46,7 @@ import {
   itemsFromEntries,
   nextItemId,
   normalizeItem,
+  parseValidationRestartResult,
   upsertPermission,
 } from "@/components/AutoResearch/arlStream"
 import { handleUnauthorized } from "@/utils/auth"
@@ -65,6 +67,7 @@ export type {
   ARLSubagent,
   ARLSubagentStatus,
   ARLTurnStatus,
+  ARLValidationRestartResult,
   ARLValidationState,
 } from "@/components/AutoResearch/arlStream"
 // Re-exported so existing imports keep resolving through the hook. The pure
@@ -76,6 +79,11 @@ export {
 
 /** How long to wait for a subagent transcript before giving up. */
 const SUBAGENT_TIMELINE_TIMEOUT_MS = 30_000
+/**
+ * Peers can be `closed` after a container restart; opening one makes the
+ * backend resume it first (up to 60s for the refresh, plus the fetch).
+ */
+const PEER_TIMELINE_TIMEOUT_MS = 90_000
 
 /** A `subagent_timeline` request waiting for its reply. */
 interface PendingSubagentRequest {
@@ -187,6 +195,12 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   const fsRequestsRef = useRef<ARLFsRequests | null>(null)
   if (!fsRequestsRef.current) fsRequestsRef.current = new ARLFsRequests()
   const fsRequests = fsRequestsRef.current
+  // Callers waiting on a `validation_restart_result`. The backend answers
+  // every request (it serializes and de-duplicates restarts itself), so one
+  // reply settles all of them.
+  const restartWaitersRef = useRef<
+    Array<(result: ARLValidationRestartResult) => void>
+  >([])
   // Cursor each in-flight "load older" request was sent from, so a reply
   // that lands after history was replaced (reconnect) can be recognized.
   const olderFromRef = useRef<Record<ARLRole, ARLTimelineCursor | null>>({
@@ -278,7 +292,7 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
       }
 
       if (type === "agent_update") {
-        // Peer agents (validation runs spawned with an `aris.role` label) go
+        // Peer agents (validation runs spawned with a `contrejour.role` label) go
         // to the peer list. Checked by label first, so a peer can never be
         // mistaken for the main agent even before `agents_ready` sets its id.
         if (payload.kind === "remove") {
@@ -426,11 +440,12 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
             const rows: any[] = frame.data?.rows ?? []
             pending.resolve(itemsFromEntries(rows))
           } else {
-            pending.reject(
-              new Error(
-                frame.data?.message || "Failed to load the subagent transcript",
-              ),
+            // `code` (peers only) lets the sheet show a translated reason
+            const error: Error & { code?: string } = new Error(
+              frame.data?.message || "Failed to load the subagent transcript",
             )
+            if (typeof frame.data?.code === "string") error.code = frame.data.code
+            pending.reject(error)
           }
           return
         }
@@ -508,6 +523,14 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
         case "validation_status":
           setValidation((prev) => applyValidationStatus(prev, frame.data))
           return
+
+        case "validation_restart_result": {
+          const result = parseValidationRestartResult(frame.data)
+          const waiters = restartWaitersRef.current
+          restartWaitersRef.current = []
+          for (const resolve of waiters) resolve(result)
+          return
+        }
 
         case "fs_result":
           fsRequests.settle(frame.data)
@@ -663,6 +686,7 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
     (
       key: string,
       frame: { type: string; role: ARLRole; payload: Record<string, unknown> },
+      timeoutMs: number = SUBAGENT_TIMELINE_TIMEOUT_MS,
     ): Promise<ARLStreamItem[]> => {
       const requests = subagentRequestsRef.current
       const previous = requests.get(key)
@@ -681,7 +705,7 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
           if (requests.get(key)?.timer !== timer) return
           requests.delete(key)
           reject(new Error("Request timed out"))
-        }, SUBAGENT_TIMELINE_TIMEOUT_MS)
+        }, timeoutMs)
         requests.set(key, { resolve, reject, timer })
       })
     },
@@ -701,16 +725,22 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   /**
    * Fetch the transcript of one peer agent (opened from the subagent strip).
    *
-   * Same contract as {@link fetchSubagentTimeline}. The backend refuses
-   * `closed` peers so that viewing one never resumes its provider process.
+   * Same contract as {@link fetchSubagentTimeline}. A `closed` peer (not
+   * loaded after a container restart) is resumed by the backend first, so
+   * this only happens when the user opens it; failures carry a `code`
+   * (`peer_unrecoverable` / `peer_resume_failed`) on the rejected error.
    */
   const fetchPeerTimeline = useCallback(
     (role: ARLRole, peerId: string) =>
-      requestTranscript(`${role}:peer:${peerId}`, {
-        type: "peer_timeline",
-        role,
-        payload: { peer_id: peerId },
-      }),
+      requestTranscript(
+        `${role}:peer:${peerId}`,
+        {
+          type: "peer_timeline",
+          role,
+          payload: { peer_id: peerId },
+        },
+        PEER_TIMELINE_TIMEOUT_MS,
+      ),
     [requestTranscript],
   )
 
@@ -812,6 +842,31 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
   )
 
   /**
+   * Ask the backend to (re)start the Validator's validation service.
+   *
+   * Safe to call repeatedly: the backend only acts when the service has been
+   * set up and is down, and answers `starting` while a start is in flight.
+   *
+   * @returns The backend's verdict; `disconnected` if the socket is gone.
+   */
+  const restartValidation = useCallback(
+    (): Promise<ARLValidationRestartResult> =>
+      new Promise((resolve) => {
+        if (
+          !sendRaw(
+            { type: "validation_restart", role: "worker", payload: {} },
+            { quiet: true },
+          )
+        ) {
+          resolve({ ok: false, action: "disconnected", message: null })
+          return
+        }
+        restartWaitersRef.current.push(resolve)
+      }),
+    [sendRaw],
+  )
+
+  /**
    * Fetch the slash commands a container's agent offers.
    *
    * Sent quietly: the composer calls this as the user types `/`, and a
@@ -895,6 +950,11 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
     subagentRequestsRef.current.clear()
     // Same for file-panel requests: reject them now instead of at timeout.
     fsRequests.failAll("Disconnected from the ARL session")
+    // And for a pending validation restart, so its button does not spin forever.
+    const restartWaiters = restartWaitersRef.current
+    restartWaitersRef.current = []
+    for (const resolve of restartWaiters)
+      resolve({ ok: false, action: "disconnected", message: null })
     // A `list_commands` reply cannot arrive on a dead socket; release the
     // menu spinner so the next open simply asks again.
     setCommands((prev) => {
@@ -973,6 +1033,8 @@ export function useARLWebSocket({ session }: UseARLWebSocketOptions) {
     systemMessage,
     /** State of the validation service the Validator exposes to the Worker. */
     validation,
+    /** Restart a validation service that was set up but is not running. */
+    restartValidation,
     /** Slash commands per container, fetched on demand via `listCommands`. */
     commands,
     listCommands,
