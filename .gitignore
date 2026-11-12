@@ -264,9 +264,13 @@ refefence_superpowers/
 *.pdf
 *.zip
 
-# Internal release script for the test servers (192.168.8.181 / 10.121.17.44);
-# contains internal addresses and must not be committed
+# Internal deployment helpers contain private connection details.
 /scripts/deploy-test-server.sh
+
+# Local credentials, scratch notes and exported production data.
+/test_provider.md
+/problem.txt
+/docker/exports/
 
 # Local evaluation gateway credentials, journals and candidate workspaces
 .llm4ad-gateway/

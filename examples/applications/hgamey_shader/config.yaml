@@ -1,8 +1,8 @@
 # Draft template: select an authorized gateway and LLM provider in the web wizard.
 # Empty gateway_ids intentionally fail runtime validation until selection.
 project_name: hgamey_shader
-description_en: "Evolve a Genshin screenshot super-resolution compute shader using a private remote GPU benchmark."
-description_zh: "通过私有远程 GPU 基准进化原神截图超分辨率计算着色器。"
+description_en: "Optimize a single-frame Genshin upscaling shader on an authorized Android GPU, with quality checks and baseline-relative latency scoring."
+description_zh: "在授权 Android 设备上优化原神单帧超分着色器，校验画质并按相对基线的耗时改善率评分。"
 random_seed: 42
 base_dir: ./runs
 
