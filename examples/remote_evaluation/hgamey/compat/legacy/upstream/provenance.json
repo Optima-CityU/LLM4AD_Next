@@ -1,0 +1,92 @@
+{
+  "repository": "https://github.com/HGamey/experiments",
+  "commit": "3ea2d8cfb4dfbd76690ee12b25ad8afd9bcb06c6",
+  "attribution": "HGamey/experiments upstream authors; original source comments and docstrings retained.",
+  "files": [
+    {
+      "path": "selfsr/selfsr_ab.py",
+      "source_url": "https://github.com/HGamey/experiments/blob/3ea2d8cfb4dfbd76690ee12b25ad8afd9bcb06c6/selfsr/selfsr_ab.py",
+      "upstream_sha256": "d54bd4df00ec1b6241724f8e65c658ef0c14a74b19698d140c1de79bc38abeba",
+      "packaged_sha256": "ef17570ee5e67986c6faefd45cd220972cec8f134aa8511b1e178abd90584621"
+    },
+    {
+      "path": "gfrc/gfrc_ab.py",
+      "source_url": "https://github.com/HGamey/experiments/blob/3ea2d8cfb4dfbd76690ee12b25ad8afd9bcb06c6/gfrc/gfrc_ab.py",
+      "upstream_sha256": "a896de1c08c6e13570a2cc38c8b070acd40dd11f4b033d662a9744715b31d27d",
+      "packaged_sha256": "cfbbaadadb4fd956847dcdc0e9ea0be364ed1d1818aef8e3ec14a8a1006b4ed9"
+    }
+  ],
+  "modified_paths": [
+    "selfsr/selfsr_ab.py",
+    "gfrc/gfrc_ab.py"
+  ],
+  "modifications": [
+    "Expose --vlm-calls with default 0; pass it to onboard and leased _locked children; reject negative budgets.",
+    "Expose --verify-game-world and propagate it to leased _locked children.",
+    "After successful entry, require bounded capture --ready-only for opted-in runs and every fixed entry script.",
+    "Validate exit status and capture summary: ok=true, ready_only=true, frames=1, stop_reason=target_reached. The upstream kept counter is serialized as frames.",
+    "Store capture evidence under onboard/<arm>_world; reject verification for non-Genshin packages because capture has no package option.",
+    "Select A/B layer libraries independently with --so-a/--so-b and retain library identities.",
+    "Stop on unresolved capture recovery; accept both flat and nested capture reports.",
+    "Use an explicit 45-second screenshot budget inside the bounded capture watchdog.",
+    "Record and retrieve camera-motion video with the existing root transport; preserve errors and remove only the owned recording.",
+    "Persist capture recovery obligations across leased children; defer outer session stop and device restoration while capture recovery is unknown, retaining native owner FDs and automatic lifecycle.",
+    "Collect Mali UID GPU work, GED device telemetry, application presentation bounds and explicitly profiled battery-supply V*I using local helpers; retain evidence and stop on unknown cleanup.",
+    "Preserve Mali recovery obligations even when a leased child loses ARM_JSON; stop plain-arm force-stop and outer restoration until cleanup is confirmed. Show actual Mali metrics in progress text.",
+    "Capture the existing A/B window with attempt-owned Perfetto, exact ATrace markers, read-only Android capability probes and bounded official Trace Processor analysis; preserve recorder cleanup obligations.",
+    "Use process-scoped asynchronous ATrace window pairs because Android printf may emit from different child threads; timeouts terminate the entire owned host transport process group so orphaned ADB proxies cannot retain device leases. Remote recorder cleanup still requires a receipt.",
+    "Retrieve completed pan recordings through checkpointed bounded root reads; verify physical/file identity and full SHA-256 before local publication or remote removal. A failed transfer retains the original recording and does not replay the experiment.",
+    "Preserve terminal failed capture diagnostics and recovery status instead of following a self-referencing report path. Native screenshot acquisition stages and verifies one lossless PNG without changing image content."
+  ],
+  "capture_contract": {
+    "repository": "https://github.com/HGamey/hgamey",
+    "commit": "95f55e5c72ae28806181d299107fc57471818be5",
+    "source_path": "phonefarm/src/capture.rs",
+    "source_url": "https://github.com/HGamey/hgamey/blob/95f55e5c72ae28806181d299107fc57471818be5/phonefarm/src/capture.rs",
+    "source_sha256": "b547be4c3f6bca1c5a2395f3618da52dfa62d773882f74b6e2f6265651efdeee",
+    "source_vendored": false
+  },
+  "python_dependencies": {
+    "requirements_file": "requirements.txt",
+    "requirements_origin": "Local minimal runtime constraints; not an upstream lockfile.",
+    "local": [
+      "gfrc/gfrc_ab.py"
+    ],
+    "external": [
+      "numpy",
+      "Pillow",
+      "perfetto==0.59.1"
+    ]
+  },
+  "scope": "Pinned upstream Python runner and helper with documented LLM4AD entry/recovery changes and adjacent local Mali telemetry helpers. Native algorithms and SR math are unchanged. Device sources are explicitly distinguished; unconfirmed capture or telemetry recovery defers outer cleanup.",
+  "local_helpers": [
+    {
+      "path": "selfsr/mali_capture.py",
+      "origin": "LLM4AD local telemetry adaptation, not upstream HGamey code"
+    },
+    {
+      "path": "selfsr/mali_telemetry.py",
+      "origin": "LLM4AD local telemetry adaptation, not upstream HGamey code"
+    },
+    {
+      "path": "selfsr/frame_telemetry.py",
+      "origin": "LLM4AD local telemetry adaptation, not upstream HGamey code"
+    },
+    {
+      "path": "selfsr/power_telemetry.py",
+      "origin": "LLM4AD local telemetry adaptation, not upstream HGamey code"
+    },
+    {
+      "path": "selfsr/perfetto_capture.py",
+      "origin": "LLM4AD local Perfetto integration; uses official Perfetto SDK, not upstream HGamey code"
+    },
+    {
+      "path": "selfsr/perfetto_analysis.py",
+      "origin": "LLM4AD local Perfetto integration; uses official Perfetto SDK, not upstream HGamey code"
+    },
+    {
+      "path": "selfsr/evidence_transfer.py",
+      "origin": "LLM4AD local durable evidence transfer; no change to acquisition or algorithm metrics"
+    }
+  ]
+}

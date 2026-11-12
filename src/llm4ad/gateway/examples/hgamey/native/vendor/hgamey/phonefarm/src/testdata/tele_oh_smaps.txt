@@ -1,0 +1,12 @@
+1220000000-7fdf788000 ---p 00000000 00:00 0                              [rollup]
+Rss:              380480 kB
+Pss:              171378 kB
+Pss_Anon:          85271 kB
+Pss_File:          85827 kB
+Pss_Shmem:           279 kB
+Shared_Clean:     195060 kB
+Shared_Dirty:      70240 kB
+Private_Clean:     37564 kB
+Private_Dirty:     77616 kB
+Referenced:       311828 kB
+Anonymous:        147204 kB

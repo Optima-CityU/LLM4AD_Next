@@ -1,0 +1,45 @@
+name: llm4ad-hgamey
+services:
+  gateway:
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+      args:
+        RUST_IMAGE: ${RUST_IMAGE:-rust:1.99-slim-bookworm}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.13.16-slim-bookworm}
+        HGAMEY_NATIVE_IMAGE: ${HGAMEY_NATIVE_IMAGE:-native-runtime}
+        APT_MIRROR: ${APT_MIRROR:-}
+        CARGO_REGISTRY_MIRROR: ${CARGO_REGISTRY_MIRROR:-}
+        ANDROID_REPOSITORY_BASE: ${ANDROID_REPOSITORY_BASE:-https://dl.google.com/android/repository}
+        TRACE_PROCESSOR_URL: ${TRACE_PROCESSOR_URL:-}
+        LLM4AD_PACKAGE: ${LLM4AD_PACKAGE:-llm4ad-next}
+        LLM4AD_EXTRAS: gateway-ui
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    command: ["start", "--ui-host", "${LLM4AD_GATEWAY_UI_HOST:-127.0.0.1}", "--ui-port", "${LLM4AD_GATEWAY_UI_PORT:-8768}", "--no-open-browser"]
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      LLM4AD_GATEWAY_ADAPTER: hgamey
+      LLM4AD_GATEWAY_CONCURRENCY: '1'
+      LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}
+      LLM4AD_GATEWAY_STATE_DIR: /data/gateway
+      HGAMEY_RUNTIME_DIR: /data/gateway
+      EXECUTOR_DATA: /data/executor
+      DEVLOCK_DIR: /work/locks
+      PHONEFARM_STATE_DIR: /work/state
+    volumes:
+      - ${HGAMEY_DATA_DIR:?Set a persistent data directory}:/data
+      - ${HGAMEY_INPUTS_DIR:?Set the directory containing Genshin reference frames}:/inputs:ro
+      - ${HGAMEY_CONFIG_DIR:?Set the local configuration directory}:/config:ro
+      - ${HGAMEY_PHONEFARM_DIR:?Set the persistent phonefarm state directory}:/work
+      - ${ADB_IDENTITY_FILE:?Set your authorized ADB identity file}:/run/adb-identity:ro
+      - ${ADB_STATE_DIR:?Set a persistent ADB pairing state directory}:/home/hgamey/.android
+    network_mode: host
+    stop_grace_period: 35m
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'

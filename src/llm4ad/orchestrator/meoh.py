@@ -595,7 +595,7 @@ class MEoHOrchestrator(BaseOrchestrator):
                 candidate_runtime_ms=metrics.get("candidate_runtime_ms", 0.0),
             ),
         )
-        algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
+        algorithm.custom_metadata["evaluation_result"] = result.candidate_summary()
         return algorithm
 
     def _apply_eval_result(self, algorithm: Algorithm, result: EvaluationResult) -> None:
@@ -631,7 +631,7 @@ class MEoHOrchestrator(BaseOrchestrator):
                 candidate_runtime_ms=metrics.get("candidate_runtime_ms", 0.0),
             ),
         )
-        algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
+        algorithm.custom_metadata["evaluation_result"] = result.candidate_summary()
         self._eval_successes += 1
         self._update_per_objective_best(algorithm)
 

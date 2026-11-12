@@ -1,0 +1,6 @@
+Name:	id.article.news
+State:	S (sleeping)
+Uid:	10207	10207	10207	10207
+VmHWM:	  829268 kB
+VmRSS:	  822156 kB
+Threads:	292

@@ -1,0 +1,1665 @@
+{
+  "repository": "https://github.com/HGamey/hgamey",
+  "base_revision": "95f55e5c72ae28806181d299107fc57471818be5",
+  "local_compatibility_changes_included": true,
+  "source": "User-provided hgamey-evaluator/vendor/hgamey, after the verified LLM4AD device compatibility fixes",
+  "scope": [
+    "phonefarm source and build inputs",
+    "refbench source and contracts",
+    "game_opt_loop/contracts only"
+  ],
+  "excluded": [
+    "Git/CI/agent configuration",
+    "generated binaries and build outputs",
+    "device logs, captured media and raw measurement fixtures",
+    "host/device credentials and runtime state",
+    "upstream optional orchestration and dashboard",
+    "README documentation omitted from this source distribution"
+  ],
+  "files": {
+    "game_opt_loop/contracts/candidate.schema.json": {
+      "sha256": "3f99670dc86dd42a054addfdabbe2d20c7c662c4a02fbdcd8edfe76a3876d5a6",
+      "size": 1410
+    },
+    "game_opt_loop/contracts/eval_report.schema.json": {
+      "sha256": "a8f4e2fe19a96e89916b669d2e458ae65c71d77170698771b1437c1f2c3f8695",
+      "size": 17179
+    },
+    "game_opt_loop/contracts/eval_request.schema.json": {
+      "sha256": "67e14e4d5c82fe08782b41e68a317fbd9d2ead457790313a4d8f8e937d91f769",
+      "size": 25117
+    },
+    "game_opt_loop/contracts/game_profile.schema.json": {
+      "sha256": "3cbfcbf306053750ebef1a38d687c90fea9d5ac13e7d0c2143371168ce11c067",
+      "size": 3275
+    },
+    "game_opt_loop/contracts/goal.schema.json": {
+      "sha256": "7a1d292221144f56ae96d34f14f364845ca6d0812954e844b5bf959be15a2cca",
+      "size": 3188
+    },
+    "game_opt_loop/contracts/goal_event.schema.json": {
+      "sha256": "ddf61b9b5248d20e257b928a455f1ce1f5e8d61fc8347f612b488ccd3e4279aa",
+      "size": 3759
+    },
+    "game_opt_loop/contracts/goal_state.schema.json": {
+      "sha256": "dc2802d3c59694c8de9434e7ebe4753ae7655cea844ccd384a99d3ff443f2648",
+      "size": 2139
+    },
+    "game_opt_loop/contracts/pareto_archive.schema.json": {
+      "sha256": "ff0ddd3db8dab62ff649a782f1a9cd3cb6ff2d382b2a85ec6dd9850db386ba39",
+      "size": 1653
+    },
+    "game_opt_loop/contracts/proposer_candidate.schema.json": {
+      "sha256": "b92d82be92eececf4776a3700c8ab2b3f70e548d752827d787c86d6e2599bbb8",
+      "size": 3430
+    },
+    "game_opt_loop/contracts/proposer_input.schema.json": {
+      "sha256": "8856eeeb17819609812f6878c5b74bfde3607f931de1e286412ed3bd00d7392d",
+      "size": 9150
+    },
+    "game_opt_loop/contracts/proposer_output.schema.json": {
+      "sha256": "dcc104580126dd5ea41537bf7fcb491c20784f654d93092cf34be996aec1c8a8",
+      "size": 1774
+    },
+    "phonefarm/.gitignore": {
+      "sha256": "202ddd1993a37cb93825bf35a65ef4151c14cecf68a54fd2261ae6a22dcaab11",
+      "size": 1046
+    },
+    "phonefarm/THIRD_PARTY_NOTICES.md": {
+      "sha256": "230a994743fad5bfe19c0a9ef1f785adfe23b3e0f6a81ff7ff5f3e6627dd6bc7",
+      "size": 6094
+    },
+    "phonefarm/examples/cts_getPackageInfo.profile.json": {
+      "sha256": "127f132a81a505d4da9bab7f8d0cdf73543b2c76c45e62a411cc21359065216f",
+      "size": 384
+    },
+    "phonefarm/examples/cts_instrument_slice.json": {
+      "sha256": "7ca35171cba59d62ceb8a8a356f9d789e46a6226d3ef83762993d01ca20f275e",
+      "size": 571
+    },
+    "phonefarm/examples/genshin_30min_gamepad.json": {
+      "sha256": "21af3688205ae23c5bd2d9d47b0df8885e5fd8ff5a2b8ffa79421bdf2dac396c",
+      "size": 1247
+    },
+    "phonefarm/examples/genshin_verify.json": {
+      "sha256": "7725b3972f852c3eb0da684a9e4f6ce30751382517c41afe7c98c3098f98e6d9",
+      "size": 780
+    },
+    "phonefarm/examples/gol_shader_native_request.json": {
+      "sha256": "6d7d0bdeb2b36e7416d03d5a4763d427ba4e4ae82596d7d568177d9ccc451cac",
+      "size": 1206
+    },
+    "phonefarm/examples/harmony_genshin_multitouch_smoke.json": {
+      "sha256": "8fc4ee06b4ce70b8052139db2ccb8e08504ad0bcde2f5ddbde48098b9466528c",
+      "size": 411
+    },
+    "phonefarm/examples/harmony_genshin_town_loop.json": {
+      "sha256": "4e385ac01493819024ef070f2f72950409e81678c08aa4e9eb7e9b7432af6a77",
+      "size": 651
+    },
+    "phonefarm/examples/qualification_ready.json": {
+      "sha256": "2694f8ea1977afc54ee9edb640ee950999736a65c13a197fe318d0eb096c244e",
+      "size": 9428
+    },
+    "phonefarm/examples/sample_game_benchmark.json": {
+      "sha256": "1da9051562385251884d24768c3e3acfbb422bab8eb3fb91400718ca27ed29d9",
+      "size": 384
+    },
+    "phonefarm/examples/sequence_quality_fixture.py": {
+      "sha256": "8d4911976a046452f0640f54cfda5131f436adb37c5f1a88b41e9cfdd0ba3df6",
+      "size": 5150
+    },
+    "phonefarm/knobs/.gitignore": {
+      "sha256": "7faa2653dd82292181c9b09d5f337df2181378aac1e199fc68f3d2f9eca94521",
+      "size": 35
+    },
+    "phonefarm/knobs/black/knob_framecap.sh": {
+      "sha256": "15b7863aaf32361b209531653348d78faa1b61c1fbb0bcb1b8ae474ebd963323",
+      "size": 2015
+    },
+    "phonefarm/knobs/gray/build/build_layer.sh": {
+      "sha256": "212deff35ac28a6efab803416ccddedb456ed9258abe4206c8bc707f1dd280c0",
+      "size": 7120
+    },
+    "phonefarm/knobs/gray/build/layer_build.json": {
+      "sha256": "5ff1ee3c494aa6dbaac943114f43542dfa53cc9af95874d56fc232b25deec862",
+      "size": 659
+    },
+    "phonefarm/knobs/gray/enable_layer.sh": {
+      "sha256": "c794811e1c5d4d22f9ad568717d69e3750fab626b698c0dad06921e36e4e5464",
+      "size": 3468
+    },
+    "phonefarm/knobs/gray/genshin_interp_smoke.sh": {
+      "sha256": "84a0474567561d24ff672dfdb0e8e5c18431f281f59ae7ae4f64b7494f499924",
+      "size": 20700
+    },
+    "phonefarm/knobs/gray/genshin_quality.py": {
+      "sha256": "23ffdb01d2cff7c0408d562e13033da127992ba5f76f15355620711ee11a484b",
+      "size": 14520
+    },
+    "phonefarm/knobs/gray/genshin_quality.sh": {
+      "sha256": "9ce16d7faf3dd2d10134448b79c06c961c0c2297bd6ac451f046ae38833d35e8",
+      "size": 303
+    },
+    "phonefarm/knobs/gray/genshin_reference.py": {
+      "sha256": "b69fc372d2604ad0d42d87c48172c25743a11d388c3d8b119ca56f8dab23d3dc",
+      "size": 12855
+    },
+    "phonefarm/knobs/gray/genshin_upop_ab.sh": {
+      "sha256": "bb52f28e5977669083983864585068c4ed9c7afecc2f6d6be8802a4cd0f10bbe",
+      "size": 384
+    },
+    "phonefarm/knobs/gray/genshin_vfi_capture.sh": {
+      "sha256": "8d96ad5a625b4859b0ca74296eb46c4fb510c529a0a036652b124396285187a9",
+      "size": 9507
+    },
+    "phonefarm/knobs/gray/gray_control_client.py": {
+      "sha256": "d27617bd7fe1b8865313ff48231a3d1703dcba3e5c6c9f74864bfd066b8610d1",
+      "size": 11749
+    },
+    "phonefarm/knobs/gray/gray_mode_admission.sh": {
+      "sha256": "3bc4d26f2f1b69b8b5c9a37d172ec83ec6b8edf70f7981d23c7e8fcdd6bf25d8",
+      "size": 652
+    },
+    "phonefarm/knobs/gray/layer/VkLayer_refknobs.json": {
+      "sha256": "ec69a8c831a6ac4bd6521904269b5dc9809def25df36c9152b7403e1ac46776d",
+      "size": 449
+    },
+    "phonefarm/knobs/gray/layer/artifact_stats.h": {
+      "sha256": "a827991b4bab553ded8633f895556981645d605145f2b583a8d464820bdef648",
+      "size": 2367
+    },
+    "phonefarm/knobs/gray/layer/copyprobe_copy.comp": {
+      "sha256": "5a45495dbc18f185519f1cc1e0b398d477af2e13fe03c0a4c1f3de4710de21cd",
+      "size": 668
+    },
+    "phonefarm/knobs/gray/layer/dispatch_ownership.h": {
+      "sha256": "0958948104ab9cf75f5d56383bdbbcd4afe9d03f3ea8a77ebd653e6fd07487c0",
+      "size": 37308
+    },
+    "phonefarm/knobs/gray/layer/framedump.cpp": {
+      "sha256": "9b394f055b14fd38d5c4b736fddd8e8bfc9cde6067c882094d8c511730f6b903",
+      "size": 34132
+    },
+    "phonefarm/knobs/gray/layer/framedump.h": {
+      "sha256": "70e93f945fad14c169ad340f3396d079dea11e3fb011787914d344ceab665183",
+      "size": 2083
+    },
+    "phonefarm/knobs/gray/layer/interp.cpp": {
+      "sha256": "0e92c2e622a7dce50d98130a3ddb0009492481803dc693eea9509846b509de66",
+      "size": 44372
+    },
+    "phonefarm/knobs/gray/layer/interp.h": {
+      "sha256": "ddbc82b20ffb0ae8b9a7c41059d2244cf3957b5f903743b15ac4c77cb763b95c",
+      "size": 6115
+    },
+    "phonefarm/knobs/gray/layer/interp_a_blend.comp": {
+      "sha256": "1aae24116876a631f06ff652b693192ac75474da361f0cebcb78afed8460f177",
+      "size": 2623
+    },
+    "phonefarm/knobs/gray/layer/interp_a_down.comp": {
+      "sha256": "f37f6b5abc0a30a723e9ce366607d49ed7cb37dd40006348024831eb51d06a1a",
+      "size": 3001
+    },
+    "phonefarm/knobs/gray/layer/interp_b_bm.comp": {
+      "sha256": "535dda6d55f628f675063cfb55fe3a0c8aeaa43e9404f4909b0766a344c57afa",
+      "size": 2628
+    },
+    "phonefarm/knobs/gray/layer/interp_b_compose.comp": {
+      "sha256": "f9a491fb59e0051b42c50fbde8aac32ede491023dbc2a01f0c807d13a27ce5ed",
+      "size": 2210
+    },
+    "phonefarm/knobs/gray/layer/interp_b_luma.comp": {
+      "sha256": "7022a2304726af290e373b2e85ea2e08318133b4bb559c80eeb58d1e5198c14a",
+      "size": 1358
+    },
+    "phonefarm/knobs/gray/layer/interp_b_prealign.comp": {
+      "sha256": "5369060ccaa0499db52a7bbb2785d3797a7b9179fa00f558c74f43ef0560db85",
+      "size": 2210
+    },
+    "phonefarm/knobs/gray/layer/interp_b_smooth.comp": {
+      "sha256": "2debf165f1e8ad6bc23244675487defb403c09984cebab5debfd95c4a8f8a2e0",
+      "size": 1663
+    },
+    "phonefarm/knobs/gray/layer/interp_bm.cpp": {
+      "sha256": "758f654da02de1d2a943c55e1cef7d9a6c05f3da263aaf3557ee5cc2c5fff657",
+      "size": 19214
+    },
+    "phonefarm/knobs/gray/layer/interp_common.glsl": {
+      "sha256": "c1c18d02f8bdf367c94ca747bbbcb442e7c3fa65e931d17bca1e139c79e80b71",
+      "size": 4298
+    },
+    "phonefarm/knobs/gray/layer/npu_pack.comp": {
+      "sha256": "96ee5718e3a6c55b5761a50eaac8afa84eb269b813e692c096c894fc439c9261",
+      "size": 2280
+    },
+    "phonefarm/knobs/gray/layer/npu_rt.h": {
+      "sha256": "99b875cd39daf958b5bf5fd0c208f521afc06088b12a0f25c9508d57f9d3ce2e",
+      "size": 1492
+    },
+    "phonefarm/knobs/gray/layer/npu_unpack.comp": {
+      "sha256": "7b01df3a466374b64f17f562477ba051f17525908370623fd28c9b3b0759f637",
+      "size": 1953
+    },
+    "phonefarm/knobs/gray/layer/npuprobe.cpp": {
+      "sha256": "c2de45caab8d43e0096da1ff334178ce61c33a5761c594b3efdfdcd7d36c9ae0",
+      "size": 11223
+    },
+    "phonefarm/knobs/gray/layer/selfsr.cpp": {
+      "sha256": "3db8e09e60fd1ed5f1104fb7755e62502fe76ec0b903900865a52b6a3c86934f",
+      "size": 40598
+    },
+    "phonefarm/knobs/gray/layer/selfsr.h": {
+      "sha256": "59218ec57aa6f6d21957a8f45e798725610ccb9a6b94d393766d68413b8d7908",
+      "size": 2904
+    },
+    "phonefarm/knobs/gray/layer/selfsr_rcas.comp": {
+      "sha256": "af6b88657e5cce081ba61f562e2a875e9f3da3e5f964aab6503f00463a6bdb18",
+      "size": 1411
+    },
+    "phonefarm/knobs/gray/layer/selfsr_up.comp": {
+      "sha256": "f1da45c88e581ebd7ce46fc43c04452fad4ca39703af6a45e52d436fb8887cbe",
+      "size": 2031
+    },
+    "phonefarm/knobs/gray/layer/upop.comp": {
+      "sha256": "35e0a10a1e2034f6788e7042d358fda462af546534fb4bf27ecc03ee4082b47f",
+      "size": 1937
+    },
+    "phonefarm/knobs/gray/layer/vk_layer_refknobs.cpp": {
+      "sha256": "0381389b1de1ea1a8bd3acdcf0c39573227ebfb73e3b63407b737ddc9cde24c9",
+      "size": 241387
+    },
+    "phonefarm/knobs/gray/o3_storeop_ab.sh": {
+      "sha256": "ef7678c459ebd4f55194c1bc14548b28751ca2160691ea1a40103c0fac78ad95",
+      "size": 9072
+    },
+    "phonefarm/knobs/gray/o3_storeop_budget.py": {
+      "sha256": "a56fe6e814ae109ed7694c10dd96bd33e58cc8f8c6c967a4e6fac16e62533c4c",
+      "size": 8174
+    },
+    "phonefarm/knobs/gray/requests/o3_storeop3_genshin_30fps.json": {
+      "sha256": "07faeb93057f0213bc04664a97b377795ab3ad6cc9a09ee8f58a049e87e5a3fb",
+      "size": 2370
+    },
+    "phonefarm/knobs/gray/requests/o3_storeop3_genshin_60fps.json": {
+      "sha256": "ab6b22dd9c2ce4cf18e9e61ff625813ec142f1653699262522c5caeede644a15",
+      "size": 2370
+    },
+    "phonefarm/knobs/gray/test_loadop.sh": {
+      "sha256": "acfc5440b140df73f082aef977e6007b04df61686d4198df1e3b8e3070c085cd",
+      "size": 544
+    },
+    "phonefarm/knobs/gray/tests/artifact_stats_test.cpp": {
+      "sha256": "fd270057115183eb17eff4655e2ffa06f56dc09ba9ee24c2356f4a21a00e92fa",
+      "size": 934
+    },
+    "phonefarm/knobs/gray/tests/layer_artifact_test.cpp": {
+      "sha256": "23c18bc06947ddad9c678f1fa944576bfc5233305b30d88d611b2ad76318f97c",
+      "size": 36522
+    },
+    "phonefarm/knobs/gray/tests/selfsr_test.cpp": {
+      "sha256": "861fd393b782bf16e0b4c8591b97b123cced4451049fc6f07ef14a3e15cea27b",
+      "size": 15526
+    },
+    "phonefarm/knobs/gray/tests/stubs/android/log.h": {
+      "sha256": "2c6ab391f6dbc823a45cbe6412d91f0d8bb7382e6a58534bb61dfade28c0efb5",
+      "size": 380
+    },
+    "phonefarm/knobs/gray/tests/stubs/sys/system_properties.h": {
+      "sha256": "9ef3a19e59cbb42921c2eb166323bb3132e0cb741c7e278d1d2e1c3aa849d106",
+      "size": 126
+    },
+    "phonefarm/knobs/gray/tests/test_selfsr.py": {
+      "sha256": "d50ec2f1028ff55c8e1956066efd55eee4b91a6c7da31317551571f631ecd125",
+      "size": 3214
+    },
+    "phonefarm/knobs/gray/vfi/make_triplets.py": {
+      "sha256": "f31da3935e5cde15eb16abe5d4401912b033bafa7feb1a5c1a15fe0245fa94e7",
+      "size": 5042
+    },
+    "phonefarm/knobs/gray/vfi/raw2png.py": {
+      "sha256": "17dfb5ef90f6a0ce9640e4d69c102c15acfed45335ca4d37edfac48a3b4d0029",
+      "size": 5419
+    },
+    "phonefarm/knobs/gray/workload_spin_touch_v1.json": {
+      "sha256": "104a53820bb20f0598bdeae2b4292ee1369d86c7bf89c35fa6cda974a8b44eb6",
+      "size": 284
+    },
+    "phonefarm/knobs/refresh/genshin_fps_prefs.py": {
+      "sha256": "f26afee5ac86b9ecbe1d2ac6ce38ac8dda2b4c08bda47a0c1f0bf6df312e8d9e",
+      "size": 3738
+    },
+    "phonefarm/knobs/refresh/genshin_fpscap.sh": {
+      "sha256": "22f1283123ea38184fbcaa11b676af453f057e2c0b800b043f343eb93b09aaa2",
+      "size": 8587
+    },
+    "phonefarm/knobs/refresh/n3_ui.py": {
+      "sha256": "3adddf6281df7c30af5d435b2eaf97c6a7210ffe8f385f7d4dd22fb407b5b05d",
+      "size": 11508
+    },
+    "phonefarm/knobs/refresh/o1_fps_ui.py": {
+      "sha256": "ec87ee884d942e706f27373c273aced2ab29b19434b9024dbc48755376fc0ee0",
+      "size": 8891
+    },
+    "phonefarm/knobs/refresh/o1_refresh_dev.sh": {
+      "sha256": "59766465ac3d3647832cab27bf184594a900d1240debd812147004181bd38817",
+      "size": 7560
+    },
+    "phonefarm/knobs/refresh/probe_refresh.sh": {
+      "sha256": "312c44cacfba66fac787f607028c97f1b0d6b84658d4dca19e70cf082d616ef9",
+      "size": 12500
+    },
+    "phonefarm/knobs/refresh/refresh_analyze.py": {
+      "sha256": "bd7076d45b2f66b5a96fb0fb2be64637e1a49c7357598fe9b16a4c90c25780ad",
+      "size": 27691
+    },
+    "phonefarm/knobs/refresh/refresh_lib.sh": {
+      "sha256": "1bb634195f78a96ff7ac2b28fe813ee0b7d73f09abaa3a8e86df80d8ce07a20f",
+      "size": 3126
+    },
+    "phonefarm/knobs/refresh/run_refresh_ab.sh": {
+      "sha256": "b6b5096b9d176c67ccbf69a988d21231a5d7c59f83ecd45a0dbc5bf9788aba7f",
+      "size": 21284
+    },
+    "phonefarm/loop_v1/.gitignore": {
+      "sha256": "781d725a15da60c61e79a596754c428c689af6f186c2393641d4caefe7f48d6c",
+      "size": 775
+    },
+    "phonefarm/loop_v1/auto/charge_suspend.sh": {
+      "sha256": "810dd097126eac1a72a01d03e89093da04232d5a8d36a7d6a6b4ae7bcaf45829",
+      "size": 13390
+    },
+    "phonefarm/loop_v1/auto/knob_sysparam.sh": {
+      "sha256": "cc9cb49c691d859da6419515a310c9cd0042aeec9dde3783f4beb9ad9eaddbf3",
+      "size": 9688
+    },
+    "phonefarm/loop_v1/auto/probe_sysparam.sh": {
+      "sha256": "5eea46a1af5793bb2dd8b34ac74307c0d0cf870e0ab1f53d7fe4f3b73a927f71",
+      "size": 17226
+    },
+    "phonefarm/loop_v1/auto/sample_env.sh": {
+      "sha256": "ee0bcc3c534785b9ea7a0e008ca0a0687293b8e8b760d333780766a79cc2dd9b",
+      "size": 6150
+    },
+    "phonefarm/loop_v1/auto/sample_hw.sh": {
+      "sha256": "886fceb24dba963b2c70c9a49d89a041255ecf44e752d2669e940cd436758c1f",
+      "size": 2089
+    },
+    "phonefarm/loop_v1/auto/test_auto.py": {
+      "sha256": "14e3af912be6f6763deebc29892b8f601165d333304be2f50592769efeaa33be",
+      "size": 10354
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/contract/launch.json": {
+      "sha256": "4aad15f2f6dce2fd41456217aa2f238947e1d18112723d6e021c2cfe74798c78",
+      "size": 5261
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/patches/0001-sponza-deterministic-run.patch": {
+      "sha256": "e95b6c2f7efb98101f56372c6734bea2b4a3c0c0397db7176416484e880e48a4",
+      "size": 4843
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/patches/0002-ndk28-alooper-pollonce.patch": {
+      "sha256": "67ead5b145a7d325272478820f9678f81f197297c32ddb27f8843ca3870962a4",
+      "size": 1445
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/scripts/build_apk.sh": {
+      "sha256": "8c7eadc6e6d7a79b3517a00d2a5213ac0066c891abee35648f4aaf242f6572ac",
+      "size": 4198
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/scripts/build_shadercompiler.sh": {
+      "sha256": "396115b2be83d135ed206d2d8db68d59546932bb2a9288916a5ec602b559be3f",
+      "size": 5951
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/scripts/run_anki_sponza.sh": {
+      "sha256": "9004ce8c115d6909cae6146296f8b34d542493117a2a284d6ff0834122f6178d",
+      "size": 4693
+    },
+    "phonefarm/loop_v1/carriers/anki-sponza/scripts/shadercompiler_shim.py": {
+      "sha256": "f521e36f51011a80c813c4da2e5740c8257a501d6307b2a0c1d7bdc8adf049d3",
+      "size": 3203
+    },
+    "phonefarm/loop_v1/carriers/megacity/.gitignore": {
+      "sha256": "f8731493b4d0553d5fce471256ca41fe11e47d407c71ba5a86cd7d6db205f80e",
+      "size": 325
+    },
+    "phonefarm/loop_v1/carriers/megacity/build_megacity.ps1": {
+      "sha256": "1b6fcd7ac745c7da2da250c3a156839be68a66e54fc52a651942a54a082e13b6",
+      "size": 2615
+    },
+    "phonefarm/loop_v1/carriers/megacity/contract/launch.json": {
+      "sha256": "f4d96e33034d9d0080cad942806ef75fc182f535f16e471d3f518d93c43f2fac",
+      "size": 10250
+    },
+    "phonefarm/loop_v1/carriers/megacity/contract/output.schema.json": {
+      "sha256": "7577923a85379daceec85e15b0ea78fd2ad21e8ea989ba522e54ea6ab2c86534",
+      "size": 9969
+    },
+    "phonefarm/loop_v1/carriers/megacity/routes/make_route_a.py": {
+      "sha256": "c3b93d262fb90bd182cd8d6ad302a644625982417f24221e4ded524720f291a6",
+      "size": 5526
+    },
+    "phonefarm/loop_v1/carriers/megacity/routes/route_a.example.json": {
+      "sha256": "d87e3d2c201e31e9a67b419493d4e04a9e1a83fafa00338e8539018572bf3538",
+      "size": 887
+    },
+    "phonefarm/loop_v1/carriers/megacity/routes/route_a.json": {
+      "sha256": "13c5a376cadabc15b856a9abc35eee83815ea674e0f05518805704f186180698",
+      "size": 3042
+    },
+    "phonefarm/loop_v1/carriers/megacity/run_megacity.sh": {
+      "sha256": "31a6a1f3e403dd4697efdeea4852d2222312af40075218ef3cc34db61c38b5aa",
+      "size": 7698
+    },
+    "phonefarm/loop_v1/carriers/megacity/setup_on_magicbook.ps1": {
+      "sha256": "f7a94ffe8c7590998fa99f6f222555b516d0c5b0f7398f448de020080f4d90de",
+      "size": 3926
+    },
+    "phonefarm/loop_v1/carriers/megacity/unity/MegacityRefbenchBuild.cs": {
+      "sha256": "bea6496c018cd704c6ce7c2019808d941d28bfc8c4cb9046a09803d804ba354b",
+      "size": 7184
+    },
+    "phonefarm/loop_v1/carriers/megacity/unity/MegacityRefbenchHarness.cs": {
+      "sha256": "d81beb52d1072f850ae909a160e8e9ace590da0ccf69d66d9130dc10558931a2",
+      "size": 44787
+    },
+    "phonefarm/loop_v1/carriers/megacity/unity/UpstreamCommit.cs": {
+      "sha256": "25063bcd162340ba4c5a030ad9c7f4f551889bb3a868f6d747b51221efd75d94",
+      "size": 424
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/build_vks.sh": {
+      "sha256": "82860dac8375fcfc7c83bda11a29aba7825ff50caffb9feba9326f54e03042ae",
+      "size": 5658
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/install_vks.sh": {
+      "sha256": "0340e64b88bc536d94a62e47f3b12d302e6bf18748910011fc10f03af40ae34c",
+      "size": 1799
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/patches/0002-no-vvl-download.patch": {
+      "sha256": "2d1f68743beb790995e0bdd7b32a5aa90b75390a6d469d11bd67051db9a60385",
+      "size": 523
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/patches/file_logger.cpp.patched": {
+      "sha256": "b009a622b28a0fedf13d8a7f34aacfbfba62ae4ffb27533280604ceb3a25806d",
+      "size": 2087
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/patches/sample_config/sample_config.cpp": {
+      "sha256": "bc0e9ae7ad165bf9755fb87dfa1cab96e3b76a0cb195a1e8031a8e583d39ff99",
+      "size": 2843
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/patches/sample_config/sample_config.h": {
+      "sha256": "44fe2692a670eb6f7ecd3d8a4d78b623f9d280a85903c5aa3da75e4c1f51ccf5",
+      "size": 1782
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/patches/vks_pin.txt": {
+      "sha256": "82c35088d6cb226be1b45a8d6aecc76db6517935b5ff894f69f9b04a66c0eff3",
+      "size": 1702
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/rules.json": {
+      "sha256": "57a9de49168c5df0b08a3856487a98d73e6700d238b15b3e15043c8e918f602c",
+      "size": 1572
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/rules_frozen.py": {
+      "sha256": "ef6202a5d3aa7b5d9596a4978f8a40ac64bffcd36bbf70aff59ab7ca830003d5",
+      "size": 11691
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/run_ab.sh": {
+      "sha256": "e2d91191073ea475ac2ab0f8555b5b0a4ed4bcc8a16ddf40940fde00162827fb",
+      "size": 5436
+    },
+    "phonefarm/loop_v1/carriers/vulkan-samples/run_vks.sh": {
+      "sha256": "af1fbd529de4291fdc7ecb61ed0270f1314505ddb2fa5b9d7422e7722f1889f9",
+      "size": 10567
+    },
+    "phonefarm/loop_v1/fixtures/trace_slice.txt": {
+      "sha256": "faa47ddc2e76aab38ed18a7a491d0e1e5f7a244ab9885ffe56d929b0d62c677a",
+      "size": 135927
+    },
+    "phonefarm/loop_v1/refbench/rules.json": {
+      "sha256": "7f7555660dcf1db40080cedaa2b254e8a075cf4fb2eefcdeb5ee19ec00a251be",
+      "size": 1452
+    },
+    "phonefarm/loop_v1/scripts/workload_spin_touch_long_v1.json": {
+      "sha256": "168ed34a68a7a90c68e93269e5df1dc492dd0204c6c8e05bac41ba396dd3989c",
+      "size": 609
+    },
+    "phonefarm/loop_v1/scripts/workload_spin_touch_v1.json": {
+      "sha256": "104a53820bb20f0598bdeae2b4292ee1369d86c7bf89c35fa6cda974a8b44eb6",
+      "size": 284
+    },
+    "phonefarm/loop_v1/scripts/workload_spin_v1.json": {
+      "sha256": "c2eb8228558186796a6ce7ad11ee5b7d3570c39f40b0157e865ac3cfd046ae06",
+      "size": 449
+    },
+    "phonefarm/loop_v1/tools/confirmation_bootstrap.sh": {
+      "sha256": "d30f72292910398fcf0884b6274d00078dcd873c9aa59a7e42723c4eab0c57e9",
+      "size": 632
+    },
+    "phonefarm/loop_v1/tools/confirmation_probe_readonly.sh": {
+      "sha256": "56e652ab08626d8ac6090772a94541ee2cfe4901abfa498f06896dc07da4e764",
+      "size": 2321
+    },
+    "phonefarm/loop_v1/tools/confirmation_render_close.sh": {
+      "sha256": "b5dde59d66e10988947182fd147549ab94f182c55e8a3443a877076783852577",
+      "size": 2775
+    },
+    "phonefarm/loop_v1/tools/confirmation_worker.sh": {
+      "sha256": "1f03ba9a126a7c8cee367860b83c5eb16d4d6e5a81b05c65f5e3eb02957c790c",
+      "size": 34567
+    },
+    "phonefarm/loop_v1/tools/crosscheck_perfsrc.sh": {
+      "sha256": "b9ba0bb09265649e3c52ef565aa706c5051af1b0f916611b22a6323a26c46443",
+      "size": 10543
+    },
+    "phonefarm/loop_v1/tools/device_snapshot.sh": {
+      "sha256": "d86b4d4b22bd1ce65a37d8bfd7e399a67cab79285425160d80830fd3e82b33a6",
+      "size": 3306
+    },
+    "phonefarm/loop_v1/tools/fixed_tool_bundle.sh": {
+      "sha256": "aed1c8d0a498150aadf1b75ce6b00a51da02f25065d4325c55e7e55fe69a3be8",
+      "size": 2577
+    },
+    "phonefarm/loop_v1/tools/ftrace_capture.sh": {
+      "sha256": "8c16dc12491395c2bc9719fbf0f3f0b5218e2bf87240b34db4b829dca2b2b464",
+      "size": 6139
+    },
+    "phonefarm/loop_v1/tools/gray_child_guard.sh": {
+      "sha256": "ea281f3e819e4dea252b0b6bcdb087624df3ec36213f35ac2a52a0fd787d198d",
+      "size": 1779
+    },
+    "phonefarm/loop_v1/tools/gray_input_workload.sh": {
+      "sha256": "784404e896b730d2096702c8466d6f371c4f23a540faeb472ff9565313922daf",
+      "size": 838
+    },
+    "phonefarm/loop_v1/tools/gray_trace_workload.sh": {
+      "sha256": "2631613efd43d35a09bd64760e35d7d18eb1663f30c35f892d6794c388a62291",
+      "size": 5142
+    },
+    "phonefarm/loop_v1/tools/helper_native_retirement.sh": {
+      "sha256": "d7539f9997fd669233b500a6c0659c0a427c25a5f52e4aff95bc4db4599aa8a0",
+      "size": 11613
+    },
+    "phonefarm/loop_v1/tools/helper_recovery_diagnostics.sh": {
+      "sha256": "80a5ee6559322c3c5a1908bc0188feb91d554642c7250c6f7af5980aaabd83f9",
+      "size": 5536
+    },
+    "phonefarm/loop_v1/tools/knob_ddr_boost.sh": {
+      "sha256": "41ac75f8ad4ec8df215a3e4dc48c71a0d75f809b65608245fce6d81885fb2713",
+      "size": 2765
+    },
+    "phonefarm/loop_v1/tools/pf_bin.sh": {
+      "sha256": "8f68866820ea24fc9155d63ce2aec8469bb42954c2a110deeffc786873ccc2e0",
+      "size": 1388
+    },
+    "phonefarm/loop_v1/tools/pybridge.py": {
+      "sha256": "2d5b4e1f908e11447386de7af82ad4b4159e38eb5ea9df5918d7fea6c94ffa8b",
+      "size": 6582
+    },
+    "phonefarm/loop_v1/tools/render_ownership_readonly.sh": {
+      "sha256": "87aa255f10af10b2c0bb950c137b970979d655d3b21df6d439d15960440e1de9",
+      "size": 2817
+    },
+    "phonefarm/loop_v1/tools/replay_test.sh": {
+      "sha256": "687c7fbafd030aa67c7a13b761c22511b46d66e0957b7d4df63f88fc16dbaaed",
+      "size": 2425
+    },
+    "phonefarm/loop_v1/tools/run_once.sh": {
+      "sha256": "4e55e7835ac43ff4d06730fc6b6ae5eccb22d91eb8cf033854cf9ed082c3f152",
+      "size": 3595
+    },
+    "phonefarm/loop_v1/tools/thermal_profile_metadata.sh": {
+      "sha256": "627a06a369cd6dea515553dab86ed924e972d824dc96795aa98db4d8797667b8",
+      "size": 891
+    },
+    "phonefarm/loop_v1/tools/thermal_rejection_gate.awk": {
+      "sha256": "11bfba60f98a88117bc34d0b4269bba6e3147379801fdf853bf283bd65d50bfb",
+      "size": 3190
+    },
+    "phonefarm/ocr.swift": {
+      "sha256": "c7df5757f1a925f2a93dec6824496ac7a52a44a5e052ce91c4961fc1ef264024",
+      "size": 1849
+    },
+    "phonefarm/phonefarm.toml": {
+      "sha256": "0aa09457ebd28c185c16bae11c5fc27f005a4380ed7c60ebf93b305f7d253cd2",
+      "size": 17669
+    },
+    "phonefarm/round.sh": {
+      "sha256": "3ced84ad1e3355efae226e3c146c0f38084f1be190d0557d890fc84b2bb3a5bc",
+      "size": 3899
+    },
+    "phonefarm/skills/a2oh-diagnose/SKILL.md": {
+      "sha256": "8cbacefa0fb9651f870c724b7e1f9edd61ce0d83efd5ed38b422af4df937b940",
+      "size": 5183
+    },
+    "phonefarm/skills/phonefarm-cts/SKILL.md": {
+      "sha256": "5e893910648c90384aeef090047a8f92dd9b5ddff37624f0f7cc8988f24a82c9",
+      "size": 12001
+    },
+    "phonefarm/skills/phonefarm/SKILL.md": {
+      "sha256": "47b283fa0e640b6589befc76127febc491b0b43f75ecfe4869968c29738cc76f",
+      "size": 10382
+    },
+    "phonefarm/skills/phonefarm/references/architecture.md": {
+      "sha256": "9826f5d25e8148fcf025543e9f232585f2ba2188c33a090b82fe7a0a7b24a7a4",
+      "size": 6147
+    },
+    "phonefarm/skills/phonefarm/references/cli.md": {
+      "sha256": "f00db8e0882e65a4183f96cafc8bb6c347b2b0a4515170c014850e8157da36f5",
+      "size": 10887
+    },
+    "phonefarm/skills/phonefarm/references/telemetry.md": {
+      "sha256": "921906561453829b101159293c440588bed21b0b3aab2c699a1ac3388bb35ce2",
+      "size": 2290
+    },
+    "phonefarm/src/Cargo.lock": {
+      "sha256": "64bd2aac318ba2063a7b83dff67718c420082dcbd19f689908b2452b744c91f9",
+      "size": 24224
+    },
+    "phonefarm/src/Cargo.toml": {
+      "sha256": "5c16c0e15ac08bd113cee9f75deac00303c0fd18d851266d975a68e43a66ebf8",
+      "size": 776
+    },
+    "phonefarm/src/apk_metadata.rs": {
+      "sha256": "d58651f831fe80190694c8f6c903d55b6f8748199ada3ae899376f9e2e1ee77a",
+      "size": 17533
+    },
+    "phonefarm/src/app_snapshot.rs": {
+      "sha256": "92b6cf301aaf365318e11b4480a343443bc27bf0edf3428c8b0cdfb831cadb1c",
+      "size": 5681
+    },
+    "phonefarm/src/autoloop.rs": {
+      "sha256": "4916804828292602b37971b6e819076d79fd74ea379a9789a22f18c607786f76",
+      "size": 71063
+    },
+    "phonefarm/src/bench.rs": {
+      "sha256": "1c33d1361053b7a40858a6ba7235efdd688554b1e0f2a77a0c9633b43f64b13b",
+      "size": 48927
+    },
+    "phonefarm/src/bench_session.rs": {
+      "sha256": "2941153a0b80e557220ede33a9d4c114ef0e49ef3edcaef372be4e453f90ab8f",
+      "size": 15781
+    },
+    "phonefarm/src/brain.rs": {
+      "sha256": "c985ba88abb5ebfa6c74b5dc0f943800bce9043e855b854bc25777d32224829b",
+      "size": 13109
+    },
+    "phonefarm/src/build.rs": {
+      "sha256": "9e7f382650426ef7da4edc331106b07b03427265232b63730185ef683e7f8209",
+      "size": 1046
+    },
+    "phonefarm/src/caps.rs": {
+      "sha256": "804cf7e9a59dd7b3e2bee458e9f71cb8a0f1edc9a6031e80400be62810ddc427",
+      "size": 15220
+    },
+    "phonefarm/src/capture.rs": {
+      "sha256": "5a75fff53d3f1514b2e8d58de9dbe14bff0afe52bf0ad404e70af57c4811178a",
+      "size": 27106
+    },
+    "phonefarm/src/capture_session.rs": {
+      "sha256": "c79aca0862633a5d8d830a37f475cb84c639131eb2d8a5d66765e6040249f9ca",
+      "size": 19810
+    },
+    "phonefarm/src/capture_worker.rs": {
+      "sha256": "c03f5bd949373580f4576115a22a1d7d2f53bfaa7ed547b8585d4dcb8328fa04",
+      "size": 25409
+    },
+    "phonefarm/src/cli.rs": {
+      "sha256": "3541c1da2692dc6149c83f0bea48e46bef65b9d06255989958025fd1a8ab8298",
+      "size": 67316
+    },
+    "phonefarm/src/collect.rs": {
+      "sha256": "1abd1c025389273cc4c6473feeae56e13e7e11de53569a5614e50970f4a5651a",
+      "size": 12062
+    },
+    "phonefarm/src/confirmation_control.rs": {
+      "sha256": "e7a9737f92d1510b2b9a4900e56b51999fb793ff7ef47e9f1135b007754d0916",
+      "size": 25537
+    },
+    "phonefarm/src/confirmation_control_probe.rs": {
+      "sha256": "ae02ebf05c89ad1bad3bf3249a28a3caf328a7aac68e920eda94849eb9aeaa9c",
+      "size": 18005
+    },
+    "phonefarm/src/confirmation_driver.rs": {
+      "sha256": "a01052c2b3aa2ad8c83227b8d333c01f726bab191fb258992eabe91e79af141d",
+      "size": 92837
+    },
+    "phonefarm/src/confirmation_fixed_tools.rs": {
+      "sha256": "eefbad27e0b016d7b4ba74053e142d1cee35d780afc0ce55d1bd0ecd015fdad5",
+      "size": 21730
+    },
+    "phonefarm/src/confirmation_helper_diagnostics.rs": {
+      "sha256": "7b7bb541a6aff5f1482305ae70057a0008da5ed158e4b0ad3a7d91bdd004da78",
+      "size": 18334
+    },
+    "phonefarm/src/confirmation_helper_native.rs": {
+      "sha256": "27c219617337d70c8741e9605601ee9129bb5f68332a1f15f7340de7db9ca6d4",
+      "size": 35507
+    },
+    "phonefarm/src/confirmation_observation.rs": {
+      "sha256": "ff60b01352a031abeb957ba73795f107e19285119630f92de5db1fbb229fea10",
+      "size": 66607
+    },
+    "phonefarm/src/confirmation_render_reader.rs": {
+      "sha256": "aa6b4f18785a06d519ca4acd2c1f55b994750eab80828c8b88edb44482a543ce",
+      "size": 7877
+    },
+    "phonefarm/src/confirmation_temperature.rs": {
+      "sha256": "c668cd998d46f8359873fbff4921fcec1967f55ad7d5d77279fd6ad8e55cee71",
+      "size": 44496
+    },
+    "phonefarm/src/confirmation_transport.rs": {
+      "sha256": "7305c5555884c8c2d83e18b667087b40ffe9917dc43439e4da8eac4e3dbd8faf",
+      "size": 14932
+    },
+    "phonefarm/src/crosscheck.rs": {
+      "sha256": "13d235cf2e051e5f31da6008c929741fcd5ccc627f3dd16ad895cdf04c82615e",
+      "size": 17964
+    },
+    "phonefarm/src/cts.rs": {
+      "sha256": "79ad667d722bb9f1b72855fb84b5fd8b8da8b167af3207d22fd5aa7add6efd94",
+      "size": 137786
+    },
+    "phonefarm/src/curtail.rs": {
+      "sha256": "d3e4615fcf99bf8150f6d54b4a866a871b0b2bf84a34b5a5ccf531b547cddd76",
+      "size": 24527
+    },
+    "phonefarm/src/decision.rs": {
+      "sha256": "41756db71ac3cf71b764c965d8c375ed495c5eb1ae63d7cbca8cbe9b7fa9047e",
+      "size": 43910
+    },
+    "phonefarm/src/device.rs": {
+      "sha256": "e406beccbd31ba01d31075b6fef1ec330838cf7eca71c68dceb4ee80ebeeb528",
+      "size": 93857
+    },
+    "phonefarm/src/device_registry.rs": {
+      "sha256": "655681a26895638fc484c736bcce8801d5f252f37b7f4f8cd865734d03dd1ad4",
+      "size": 24935
+    },
+    "phonefarm/src/devlease.rs": {
+      "sha256": "edbc51b3a6c643ff3ca5a4a18a6bc79dd87889b6074a40b0a282d3710ecf0464",
+      "size": 16108
+    },
+    "phonefarm/src/devlock.rs": {
+      "sha256": "c41dd36a6805fb9b6966afd6ef583cfaabf06f52148f128305a501376f4ec0ee",
+      "size": 19001
+    },
+    "phonefarm/src/eval.rs": {
+      "sha256": "c69fc5f8e94d9b8c8c7fa0f8caf4e771f68027a347cced8bc011a929ddbbe4e9",
+      "size": 320029
+    },
+    "phonefarm/src/experiment.rs": {
+      "sha256": "e97ff2ea6f88d2b6296fafa439fa286d5dbfa7df1b16656600291dacc08861b6",
+      "size": 49907
+    },
+    "phonefarm/src/fd_lock.rs": {
+      "sha256": "6180d997bd78721aab703f74aea66828f262c61b973ce265671989fd3879c223",
+      "size": 19335
+    },
+    "phonefarm/src/fleet.rs": {
+      "sha256": "0b07260bddd4aed12c88492c11acabf567a698b17ecd594c02bc749677d1ab02",
+      "size": 73137
+    },
+    "phonefarm/src/fold.rs": {
+      "sha256": "4d595761965ae1c651b525a1e1cdd10593728530034da9a2b64faaecd401d111",
+      "size": 11137
+    },
+    "phonefarm/src/frameaudit.rs": {
+      "sha256": "1950a55160833038e2865220627cad625429626bdf8e38c0fd6f027fd4625aff",
+      "size": 79572
+    },
+    "phonefarm/src/framecheck.rs": {
+      "sha256": "3e07da67873972e9849636d2672f50ae0a26ba49dfc3d9424878c820d59202ba",
+      "size": 13179
+    },
+    "phonefarm/src/framesrc.rs": {
+      "sha256": "42a04c2767fddf1b46b689e24bf142502fa3bc1b93a4bd4b2288b4b23a756e1c",
+      "size": 22958
+    },
+    "phonefarm/src/ftrace.rs": {
+      "sha256": "b29aa7a1f93492aa543583a9fecf88de4ba83f1b6aa4e75402a1dbf1b3648b03",
+      "size": 13736
+    },
+    "phonefarm/src/game_deploy.rs": {
+      "sha256": "b3337e56a228e429e212f9ad4f9ac4e39dbfa2dc6d221828bf6295f8cf0f4f99",
+      "size": 30571
+    },
+    "phonefarm/src/game_deploy_session.rs": {
+      "sha256": "760048069e0e988d111d43704c84919462de066df4cb434cddae6252a1e5c8fd",
+      "size": 42996
+    },
+    "phonefarm/src/game_deploy_transport.rs": {
+      "sha256": "7dcc163c44dd15410e951ff0556585c34876f0bb60112e53d4e8e698dddd4a20",
+      "size": 4718
+    },
+    "phonefarm/src/game_initialize.rs": {
+      "sha256": "18fbfc6053adb804a3f8a065db684f638983cba338fcd2d623093af3e68b53af",
+      "size": 54650
+    },
+    "phonefarm/src/game_install_session.rs": {
+      "sha256": "182dd7b00a685c01be4e44c464983ec93cb3d0a31d3a8bd178147ab260ab23a3",
+      "size": 32669
+    },
+    "phonefarm/src/game_scene.rs": {
+      "sha256": "6d83d17aa19b798a95b619f9de0825e831309f1b28c2966a23db1693e026a3f1",
+      "size": 21342
+    },
+    "phonefarm/src/gamepad.rs": {
+      "sha256": "1299f9aa12cb768de92127c722e0c8c2950483a884ba7bbd1eabcdd5666cba5b",
+      "size": 15195
+    },
+    "phonefarm/src/gpdaemon.rs": {
+      "sha256": "cdbc69712e68804733023c9428bdc8bd88dcd4da40a079f507c819d279feccaf",
+      "size": 46273
+    },
+    "phonefarm/src/gpuop.rs": {
+      "sha256": "2812752fa914ec2a1a333dd0e063bdc9429dfc3447970ff08a17cc16495cd421",
+      "size": 142290
+    },
+    "phonefarm/src/gpustat.rs": {
+      "sha256": "cfd08969146683090887689751d44712081fe6a82c84d6bdf6b7ceba2ff88c1a",
+      "size": 13237
+    },
+    "phonefarm/src/gray_control.rs": {
+      "sha256": "fcac34d405ac57f8965fb4132161529f8de3192761970bddca6558b1fa420076",
+      "size": 84121
+    },
+    "phonefarm/src/gray_eval_session.rs": {
+      "sha256": "4b8e995c7ce85967f5b9c5b118ed3733576741292d1d66024a21f3de3a174299",
+      "size": 62060
+    },
+    "phonefarm/src/gray_quality.rs": {
+      "sha256": "825ba6d75a6d5672df6d4c24f1321202acf0083fbdfbf367a0a0bfdb14559890",
+      "size": 7408
+    },
+    "phonefarm/src/gray_refbench.rs": {
+      "sha256": "eeea8efdccede8d0846209f3990f0fcfe4a3218b184650ea19416194750b0021",
+      "size": 15545
+    },
+    "phonefarm/src/gray_script.rs": {
+      "sha256": "e18ea008e983dcd4d4e024fcd215b125660701a2996a02e42500626276bb6b59",
+      "size": 14459
+    },
+    "phonefarm/src/gray_session.rs": {
+      "sha256": "fe8db5a363e637df4530f783d5d1de435541e321043681618f3dd57a6208ea4f",
+      "size": 87834
+    },
+    "phonefarm/src/grayab.rs": {
+      "sha256": "a4f48daa8502a96669403d8a2234f999a4e232affcc082b4ba7cdd0d26a2ee2e",
+      "size": 16311
+    },
+    "phonefarm/src/grayartifact.rs": {
+      "sha256": "30777a692d387191bbfcd571749a104153d1eb5b86b2faf71fbba4174d2ddbde",
+      "size": 38148
+    },
+    "phonefarm/src/graylayer.rs": {
+      "sha256": "e2b38d19b3973c8f162016ce3e78fa4f0bda847b2495adefb9d47521f3553c06",
+      "size": 41554
+    },
+    "phonefarm/src/host_process.rs": {
+      "sha256": "54909e57110d62126c7c036da79f543702d064714fe7f6e2c89026d9b42c16c3",
+      "size": 6366
+    },
+    "phonefarm/src/hwcond.rs": {
+      "sha256": "5e47c18ea04f2112a350ad1055a81e9959974f872655540402780a51f490fcf6",
+      "size": 107715
+    },
+    "phonefarm/src/hypo.rs": {
+      "sha256": "174ae7139236367d4cc0f4c375c03566de2ca9da8f77e2a86926d4224bbed983",
+      "size": 24348
+    },
+    "phonefarm/src/interpjudge.rs": {
+      "sha256": "81cbd27115f0785dca4051031b422af9d5ea4461b8f7b79005518dc5205eac65",
+      "size": 44183
+    },
+    "phonefarm/src/ios.rs": {
+      "sha256": "7a7a1b09caa2eb048cf577faada83679a21b3b87880fd694e7a17db52b198add",
+      "size": 50940
+    },
+    "phonefarm/src/iqdiagnose.rs": {
+      "sha256": "5ae4b510c133e879122e3598333138e3af2b64e00fcb581a30f1a307f9c0f97b",
+      "size": 98741
+    },
+    "phonefarm/src/iqjudge.rs": {
+      "sha256": "85b3e1cd978dd8e6103b44f8cfa4bb4a11036ff70bf5ef439db4aa6929c5d7ca",
+      "size": 31499
+    },
+    "phonefarm/src/iqsheet.rs": {
+      "sha256": "7df3f72f1edbf05be427431513537c49d690d3f5cf54873a75bcd8bbe76609d8",
+      "size": 9175
+    },
+    "phonefarm/src/keepalive.rs": {
+      "sha256": "ddc9dc9580b1f104d0b2671e88cd386d9d47effe582aea6c3092340dea4f223e",
+      "size": 15642
+    },
+    "phonefarm/src/lease_command.rs": {
+      "sha256": "30a538628404b828633280adba17792126f9b49f8354fe95a050f2b4a6992fb5",
+      "size": 13313
+    },
+    "phonefarm/src/lease_receipt.rs": {
+      "sha256": "c5855d282af598f7189edde923ace67f613a5de680a2bf4070d03cbe3f49b46f",
+      "size": 4244
+    },
+    "phonefarm/src/lease_scopes.rs": {
+      "sha256": "35009674a59be0bf833d353f5111cbcc6c6409fcf307fcf8d5b673bbb44f629b",
+      "size": 4393
+    },
+    "phonefarm/src/lease_storage.rs": {
+      "sha256": "57ce6df90e409d8e429636384d17d35077ca076067b0e9f17a01593e9d080183",
+      "size": 5655
+    },
+    "phonefarm/src/llm.rs": {
+      "sha256": "4cd2cbe179f32100658a7358f478658e4405c87c1833c0a3efc98fe5d8465705",
+      "size": 28887
+    },
+    "phonefarm/src/lock_handoff.rs": {
+      "sha256": "87ec8520dfa5340066a41670a30f8885b01ff24e30bdd2c75d2208263243af82",
+      "size": 3039
+    },
+    "phonefarm/src/loopreport.rs": {
+      "sha256": "2fb438d5fa6383945fc0a74bbfd3db8ea3fc5e771a925a159762ebd053d55c43",
+      "size": 16528
+    },
+    "phonefarm/src/loopstat.rs": {
+      "sha256": "d71d5140ee41a59d45439e87a661682e5fa13b2f8175c9ffb71df395c8f6d85a",
+      "size": 43274
+    },
+    "phonefarm/src/looptrace.rs": {
+      "sha256": "a836d020b4390f625e28df6147841d06d70680a8da49cd67b1b3ee74afafbce3",
+      "size": 47494
+    },
+    "phonefarm/src/main.rs": {
+      "sha256": "7387fca43ecf2bdf5758dce1f907e4ffa1bbf264df41b75ce46a172c83d40f87",
+      "size": 63725
+    },
+    "phonefarm/src/mtools.rs": {
+      "sha256": "528aa2accee0a8f4d202641ef5ed003996c867c6cc5332e767b00e37a82fe1f7",
+      "size": 16356
+    },
+    "phonefarm/src/npuop_device.rs": {
+      "sha256": "77b3892dd6005d4ac162354bfa28c67ed6e5c2943a723c080c319a8f003f3868",
+      "size": 30045
+    },
+    "phonefarm/src/observation.rs": {
+      "sha256": "077ca8a17969b39432ffb4a89d387387d9a70f30d1e7b4370ddfb872648eb4ba",
+      "size": 8979
+    },
+    "phonefarm/src/onboard.rs": {
+      "sha256": "0bdca40386531b6aa4e8da5ffcc23afc434b085f158750112dc2d99104df704e",
+      "size": 94934
+    },
+    "phonefarm/src/parallel.rs": {
+      "sha256": "086b1ca79b17b023cbbd8a86b397ac993337ff02bec971ea7f94d38faa8b7dad",
+      "size": 9209
+    },
+    "phonefarm/src/perfsrc.rs": {
+      "sha256": "42667b73a7487203e68b5f4065d3a0e5aad9dc90b1fde85b48735e0b5b87d6c4",
+      "size": 68053
+    },
+    "phonefarm/src/platform.rs": {
+      "sha256": "80a7ebe50be187102154cae2bcd3efbd4e7075912d07f9836ec148ce31e1fb6c",
+      "size": 16506
+    },
+    "phonefarm/src/plugins/genshin.rs": {
+      "sha256": "bb8494b192ac7499f5a24acbaf866e0109938ddbda774ef63e8e63bbb9018605",
+      "size": 40707
+    },
+    "phonefarm/src/plugins/mod.rs": {
+      "sha256": "6137aa10fbbeb208100087b5bdfe13b8b313be2d930c0aaaf2f487f818fe89c8",
+      "size": 805
+    },
+    "phonefarm/src/preflight.rs": {
+      "sha256": "236a5c6de7a5f71c7ec8e823c351af833c634dfbbeac71c7588a92c094aac2db",
+      "size": 9297
+    },
+    "phonefarm/src/pyjson.rs": {
+      "sha256": "0d6313b358b6ff7117ff6dc0b26266215746410078a66d1f764c7b877a10918e",
+      "size": 32902
+    },
+    "phonefarm/src/pyrandom.rs": {
+      "sha256": "b301fe3f0c4ed018893a9f0778967e2e716cbcefa43f45e8638110dc3b055ae1",
+      "size": 9643
+    },
+    "phonefarm/src/qualification.rs": {
+      "sha256": "892a4acfe8029c0ce8bedb46f8a56815a80fc87762bcfe588f6202a3255cadde",
+      "size": 35347
+    },
+    "phonefarm/src/refbench_timing.rs": {
+      "sha256": "d165fbd0a90c83a1630adb120b6a23477f88c6ad2531ac8c627c31e778efcbf3",
+      "size": 4412
+    },
+    "phonefarm/src/refbenchreport.rs": {
+      "sha256": "e82857e5ca2f37174ba3f3d534ae79e3745940f4713c530cb61eb8de7143f6a6",
+      "size": 18695
+    },
+    "phonefarm/src/remote_control.rs": {
+      "sha256": "93530430b1aa71c5835744c937c86de0e3fe2586cfa92e03edd7c1356a47be74",
+      "size": 85458
+    },
+    "phonefarm/src/render_attribution.rs": {
+      "sha256": "11fc0f7abb31a91c852ddd5f21aab21d8894cf29fc06c9aab75dec50de21d157",
+      "size": 51977
+    },
+    "phonefarm/src/runtime.rs": {
+      "sha256": "1c4bc9af6dc3e409124a215922f86cfdebe1951ac312d30539c0384753c5d3bf",
+      "size": 193374
+    },
+    "phonefarm/src/runtime_identity.rs": {
+      "sha256": "86b6703b42c7f24e5e5410bb2fbf459c0e79cc47f4692f8815bf604cf6369687",
+      "size": 3516
+    },
+    "phonefarm/src/scorecard.rs": {
+      "sha256": "1d1489f255ea2e9e797b24e6fdd877516193a15e6035e94ce4281afef50703a2",
+      "size": 42083
+    },
+    "phonefarm/src/screen.rs": {
+      "sha256": "16705882b8dcf4629b15eb5f89401aa7cca4476b2c9421ec03993df12aacfcf1",
+      "size": 45219
+    },
+    "phonefarm/src/screen_widget.html": {
+      "sha256": "3710367022776b0a33abbce3b19c76d25c341b1b152c9b532e44f4154306e8fd",
+      "size": 14900
+    },
+    "phonefarm/src/script.rs": {
+      "sha256": "42e091b72f1fac87102354833c7bd0ed8a3111aa3eeb43b4617d0e16adb5f09b",
+      "size": 35778
+    },
+    "phonefarm/src/selftest.rs": {
+      "sha256": "e31d982b2efad6729c55eb0223c935835f193ddfd727e2ed90c59403ec978aed",
+      "size": 103870
+    },
+    "phonefarm/src/sequence_quality.rs": {
+      "sha256": "dfa4a84b2e71ea7022b7ccc0ea96b218aeaa11c72e28d82a494b3c1e55f48693",
+      "size": 32956
+    },
+    "phonefarm/src/serve.rs": {
+      "sha256": "2647c694114f5dd38a863f33850624f154624e83d507329b40c9edd3907b2e43",
+      "size": 36084
+    },
+    "phonefarm/src/sflatency.rs": {
+      "sha256": "e64dac536ddf728e4044d54658212e3bcf6a88b5195588e571245b9f022c7515",
+      "size": 18424
+    },
+    "phonefarm/src/shaderplan.rs": {
+      "sha256": "f384ace221829ab583f0f580927f8c6ebc3a9cb545a5334a5e62f7cd385565c1",
+      "size": 17228
+    },
+    "phonefarm/src/shotdiff.rs": {
+      "sha256": "caf6c3b250f7b328d2c61dcc7dc4dbb0d6ebee9b3f9d5741539ba4a99a0eaca8",
+      "size": 9919
+    },
+    "phonefarm/src/smartperf.rs": {
+      "sha256": "b9fd7ede21e7ebfc1df4be5e110ac969b15b7af1ea980e3685d1a98ca520fb29",
+      "size": 25368
+    },
+    "phonefarm/src/storageadapter.rs": {
+      "sha256": "97a6dd3da812c494bf42d22e2f065e3ff91ed12c166229a704715d94248fbfd3",
+      "size": 42565
+    },
+    "phonefarm/src/sysparam.rs": {
+      "sha256": "3628a641eabcbb411140788a64926637c68a8e04c08a881711de408a99665bca",
+      "size": 140334
+    },
+    "phonefarm/src/telemetry.rs": {
+      "sha256": "fe22b8f0fb60932b6444bf5b5957094c5f1e0950984fbc0fb93752be880a644d",
+      "size": 39887
+    },
+    "phonefarm/src/testdata/feed.xml": {
+      "sha256": "d3461fbcb36e818c9557b297a0f6f5c95eb6d99d1d4c941a927db0cef4818a4d",
+      "size": 27673
+    },
+    "phonefarm/src/testdata/feed2.xml": {
+      "sha256": "1deb6278f04a669fa62c1c6b520a38956b8a3831130fdc732257df99bb24b6fe",
+      "size": 21920
+    },
+    "phonefarm/src/testdata/gray_npuop_request.json": {
+      "sha256": "364ace224cd9a6d47b8990213d70b536f58f878cbce287957b1bb29033b9079b",
+      "size": 1371
+    },
+    "phonefarm/src/testdata/hismartperf_general.csv": {
+      "sha256": "5136841c0351d8cad11a6591bf8acdfffece7e6945e686585dcd7f365c591307",
+      "size": 356
+    },
+    "phonefarm/src/testdata/mine.xml": {
+      "sha256": "5d14265b683872158174264f10ee99413963132a4888ad27a012712bc9e0110e",
+      "size": 23942
+    },
+    "phonefarm/src/testdata/oh_home.json": {
+      "sha256": "8bc4592e3ec160266c67c395bed513a41b6cb7cb32b37d33e067e3db419b324a",
+      "size": 21560
+    },
+    "phonefarm/src/testdata/settings.xml": {
+      "sha256": "b418bd58fcab7898afdaf5d19ef4dfe3f50c656cc4c038dfc4089cdbf065d1ef",
+      "size": 15016
+    },
+    "phonefarm/src/testdata/sf_latency_redmagic_genshin_g60.txt": {
+      "sha256": "aac5418ad5083eb33849a2fbf4afe1c9a1cb299ba7d867161c6306d42cb8dbbf",
+      "size": 12510
+    },
+    "phonefarm/src/testdata/sp_daemon_data.csv": {
+      "sha256": "e38bd790b1f7415d29ce561b2136f69c69271e9f70724cd4fa79075cc674bd81",
+      "size": 506
+    },
+    "phonefarm/src/testdata/sp_daemon_w1_genshin_fg_global.csv": {
+      "sha256": "16c78f0aedd1203b9f9a23d618002a752664e49ffa2d3a20c57eed111eac8e55",
+      "size": 518
+    },
+    "phonefarm/src/testdata/sp_daemon_w1_genshin_fg_pkg.csv": {
+      "sha256": "d1fac425fe20dfa9790824fdc7259710c01e82847abcdb7c33d9b31e6cba2cc3",
+      "size": 6238
+    },
+    "phonefarm/src/testdata/sp_daemon_w1_home_pkg.csv": {
+      "sha256": "b8214bde971d16b5caae5b86fc9e99bfd9a5b65b2144cf1f08873439bd76e4ea",
+      "size": 478
+    },
+    "phonefarm/src/testdata/tele_a_battery.txt": {
+      "sha256": "2db51306de7983f3ef458706274223b35171c8390a0721b2b257a51a0219a22e",
+      "size": 359
+    },
+    "phonefarm/src/testdata/tele_a_coldstart.txt": {
+      "sha256": "8e47f219fc9c5d1b76e03d9d9cc441e674f5cfc4cb42fceb4b05196376401875",
+      "size": 318
+    },
+    "phonefarm/src/testdata/tele_a_cpuinfo.txt": {
+      "sha256": "3d1b059cbe4bf07d7462ef6da3ab18c6de547a1f3218fe50b14301d3e95b3be6",
+      "size": 191
+    },
+    "phonefarm/src/testdata/tele_a_df.txt": {
+      "sha256": "e9d88ac0b931f45be0fc1d8f59485f597d283c274c7a1318383e084d414fc89a",
+      "size": 79
+    },
+    "phonefarm/src/testdata/tele_a_diskstats.txt": {
+      "sha256": "c383809a6670db61718c68348cc8f37b4ebdf057cc7dea885d75c95f10d1d188",
+      "size": 291
+    },
+    "phonefarm/src/testdata/tele_a_dropbox.txt": {
+      "sha256": "fe971d99d64f33e1ea0c7134df22823d0b3f869aae571a1dc766483ef3617d03",
+      "size": 209
+    },
+    "phonefarm/src/testdata/tele_a_gfxinfo.txt": {
+      "sha256": "a8394b41df81e898eccdcb24c9434fa3e481eed66ce3cf750f9899f3feca0ffc",
+      "size": 2600
+    },
+    "phonefarm/src/testdata/tele_a_io.txt": {
+      "sha256": "5b309022e592396f0590bb72867508803286649cf6eb51074cf2e77b1fb24e4d",
+      "size": 132
+    },
+    "phonefarm/src/testdata/tele_a_meminfo.txt": {
+      "sha256": "ef8cc6cbe0db7f265aabc64d5f71b261867026cd1527157d091316eb0fcbb363",
+      "size": 1262
+    },
+    "phonefarm/src/testdata/tele_a_meminfo_app.txt": {
+      "sha256": "cd24d2431d543aeb981ced5335daa469b98aedd4c30a86153bf2550d90ea95c2",
+      "size": 2600
+    },
+    "phonefarm/src/testdata/tele_a_netstats.txt": {
+      "sha256": "5737d829274c7e79d09fe311cad48630d9f6d86a1ca3025bd1d2bf1ee62162d9",
+      "size": 767
+    },
+    "phonefarm/src/testdata/tele_a_psi.txt": {
+      "sha256": "5a5b718b2358c5e0242b1dbdd7015a6293a49e54c000012cc119d2a7b60da2d0",
+      "size": 213
+    },
+    "phonefarm/src/testdata/tele_a_sensors.txt": {
+      "sha256": "cb94dddb6ef7bda39d8ab225b9562d10c59daf93348be0481c5e7b0a158609db",
+      "size": 715
+    },
+    "phonefarm/src/testdata/tele_a_smaps.txt": {
+      "sha256": "d87939a5d8eee54edc28801361e19f9a952405b9683c0dde99d27305c9a0448d",
+      "size": 390
+    },
+    "phonefarm/src/testdata/tele_a_status.txt": {
+      "sha256": "be3e4dacd5489b25936a0ba713ab9bd5e9e41f957c114bdb1605aa174de2713a",
+      "size": 122
+    },
+    "phonefarm/src/testdata/tele_a_topact.txt": {
+      "sha256": "d891297b47d7648e7274902b524ddbe58b9df9df40cd602442c2f463462cc1f3",
+      "size": 140
+    },
+    "phonefarm/src/testdata/tele_a_vsync.txt": {
+      "sha256": "15b29ebfb1b3e2acc2a6ef6ae8960873e7441beb80fd67a148077b9e8408d03c",
+      "size": 112
+    },
+    "phonefarm/src/testdata/tele_a_wifi.txt": {
+      "sha256": "0cb4dc8d59439e0e05f064fa81ded444621f3e82da6056ab90aa615c380c500c",
+      "size": 1865
+    },
+    "phonefarm/src/testdata/tele_oh_battery.txt": {
+      "sha256": "8df27e0a46659811b90f5921f3c610e7a7bad6680afe513db6dc902e79e9c2fe",
+      "size": 468
+    },
+    "phonefarm/src/testdata/tele_oh_cpufreq.txt": {
+      "sha256": "efa9dbc19cd5f9cc8d837f13bd24a8aa4843cd7ae199968c9831d193442aee3c",
+      "size": 379
+    },
+    "phonefarm/src/testdata/tele_oh_cpuusage.txt": {
+      "sha256": "0ba812d222d4dd76f7d68e96a32681f3a20b3cb10166f01a2de298e1670fbf4d",
+      "size": 2409
+    },
+    "phonefarm/src/testdata/tele_oh_faultlog.txt": {
+      "sha256": "f7a89b34f9ccc538be7837dc6e58de2f66bdd36e36f493edc4dcfdb7ed161e06",
+      "size": 18
+    },
+    "phonefarm/src/testdata/tele_oh_fpscount.txt": {
+      "sha256": "bb9f909f9fad0b791b7c53ace55d605ebe07349e39ce76e47bc086efd822b40e",
+      "size": 210
+    },
+    "phonefarm/src/testdata/tele_oh_ipc.txt": {
+      "sha256": "ac630f39cff9561c2d0fbfffd1a08e6804a0e1485e88d9fdcaa4c901bb80aa5c",
+      "size": 857
+    },
+    "phonefarm/src/testdata/tele_oh_mem_app.txt": {
+      "sha256": "6526c305793109a560626fdf8b79c5a29be68f5275f6fe96083077bb14cc701d",
+      "size": 2600
+    },
+    "phonefarm/src/testdata/tele_oh_net.txt": {
+      "sha256": "567d94fc5212caa8b30c248f12077e386972d6d66527e306423ecbcd268923bf",
+      "size": 1651
+    },
+    "phonefarm/src/testdata/tele_oh_smaps.txt": {
+      "sha256": "54fca2977c031014827dba15b6716d1d495bb603dfcd7a4add6d89caa98dbca9",
+      "size": 390
+    },
+    "phonefarm/src/testdata/tele_oh_surface.txt": {
+      "sha256": "5fb41f429b7f96de3404cefa500b00a458bba1f9e9163c67a62666bd984e2a98",
+      "size": 2600
+    },
+    "phonefarm/src/testdata/tele_oh_thermal.txt": {
+      "sha256": "8aa291c3d4d6b1530977863204ee2b5a4b1c8db2dd2c2c749667fad9c95afc12",
+      "size": 411
+    },
+    "phonefarm/src/tests/app_snapshot.rs": {
+      "sha256": "424543c4d5c27dab82e427a8796a3b648e984886e8af2e1b77313a9485ffaf48",
+      "size": 5215
+    },
+    "phonefarm/src/tests/app_snapshot_hdc.rs": {
+      "sha256": "4f5fbaa66b15398cfd8ee8b734a921233dfc03f837bb650dd6c09f81bdc4c7f1",
+      "size": 7946
+    },
+    "phonefarm/src/tests/bench_worker.py": {
+      "sha256": "84a8f6ac85ef5357a78d5bb5a63de2876902c41d104066af696c1eb19f6b3f47",
+      "size": 8232
+    },
+    "phonefarm/src/tests/confirmation_driver_cli.rs": {
+      "sha256": "1ff480f873d6567823420887a6fd11aea0781af19ad4bf4e49f37bbede60b701",
+      "size": 81403
+    },
+    "phonefarm/src/tests/confirmation_observation_cli.rs": {
+      "sha256": "81ae942b80317495c0c5dc7fe67320314ff5d0c79c5b720de1376af5677351fd",
+      "size": 48921
+    },
+    "phonefarm/src/tests/fd_lock_protocol.rs": {
+      "sha256": "b2010224f1b42539e5e52b6e2ab64ed089a04a3d1938539b8d6ba7d21be9118f",
+      "size": 25939
+    },
+    "phonefarm/src/tests/fixtures/storage_sr.comp": {
+      "sha256": "f8563e4747bf005ea5da870bee66d5c18c021704597b9b708d9d40186f97cde0",
+      "size": 673
+    },
+    "phonefarm/src/tests/gray_artifact_process.rs": {
+      "sha256": "0ed56502006281171fefb7d887288d432d3e51a555a5f5a86200553affe0c4ff",
+      "size": 26066
+    },
+    "phonefarm/src/tests/gray_help_cli.rs": {
+      "sha256": "42c94c10982c24b6b7628a7ed8811736751f05b63f71b3d64fef5c63d99b15c8",
+      "size": 1705
+    },
+    "phonefarm/src/tests/gray_scope_cli.rs": {
+      "sha256": "eeff14f20eda719c9e1d9edaf96170ace1451334813e99063f53d52d9047dbfe",
+      "size": 781
+    },
+    "phonefarm/src/tests/gray_worker.py": {
+      "sha256": "743fd61a30a6567558d8d4b53bb8c2eadb73c59973fa034dddae7498287a35f0",
+      "size": 17491
+    },
+    "phonefarm/src/tests/hdc_server.rs": {
+      "sha256": "bf82ab02d6c71055989dc90a9cdfa5e757e78878df5f9d767c64f3017155cb79",
+      "size": 14000
+    },
+    "phonefarm/src/tests/lease_recovery_backport.rs": {
+      "sha256": "90a089f2b305dbb40d6b8b978b1c3ef72ee77c432d392f2b688dc6a43a8db942",
+      "size": 5403
+    },
+    "phonefarm/src/tests/lock_storage_paths.rs": {
+      "sha256": "c3225b555bc16ecd19116fd893ba630ecbaa09dc6416d31bcd32549a5aa172c0",
+      "size": 3766
+    },
+    "phonefarm/src/tests/native_artifact_host.rs": {
+      "sha256": "ce3a99f2f5d0abf60db3fe47980222bc192850957dd96644fee3a604a96d6454",
+      "size": 6556
+    },
+    "phonefarm/src/tests/node_multi_node_jobs.rs": {
+      "sha256": "762a07337dc65f3aedbc114de144050538afc5572cff071edab37285f29e1239",
+      "size": 1133
+    },
+    "phonefarm/src/tests/node_remote_admission.rs": {
+      "sha256": "72fe247392976368507662a0e989645824218ad05d4f009e08a231554b9c84b0",
+      "size": 598
+    },
+    "phonefarm/src/tests/observation_ownership.rs": {
+      "sha256": "1aacacaa37cbdef5d1d593ec4f76014e7e25b6bcb82e6ab8ea533a07079c3dbd",
+      "size": 20952
+    },
+    "phonefarm/src/tests/program_help_cli.rs": {
+      "sha256": "934fb9bff7456b779eded36fcad1dbcd2f6854a04310dcf0c3b6b8c5ab76596e",
+      "size": 1286
+    },
+    "phonefarm/src/tests/qualification_cli.rs": {
+      "sha256": "7bdd9e2c6ff5732d0b8639c7b2a64cd513f597c77d76a40978f6263416abf2ad",
+      "size": 16126
+    },
+    "phonefarm/src/tests/screen_observation.rs": {
+      "sha256": "10e30d1734674eaacc213be6e74e007d6554312145c208355fce249460920dbb",
+      "size": 6358
+    },
+    "phonefarm/src/tests/screen_widget_lifecycle.cjs": {
+      "sha256": "02da83d9c527fd396b1d0960e420e540bf9c0d3f9a4582ef2f733a63440d4a0e",
+      "size": 7127
+    },
+    "phonefarm/src/tests/sequence_quality_cli.rs": {
+      "sha256": "673c9470f342a960955181ea62242f1aef34596ff00b005e0acf88fd7b358975",
+      "size": 16535
+    },
+    "phonefarm/src/tests/storage_adapter_process.rs": {
+      "sha256": "6a7f9c834674bf86bb59b86de9f499065d1d90f70fb6437741a05ead787a220b",
+      "size": 12509
+    },
+    "phonefarm/src/tests/support/fake_confirmation_adb.py": {
+      "sha256": "ebd603fe3a245e28a163b3ca1f184992ed6141f746567d4ca50740b0df1c660d",
+      "size": 22476
+    },
+    "phonefarm/src/tests/support/kgsl-formats-oneplus20261012.tsv": {
+      "sha256": "7478bd6e155e54b90aecf54077d0135098c5b9f78667226ca7cffe6a27f89358",
+      "size": 6032
+    },
+    "phonefarm/src/tests/support/render_origin.synthetic.raw.tsv": {
+      "sha256": "0842ea83aa2e4ba95d0ee7a7ff12acb193a200eacc8cf96fe034352ecdc452de",
+      "size": 6022
+    },
+    "phonefarm/src/tests/support/thermal_rejection_diagnostics.rs": {
+      "sha256": "00cb069dd68c8b14035fc027f03b4a87866b752b1eb02771821800baa833963a",
+      "size": 15322
+    },
+    "phonefarm/src/tests/v2_conditions_lease.rs": {
+      "sha256": "84e65a2b168ca22feb68b007098cd62ca8d807118b0e26689675573f670a7eed",
+      "size": 13866
+    },
+    "phonefarm/src/thermal_profile.rs": {
+      "sha256": "0be9d5fc1dfbbf2fe9e91200d1bffd6088a55d0d352c6c8ae6225a60187bb376",
+      "size": 26549
+    },
+    "phonefarm/src/tree.rs": {
+      "sha256": "4de36de5083f64bb458c04933ffa5e18d21d7d316043fe63c26c1ac560c40108",
+      "size": 21791
+    },
+    "phonefarm/src/universal/action.rs": {
+      "sha256": "50baa8e5539ec5c836a1d0632ab59560a206a61662dde952f9c06d791eac8843",
+      "size": 6690
+    },
+    "phonefarm/src/universal/dialogue.rs": {
+      "sha256": "6112ef7593da0704a878cefcbc1ca773636b74f8453156973148252395d5a1da",
+      "size": 10409
+    },
+    "phonefarm/src/universal/engine.rs": {
+      "sha256": "9f74757876a0462bf71814ced2dd17714978330299ff94ea3bdb9d6a965191e8",
+      "size": 14662
+    },
+    "phonefarm/src/universal/mod.rs": {
+      "sha256": "b2a0f91fc4407ab6a84afdada15241ad76699139a563fff899351542c00565b0",
+      "size": 1753
+    },
+    "phonefarm/src/universal/nav.rs": {
+      "sha256": "38b24b566ff319c07098f6a0360048262d54aba5cd31de8676e5438f10ff02d3",
+      "size": 11703
+    },
+    "phonefarm/src/universal/plugin.rs": {
+      "sha256": "205019e83e4f865d0f389f7c04d148aaaf67790c6d645a221e345cbfa9c86e50",
+      "size": 6029
+    },
+    "phonefarm/src/universal/popup.rs": {
+      "sha256": "2a84995a0c0d330a02111e36b8378c16847be9fc0d5c44e32f5b2e00c9d2b11a",
+      "size": 13041
+    },
+    "phonefarm/src/upopabi.rs": {
+      "sha256": "fe8cce36b1dadb249dd049a64d75a276d6463f8f85e2eb680485edec0ef4e57c",
+      "size": 15658
+    },
+    "phonefarm/src/vks.rs": {
+      "sha256": "c23aaacf1dc7b42b23788cd68bb5e42c7e803b3d51b5af69fc681ffb538e7361",
+      "size": 22276
+    },
+    "phonefarm/src/vksreport.rs": {
+      "sha256": "252585106921abc0dd57759ba6c25db1d3c6e8a2421bdb4a1d3e2e402b013841",
+      "size": 21004
+    },
+    "phonefarm/src/whitebox.rs": {
+      "sha256": "90bb9c172b3afc6672b5b65675cf9788f6d717e68615fa56936c657d455610cc",
+      "size": 28629
+    },
+    "phonefarm/src/whitebox_refbench.rs": {
+      "sha256": "ad7245ce04616e623750a466d9fac34b30fc9f8f78d3e7b84799d7c1c6b0afeb",
+      "size": 13267
+    },
+    "phonefarm/tools/decision-sidecar/.gitignore": {
+      "sha256": "181314065df2f2fdaf920b1a8b5311daa216a2d6489a06ada5b49cc514d89417",
+      "size": 7
+    },
+    "phonefarm/tools/decision-sidecar/Makefile": {
+      "sha256": "3e59e7578655a74067a9711b9e3d6732ae1592fe6699943ab67da086bb0aa673",
+      "size": 1564
+    },
+    "phonefarm/tools/decision-sidecar/reference-model.py": {
+      "sha256": "b7e3e1c498851b992f8a044db772511834430c9dd68b4f950bf9ad8e23aad544",
+      "size": 2391
+    },
+    "phonefarm/tools/decision-sidecar/reference.mlmodel": {
+      "sha256": "5a80e531971ea21705c5da8402d9ca60d8edd96fd51c0de4042deb1647f5164d",
+      "size": 137
+    },
+    "phonefarm/tools/decision-sidecar/sidecar.swift": {
+      "sha256": "be48171406162f7196397630e0ba4ea276654d03ed93f183b030c9e095ce5b04",
+      "size": 16928
+    },
+    "phonefarm/tools/devlock": {
+      "sha256": "9edf694d5f8085124ef379e913f9b80c0f890d1465d8945fde5c07749429f9d1",
+      "size": 667
+    },
+    "phonefarm/tools/export_ndk_profile.py": {
+      "sha256": "7bb7ee2d613690f83e5b8588135d62bc435b4c9e9f9d09a1c11f866c775a212f",
+      "size": 21273
+    },
+    "phonefarm/tools/farm/.gitignore": {
+      "sha256": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+      "size": 13
+    },
+    "phonefarm/tools/farm/farm.py": {
+      "sha256": "804fec061a70e15a9684364cc4cb5127f99130028277a564026c001ae862b4b3",
+      "size": 10648
+    },
+    "phonefarm/tools/farm/tests/fake_adb.py": {
+      "sha256": "643b0d1061ca34d55efdf8d353bf79bf4a61361784ee04e39be3a45b6a607edc",
+      "size": 2114
+    },
+    "phonefarm/tools/farm/tests/test_farm.py": {
+      "sha256": "339e536d706b8ce37e2d27c97c51d6b359d014c60ff3f3c361d101a6ae93137a",
+      "size": 5637
+    },
+    "phonefarm/tools/interp_gpu/harness.cpp": {
+      "sha256": "1a854872ab1777d2e3df933731366450a2818ec57730b2a446e4258820baf699",
+      "size": 24333
+    },
+    "phonefarm/tools/interp_gpu/run.sh": {
+      "sha256": "c933728f9e0fe202784791677f9ece42e6123c7211cb765580828db7d1256670",
+      "size": 1438
+    },
+    "phonefarm/tools/interp_gpu/validate.py": {
+      "sha256": "0d77198cf6b8f2f28eb09c4a22d878f36f9e1a138e2d84784a43cb3872d44aff",
+      "size": 16862
+    },
+    "phonefarm/tools/render-collector/build.py": {
+      "sha256": "81c3703c7128a0be47405bd575d51a789d9981e7b1cb69d0ab454da92e2fcf56",
+      "size": 4790
+    },
+    "phonefarm/tools/render-collector/reader.c": {
+      "sha256": "f2c66df14419eab36913b84557c81aed5861081f20e1cdccdd75c9bb1c33acbf",
+      "size": 6021
+    },
+    "phonefarm/tools/render-collector/test_reader.py": {
+      "sha256": "900a130844feb53d49e55e6fb3c2d14d99b0df7208c2527cf39206a810c37c70",
+      "size": 4028
+    },
+    "phonefarm/tools/test_host.py": {
+      "sha256": "dd6a301f09b00d3a5d07a72d8d994cdbf4908cbb538db98946ad7355562d66ea",
+      "size": 5941
+    },
+    "phonefarm/tools/tests/fake_gray_control_adb.py": {
+      "sha256": "cd2ffe6d823f84a6e5bd2e7116d888c2d41cbd034f1700e9d5611f89e6a9068e",
+      "size": 2793
+    },
+    "phonefarm/tools/tests/test_devlock.py": {
+      "sha256": "b6d458e4942f5e7b58569672c67bd57e14a401cb30e511ace6c7fcaa4b8e5465",
+      "size": 25166
+    },
+    "phonefarm/tools/tests/test_ndk_profile.py": {
+      "sha256": "c013d15ca2cef713137a13f768dede4c76b78b3cfd23f17d7771d492e9a15acf",
+      "size": 8567
+    },
+    "phonefarm/tools/tflite/fetch.sh": {
+      "sha256": "388ed33b67f53dbe1254593d0bb9587e8283d308da2a22b3c9c88666680daef0",
+      "size": 533
+    },
+    "phonefarm/tools/vkop/build.sh": {
+      "sha256": "10f4567a775503a22234a12eaf04d1e37bc068eed54acf0573d424596805eb99",
+      "size": 991
+    },
+    "phonefarm/tools/vkop/main.cpp": {
+      "sha256": "e2ecbc50aa45f35a0c0822a9c6cacefb8b2f661bcd49549ce3ca357aab4e42a1",
+      "size": 38261
+    },
+    "refbench/.gitignore": {
+      "sha256": "5cb07f9ce80d41b7763f5b151dc5db0c30de47bb9330a866d554cda5c1c5d39d",
+      "size": 69
+    },
+    "refbench/app/AndroidManifest.xml": {
+      "sha256": "07e193eeb712bca1d4706d7ce40760f0eba4f336f4ad83cc5963549b1293bd63",
+      "size": 1216
+    },
+    "refbench/app/shaders/alu.frag": {
+      "sha256": "ec07143757932525e5764e258ccf89c0b71588d7d0cfd5433c51875c93a00edd",
+      "size": 725
+    },
+    "refbench/app/shaders/blit.frag": {
+      "sha256": "19fc6fce62de458d4c151750b31900d2429a74ac7da53c1d0fe7d679b326705c",
+      "size": 255
+    },
+    "refbench/app/shaders/fullscreen.vert": {
+      "sha256": "e9fbb72bff1741c7d6e91495d0e20f1cf46b990ed8f011365a7ee90fa71403f1",
+      "size": 261
+    },
+    "refbench/app/shaders/pingpong.frag": {
+      "sha256": "213a6ba87852d11d1b5df314f3b9ccd02ea58fcdc88bee62d40f30dd2efaf9ad",
+      "size": 1182
+    },
+    "refbench/app/shaders/tri.frag": {
+      "sha256": "10526b8aaddc33ad09a2062b0dc81da89010790aa25e47ecd19bb945179e409a",
+      "size": 98
+    },
+    "refbench/app/shaders/tri.vert": {
+      "sha256": "65bad70e750cd0564f4fffec643adf1d64005a077dbabed1562fb1daca92f5d2",
+      "size": 413
+    },
+    "refbench/app/src/gpu_timestamps.h": {
+      "sha256": "dccb55f655122762566f3ef4c0ed707a7598da4fb2137653101f0f3db5e73c90",
+      "size": 2010
+    },
+    "refbench/app/src/main.cpp": {
+      "sha256": "e9b9c82b493cc6ab1d3470eff3cf4d2799567abaf16c12a51d57b184c1fbb907",
+      "size": 82102
+    },
+    "refbench/app/src/output_json.h": {
+      "sha256": "dff9e2eaa294f2d18ef7bc40947e7b6ba217edfe71ff92e243155d0bc19e8a41",
+      "size": 5238
+    },
+    "refbench/app/src/paired_capture.h": {
+      "sha256": "a044b567b90d29e27aadb60a59e875a6ac17265d1177b3372146cb7831327f21",
+      "size": 23347
+    },
+    "refbench/build/build.sh": {
+      "sha256": "52466de29711d98d54128dc05feb16b384e560b3462ec5684a77111289cbf366",
+      "size": 3757
+    },
+    "refbench/contract/gpu-timestamps.schema.json": {
+      "sha256": "f27205eb9e0e592acd621bf597343445e5ad74b2fe4497cdcedcb166c33a606c",
+      "size": 1135
+    },
+    "refbench/contract/launch.json": {
+      "sha256": "f2dc384c39c447a7cb255c07932580ba0db2a3022e214b97ffeda3189bbad700",
+      "size": 9322
+    },
+    "refbench/contract/output.schema.json": {
+      "sha256": "2a1d977736eb8d83fc0e028c0cb3883152e703c054ce5d889b78a270efaec09f",
+      "size": 5508
+    },
+    "refbench/selftest/build.sh": {
+      "sha256": "d3e9c7631e16673979ec328623105172ea9e9c37a0e578bcbe6907677650d5c8",
+      "size": 688
+    },
+    "refbench/selftest/load.comp": {
+      "sha256": "6465ecf2296ccbb573f0233968eeea62131df29ffec2fa427afb7217b6674ff7",
+      "size": 2982
+    },
+    "refbench/tests/host_syntax.py": {
+      "sha256": "8079f9b05cecc6eea9d98471714500bf2f29c94ddd162975e721ca56d2a225ea",
+      "size": 1655
+    },
+    "refbench/tests/output_contract_test.cpp": {
+      "sha256": "9dbd3a096a9771f89e48a4505672d7231d76418ec4998af1b3e3bc5b3125e106",
+      "size": 3420
+    },
+    "refbench/tests/paired_capture_test.cpp": {
+      "sha256": "90bbb529394c4cf0bb2f6e3b773670098ea0727dea7da722025167c43fd05af4",
+      "size": 6680
+    },
+    "refbench/tests/stubs/android/log.h": {
+      "sha256": "91e14073b7b7ebaa5f2ef5474e878272f22c25385a4510af88cb03213aeb04e0",
+      "size": 142
+    },
+    "refbench/tests/stubs/android/native_activity.h": {
+      "sha256": "5c775cf79191275f4cd3ba2b5040c392c79a2ae07a67a6af1730e5e6e70ccc85",
+      "size": 431
+    },
+    "refbench/tests/stubs/android/window.h": {
+      "sha256": "9673591d2c08286e90db298a2c7e2b4eaf580c0558a3a78ebab0f52d877776ae",
+      "size": 35
+    },
+    "refbench/tests/stubs/android_native_app_glue.h": {
+      "sha256": "ecdb2238baeaf1a60e79520de7b3eb12b4fe63e44be59450c12993df47bb8b3f",
+      "size": 434
+    },
+    "refbench/tests/stubs/host_platform.h": {
+      "sha256": "d7e6ee5d7b0d83fda5d86dd03fc0a8352451d7f96ee5e3ceb98e7ae983e59b3c",
+      "size": 263
+    },
+    "refbench/tests/stubs/jni.h": {
+      "sha256": "8c1599b0fc20934b4226b9c82ae4acbc9906b09669bf5af788c87083329e03c0",
+      "size": 634
+    },
+    "refbench/tests/stubs/vulkan_android.h": {
+      "sha256": "94968530fb56aa605273b8154c915f0c7c1b356f90269351d7db823144e0ec65",
+      "size": 622
+    },
+    "refbench/tests/test_gpu_timestamps.py": {
+      "sha256": "40c915071b994bb3ca9567e9ddd04f72ed9d6e1dd7462bd5e75da570246e2d96",
+      "size": 1770
+    },
+    "refbench/tests/test_native_pairs.py": {
+      "sha256": "2e7204d413f394897ab4850c6c876df86743bd1c84b643112dc16550502826ae",
+      "size": 16634
+    },
+    "refbench/tests/test_output_contract.py": {
+      "sha256": "f117c3db8761b503ccbc2b38992728bad30b4b9a162420b521c0912e6ad2401d",
+      "size": 6416
+    },
+    "refbench/tools/native_pairs.py": {
+      "sha256": "a8f859e39ea43cbfa5c816b614a36f069a0b2b26e70f242b621cb6fbe54db56f",
+      "size": 20944
+    }
+  }
+}

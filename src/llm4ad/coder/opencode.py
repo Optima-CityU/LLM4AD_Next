@@ -31,7 +31,7 @@ class OpenCode(BaseCoder):
     _SOURCE_EXTENSIONS = {
         ".py", ".cpp", ".cc", ".c", ".h", ".hpp",
         ".java", ".js", ".ts", ".go", ".rs", ".rb",
-        ".sh", ".php", ".cmake", ".txt",
+        ".sh", ".php", ".cmake", ".txt", ".comp", ".glsl", ".vert", ".frag",
     }
 
     # Directories to skip when scanning for generated files.

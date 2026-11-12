@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from llm4ad.config.schema import (
@@ -50,6 +52,7 @@ class EvaluationDispatcher:
         behavior_storage: str = "rendered",
         config_dir: str | None = None,
         provider_config: Any = None,
+        records_dir: str | Path | None = None,
     ):
         """Initialize the dispatcher with an evaluator instance.
 
@@ -64,6 +67,7 @@ class EvaluationDispatcher:
                 evaluator module specs and dataset configs are resolved
                 against this directory instead of the current working
                 directory.
+            records_dir: Durable record root, outside candidate worktrees.
             provider_config: Resolved provider configuration for custom
                 evaluators that need LLM access. Passed through to the
                 evaluator constructor.
@@ -74,6 +78,9 @@ class EvaluationDispatcher:
         self._behavior_storage = behavior_storage
         self._config_dir = config_dir
         self._provider_config = provider_config
+        configured_records = os.environ.get("LLM4AD_EVALUATION_OUTBOX") or records_dir
+        self._records_dir = Path(configured_records) if configured_records else None
+        self._execution_id = os.environ.get("LLM4AD_EXECUTION_ID") or str(uuid.uuid4())
 
         # Concurrency limit for parallel evaluation subprocesses
         effective_workers = config.batch_size or os.cpu_count() or 4
@@ -297,6 +304,8 @@ class EvaluationDispatcher:
                 metadata={
                     "num_instances": len(results),
                     "successful_instances": 0,
+                    "per_instance": [r.model_dump(mode="python", exclude={"behavior", "artifacts"}) for r in results],
+                    "evaluation_records": [ref for r in results for ref in r.metadata.get("evaluation_records", [])],
                 },
             )
 
@@ -320,13 +329,7 @@ class EvaluationDispatcher:
         # Build per-instance summary for metadata (lightweight)
         per_instance: list[dict[str, Any]] = []
         for r in results:
-            per_instance.append(
-                {
-                    "score": r.score,
-                    "success": r.success,
-                    "error_message": r.error_message,
-                }
-            )
+            per_instance.append(r.model_dump(mode="python", exclude={"behavior", "artifacts"}))
 
         # Aggregate behavior data: pick the best instance's behavior as primary
         best_behavior = None
@@ -343,6 +346,7 @@ class EvaluationDispatcher:
             "num_instances": len(results),
             "successful_instances": count,
             "per_instance": per_instance,
+            "evaluation_records": [ref for r in results for ref in r.metadata.get("evaluation_records", [])],
         }
         if all_behavior:
             metadata["all_behavior"] = all_behavior
@@ -350,6 +354,11 @@ class EvaluationDispatcher:
         return EvaluationResult(
             score=avg_score,
             metrics=aggregated_metrics,
+            monitor_metrics={
+                name: sum(r.monitor_metrics[name] for r in successful if name in r.monitor_metrics)
+                / sum(name in r.monitor_metrics for r in successful)
+                for name in {key for r in successful for key in r.monitor_metrics}
+            },
             success=True,
             duration_ms=total_duration,
             behavior=best_behavior,
@@ -357,112 +366,106 @@ class EvaluationDispatcher:
             evolution_feedback=max(successful, key=lambda result: result.score).evolution_feedback,
         )
 
-    async def dispatch_batch(
-        self,
-        algorithms: list[Algorithm],
-        **kwargs,
-    ) -> list[EvaluationResult]:
-        """Dispatch a batch of algorithms for evaluation.
+    async def _evaluate_one(self, alg, data_path: str, instance_id: str, options: dict) -> EvaluationResult:
+        """Record one evaluation while preserving cancellation and scoring behavior."""
+        from llm4ad.evaluator.records import atomic_json, complete_record, new_record
 
-        Each algorithm is evaluated against all discovered data files.
-        Per-file results are aggregated into a single result per algorithm
-        using mean aggregation.
+        evaluation_id = str(uuid.uuid4())
+        root = self._records_dir / evaluation_id if self._records_dir else None
+        fingerprint = alg.code_fingerprint() if hasattr(alg, "code_fingerprint") else ""
+        cfg = EvalContext(
+            **{
+                **options,
+                "project_root": alg.worktree.path if alg.worktree else "",
+                "data_path": data_path,
+                "behavior_storage": self._behavior_storage,
+                "evaluation_id": evaluation_id,
+                "algorithm_id": str(getattr(alg, "id", "")),
+                "algorithm_name": getattr(alg, "name", ""),
+                "source_fingerprint": fingerprint,
+                "execution_id": self._execution_id,
+                "instance_id": instance_id,
+                "artifact_dir": str((root / "output").absolute()) if root else "",
+            }
+        )
+        remote = isinstance(self.config, RemoteEvaluatorConfig)
+        record = new_record(cfg, task_id=os.environ.get("LLM4AD_TASK_ID", ""), origin="remote" if remote else "local")
+        if root and not remote:
+            try:
+                (root / "output").mkdir(parents=True, exist_ok=True)
+                atomic_json(root / "record.json", record.model_dump(mode="json"))
+            except OSError:
+                logger.exception("Evaluation recording unavailable; continuing evaluation")
+                root = None
+        try:
+            async with self._semaphore:
+                if remote:
+                    from llm4ad.remote.client import evaluate_remote
+
+                    result = await evaluate_remote(self.config, cfg)
+                else:
+                    result = await self._create_evaluator().evaluate(cfg)
+        except BaseException as exc:
+            if root and not remote:
+                failed = EvaluationResult(success=False, metrics={}, error_message=str(exc) or type(exc).__name__)
+                try:
+                    complete_record(root, record, failed)
+                    if isinstance(exc, asyncio.CancelledError):
+                        record.state = "cancelled"
+                        atomic_json(root / "record.json", record.model_dump(mode="json"))
+                except OSError:
+                    logger.exception("Could not retain failed evaluation record")
+            raise
+        if remote:
+            references = result.metadata.get("evaluation_records", [])
+        elif root:
+            try:
+                record = await asyncio.to_thread(complete_record, root, record, result)
+                result.artifacts = []
+                references = [
+                    {
+                        "id": record.id,
+                        "algorithm_id": cfg.algorithm_id,
+                        "evaluation_profile": record.evaluation_profile,
+                        "instance_id": instance_id,
+                        "source_fingerprint": fingerprint,
+                    }
+                ]
+            except Exception:
+                logger.exception("Could not retain evaluation files; keeping the original score")
+                references = []
+        else:
+            references = []
+        result.metadata["evaluation_records"] = references
+        if hasattr(alg, "custom_metadata"):
+            previous = [
+                ref for ref in alg.custom_metadata.get("evaluation_records", []) if ref.get("algorithm_id") == cfg.algorithm_id
+            ]
+            known = {ref["id"] for ref in previous}
+            previous.extend(ref for ref in references if ref["id"] not in known)
+            alg.custom_metadata = {**alg.custom_metadata, "evaluation_records": previous}
+        return result
+
+    async def dispatch_batch(self, algorithms: list[Algorithm], **kwargs) -> list[EvaluationResult]:
+        """Evaluate candidates and retain each instance before aggregation.
 
         Args:
-            algorithms: List of algorithms to evaluate.
-            **kwargs: Additional evaluation options.
+            algorithms: Candidates to evaluate.
+            **kwargs: Evaluation context overrides, including fidelity and timeout.
 
         Returns:
-            List of aggregated evaluation results, one per algorithm.
-
-        TODO: Now → Means, maybe can update to more configuration（算术平均，几何平均，最大值，最小值之类的）
+            Aggregated results in candidate order.
         """
         kwargs.setdefault("timeout", self.config.timeout)
-        if isinstance(self.config, RemoteEvaluatorConfig):
-            from llm4ad.remote.client import evaluate_remote
-
-            async def remote(alg):
-                async with self._semaphore:
-                    return await evaluate_remote(
-                        self.config,
-                        EvalContext(
-                            project_root=alg.worktree.path if alg.worktree else "",
-                            behavior_storage=self._behavior_storage,
-                            **kwargs,
-                        ),
-                    )
-
-            if self._parallel:
-                return list(await asyncio.gather(*(remote(alg) for alg in algorithms)))
-            return [await remote(alg) for alg in algorithms]
-        n_files = len(self._data_files)
-
-        if n_files == 0:
-            # No dataset configured — evaluate each algorithm once without data files.
-            if self._parallel:
-                tasks = []
-                for alg in algorithms:
-                    cfg = EvalContext(
-                        data_path="",
-                        project_root=alg.worktree.path if alg.worktree else "",
-                        behavior_storage=self._behavior_storage,
-                        **kwargs,
-                    )
-                    evaluator = self._create_evaluator()
-                    tasks.append(evaluator.evaluate(cfg))
-                return list(await asyncio.gather(*tasks))
-            else:
-                results = []
-                for alg in algorithms:
-                    cfg = EvalContext(
-                        data_path="",
-                        project_root=alg.worktree.path if alg.worktree else "",
-                        behavior_storage=self._behavior_storage,
-                        **kwargs,
-                    )
-                    evaluator = self._create_evaluator()
-                    results.append(await evaluator.evaluate(cfg))
-                return results
-
-        # Collect raw per-instance results
+        paths = [""] if isinstance(self.config, RemoteEvaluatorConfig) else self._data_files or [""]
+        calls = [
+            (alg, path, f"{index}:{Path(path).name}" if path else "", kwargs)
+            for alg in algorithms
+            for index, path in enumerate(paths)
+        ]
         if self._parallel:
-            semaphore = self._semaphore
-
-            async def _limited_eval(evaluator: BaseEvaluator, cfg: EvalContext) -> EvaluationResult:
-                async with semaphore:
-                    return await evaluator.evaluate(cfg)
-
-            tasks = []
-            for alg in algorithms:
-                for data_path in self._data_files:
-                    cfg = EvalContext(
-                        data_path=data_path,
-                        project_root=alg.worktree.path if alg.worktree else "",
-                        behavior_storage=self._behavior_storage,
-                        **kwargs,
-                    )
-                    evaluator = self._create_evaluator()
-                    tasks.append(_limited_eval(evaluator, cfg))
-            raw_results = list(await asyncio.gather(*tasks))
+            raw_results = list(await asyncio.gather(*(self._evaluate_one(*call) for call in calls)))
         else:
-            raw_results = []
-            for alg in algorithms:
-                for data_path in self._data_files:
-                    cfg = EvalContext(
-                        data_path=data_path,
-                        project_root=alg.worktree.path if alg.worktree else "",
-                        behavior_storage=self._behavior_storage,
-                        **kwargs,
-                    )
-                    evaluator = self._create_evaluator()
-                    raw_results.append(await evaluator.evaluate(cfg))
-
-        # Aggregate per-algorithm: group by chunks of n_files
-        aggregated = []
-        for i in range(len(algorithms)):
-            start = i * n_files
-            end = start + n_files
-            alg_results = raw_results[start:end]
-            aggregated.append(self._aggregate_results(alg_results))
-
-        return aggregated
+            raw_results = [await self._evaluate_one(*call) for call in calls]
+        count = len(paths)
+        return [self._aggregate_results(raw_results[i : i + count]) for i in range(0, len(raw_results), count)]

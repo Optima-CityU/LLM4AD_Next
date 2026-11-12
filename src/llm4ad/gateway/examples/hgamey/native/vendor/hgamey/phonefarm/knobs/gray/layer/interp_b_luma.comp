@@ -1,0 +1,27 @@
+#version 450
+// 路线 B 第 1 步: 两帧全分辨率 -> 1/4 分辨率整数亮度 (每个 1/4 像素 = 4x4 全分辨率像素的 (77R+150G+29B) 之和)。
+// 全程整数, 块匹配的 SAD 因此在 GPU 和 numpy 参考里逐位一致 (不存在浮点次序差)。
+// 越界 (W、H 不是 4 的倍数时) 夹到边缘。调度: x = ceil(qw/8), y = ceil(qh/8), z = 2 (z 选帧)。
+#include "interp_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D f0;
+layout(binding = 1) uniform sampler2D f1;
+layout(std430, binding = 2) writeonly buffer L0 { uint v[]; } l0;
+layout(std430, binding = 3) writeonly buffer L1 { uint v[]; } l1;
+layout(push_constant) uniform P { int W; int H; int qw; int qh; } pc;
+
+void main() {
+    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
+    if (q.x >= pc.qw || q.y >= pc.qh) return;
+    bool second = gl_GlobalInvocationID.z == 1u;
+    uint acc = 0u;
+    for (int j = 0; j < 4; j++)
+        for (int i = 0; i < 4; i++) {
+            ivec2 p = min(q * 4 + ivec2(i, j), ivec2(pc.W - 1, pc.H - 1));
+            vec3 c = second ? texelFetch(f1, p, 0).rgb : texelFetch(f0, p, 0).rgb;
+            uvec3 u = uvec3(round(c * 255.0));
+            acc += 77u * u.r + 150u * u.g + 29u * u.b;
+        }
+    uint idx = uint(q.y * pc.qw + q.x);
+    if (second) l1.v[idx] = acc; else l0.v[idx] = acc;
+}

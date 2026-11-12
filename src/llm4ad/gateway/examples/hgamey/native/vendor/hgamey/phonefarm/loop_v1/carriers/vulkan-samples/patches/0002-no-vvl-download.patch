@@ -1,0 +1,14 @@
+diff --git a/bldsys/cmake/template/gradle/app.build.gradle.in b/bldsys/cmake/template/gradle/app.build.gradle.in
+index 5f4fc3b..cf5fcc5 100644
+--- a/bldsys/cmake/template/gradle/app.build.gradle.in
++++ b/bldsys/cmake/template/gradle/app.build.gradle.in
+@@ -3,7 +3,8 @@ plugins {
+ }
+ 
+ ext.vvl_version='1.4.341.0'
+-apply from: "./download_vvl.gradle"
++// vulkan-samples carrier: 不下载校验层 (省 ~150MB 与 APK 体积, 实测不需要)
++//apply from: "./download_vvl.gradle"
+ 
+ android {
+ 	ndkVersion '28.2.13676358'

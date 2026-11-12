@@ -119,6 +119,8 @@ class TestDispatcherBehaviorAggregation:
 def test_dispatch_batch_uses_configured_evaluator_timeout():
     """The evaluator timeout must not fall back to EvalContext's 60-second default."""
     dispatcher = EvaluationDispatcher.__new__(EvaluationDispatcher)
+    dispatcher._records_dir = None
+    dispatcher._execution_id = "fixture"
     dispatcher.config = CustomEvaluatorConfig(module="example.py:ExampleEvaluator", timeout=600)
     dispatcher._parallel = True
     dispatcher._data_files = ["/tmp/input"]

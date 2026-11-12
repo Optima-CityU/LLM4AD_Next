@@ -329,3 +329,103 @@ async def test_elite_reevaluation_uses_high_fidelity_profile() -> None:
     assert high.evaluation is not None
     assert high.evaluation.evolution_feedback["optimized_parameters"] == {"phase": 0.4}
     assert low.score == 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('candidate_failure', [True, False])
+async def test_elite_failure_retains_history_without_claiming_success(candidate_failure):
+    """Candidate rejection removes active fitness; transport failure remains unconfirmed."""
+    algorithm = _algorithm()
+    algorithm.set_evaluation_result(50, metrics={'improvement': 50})
+    orchestrator = _orchestrator(orchestrator_type=DiverseIslandGAOrchestrator)
+    orchestrator.config = SimpleNamespace(elite_reevaluation_count=1)
+    initial = DispatcherEvaluationResult(score=50, metrics={'improvement': 50})
+    orchestrator._save_evaluation_profile(algorithm, initial)
+    orchestrator.dispatcher.dispatch_batch = AsyncMock(return_value=[DispatcherEvaluationResult(
+        success=False, metrics={}, error_message='candidate rejected' if candidate_failure else '503 unavailable',
+        metadata={'candidate_failure': candidate_failure},
+    )])
+    await orchestrator._reevaluate_elite_offspring([algorithm])
+    profiles = algorithm.custom_metadata['evaluation_profiles']
+    assert profiles['standard']['score'] == 50
+    assert profiles['elite']['status'] == 'failed'
+    assert profiles['elite']['score'] is None
+    assert algorithm.is_evaluated() == (not candidate_failure)
+    assert orchestrator._total_evaluation_attempts == 1
+    assert getattr(orchestrator, '_total_successful_evaluations', 0) == 0
+    assert not orchestrator._elite_evaluation_passed(algorithm)
+
+
+@pytest.mark.asyncio
+async def test_elite_transport_exception_does_not_drop_existing_measurement():
+    """Failed request transport records an unconfirmed stage without corrupting ranking data."""
+    algorithm = _algorithm()
+    algorithm.set_evaluation_result(50, metrics={})
+    orchestrator = _orchestrator(orchestrator_type=DiverseIslandGAOrchestrator)
+    orchestrator.config = SimpleNamespace(elite_reevaluation_count=1)
+    orchestrator.dispatcher.dispatch_batch = AsyncMock(side_effect=ConnectionError('connection refused'))
+    await orchestrator._reevaluate_elite_offspring([algorithm])
+    assert algorithm.score == 50 and algorithm.is_evaluated()
+    assert algorithm.custom_metadata['evaluation_profiles']['elite']['status'] == 'failed'
+    assert not orchestrator._elite_evaluation_passed(algorithm)
+
+
+@pytest.mark.asyncio
+async def test_initial_population_receives_optional_elite_evaluation():
+    """Generation zero participates in the same configured two-stage mechanism."""
+    low, high = _algorithm(), _algorithm()
+    low.id, high.id = 'low', 'high'
+    low.set_evaluation_result(10, metrics={})
+    high.set_evaluation_result(20, metrics={})
+    orchestrator = _orchestrator(orchestrator_type=DiverseIslandGAOrchestrator)
+    orchestrator.config = SimpleNamespace(
+        elite_reevaluation_count=1, num_islands=1, per_island_config={}, island_population_size=2,
+    )
+    orchestrator.global_best_individual = None
+    orchestrator._limited_generate = AsyncMock(side_effect=[low, high])
+    orchestrator._print_population_summary = MagicMock()
+    orchestrator._assert_unique_island_membership = MagicMock()
+    orchestrator.dispatcher.dispatch_batch = AsyncMock(return_value=[DispatcherEvaluationResult(score=15, metrics={})])
+    population = await orchestrator.initialize_population()
+    assert len(population) == 2
+    orchestrator.dispatcher.dispatch_batch.assert_awaited_once_with(algorithms=[high], evaluation_profile='elite')
+    assert orchestrator.global_best_individual is high
+    assert high.score == 15 and orchestrator._elite_evaluation_passed(high)
+
+
+@pytest.mark.asyncio
+async def test_final_elite_refreshes_best_when_early_score_was_optimistic():
+    """Final selection compares refreshed results and checks a previously unverified winner."""
+    from llm4ad.orchestrator.island_ga import Island
+
+    optimistic, stable = _algorithm(), _algorithm()
+    optimistic.id, stable.id = 'optimistic', 'stable'
+    optimistic.set_evaluation_result(50, metrics={})
+    stable.set_evaluation_result(30, metrics={})
+    orchestrator = _orchestrator(orchestrator_type=DiverseIslandGAOrchestrator)
+    orchestrator.config = SimpleNamespace(elite_reevaluation_count=1)
+    orchestrator.islands = [Island(island_id=0, population=[optimistic, stable])]
+    orchestrator.global_best_individual = optimistic
+    orchestrator.dispatcher.dispatch_batch = AsyncMock(side_effect=[
+        [DispatcherEvaluationResult(score=10, metrics={})],
+        [DispatcherEvaluationResult(score=25, metrics={})],
+    ])
+    await orchestrator._finalize_elite_evaluation()
+    assert orchestrator.global_best_individual is stable
+    assert stable.score == 25 and optimistic.score == 10
+    assert orchestrator._elite_evaluation_passed(stable)
+    assert orchestrator.dispatcher.dispatch_batch.await_count == 2
+    await orchestrator._finalize_elite_evaluation()
+    assert orchestrator.dispatcher.dispatch_batch.await_count == 2
+
+
+def test_profile_update_does_not_mutate_inherited_parent_history():
+    """Migrated or inherited shallow metadata must not erase another candidate's stage."""
+    parent, child = _algorithm(), _algorithm()
+    orchestrator = _orchestrator(orchestrator_type=DiverseIslandGAOrchestrator)
+    result = DispatcherEvaluationResult(score=20, metrics={})
+    orchestrator._save_evaluation_profile(parent, result, 'elite')
+    child.custom_metadata = dict(parent.custom_metadata)
+    orchestrator._save_evaluation_profile(child, result, 'standard')
+    assert 'elite' in parent.custom_metadata['evaluation_profiles']
+    assert set(child.custom_metadata['evaluation_profiles']) == {'standard'}

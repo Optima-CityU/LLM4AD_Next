@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CandidateOperator",
+  "description": "一个待评测的算子。由 LLM 变异或本地确定性变异器产出, 必须先过本地防爆门禁才允许下发真机。",
+  "type": "object",
+  "required": ["id", "generation", "track", "budget_ms", "shader_source", "fingerprint", "origin"],
+  "properties": {
+    "id": { "type": "string", "description": "唯一算子 ID" },
+    "generation": { "type": "integer", "minimum": 0, "description": "演化代数; 0 = 赛道基线模板" },
+    "track": { "type": "string", "enum": ["sr", "frame_gen"] },
+    "parent_id": { "type": ["string", "null"], "description": "亲本算子 ID" },
+    "budget_ms": { "type": "number", "exclusiveMinimum": 0, "description": "单帧耗时硬约束 (ms)" },
+    "shader_source": { "type": "string", "description": "GLSL 450 Compute Shader 源码" },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "折叠注释与空白后的 sha256 前 16 位。跨代去重用: 同构算子不重复占真机名额。"
+    },
+    "origin": {
+      "type": "string",
+      "enum": ["baseline", "llm", "local_mutation"],
+      "description": "算子来源。local_mutation 是 LLM 不可用时的兜底通道。"
+    },
+    "notes": { "type": ["string", "null"], "description": "一行人类可读的形态描述" }
+  }
+}

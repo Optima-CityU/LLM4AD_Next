@@ -1,0 +1,49 @@
+{
+  "patch": "present-probe.patch",
+  "patch_sha256": "e5957ba29d9c6b9e775c3716dfdec79bc199d7ab2fff2a378a394e05b86829b1",
+  "comparison": "exact pre-probe local extraction snapshots; not repository HEAD",
+  "scope": "opt-in synchronous present-stage functional probe; not the game internal upscaler or performance evaluator",
+  "files": [
+    {
+      "path": "vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp",
+      "original_sha256": "a1317d712d1de3d87fc30de4a68d365bdce959a92055d64f10e1e420fc803880",
+      "patched_sha256": "16852a358fdd2ebb1053ad683605e582155829aafff549ff055b749364fc446b"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.h",
+      "original_sha256": "3db8e3fceeef53238703f45f8cae5d3fd524d1748a9cf3e7b740bfb6d111d84e",
+      "patched_sha256": "59218ec57aa6f6d21957a8f45e798725610ccb9a6b94d393766d68413b8d7908"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/knobs/gray/layer/vk_layer_refknobs.cpp",
+      "original_sha256": "f459e4bf8042c67b9bde21848d97671c8b1b689d05a3ca2dccb0949f1bb30901",
+      "patched_sha256": "0381389b1de1ea1a8bd3acdcf0c39573227ebfb73e3b63407b737ddc9cde24c9"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/knobs/gray/tests/selfsr_test.cpp",
+      "original_sha256": null,
+      "patched_sha256": "861fd393b782bf16e0b4c8591b97b123cced4451049fc6f07ef14a3e15cea27b"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/knobs/gray/tests/test_selfsr.py",
+      "original_sha256": null,
+      "patched_sha256": "d50ec2f1028ff55c8e1956066efd55eee4b91a6c7da31317551571f631ecd125"
+    },
+    {
+      "path": "tools/experiments/build_present_candidate.py",
+      "original_sha256": null,
+      "patched_sha256": "8489163f6fc3e5eb4f0e6d7fb39c259e9fe343959b4b553df1961597e5420d35"
+    },
+    {
+      "path": "tools/experiments/run_present_probe.py",
+      "original_sha256": null,
+      "patched_sha256": "47a2867243962c63054d5441847afeaad8c542a3448df60b6852c50db15d8be5"
+    },
+    {
+      "path": "tests/test_present_probe.py",
+      "original_sha256": null,
+      "patched_sha256": "e73f9b8e19bb852bca99a99636565daa5660a494741c27d33076fede062622ae"
+    }
+  ],
+  "patch_replay": "all eight files reproduced byte-for-byte"
+}

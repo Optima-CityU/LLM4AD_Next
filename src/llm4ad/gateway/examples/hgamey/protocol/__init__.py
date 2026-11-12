@@ -1,0 +1,1 @@
+"""HGamey protocol implementation."""

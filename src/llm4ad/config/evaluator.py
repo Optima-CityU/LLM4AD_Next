@@ -334,6 +334,13 @@ class ExecutableEvaluatorConfig(EvaluatorConfig):
 class EvalContext(BaseModel):
     """Runtime context passed to an evaluator for a single evaluation."""
 
+    artifact_dir: str = Field(default="", description="Directory for explicitly declared evaluation files")
+    evaluation_id: str = ""
+    algorithm_id: str = ""
+    algorithm_name: str = ""
+    source_fingerprint: str = ""
+    execution_id: str = ""
+    instance_id: str = ""
     data_path: str = Field(default="", description="Data path")
     project_root: str = Field(description="Project root path, e.g. worktree path")
     timeout: float = Field(

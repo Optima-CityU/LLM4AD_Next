@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game_opt_loop/goal_event@1",
+  "title": "events.jsonl 的一行",
+  "description": "时间线, 只追加。每行一个 JSON 对象, 都带 t (RFC3339)、type、gen (0 = 开跑前)。按 type 带不同字段。",
+  "type": "object",
+  "required": [
+    "t",
+    "type",
+    "gen"
+  ],
+  "properties": {
+    "t": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "start",
+        "plan",
+        "steer",
+        "propose",
+        "gate",
+        "measure",
+        "screened_out",
+        "verdict",
+        "keep",
+        "stop",
+        "error",
+        "note"
+      ]
+    },
+    "gen": {
+      "type": "integer"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "propose"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "candidate_id",
+          "layer",
+          "changes",
+          "why"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string",
+            "enum": [
+              "sysparam",
+              "gray",
+              "whitebox"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "measure"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "candidate_id",
+          "arms_done",
+          "arms_planned"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "verdict"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "candidate_id",
+          "verdict",
+          "metrics",
+          "image_psnr",
+          "contested_arms"
+        ],
+        "properties": {
+          "metrics": {
+            "type": "object",
+            "description": "回包 verdict.per_metric 的键 → {delta_pct, p, status}"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "keep"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "candidate_id",
+          "metric",
+          "delta_pct",
+          "verdict"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "steer"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "human_md_rev",
+          "text",
+          "interpreted"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "stop"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "reason",
+          "summary"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "target_reached",
+              "budget_exhausted",
+              "no_gain",
+              "human_stop",
+              "error"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "plan"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "layers",
+          "per_generation",
+          "budget_left_min"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "message"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "screened_out"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "candidate_id",
+          "layer",
+          "reason"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+[
+  { "action": "home" },
+  { "action": "sleep", "ms": 1000 },
+  { "action": "tap", "x": 540, "y": 1200 },
+  { "action": "sleep", "ms": 1500 },
+  {
+    "action": "loop",
+    "count": 5,
+    "steps": [
+      { "action": "scroll_down" },
+      { "action": "sleep", "ms": 800 },
+      { "action": "scroll_up" },
+      { "action": "sleep", "ms": 800 }
+    ]
+  },
+  { "action": "home" }
+]

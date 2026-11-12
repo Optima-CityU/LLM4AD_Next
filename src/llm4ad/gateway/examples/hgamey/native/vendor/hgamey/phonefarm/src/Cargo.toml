@@ -1,0 +1,30 @@
+[package]
+name = "phonefarm"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.89"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+toml = "0.8"
+quick-xml = "0.36"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+flate2 = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+regex = "1"
+sha2 = "0.10"
+rspirv = "0.13"
+libc = "0.2"
+
+[dev-dependencies]
+# Matches GOL's real GLSL→SPIR-V path; wgsl-in is needed by Naga30's feature gate.
+naga = { version = "30.0", default-features = false, features = ["glsl-in", "wgsl-in", "spv-out"] }
+
+[profile.release]
+strip = true
+lto = true
+
+[[bin]]
+name = "phonefarm"
+path = "main.rs"

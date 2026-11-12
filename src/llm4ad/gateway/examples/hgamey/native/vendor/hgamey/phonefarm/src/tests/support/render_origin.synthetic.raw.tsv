@@ -1,0 +1,231 @@
+#phonefarm_render_witness v2
+BEGIN	boot
+fake-boot
+END	boot
+BEGIN	boot_end
+fake-boot
+END	boot_end
+BEGIN	event_pid
+EMPTY
+END	event_pid
+BEGIN	event_notrace_pid
+EMPTY
+END	event_notrace_pid
+BEGIN	tracing_cpumask
+f
+END	tracing_cpumask
+BEGIN	device
+kgsl-3d0
+END	device
+BEGIN	enabled/adreno_cmdbatch_queued
+1
+END	enabled/adreno_cmdbatch_queued
+BEGIN	enabled/adreno_cmdbatch_submitted
+1
+END	enabled/adreno_cmdbatch_submitted
+BEGIN	enabled/kgsl_context_create
+1
+END	enabled/kgsl_context_create
+BEGIN	enabled/kgsl_context_destroy
+1
+END	enabled/kgsl_context_destroy
+BEGIN	enabled/kgsl_context_detach
+1
+END	enabled/kgsl_context_detach
+BEGIN	enabled/sched_process_exit
+1
+END	enabled/sched_process_exit
+BEGIN	enabled/sched_process_fork
+1
+END	enabled/sched_process_fork
+BEGIN	trigger/adreno_cmdbatch_queued
+# Available triggers:
+# traceon traceoff
+END	trigger/adreno_cmdbatch_queued
+BEGIN	filter/adreno_cmdbatch_queued
+none
+END	filter/adreno_cmdbatch_queued
+BEGIN	format/adreno_cmdbatch_queued
+name: adreno_cmdbatch_queued
+field:int common_pid;
+field:unsigned int id;
+field:unsigned int timestamp;
+field:unsigned int queued;
+field:unsigned int flags;
+field:unsigned int prio;
+print fmt: "ctx=%u ctx_prio=%u ts=%u queued=%u flags=%s", REC->id, REC->prio, REC->timestamp, REC->queued, REC->flags ? __print_flags(REC->flags, "|", { 0x00000002, "MARKER" }, { 0x00000400, "SYNC" }, { 0x00000004, "IB_LIST" }, { 0x00000008, "CTX_SWITCH" }, { 0x00000100, "EOF" }, { 0x00000800, "PWR_CONSTRAINT" }) : "none"
+END	format/adreno_cmdbatch_queued
+BEGIN	trigger/adreno_cmdbatch_submitted
+# Available triggers:
+# traceon traceoff
+END	trigger/adreno_cmdbatch_submitted
+BEGIN	filter/adreno_cmdbatch_submitted
+none
+END	filter/adreno_cmdbatch_submitted
+BEGIN	format/adreno_cmdbatch_submitted
+name: adreno_cmdbatch_submitted
+field:int common_pid;
+field:unsigned int id;
+field:unsigned int timestamp;
+field:unsigned int flags;
+print fmt: "ctx=%u ts=%u flags=%s", REC->id, REC->timestamp, REC->flags ? __print_flags(REC->flags, "|", { 0x00000002, "MARKER" }, { 0x00000400, "SYNC" }, { 0x00000004, "IB_LIST" }, { 0x00000008, "CTX_SWITCH" }, { 0x00000100, "EOF" }, { 0x00000800, "PWR_CONSTRAINT" }) : "none"
+END	format/adreno_cmdbatch_submitted
+BEGIN	trigger/kgsl_context_create
+# Available triggers:
+# traceon traceoff
+END	trigger/kgsl_context_create
+BEGIN	filter/kgsl_context_create
+none
+END	filter/kgsl_context_create
+BEGIN	format/kgsl_context_create
+name: kgsl_context_create
+field:int common_pid;
+field:unsigned int id;
+print fmt: "d_name=%s ctx=%u flags=%s priority=%u type=%s", __get_str(device_name), REC->id, REC->flags, REC->priority, REC->type
+END	format/kgsl_context_create
+BEGIN	trigger/kgsl_context_destroy
+# Available triggers:
+# traceon traceoff
+END	trigger/kgsl_context_destroy
+BEGIN	filter/kgsl_context_destroy
+none
+END	filter/kgsl_context_destroy
+BEGIN	format/kgsl_context_destroy
+name: kgsl_context_destroy
+field:int common_pid;
+field:unsigned int id;
+print fmt: "d_name=%s ctx=%u", __get_str(device_name), REC->id
+END	format/kgsl_context_destroy
+BEGIN	trigger/kgsl_context_detach
+# Available triggers:
+# traceon traceoff
+END	trigger/kgsl_context_detach
+BEGIN	filter/kgsl_context_detach
+none
+END	filter/kgsl_context_detach
+BEGIN	format/kgsl_context_detach
+name: kgsl_context_detach
+field:int common_pid;
+field:unsigned int id;
+print fmt: "d_name=%s ctx=%u", __get_str(device_name), REC->id
+END	format/kgsl_context_detach
+BEGIN	trigger/sched_process_exit
+# Available triggers:
+# traceon traceoff
+END	trigger/sched_process_exit
+BEGIN	filter/sched_process_exit
+none
+END	filter/sched_process_exit
+BEGIN	format/sched_process_exit
+name: sched_process_exit
+field:int common_pid;
+field:pid_t pid;
+print fmt: "comm=%s pid=%d prio=%d", REC->comm, REC->pid, REC->prio
+END	format/sched_process_exit
+BEGIN	trigger/sched_process_fork
+# Available triggers:
+# traceon traceoff
+END	trigger/sched_process_fork
+BEGIN	filter/sched_process_fork
+none
+END	filter/sched_process_fork
+BEGIN	format/sched_process_fork
+name: sched_process_fork
+field:int common_pid;
+field:pid_t parent_pid;
+field:pid_t child_pid;
+print fmt: "comm=%s parent_pid=%d child_comm=%s child_pid=%d", REC->parent_comm, REC->parent_pid, REC->child_comm, REC->child_pid
+END	format/sched_process_fork
+BEGIN	kernel
+synthetic kernel fixture; not installed
+END	kernel
+BEGIN	package
+com.example.game
+END	package
+BEGIN	package_uid
+package:com.example.game uid:10001
+END	package_uid
+BEGIN	package_version
+versionCode=1
+versionName=fixture
+END	package_version
+BEGIN	pid
+32000
+END	pid
+BEGIN	process_cmdline
+com.example.game
+END	process_cmdline
+BEGIN	process_stat
+32000 (fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 320000
+END	process_stat
+BEGIN	process_status
+Name:	fixture
+Pid:	32000
+Tgid:	32000
+Uid:	10001	10001	10001	10001
+Threads:	3
+END	process_status
+BEGIN	stats/cpu0
+entries: 0
+overrun: 0
+commit overrun: 0
+dropped events: 0
+END	stats/cpu0
+BEGIN	stats/cpu3
+entries: 0
+overrun: 0
+commit overrun: 0
+dropped events: 0
+END	stats/cpu3
+BEGIN	task_count
+3
+END	task_count
+BEGIN	thread_comm/32000
+game
+END	thread_comm/32000
+BEGIN	thread_comm/32074
+UnityGfxDeviceW
+END	thread_comm/32074
+BEGIN	thread_comm/32075
+othercaller
+END	thread_comm/32075
+BEGIN	thread_stat/32000
+32000 (fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 320000
+END	thread_stat/32000
+BEGIN	thread_stat/32074
+32074 (fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 320740
+END	thread_stat/32074
+BEGIN	thread_stat/32075
+32075 (fixture) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 320750
+END	thread_stat/32075
+BEGIN	thread_status/32000
+Name:	fixture
+Pid:	32000
+Tgid:	32000
+Uid:	10001	10001	10001	10001
+Threads:	3
+END	thread_status/32000
+BEGIN	thread_status/32074
+Name:	fixture
+Pid:	32074
+Tgid:	32000
+Uid:	10001	10001	10001	10001
+Threads:	3
+END	thread_status/32074
+BEGIN	thread_status/32075
+Name:	fixture
+Pid:	32075
+Tgid:	32000
+Uid:	10001	10001	10001	10001
+Threads:	3
+END	thread_status/32075
+BEGIN	trace_clock
+[local] boot global
+END	trace_clock
+BEGIN	uptime
+UPTIME_PLACEHOLDER 0
+END	uptime
+BEGIN	uptime_end
+UPTIME_END_PLACEHOLDER 0
+END	uptime_end
+#end

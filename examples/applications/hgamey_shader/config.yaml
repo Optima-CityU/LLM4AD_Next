@@ -1,0 +1,144 @@
+# Draft template: select an authorized gateway and LLM provider in the web wizard.
+# Empty gateway_ids intentionally fail runtime validation until selection.
+project_name: hgamey_shader
+description_en: "Evolve a Genshin screenshot super-resolution compute shader using a private remote GPU benchmark."
+description_zh: "通过私有远程 GPU 基准进化原神截图超分辨率计算着色器。"
+random_seed: 42
+base_dir: ./runs
+
+background: |
+  Evolve shader.comp for single-frame super-resolution of Genshin Impact
+  screenshots on an authorized remote GPU. The original seed is a bilinear
+  upscaler with half-pixel-centered coordinates and clamped border sampling.
+  Improve measured operator_latency_ms (minimize) while satisfying the
+  gateway's fixed image-quality criteria; psnr_db is a monitoring metric.
+  The gateway scores same-run baseline-relative latency improvement (%) and preserves
+  upstream verdict, significance and restoration evidence in metadata.
+  A passing operator benchmark does not demonstrate higher in-game FPS,
+  integration into Genshin, or a statistically significant improvement.
+
+  Modify only the EVOLVE_START / EVOLVE_END region in shader.comp. Keep
+  #version 450 and the descriptor interface outside that region unchanged:
+  set 0 binding 0 is a readonly rgba8 image2D input_image; set 0 binding 1
+  is a writeonly rgba8 image2D output_image. No samplers, push constants,
+  extra resources, host-side code or model-generated SPIR-V are accepted.
+  Read dimensions with imageSize. Every valid output pixel must be written
+  with a defined RGBA value; clamp all source coordinates to input bounds
+  and guard out-of-bounds output invocations, including partial edge tiles.
+
+  The trusted runner dispatches (ceil(output_width / 16),
+  ceil(output_height / 16), 1) workgroups, independent of candidate code.
+  The initial local_size is (16, 16, 1). Its declaration, helper functions
+  and main are evolvable. If local_size or pixel assignment changes, map
+  each dispatched workgroup to its fixed 16-by-16 output tile and use
+  strided loops as needed to preserve full coverage without overlapping
+  writes. A smaller local_size with unchanged global-ID indexing leaves
+  holes and is invalid. Avoid barriers after nonuniform early returns.
+
+  The immutable bilinear baseline, private Genshin reference frames,
+  input/output sizes, quality thresholds, compiler, device profile, timing
+  protocol and dispatch grid belong to the gateway, outside this candidate.
+  Do not tune measurement conditions or hardcode reference image contents.
+  Compilation and SPIR-V validation occur on the gateway before submission.
+  This case covers Genshin screenshots only; retain the benchmark's limits
+  when interpreting measured latency and quality.
+
+# The existing wizard binds a configured provider; no credentials are packaged.
+providers: []
+
+coder:
+  type: custom
+  provider: default
+  timeout: 300.0
+  max_retries: 2
+  temperature: 0.7
+  context_max_tokens: 24000
+  max_gen_tokens: 8192
+  default_extension: comp
+  log_to_console: false
+
+planner:
+  type: llm_evolution
+  provider: default
+  selection_strategy: weighted
+  parent_selection_strategy: tournament
+  mask_evolve_blocks: false
+  samplers:
+    - name: init_sampler
+      config:
+        max_tokens: 4096
+    - name: mutation_sampler
+      config:
+        max_tokens: 4096
+    - name: crossover_sampler
+      config:
+        max_tokens: 4096
+
+evaluator:
+  type: remote
+  # GatewayPoolPicker fills these from the user's authorized gateway selection.
+  gateway_ids: []
+  contract: {}
+  parameters: {}
+  candidate_paths: [shader.comp]
+  # Budget includes gateway compilation, executor waiting, measurement and cleanup.
+  timeout: 7200.0
+  max_retries: 1
+  parallel: false
+  batch_size: 1
+  dataset:
+    mode: files
+    files: []
+
+evolution:
+  type: diverse_island_ga
+  max_generations: 3
+  population_size: 6
+  num_islands: 2
+  island_population_size: 3
+  parallel_islands: false
+  max_llm_concurrency: 1
+  elite_ratio: 0.34
+  mutation_rate: 0.6
+  crossover_rate: 0.4
+  tournament_size: 2
+  parent_selection_strategy: tournament
+  survival_selection_strategy: truncation
+  migration_interval: 2
+  migration_rate: 0.34
+  migration_strategy: best
+  migration_topology: ring
+  adaptive_migration: true
+  migration_stagnation_threshold: 2
+  elite_reevaluation_count: 1
+  early_stop_patience: 3
+  early_stop_threshold: 0.000001
+  checkpoint_interval: 1
+  max_checkpoints: 3
+
+# Memory is opt-in after the user configures a supported memory backend.
+memory:
+  enabled: false
+
+multimodal:
+  enabled: false
+
+version_control:
+  enabled: true
+  type: git_worktree
+  # Cloud task downloads remove the template's top-level directory.
+  local_path: algorithm
+  auto_initialize: true
+  auto_cleanup: true
+  default_branch: main
+
+repo_analyzer:
+  type: evolve_detector
+  context_lines_before: 8
+  context_lines_after: 2
+  include: ["*.comp"]
+  exclude: [".git/**", "*.spv"]
+
+logging:
+  level: INFO
+  console: true

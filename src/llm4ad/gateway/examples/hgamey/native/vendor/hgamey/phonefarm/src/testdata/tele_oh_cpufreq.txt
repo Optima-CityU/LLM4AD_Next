@@ -1,0 +1,20 @@
+
+-------------------------------[cpufreq]-------------------------------
+
+
+cmd is: cat /sys/devices/system/cpu/cpu7/cpufreq/cpuinfo_cur_freq
+
+2704000
+
+cmd is: cat /sys/devices/system/cpu/cpu7/cpufreq/cpuinfo_max_freq
+
+2704000
+
+cmd is: cat /sys/devices/system/cpu/cpu5/cpufreq/cpuinfo_cur_freq
+
+2301000
+
+cmd is: cat /sys/devices/system/cpu/cpu5/cpufreq/cpuinfo_max_freq
+
+2301000
+

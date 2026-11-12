@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProposerOutput",
+  "description": "出方案一方的回包 (协议 game_opt_loop/proposer@1)。外部进程把它作为 stdout 的**唯一**内容写出 (日志请写 stderr), 退出码 0。\n\n每个候选单独校验: 形状不对、kind 不对、带了 harness 字段、越出白名单/开关目录、超出 n 个的, 各自打回并写明原因, 不连累同一批里合法的候选。退出码非 0、超时 (缺省 600 秒, --proposer-timeout-s)、整份解析不了, 这一代记为出错、一个候选都不上机, **不**悄悄换成别的出方案一方补位。",
+  "type": "object",
+  "required": ["protocol", "version", "candidates"],
+  "properties": {
+    "protocol": { "const": "game_opt_loop/proposer@1" },
+    "version": { "const": 1 },
+    "candidates": { "type": "array", "items": { "$ref": "proposer_candidate.schema.json" } },
+    "proposer": { "type": ["string", "null"], "description": "出方案一方自报的名字/版本, 只进证据" },
+    "notes": { "type": ["string", "null"], "description": "自由文本, 只进证据" },
+    "usage": {
+      "type": ["object", "null"],
+      "description": "可选: 出方案一方自报的用量, 进报告的经费账 (report.json 的 proposer.model_calls / proposer.usage)",
+      "properties": {
+        "model_calls": { "type": "integer", "minimum": 0, "description": "调了几次大模型 (每次模型回复算一次)" },
+        "input_tokens": { "type": "integer", "minimum": 0, "description": "未命中缓存的输入 token" },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "cache_read_tokens": { "type": "integer", "minimum": 0, "description": "命中缓存的输入 token" }
+      }
+    }
+  }
+}

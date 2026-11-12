@@ -1,0 +1,46 @@
+// upop: game_opt_loop 真实帧赛道优胜算子 gen1_loc3 (37.8dB / 0.479ms)
+// 源: game_opt_loop/runs/evo_realframes_20260923/candidates/gen1_loc3.comp
+//
+// 与原版的唯一差别是输入契约: 原版 binding 0 是 `readonly image2D` + imageLoad,
+// 但我们要读的那张图 usage=151 不含 STORAGE 位, 当不了 storage image ——
+// 只能按 sampler2D + texelFetch 读。texelFetch(q, 0) 与 imageLoad(q) 同为
+// 整数坐标直读、无过滤无舍入, 数学上逐位等价, 算子本体一行未动。
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D u_InputTexture;
+layout(binding = 1, rgba8) uniform writeonly image2D u_OutputTexture;
+
+// 算子族: 2x2 tap / bilinear / sharpen=0.00
+// 邻域 2x2 = 4 tap; 全部循环静态定界, 零显存往返。
+#define SUPPORT 1.0000
+#define SHARPEN 0.0000
+
+void main() {
+    ivec2 outPos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 outSize = imageSize(u_OutputTexture);
+    if (outPos.x >= outSize.x || outPos.y >= outSize.y) return;
+
+    ivec2 inSize = textureSize(u_InputTexture, 0);
+    // 半像素对齐: 输出像素中心映回输入像素中心。差半像素就是系统性掉 PSNR。
+    vec2 uv = (vec2(outPos) + 0.5) / vec2(outSize) * vec2(inSize) - 0.5;
+    ivec2 base = ivec2(floor(uv));
+    vec2 frac = uv - vec2(base);
+
+    vec4 acc = vec4(0.0);
+    float wsum = 0.0;
+
+    for (int dy = 0; dy <= 1; dy++) {
+        for (int dx = 0; dx <= 1; dx++) {
+            ivec2 q = clamp(base + ivec2(dx, dy), ivec2(0), inSize - ivec2(1));
+            vec4 s = texelFetch(u_InputTexture, q, 0);
+            vec2 d = vec2(float(dx), float(dy)) - frac;
+            float w = max(0.0, 1.0 - abs(d.x)) * max(0.0, 1.0 - abs(d.y));
+            acc += s * w;
+            wsum += w;
+        }
+    }
+
+    vec4 col = acc / max(wsum, 1e-5);
+    imageStore(u_OutputTexture, outPos, vec4(clamp(col.rgb, 0.0, 1.0), 1.0));
+}

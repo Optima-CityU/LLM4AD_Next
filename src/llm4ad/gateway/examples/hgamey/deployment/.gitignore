@@ -1,0 +1,12 @@
+.env
+data/
+inputs/
+config/
+ndk/
+phonefarm-state/
+adbkey*
+adb-state/
+*.apk
+!wheels/
+wheels/*
+!wheels/.gitkeep

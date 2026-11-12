@@ -1,6 +1,8 @@
 # Design
 
-Use PostgreSQL for gateway identity, authorization and jobs, RustFS for credential-free candidate bundles, and outbound WebSocket notifications with HTTP claim/report operations. Each whole-candidate evaluation uses one gateway. SDK SQLite journaling and an outbox retain accepted jobs, progress and terminal results. User adapters own data, environment and subtask dispatch; optional recovery/cancellation hooks reconcile external work. Never reassign accepted jobs merely because a heartbeat expires.
+Use PostgreSQL for gateway identity, authorization and jobs, RustFS for credential-free candidate bundles, and outbound SSE notifications with HTTP claim/report operations. Each whole-candidate evaluation uses one gateway. SDK SQLite journaling and an outbox retain accepted jobs, progress and terminal results. User adapters own data, environment and subtask dispatch; optional recovery/cancellation hooks reconcile external work. Never reassign accepted jobs merely because a heartbeat expires.
+
+The notification endpoint authenticates the gateway bearer secret before opening an SSE response, releases its database session before streaming, and reuses the standard unbuffered SSE response helper. A poll event every ten seconds keeps the HTTP stream active. The SDK consumes complete SSE events, ignores comments and reconnects after EOF or transport errors with a two-second delay. SSE has no total request timeout and a thirty-second read timeout; ordinary HTTP operations retain their existing budgets. Independent heartbeat reconciliation repairs missed notifications. Both backend and gateway runtime must be upgraded together; no legacy WebSocket notification endpoint is retained.
 
 Remote evaluation uses a dedicated Celery queue without a wall-clock task timeout, while gateway execution timeouts remain local. Task credentials and execution locks are renewed while waiting. Existing local evaluator behavior remains unchanged. Frontend configuration reuses the existing evaluator section and generated API client.
 
@@ -14,3 +16,11 @@ Results are stored in RustFS, with compact progress/result summaries in PostgreS
 The remote Celery queue has no whole-task wall-clock timeout, while existing local queue behavior is preserved. Active tasks renew their execution lock and model proxy credentials. With the model proxy enabled, builtin upstream access tokens are regenerated when resolving the proxy credential after long offline waits.
 
 Validation includes SDK journal/bundle/process tests, real PostgreSQL claims and migrations, two live gateway SDKs with real candidate execution and simulated disconnection, existing container/provider regressions, frontend type/build checks and browser interaction checks at desktop/mobile widths. Windows uses spawn, SQLite locks and taskkill; the local verification host is Linux.
+
+## SSE verification — 2026-11-09
+
+The new HTTP-stream regression failed against the previous WebSocket client before implementation. Remote SDK and HGamey regressions then passed: 437 passed, 2 compiler-environment skips. Coverage includes fragmented SSE frames, authorization headers, timeout isolation, EOF/stalled-read/proxy-error reconnects, preserved local results, and heartbeat/result upload during an SSE outage.
+
+Backend tests in the existing `backend:latest` Docker image with current source mounted read-only: 12 passed, 1 PostgreSQL-only concurrency skip. Tests cover pre-stream authentication, released database connections, ASGI disconnect cleanup, and two actual SDK gateways running candidate subprocesses against a live API through simulated disconnection. SQLite and in-memory object storage were isolated from platform data.
+
+Required source Ruff, changed-test lint, formatting, whitespace and OpenSpec strict checks passed. The extracted HGamey gateway runtime was refreshed and all 39 manifest hashes verified, including exact SDK source parity. Both backend and gateway images must be updated to activate SSE; this change did not deploy services or launch phone experiments.

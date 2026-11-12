@@ -244,7 +244,7 @@ Return the code in a fenced code block with file path annotation:
         source_extensions = {
             ".py", ".cpp", ".cc", ".c", ".h", ".hpp",
             ".java", ".js", ".ts", ".go", ".rs", ".rb",
-            ".sh", ".php",
+            ".sh", ".php", ".comp", ".glsl", ".vert", ".frag",
         }
         skip_dirs = {
             "__pycache__", ".git", "node_modules", ".venv", "venv",
@@ -272,7 +272,7 @@ Return the code in a fenced code block with file path annotation:
         Collects project context from working_dir, injects it into the prompt,
         and parses multi-file output from the LLM response.
         """
-        language = context.get("language", "python")
+        language = context.get("language", self._extension_to_language(self.default_extension))
         task_description = context.get("task_description", "")
         constraints = context.get("constraints", "")
 
@@ -284,6 +284,10 @@ Return the code in a fenced code block with file path annotation:
         else:
             ext = self._get_extension(language)
             file_name = f"implementation.{ext}"
+
+        file_extension = Path(file_name).suffix.lstrip(".")
+        if file_extension:
+            language = self._extension_to_language(file_extension)
 
         # Collect project context with EVOLVE blocks masked so the LLM
         # cannot simply echo the existing baseline implementation.
@@ -323,7 +327,7 @@ Return the code in a fenced code block with file path annotation:
         result = await self.provider.generate(full_prompt, request_stage="coder", **gen_kwargs)
 
         # Try multi-file extraction first, then fall back to single file
-        file_map = self._extract_multi_file_code(result.text)
+        file_map = self._extract_multi_file_code(result.text, file_name=file_name)
 
         logger.debug(
             f"[Coder-Initial] llm_response_len={len(result.text)} "
@@ -405,11 +409,12 @@ Return the code in a fenced code block with file path annotation:
         Supports multi-file extraction from LLM responses.
         """
         parent_code = context["parent_code"]
-        language = context.get("language", "python")
+        language = context.get("language", self._extension_to_language(self.default_extension))
         task_description = context.get("task_description", "")
         constraints = context.get("constraints", "")
 
-        parent_map = self._get_parent_code_map(parent_code)
+        file_name = context.get("file_name", context.get("main_file", f"algorithm.{self._get_extension(language)}"))
+        parent_map = self._get_parent_code_map(parent_code, file_name=file_name)
         logger.debug(
             f"[Coder-Mutation] parent_files={list(parent_map.keys())} "
             f"parent_code_type={type(parent_code).__name__}"
@@ -421,6 +426,8 @@ Return the code in a fenced code block with file path annotation:
 
         # Process each parent code file
         for file_path, content in parent_map.items():
+            extension = Path(file_path).suffix.lstrip(".")
+            file_language = self._extension_to_language(extension) if extension else language
             # Find all EVOLVE blocks in the file
             evolve_blocks = self._find_evolve_blocks(content)
             total_blocks += len(evolve_blocks)
@@ -446,7 +453,7 @@ Return the code in a fenced code block with file path annotation:
                     constraints=constraints,
                     block_name=block_name,
                     file_path=file_path,
-                    language=language,
+                    language=file_language,
                 )
                 immutable_context = self._mask_evolve_blocks(content)
                 serialization_contract = ""
@@ -465,7 +472,7 @@ Return the code in a fenced code block with file path annotation:
                     "file or EVOLVE markers.\n"
                     f"{serialization_contract}\n"
                     f"Fixed file context ({file_path}):\n"
-                    f"```{language}\n{immutable_context}\n```\n\n"
+                    f"```{file_language}\n{immutable_context}\n```\n\n"
                     f"{mutation_prompt}"
                 )
 
@@ -485,7 +492,7 @@ Return the code in a fenced code block with file path annotation:
                 llm_timing.add(result.timing)
 
                 # Extract new code from response (try named block first, then plain)
-                extracted_files = self._extract_multi_file_code(result.text)
+                extracted_files = self._extract_multi_file_code(result.text, file_name=file_path)
                 new_block = extracted_files.get(file_path) if extracted_files else None
                 if new_block is None:
                     # Fallback to single unnamed block extraction
@@ -516,7 +523,7 @@ Return the code in a fenced code block with file path annotation:
                     continue
 
                 # Validate new block
-                is_valid, error = self.validate_code(new_block, language)
+                is_valid, error = self.validate_code(new_block, file_language)
                 if not is_valid:
                     errors.append(f"[{file_path}] Block '{block_name}': {error}")
                     continue
@@ -660,7 +667,7 @@ Return the code in a fenced code block with file path annotation:
         )
         return replacement, None
 
-    def _get_parent_code_map(self, parent_code: Any) -> dict[str, str]:
+    def _get_parent_code_map(self, parent_code: Any, file_name: str | None = None) -> dict[str, str]:
         """Convert parent_code from context into a map of file paths to content.
 
         Supports multiple input formats:
@@ -670,6 +677,7 @@ Return the code in a fenced code block with file path annotation:
 
         Args:
             parent_code: Parent code in one of the supported formats
+            file_name: Target filename for a parent supplied as source text.
 
         Returns:
             Dict mapping file paths to content
@@ -685,7 +693,7 @@ Return the code in a fenced code block with file path annotation:
         else:
             # Treat as single file
             ext = self.default_extension
-            return {f"algorithm.{ext}": str(parent_code)}
+            return {file_name or f"algorithm.{ext}": str(parent_code)}
 
     def _find_evolve_blocks(self, content: str) -> list[tuple[re.Pattern, str, str, str]]:
         """Find all EVOLVE blocks in the given content.
@@ -720,7 +728,7 @@ Return the code in a fenced code block with file path annotation:
         stripped = text.strip()
         return stripped if stripped else None
 
-    def _extract_multi_file_code(self, text: str) -> dict[str, str]:
+    def _extract_multi_file_code(self, text: str, file_name: str | None = None) -> dict[str, str]:
         """Extract multiple named code blocks from LLM response.
 
         Parses code blocks with file path annotations like:
@@ -732,6 +740,7 @@ Return the code in a fenced code block with file path annotation:
 
         Args:
             text: Raw response text from LLM
+            file_name: Target filename for an unnamed response block.
 
         Returns:
             Dict mapping file paths to code content. Empty dict if no code found.
@@ -750,7 +759,7 @@ Return the code in a fenced code block with file path annotation:
         single = self._extract_code(text)
         if single:
             ext = self.default_extension
-            return {f"implementation.{ext}": single}
+            return {file_name or f"implementation.{ext}": single}
 
         return {}
 
@@ -784,7 +793,7 @@ Return the code in a fenced code block with file path annotation:
         source_extensions = {
             ".py", ".cpp", ".cc", ".c", ".h", ".hpp",
             ".java", ".js", ".ts", ".go", ".rs", ".rb",
-            ".sh", ".php",
+            ".sh", ".php", ".comp", ".glsl", ".vert", ".frag",
         }
         skip_dirs = {
             "__pycache__", ".git", "node_modules", ".venv", "venv",
@@ -880,8 +889,12 @@ Return the code in a fenced code block with file path annotation:
             "rb": "ruby",
             "sh": "bash",
             "php": "php",
+            "comp": "glsl",
+            "glsl": "glsl",
+            "vert": "glsl",
+            "frag": "glsl",
         }
-        return mapping.get(ext, ext)
+        return mapping.get(ext.lower(), ext)
 
     @staticmethod
     def _comment_pattern(comment_style: str, line: str) -> bool:
@@ -969,6 +982,10 @@ Return the code in a fenced code block with file path annotation:
             "java": "java",
             "rust": "rs",
             "go": "go",
+            "glsl": self.default_extension if self._extension_to_language(self.default_extension) == "glsl" else "glsl",
+            "comp": "comp",
+            "vert": "vert",
+            "frag": "frag",
         }
         return mapping.get(language, self.default_extension)
 

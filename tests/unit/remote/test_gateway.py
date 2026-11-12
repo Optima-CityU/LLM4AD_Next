@@ -111,11 +111,12 @@ async def test_unknown_assignment_never_repeats_work(tmp_path):
 
 
 async def test_restart_preserves_result_and_recovers_unknown_work(tmp_path):
-    """Only the adapter recovery hook is eligible after restarting an active job."""
+    """Legacy running work without an execution lease remains uncertain on restart."""
     first = gateway(tmp_path)
     active, completed = payload(), payload()
     for job in (active, completed):
         first.journal.accept(job)
+    first.journal.update(active["id"], "running", {"message": "Legacy worker already started"})
     first.journal.update(completed["id"], "completed", {"metrics": {"mse": 1}})
     worker = gateway(tmp_path)
     worker.start_process = Mock()

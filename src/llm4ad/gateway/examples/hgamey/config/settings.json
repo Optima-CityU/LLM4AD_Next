@@ -1,0 +1,39 @@
+{
+  "game": "genshin",
+  "executor_url": "http://127.0.0.1:8767",
+  "device_id": "YOUR_DEVICE_ID",
+  "expected_serial": "YOUR_PHYSICAL_RO_SERIALNO",
+  "device_profile": "YOUR_GPU_DRIVER_ANDROID_BUILD_V1",
+  "inputs_root": "./inputs",
+  "executor_inputs_prefix": "/inputs",
+  "reference_path": "./inputs/genshin",
+  "compiler": "glslangValidator",
+  "spirv_validator": "spirv-val",
+  "compile_timeout": 60,
+  "poll_interval": 2,
+  "pause_foreground": false,
+  "score_mode": "relative_latency",
+  "min_operator_improvement_pct": 1.0,
+  "evaluation_profiles": {
+    "standard": {"seconds": 5, "rounds": 8},
+    "elite": {"seconds": 5, "rounds": 16}
+  },
+  "request": {
+    "version": 2,
+    "kind": "shader",
+    "package": "com.miHoYo.Yuanshen",
+    "workload": {"carrier": "headless", "seconds": 5},
+    "conditions": {
+      "require_root": true,
+      "require_discharging": false,
+      "allow_missing_power": true,
+      "charging_suspend": {"enabled": false},
+      "cool_c": 50,
+      "power_rail": "usb",
+      "fan": "unknown",
+      "notes": "Genshin reference-frame super-resolution operator benchmark; no in-game FPS claim."
+    },
+    "protocol": {"rounds": 8, "alternating": true, "p_threshold": 0.01, "stage": "full"},
+    "payload": {"track": "sr", "budget_ms": 10, "quality_baseline_db": 30}
+  }
+}

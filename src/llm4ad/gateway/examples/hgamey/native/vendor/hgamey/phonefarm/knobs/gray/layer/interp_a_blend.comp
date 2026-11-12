@@ -1,0 +1,48 @@
+#version 450
+// 路线 A 第 2 步: NPU 输出的低分辨率光流 (4 通道, 低分辨率像素单位) + 遮罩 logit (1 通道)
+// -> 双线性放大到全分辨率并按比例放大位移 -> 反向采样两帧 -> sigmoid(遮罩) 混合 -> HUD 框内直接取更近的一帧。
+// 与 I1 convert_eval.py 的 gpu_side() 一致 (放大 = tf.image.resize bilinear 半像素; 采样 = warp_np border 夹边)。
+// 光流/遮罩缓冲按模型原样是 float32 NHWC (TFLite int8 模型的输出张量就是 float32); 若上机后 QNN 给的是
+// int8 输出, 在这里加一层解量化即可 (见 interp_common.glsl 的 int8_at)。
+// 调度: x = ceil(W/8), y = ceil(H/8)。
+#define HUD_BINDING 5
+#include "interp_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D f0;
+layout(binding = 1) uniform sampler2D f1;
+layout(std430, binding = 2) readonly buffer Flow { float v[]; } flow;   // h*w*4
+layout(std430, binding = 3) readonly buffer Mask { float v[]; } mask;   // h*w*1
+layout(binding = 4, rgba8) uniform writeonly image2D dst;
+layout(push_constant) uniform P { int W; int H; int w; int h; float t; int hud_on; } pc;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= pc.W || p.y >= pc.H) return;
+    ivec2 full = ivec2(pc.W, pc.H);
+    vec3 outc;
+    if (pc.hud_on != 0 && in_hud(p)) {
+        outc = (pc.t < 0.5 ? texelFetch(f0, p, 0).rgb : texelFetch(f1, p, 0).rgb) * 255.0;
+    } else {
+        int x0, x1, y0, y1; float ax, ay;
+        up_coord(p.x, pc.W, pc.w, x0, x1, ax);
+        up_coord(p.y, pc.H, pc.h, y0, y1, ay);
+        int i00 = y0 * pc.w + x0, i10 = y0 * pc.w + x1, i01 = y1 * pc.w + x0, i11 = y1 * pc.w + x1;
+        vec4 fl = vec4(0.0);
+        for (int c = 0; c < 4; c++) {
+            float top = flow.v[i00 * 4 + c] * (1.0 - ax) + flow.v[i10 * 4 + c] * ax;
+            float bot = flow.v[i01 * 4 + c] * (1.0 - ax) + flow.v[i11 * 4 + c] * ax;
+            fl[c] = top * (1.0 - ay) + bot * ay;
+        }
+        float mt = mask.v[i00] * (1.0 - ax) + mask.v[i10] * ax;
+        float mb = mask.v[i01] * (1.0 - ax) + mask.v[i11] * ax;
+        float m = 1.0 / (1.0 + exp(-(mt * (1.0 - ay) + mb * ay)));
+        vec2 sc = vec2(float(pc.W) / float(pc.w), float(pc.H) / float(pc.h));
+        vec2 pf = vec2(p);
+        vec3 c0 = warp255(f0, pf + fl.xy * sc, full);
+        vec3 c1 = warp255(f1, pf + fl.zw * sc, full);
+        outc = c0 * m + c1 * (1.0 - m);
+    }
+    // 参考: np.clip(out + 0.5, 0, 255).astype(uint8) = 向下取整
+    vec3 q = clamp(floor(outc + 0.5), 0.0, 255.0);
+    imageStore(dst, p, vec4(q / 255.0, 1.0));
+}

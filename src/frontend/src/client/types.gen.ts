@@ -815,6 +815,88 @@ export type EmbeddingProviderUpdate = {
 };
 
 /**
+ * Combine a saved record with optional live gateway progress.
+ */
+export type EvaluationDetail = {
+    record: EvaluationRecord;
+    summary: EvaluationSummary;
+    available_artifact_ids?: Array<(string)>;
+};
+
+/**
+ * Describe an immutable saved file without exposing local paths.
+ */
+export type EvaluationFile = {
+    id: string;
+    name: string;
+    sha256: string;
+    size: number;
+    media_type?: string;
+    description?: string;
+};
+
+/**
+ * Return a filtered page of immutable evaluation identities.
+ */
+export type EvaluationList = {
+    data: Array<EvaluationSummary>;
+    count: number;
+    page: number;
+    page_size: number;
+    storage_available?: boolean;
+};
+
+/**
+ * Store one candidate, source version, profile and instance evaluation.
+ */
+export type EvaluationRecord = {
+    id: string;
+    task_id?: string;
+    execution_id?: string;
+    algorithm_id?: string;
+    algorithm_name?: string;
+    source_fingerprint?: string;
+    evaluation_profile?: string;
+    instance_id?: string;
+    origin?: string;
+    state?: string;
+    created_at: string;
+    storage_state?: string;
+    storage_errors?: Array<(string)>;
+    result?: {
+        [key: string]: unknown;
+    };
+    artifacts?: Array<EvaluationFile>;
+    remote_job_id?: string;
+    remote_attempt_id?: string;
+};
+
+/**
+ * Describe one evaluation in the task workbench.
+ */
+export type EvaluationSummary = {
+    id: string;
+    algorithm_id?: string;
+    algorithm_name?: string;
+    execution_id?: string;
+    evaluation_profile?: string;
+    instance_id?: string;
+    source_fingerprint?: string;
+    origin?: string;
+    state?: string;
+    created_at: string;
+    storage_state?: string;
+    score?: (number | null);
+    artifact_count?: number;
+    transfer_pending?: boolean;
+    gateway_name?: (string | null);
+    gateway_online?: (boolean | null);
+    progress?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
  * 单个示例模板下的配置文件。
  */
 export type ExampleTemplateConfigItem = {
@@ -5209,6 +5291,33 @@ export type Llm4AdEvaluationGatewaysTaskJobsData = {
 };
 
 export type Llm4AdEvaluationGatewaysTaskJobsResponse = (Array<JobView>);
+
+export type Llm4AdEvaluationsListEvaluationsData = {
+    algorithmId?: (string | null);
+    evaluationProfile?: (string | null);
+    executionId?: (string | null);
+    page?: number;
+    pageSize?: number;
+    taskId: string;
+};
+
+export type Llm4AdEvaluationsListEvaluationsResponse = (EvaluationList);
+
+export type Llm4AdEvaluationsEvaluationDetailData = {
+    evaluationId: string;
+    taskId: string;
+};
+
+export type Llm4AdEvaluationsEvaluationDetailResponse = (EvaluationDetail);
+
+export type Llm4AdEvaluationsEvaluationArtifactData = {
+    artifactId: string;
+    download?: boolean;
+    evaluationId: string;
+    taskId: string;
+};
+
+export type Llm4AdEvaluationsEvaluationArtifactResponse = ((Blob | File));
 
 export type Llm4AdKnowledgeGetParserBindingResponse = (KnowledgeParserBindingResponse);
 

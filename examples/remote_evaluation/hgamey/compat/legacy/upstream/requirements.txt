@@ -1,0 +1,3 @@
+numpy>=1.26
+Pillow>=10
+perfetto==0.59.1

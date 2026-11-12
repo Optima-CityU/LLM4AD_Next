@@ -4,62 +4,14 @@ import asyncio
 import re
 import time
 from abc import ABC, abstractmethod
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
 
 from llm4ad.config.schema import EvalContext, ExecutableEvaluatorConfig
-from llm4ad.evaluator.behavior import BehaviorData
+from llm4ad.evaluator.models import EvaluationResult, Metric, MetricType
 from llm4ad.utils.registry import Registrable
-
-
-class MetricType(Enum):
-    """Types of evaluation metrics."""
-
-    MINIMIZE = "minimize"  # Lower is better
-    MAXIMIZE = "maximize"  # Higher is better
-
-
-class Metric(BaseModel):
-    """A single metric definition."""
-
-    name: str
-    type: MetricType = MetricType.MAXIMIZE
-    weight: float = 1.0  # For multi-objective optimization
-    description: str = ""
-
-    model_config = ConfigDict(frozen=True)
-
-
-class EvaluationResult(BaseModel):
-    """Evaluation result container.
-
-    Contains the computed score, detailed metrics, and any extra metadata
-    for monitoring, logging, and algorithm analysis.
-
-    Users only need to provide:
-    - `metrics`: dict of metric name -> value (supports multiple objectives/metrics)
-    - `score`: Primary aggregated score (computed by base class from metrics)
-    Everything else is optional with good defaults.
-
-    Extra information that is not used for evolution (monitoring, logs, analysis)
-    should go into `metadata`.
-    """
-    score: float = 0.0  # Primary score for evolution (computed from metrics)
-    metrics: dict[str, float]  # All evaluation metrics (objectives + secondary metrics)
-    monitor_metrics: dict[str, float] = {}  # Metrics for monitoring (subset of metrics)
-    metadata: dict[str, Any] = {}  # Extra info: monitoring, logs, analysis (optional)
-    evolution_feedback: dict[str, Any] = Field(default_factory=dict)
-    """Compact, safe evaluator findings that descendants may reuse."""
-    success: bool = True  # Whether evaluation succeeded, defaults to True
-    error_message: str | None = None  # Error message if failed, optional
-    duration_ms: float = 0.0  # Evaluation duration in milliseconds, optional
-    behavior: BehaviorData | None = None  # Behavior data from evaluation (optional)
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class BaseEvaluator(Registrable, ABC, registry_name="evaluator"):
@@ -409,5 +361,10 @@ class BenchmarkEvaluator(BaseEvaluator, ABC):
             score=avg_score,
             metrics=aggregated_metrics,
             success=all_success,
-            metadata={"num_instances": len(results), "successful_instances": count},
+            metadata={
+                "num_instances": len(results), "successful_instances": count,
+                "per_instance": [r.model_dump(mode="python", exclude={"behavior", "artifacts"}) for r in results],
+                "evaluation_records": [ref for r in results for ref in r.metadata.get("evaluation_records", [])],
+            },
+            artifacts=[artifact for result in results for artifact in result.artifacts],
         )

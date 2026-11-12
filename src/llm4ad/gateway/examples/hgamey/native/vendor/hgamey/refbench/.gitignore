@@ -1,0 +1,7 @@
+build/out/
+*.spv
+*.o
+.DS_Store
+!selftest/load.spv
+__pycache__/
+*.pyc

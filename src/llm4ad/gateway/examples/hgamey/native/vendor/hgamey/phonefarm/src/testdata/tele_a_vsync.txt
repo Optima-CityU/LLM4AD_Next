@@ -1,0 +1,2 @@
+         present offset:         0 ns	        VSYNC period:  16666666 ns
+  peak-refresh-rate         : 60.00 Hz

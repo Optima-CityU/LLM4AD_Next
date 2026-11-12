@@ -2541,6 +2541,302 @@ export const EmbeddingProviderUpdateSchema = {
     description: 'Embedding 供应商更新请求（所有字段均可选）。'
 } as const;
 
+export const EvaluationDetailSchema = {
+    properties: {
+        record: {
+            '$ref': '#/components/schemas/EvaluationRecord'
+        },
+        summary: {
+            '$ref': '#/components/schemas/EvaluationSummary'
+        },
+        available_artifact_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Available Artifact Ids'
+        }
+    },
+    type: 'object',
+    required: ['record', 'summary'],
+    title: 'EvaluationDetail',
+    description: 'Combine a saved record with optional live gateway progress.'
+} as const;
+
+export const EvaluationFileSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        sha256: {
+            type: 'string',
+            title: 'Sha256'
+        },
+        size: {
+            type: 'integer',
+            title: 'Size'
+        },
+        media_type: {
+            type: 'string',
+            title: 'Media Type',
+            default: 'application/octet-stream'
+        },
+        description: {
+            type: 'string',
+            title: 'Description',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'sha256', 'size'],
+    title: 'EvaluationFile',
+    description: 'Describe an immutable saved file without exposing local paths.'
+} as const;
+
+export const EvaluationListSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/EvaluationSummary'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        },
+        page: {
+            type: 'integer',
+            title: 'Page'
+        },
+        page_size: {
+            type: 'integer',
+            title: 'Page Size'
+        },
+        storage_available: {
+            type: 'boolean',
+            title: 'Storage Available',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['data', 'count', 'page', 'page_size'],
+    title: 'EvaluationList',
+    description: 'Return a filtered page of immutable evaluation identities.'
+} as const;
+
+export const EvaluationRecordSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        task_id: {
+            type: 'string',
+            title: 'Task Id',
+            default: ''
+        },
+        execution_id: {
+            type: 'string',
+            title: 'Execution Id',
+            default: ''
+        },
+        algorithm_id: {
+            type: 'string',
+            title: 'Algorithm Id',
+            default: ''
+        },
+        algorithm_name: {
+            type: 'string',
+            title: 'Algorithm Name',
+            default: ''
+        },
+        source_fingerprint: {
+            type: 'string',
+            title: 'Source Fingerprint',
+            default: ''
+        },
+        evaluation_profile: {
+            type: 'string',
+            title: 'Evaluation Profile',
+            default: 'standard'
+        },
+        instance_id: {
+            type: 'string',
+            title: 'Instance Id',
+            default: ''
+        },
+        origin: {
+            type: 'string',
+            title: 'Origin',
+            default: 'local'
+        },
+        state: {
+            type: 'string',
+            title: 'State',
+            default: 'completed'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        storage_state: {
+            type: 'string',
+            title: 'Storage State',
+            default: 'pending'
+        },
+        storage_errors: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Storage Errors'
+        },
+        result: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Result'
+        },
+        artifacts: {
+            items: {
+                '$ref': '#/components/schemas/EvaluationFile'
+            },
+            type: 'array',
+            title: 'Artifacts'
+        },
+        remote_job_id: {
+            type: 'string',
+            title: 'Remote Job Id',
+            default: ''
+        },
+        remote_attempt_id: {
+            type: 'string',
+            title: 'Remote Attempt Id',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_at'],
+    title: 'EvaluationRecord',
+    description: 'Store one candidate, source version, profile and instance evaluation.'
+} as const;
+
+export const EvaluationSummarySchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        algorithm_id: {
+            type: 'string',
+            title: 'Algorithm Id',
+            default: ''
+        },
+        algorithm_name: {
+            type: 'string',
+            title: 'Algorithm Name',
+            default: ''
+        },
+        execution_id: {
+            type: 'string',
+            title: 'Execution Id',
+            default: ''
+        },
+        evaluation_profile: {
+            type: 'string',
+            title: 'Evaluation Profile',
+            default: 'standard'
+        },
+        instance_id: {
+            type: 'string',
+            title: 'Instance Id',
+            default: ''
+        },
+        source_fingerprint: {
+            type: 'string',
+            title: 'Source Fingerprint',
+            default: ''
+        },
+        origin: {
+            type: 'string',
+            title: 'Origin',
+            default: 'local'
+        },
+        state: {
+            type: 'string',
+            title: 'State',
+            default: 'completed'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        storage_state: {
+            type: 'string',
+            title: 'Storage State',
+            default: 'saved'
+        },
+        score: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Score'
+        },
+        artifact_count: {
+            type: 'integer',
+            title: 'Artifact Count',
+            default: 0
+        },
+        transfer_pending: {
+            type: 'boolean',
+            title: 'Transfer Pending',
+            default: false
+        },
+        gateway_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Name'
+        },
+        gateway_online: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Online'
+        },
+        progress: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Progress'
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_at'],
+    title: 'EvaluationSummary',
+    description: 'Describe one evaluation in the task workbench.'
+} as const;
+
 export const ExampleTemplateConfigItemSchema = {
     properties: {
         name: {

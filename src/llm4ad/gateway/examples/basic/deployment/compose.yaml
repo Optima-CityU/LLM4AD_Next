@@ -1,0 +1,29 @@
+name: llm4ad-gateway
+services:
+  gateway:
+    build:
+      context: .
+      args:
+        GATEWAY_BASE_IMAGE: ${GATEWAY_BASE_IMAGE:-python:3.12-slim}
+        LLM4AD_PACKAGE: ${LLM4AD_PACKAGE:-llm4ad-next}
+        LLM4AD_EXTRAS: gateway-ui
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    command: ["start", "--ui-host", "0.0.0.0", "--ui-port", "8768", "--no-open-browser"]
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${LLM4AD_GATEWAY_ENV_FILE:?Set the absolute gateway environment file path}
+    environment:
+      LLM4AD_GATEWAY_ADAPTER: example
+      LLM4AD_GATEWAY_STATE_DIR: /data/gateway
+      LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}
+    ports:
+      - "${LLM4AD_GATEWAY_UI_HOST:-127.0.0.1}:${LLM4AD_GATEWAY_UI_PORT:-8768}:8768"
+    volumes:
+      - ${LLM4AD_GATEWAY_DATA_DIR:?Set the persistent state directory}:/data
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'

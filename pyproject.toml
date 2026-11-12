@@ -59,6 +59,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gateway-ui = [
+    "nicegui>=4.0,<4.1",
+    "fastapi>=0.143.1,<1",
+    "uvicorn[standard]>=0.22.0,<1",
+]
 infra = [
     "psutil>=5.9.0",
 ]
@@ -231,6 +236,12 @@ module = "llm4ad.llm4ad"
 ignore_errors = true
 
 [tool.ruff]
+# Preserve the imported, device-validated protocol and native executor sources.
+extend-exclude = [
+    "src/llm4ad/gateway/examples/hgamey/protocol/upstream",
+    "src/llm4ad/gateway/examples/hgamey/compilation/game_layer.py",
+    "src/llm4ad/gateway/examples/hgamey/native/vendor",
+]
 line-length = 130
 target-version = "py312"
 select = [

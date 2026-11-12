@@ -1,0 +1,18 @@
+#!/bin/zsh
+# The selected phonefarm owns the only lock protocol.
+PF=${PHONEFARM_BIN:-${0:A:h:h}/phonefarm}
+case "$1" in
+  run)
+    label=$2
+    shift 2
+    [[ "$1" == -- ]] || { print -u2 'devlock run LABEL -- COMMAND ...'; exit 2; }
+    wait_args=()
+    if (( ${+DEVLOCK_WAIT_SECONDS} )); then
+      [[ "$DEVLOCK_WAIT_SECONDS" == <-> ]] || { print -u2 'DEVLOCK_WAIT_SECONDS requires an integer'; exit 2; }
+      wait_args=(--timeout-ms $(( DEVLOCK_WAIT_SECONDS * 1000 )))
+    fi
+    exec "$PF" lease --label "$label" "${wait_args[@]}" "$@"
+    ;;
+  status) exec "$PF" lease status --json ;;
+  *) print -u2 'devlock run LABEL -- COMMAND ... | status'; exit 2 ;;
+esac

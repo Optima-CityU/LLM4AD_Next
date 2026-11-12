@@ -1,0 +1,109 @@
+--- a/executor.py
++++ b/executor.py
+@@ -11,6 +11,7 @@
+ import queue
+ import re
+ import signal
++import shutil
+ import stat
+ import subprocess
+ import sys
+@@ -692,6 +693,27 @@
+                 lookup = re.fullmatch(r"/v1/jobs/by-key/([0-9a-f]{64})", self.path)
+                 if lookup:
+                     return self.reply(200, engine.get_by_key(lookup.group(1)))
++                artifact = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})/artifacts/([0-9a-f]{64})", self.path)
++                if artifact:
++                    key, digest = artifact.groups()
++                    engine.get(key)
++                    folder = engine.jobs / key / "evidence"
++                    result = read_json(engine.jobs / key / "result.json")
++                    item = next((item for item in result.get("artifacts", []) if item.get("sha256") == digest), None)
++                    if item is None:
++                        return self.reply(404, {"error": "unknown evidence"})
++                    path = (folder / item["name"]).resolve()
++                    if not path.is_relative_to(folder.resolve()) or not path.is_file():
++                        return self.reply(404, {"error": "unknown evidence"})
++                    if path.stat().st_size != item["size"] or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
++                        return self.reply(409, {"error": "evidence changed"})
++                    self.send_response(200)
++                    self.send_header("Content-Type", "application/octet-stream")
++                    self.send_header("Content-Length", str(item["size"]))
++                    self.end_headers()
++                    with path.open("rb") as stream:
++                        shutil.copyfileobj(stream, self.wfile)
++                    return
+                 match = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})(?:/(result|logs))?", self.path)
+                 if not match:
+                     return self.reply(404, {"error": "unknown endpoint"})
+--- a/tests/test_game_ab_executor.py
++++ b/tests/test_game_ab_executor.py
+@@ -7,11 +7,15 @@
+ import subprocess
+ import sys
+ import tempfile
++import json
++import urllib.error
++import urllib.request
+ import threading
+ import time
+ import unittest
+ from pathlib import Path
+ from types import ModuleType
++from types import SimpleNamespace
+ from unittest.mock import Mock, patch
+ 
+ spec = importlib.util.spec_from_file_location(
+@@ -19,6 +23,52 @@
+ )
+ app = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(app)
++
++
++class ArtifactHTTPTests(unittest.TestCase):
++    """Serve only checksum-bound completed evidence through the local executor."""
++
++    def setUp(self):
++        """Start a loopback handler with no queue or phone access."""
++        temporary = tempfile.TemporaryDirectory()
++        self.addCleanup(temporary.cleanup)
++        self.jobs = Path(temporary.name)
++        self.key = 'a' * 32
++        self.evidence = self.jobs / self.key / 'evidence'
++        self.evidence.mkdir(parents=True)
++        self.content = b'synthetic HTTP transport fixture'
++        self.file = self.evidence / 'trace.pftrace'
++        self.file.write_bytes(self.content)
++        self.digest = hashlib.sha256(self.content).hexdigest()
++        self.result = self.jobs / self.key / 'result.json'
++        app.write_json(self.result, {'artifacts': [{'name': 'trace.pftrace', 'size': len(self.content), 'sha256': self.digest}]})
++        engine = SimpleNamespace(jobs=self.jobs, get=lambda key: {'id': key})
++        self.server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.make_handler(engine))
++        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
++        self.thread.start()
++        self.addCleanup(self.server.server_close)
++        self.addCleanup(self.server.shutdown)
++        self.url = f'http://127.0.0.1:{self.server.server_port}/v1/jobs/{self.key}/artifacts/{self.digest}'
++
++    def test_raw_bytes_are_returned_without_json_encoding(self):
++        """Keep original trace bytes independent of the report JSON."""
++        with urllib.request.urlopen(self.url) as response:
++            self.assertEqual(response.read(), self.content)
++            self.assertEqual(response.headers['Content-Type'], 'application/octet-stream')
++
++    def test_changed_evidence_is_rejected(self):
++        """Do not serve corrupted bytes under their previous checksum."""
++        self.file.write_bytes(b'changed')
++        with self.assertRaises(urllib.error.HTTPError) as error:
++            urllib.request.urlopen(self.url)
++        self.assertEqual(error.exception.code, 409)
++
++    def test_manifest_cannot_escape_job_evidence(self):
++        """An untrusted relative path cannot expose another executor file."""
++        app.write_json(self.result, {'artifacts': [{'name': '../../outside', 'size': len(self.content), 'sha256': self.digest}]})
++        with self.assertRaises(urllib.error.HTTPError) as error:
++            urllib.request.urlopen(self.url)
++        self.assertEqual(error.exception.code, 404)
+ 
+ 
+ class GameABExecutorTests(unittest.TestCase):

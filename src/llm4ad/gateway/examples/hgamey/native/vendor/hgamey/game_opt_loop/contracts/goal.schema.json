@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game_opt_loop/goal@1",
+  "title": "goal.md 的 front-matter (YAML, 这里按等价 JSON 写)",
+  "description": "目标模式里人和 harness 一起定下的结构化目标。harness 起草, 人确认后冻结 (goal run 记下 sha256, 另存 goal.frozen.md), 运行中不改。正文 (front-matter 之后) 是大白话, 原样交给出方案的一方。规格见 GOAL_SPEC.md。",
+  "type": "object",
+  "required": ["game", "objective", "budget"],
+  "properties": {
+    "game": { "type": "string", "description": "包名" },
+    "device": { "type": "string", "description": "any = 空闲的同型号; 或一个序列号。缺省 any" },
+    "objective": {
+      "type": "object",
+      "required": ["metric", "direction", "target_pct"],
+      "properties": {
+        "metric": { "type": "string", "enum": ["power_watt", "frame_p95", "fps_mean", "gpu_busy_ms"], "description": "主指标, 只能一个。gpu_busy_ms 接收端还不回, 选它的话永远判不出收益" },
+        "direction": { "type": "string", "enum": ["lower", "higher"] },
+        "target_pct": { "type": "number", "description": "期望改善幅度 (%)。最好的候选在主指标上显著改善达到它即可提前结束" }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "description": "不能变差的东西, 每项一个单键映射: {fps_mean: no_worse} / {frame_p95: no_worse} / {image: \"psnr_min_db 30\"}。no_worse 由现有判定执行 (显著变差即淘汰); image 进 ② 每个候选的画面比对门槛",
+      "items": { "type": "object" }
+    },
+    "layers": { "type": "array", "items": { "type": "string", "enum": ["sysparam", "gray", "whitebox", "upop"] }, "description": "允许动的层。whitebox = 白盒引擎设置 (只对把渲染设置做成启动参数的游戏可用, 目前 Megacity), 不可用时这一层记明原因后跳过; upop 目前 optimize 不驱动, 写了会记一条 note 并跳过" },
+    "forbid": { "type": "array", "items": { "type": "string" }, "description": "禁止动的参数 id (如 gpu.max_pwrlevel, 前缀也算: gpu 禁掉整组) / 写回范围 (15a51a879df99c32:2) / 开关名 (storeop_dont_care)" },
+    "budget": {
+      "type": "object",
+      "required": ["wall_minutes", "max_generations"],
+      "properties": {
+        "wall_minutes": { "type": "integer" },
+        "max_generations": { "type": "integer" },
+        "min_generations": { "type": "integer", "description": "no_gain 停之前至少跑几代。缺省 1" }
+      }
+    },
+    "stop_when": { "type": "array", "description": "任一满足就停: \"target_reached\" / \"budget_exhausted\" / {no_gain: N}。budget_exhausted 永远生效" },
+    "proposer": { "type": "string", "enum": ["llm", "local", "cloud"], "description": "cloud = GitHub Actions 里的 pi + Kimi (tools/proposers/cloud_actions.py), 要 gh 已登录; 环境变量 GOL_CLOUD_PROPOSER 可换适配器" },
+    "gate": { "type": "string", "enum": ["off", "shadow", "jev"] },
+    "per_generation": { "type": "integer", "description": "每一代每层上机几个候选, 1..=6, 缺省 2 (规格 v1 没写, 实现补上的)" }
+  }
+}

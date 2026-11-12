@@ -8,8 +8,11 @@
 
 import json
 import os
+import threading
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from loguru import logger
 
@@ -58,12 +61,16 @@ def _build_spec(data: dict, config_key: str) -> ContainerJobSpec:
     """
     task_id = str(data["task_id"])
     run_dir = data["run_dir"]
+    outbox = Path(run_dir).parent / ".evaluation-outbox" / task_id
     env = {
         "PYTHONUNBUFFERED": "1",
         "NO_COLOR": "1",
         "LOGURU_COLORIZE": "false",
         "LLM4AD_CONFIG_KEY": config_key,
         "TASK_DEP_INSTALL_TIMEOUT": str(settings.TASK_DEP_INSTALL_TIMEOUT),
+        "LLM4AD_EVALUATION_OUTBOX": "/task/evaluation-outbox",
+        "LLM4AD_TASK_ID": task_id,
+        "LLM4AD_EXECUTION_ID": str(data.get("execution_id") or uuid.uuid4()),
     }
     remote = data["run_args"].get("evaluator", {}).get("type") == "remote"
     if remote:
@@ -76,7 +83,8 @@ def _build_spec(data: dict, config_key: str) -> ContainerJobSpec:
         name=container_name(task_id),
         enforce_timeout=not remote,
         image=settings.TASK_RUNNER_IMAGE,
-        mounts={resolve_host_path(run_dir): TASK_CONTAINER_DATA_DIR},
+        mounts={resolve_host_path(run_dir): TASK_CONTAINER_DATA_DIR,
+                resolve_host_path(str(outbox)): "/task/evaluation-outbox"},
         env=env,
         events_file=os.path.join(run_dir, EVENTS_FILENAME),
         labels={"task_id": task_id},
@@ -102,6 +110,8 @@ def run_evolution_container(data: dict, *, check_cancelled: Callable[[], bool]) 
 
     config_key = _write_encrypted_config(data["run_args"], data["run_dir"])
     spec = _build_spec(data, config_key)
+    outbox = Path(data["run_dir"]).parent / ".evaluation-outbox" / task_id
+    outbox.mkdir(parents=True, exist_ok=True)
 
     callbacks = ContainerJobCallbacks(
         on_event=lambda event: push_log_entry(task_id, event),
@@ -126,7 +136,30 @@ def run_evolution_container(data: dict, *, check_cancelled: Callable[[], bool]) 
         },
     )
 
-    result = ContainerJob(spec, callbacks).run()
+    from app.services.evaluation_data import upload_task_pending
+
+    stop_uploads = threading.Event()
+
+    def upload_loop():
+        while not stop_uploads.wait(2):
+            try:
+                upload_task_pending(task_id)
+            except Exception:
+                logger.warning("Evaluation transfer unavailable for task {}; retaining local snapshots", task_id)
+
+    uploader = threading.Thread(target=upload_loop, name="evaluation-uploader", daemon=True)
+    uploader.start()
+    try:
+        result = ContainerJob(spec, callbacks).run()
+    finally:
+        stop_uploads.set()
+        uploader.join(timeout=10)
+        try:
+            from app.tasks.evaluation_data import recover_uploads
+
+            recover_uploads.delay()
+        except Exception:
+            logger.warning("Evaluation reconciliation could not be queued; durable snapshots remain for worker recovery")
 
     if result.status is ContainerJobStatus.CANCELLED:
         raise RuntimeError("任务已被取消")

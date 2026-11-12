@@ -5512,5 +5512,66 @@
       "failed": "Execution failed",
       "cancelled": "Cancelled"
     }
+  },
+  "evaluationData": {
+    "title": "Evaluation details",
+    "candidate": "Candidate",
+    "allCandidates": "All candidates",
+    "profile": "Evaluation stage",
+    "profiles": {
+      "all": "All stages",
+      "standard": "Standard evaluation",
+      "elite": "Elite re-evaluation"
+    },
+    "origins": {
+      "local": "Local evaluator",
+      "remote": "Remote gateway"
+    },
+    "states": {
+      "queued": "Queued",
+      "accepted": "Accepted",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "cancel_requested": "Stopping",
+      "recovery_required": "Awaiting recovery",
+      "reconnecting": "Waiting for gateway"
+    },
+    "loading": "Loading evaluation data…",
+    "loadFailed": "Could not load evaluation data. Please retry.",
+    "empty": "Evaluation records will appear here after evaluation starts. Select a candidate in the evolution graph to view its data, or show all candidates.",
+    "unnamed": "Evaluation candidate",
+    "evaluations": "Evaluation records",
+    "instance": "Instance",
+    "source": "Source version",
+    "progress": "Evaluation progress",
+    "metric": "Metric",
+    "value": "Value",
+    "kind": "Type",
+    "metrics": "Evaluation metric",
+    "monitor_metrics": "Monitoring metric",
+    "results": "Results and metrics",
+    "files": "Files ({{count}})",
+    "fileCount": "{{count}} files",
+    "metadata": "Additional data and instance details",
+    "score": "Score",
+    "noFiles": "This evaluation did not retain any files. Evaluators can explicitly declare reports, images, or raw data to retain.",
+    "storagePending": "Files are awaiting durable storage. Evaluation results are unaffected; transfer will retry automatically.",
+    "storageError": "Some evidence could not be saved. Available results are retained; transfer failures will retry automatically.",
+    "pendingFile": "This file is currently unavailable. Pending local evidence is retained until storage is acknowledged.",
+    "downloadOnly": "Preview is not available for this format. Download the original file to inspect it with a suitable tool.",
+    "previewUnavailable": "Could not preview this file. It may exceed the preview size limit; try downloading the original.",
+    "download": "Download original",
+    "downloading": "Downloading…",
+    "downloadFailed": "Could not download this file. Please retry.",
+    "refresh": "Refresh",
+    "previous": "Previous",
+    "next": "Next",
+    "storageUnavailable": "The original files for this historical evaluation are unavailable. Any remaining recorded metrics and progress are shown.",
+    "demoHint": "This walkthrough does not connect to a real evaluator. Real tasks show their evaluation progress, measurements and retained files here.",
+    "storageOffline": "File storage is temporarily unavailable. Available progress and local records remain visible; access will retry automatically.",
+    "fileCount_one": "{{count}} file",
+    "fileCount_other": "{{count}} files"
   }
 }

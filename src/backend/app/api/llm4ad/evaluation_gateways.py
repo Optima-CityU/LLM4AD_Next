@@ -3,12 +3,14 @@
 import asyncio
 import base64
 import binascii
+import hashlib
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from llm4ad.evaluator.base import EvaluationResult
 from llm4ad.remote.contracts import EvaluationContract
 from pydantic import BaseModel, Field, ValidationError
@@ -16,12 +18,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.api.llm4ad.sse_utils import sse_response
 from app.core.db import engine
 from app.core.storage import storage
 from app.models import EvaluationGateway, RemoteEvaluationJob, Task, TaskStatus
 from app.services import remote_evaluation as service
 
 router = APIRouter(prefix="/evaluation-gateways", tags=["llm4ad.evaluation-gateways"])
+_NOTIFICATION_INTERVAL = 10
 
 
 class GatewayView(BaseModel):
@@ -72,6 +76,11 @@ class JobSubmission(BaseModel):
     behavior_storage: Literal["rendered", "raw", "none"] = "none"
     parameters: dict = Field(default_factory=dict)
     bundle: str
+    algorithm_id: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
+    algorithm_name: str = ""
+    source_fingerprint: str = ""
+    execution_id: str = ""
+    instance_id: str = ""
 
 
 class JobReport(BaseModel):
@@ -209,21 +218,112 @@ def report(gateway_id: uuid.UUID, job_id: uuid.UUID, body: JobReport, db: Sessio
         db.commit()
         return {"ack": body.sequence, "state": "queued"}
     payload = body.report
-    if body.state == "completed":
+    if body.state in {"completed", "failed", "cancelled"}:
+        from app.services.evaluation_data import publish, remote_record
+
         try:
-            result = EvaluationResult.model_validate(payload).model_dump(mode="json")
+            if body.state != "completed":
+                payload = {
+                    "metrics": {},
+                    **payload,
+                    "success": False,
+                    "error_message": payload.get("error_message") or payload.get("message") or body.state,
+                }
+            evaluation = EvaluationResult.model_validate(payload)
+            if body.state != "completed":
+                evaluation.metadata.setdefault("failure_type", payload.get("error_type", "RemoteExecutionError"))
+            result = evaluation.model_dump(mode="json")
+            result.setdefault("metadata", {})["evaluation_records"] = [{
+                "id": str(job.attempt_id), "algorithm_id": job.request.get("algorithm_id", ""), "evaluation_profile": job.request.get("evaluation_profile", "standard"),
+                "instance_id": job.request.get("instance_id", ""),
+                "source_fingerprint": job.request.get("source_fingerprint", ""),
+            }]
+            record, objects = remote_record(job, result)
+            if any(key not in storage.list_objects(prefix=key) for key in objects.values()):
+                raise ValueError("Remote artifact has not been uploaded")
+            record.state = "failed" if body.state == "completed" and result.get("success") is False else body.state
             encoded = json.dumps(result, allow_nan=False).encode()
         except (ValidationError, ValueError) as exc:
             raise HTTPException(422, "Invalid evaluation result") from exc
         result_key = f"remote-evaluation/{job.task_id}/{job.id}/result-{job.attempt_id}.json"
         storage.upload(result_key, encoded, content_type="application/json")
+        publish(record, objects)
         payload = {key: result[key] for key in ("score", "metrics", "success", "duration_ms")}
+        if body.state != "completed":
+            payload.update({key: body.report[key] for key in ("message", "error_type") if key in body.report})
+        if result["success"] is False and result.get("error_message"):
+            payload["error_message"] = result["error_message"]
+            payload.setdefault("message", result["error_message"])
         payload["result_key"] = result_key
     job.state, job.sequence, job.report = body.state, body.sequence, payload
     job.updated_at = datetime.now(UTC)
     db.add(job)
     db.commit()
     return {"ack": body.sequence, "state": job.state}
+
+
+def artifact_key(job: RemoteEvaluationJob, digest: str) -> str:
+    """Derive an attempt-scoped object key without accepting arbitrary storage paths."""
+    if not re.fullmatch(r"[a-f0-9]{64}", digest):
+        raise HTTPException(422, "Invalid artifact SHA-256")
+    return f"remote-evaluation/{job.task_id}/{job.id}/artifacts/{job.attempt_id}/{digest}"
+
+
+@router.put("/{gateway_id}/jobs/{job_id}/artifacts/{digest}", include_in_schema=False)
+async def upload_artifact(
+    gateway_id: uuid.UUID,
+    job_id: uuid.UUID,
+    digest: str,
+    request: Request,
+    db: SessionDep,
+    authorization: str = Header(),
+    x_attempt_id: uuid.UUID = Header(),
+):
+    """Accept retry-safe binary evidence only from the authoritative gateway."""
+    service.authorized_gateway(db, gateway_id, token(authorization))
+    job = db.get(RemoteEvaluationJob, job_id)
+    if job is None or job.gateway_id != gateway_id or job.attempt_id != x_attempt_id:
+        raise HTTPException(409, "This execution attempt is no longer authoritative")
+    if job.state not in service.ACTIVE | {"completed"}:
+        raise HTTPException(409, "Execution no longer accepts evidence")
+    key = artifact_key(job, digest)
+    content = bytearray()
+    async for chunk in request.stream():
+        content.extend(chunk)
+        if len(content) > 64 * 1024 * 1024:
+            raise HTTPException(413, "Evidence exceeds 64 MiB")
+    if not content or hashlib.sha256(content).hexdigest() != digest:
+        raise HTTPException(422, "Evidence checksum mismatch")
+    storage.upload(key, bytes(content), content_type="application/octet-stream")
+    return {"object_key": key, "sha256": digest, "size": len(content)}
+
+
+@router.get("/tasks/{task_id}/jobs/{job_id}/artifacts/{digest}", include_in_schema=False)
+def download_artifact(task_id: uuid.UUID, job_id: uuid.UUID, digest: str, db: SessionDep, current_user: CurrentUser):
+    """Return completed evidence only to the task owner and only from its manifest."""
+    task = db.get(Task, task_id)
+    if task is None or service.task_owner(db, task) != current_user.id:
+        raise HTTPException(404, "Task not found")
+    job = db.get(RemoteEvaluationJob, job_id)
+    if job is None or job.task_id != task_id or not job.report.get("result_key"):
+        raise HTTPException(404, "Evidence not found")
+    key = artifact_key(job, digest)
+    result = json.loads(storage.download(job.report["result_key"]))
+    item = next(
+        (
+            item
+            for item in result.get("metadata", {}).get("artifacts", [])
+            if item.get("object_key") == key and item.get("sha256") == digest
+        ),
+        None,
+    )
+    if item is None:
+        raise HTTPException(404, "Evidence not found")
+    data = storage.download(key)
+    if len(data) != item.get("size") or hashlib.sha256(data).hexdigest() != digest:
+        raise HTTPException(409, "Stored evidence checksum mismatch")
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", str(item.get("name", "evidence")).rsplit("/", 1)[-1])
+    return Response(data, media_type="application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.post("/tasks/{task_id}/jobs", include_in_schema=False)
@@ -264,6 +364,11 @@ def submit(task_id: uuid.UUID, body: JobSubmission, db: SessionDep, authorizatio
             "evaluation_profile": body.evaluation_profile,
             "behavior_storage": body.behavior_storage,
             "parameters": body.parameters,
+            "algorithm_id": str(body.algorithm_id) if body.algorithm_id else "",
+            "algorithm_name": body.algorithm_name,
+            "source_fingerprint": body.source_fingerprint,
+            "execution_id": body.execution_id,
+            "instance_id": body.instance_id,
         },
     )
     db.add(job)
@@ -335,20 +440,16 @@ def task_jobs(task_id: uuid.UUID, db: SessionDep, current_user: CurrentUser):
     return result
 
 
-@router.websocket("/{gateway_id}/events")
-async def notifications(websocket: WebSocket, gateway_id: uuid.UUID):
-    """Outbound notification channel; durable jobs are always fetched via HTTP."""
-    authorization = websocket.headers.get("authorization", "")
+@router.get("/{gateway_id}/events", include_in_schema=False)
+def notifications(gateway_id: uuid.UUID, authorization: str = Header()):
+    """Authenticate once and release the database before streaming SSE hints."""
     with Session(engine) as db:
-        try:
-            service.authorized_gateway(db, gateway_id, token(authorization))
-        except HTTPException:
-            await websocket.close(code=4401)
-            return
-    await websocket.accept()
-    try:
+        service.authorized_gateway(db, gateway_id, token(authorization))
+
+    async def events():
+        """Keep the HTTP stream active without holding database resources."""
         while True:
-            await websocket.send_json({"type": "poll"})
-            await asyncio.sleep(2)
-    except (WebSocketDisconnect, RuntimeError, OSError):
-        return
+            yield 'event: poll\ndata: {"type":"poll"}\n\n'
+            await asyncio.sleep(_NOTIFICATION_INTERVAL)
+
+    return sse_response(events())

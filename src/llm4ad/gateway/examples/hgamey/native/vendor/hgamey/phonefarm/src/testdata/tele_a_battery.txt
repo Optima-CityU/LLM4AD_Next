@@ -1,0 +1,18 @@
+Current Battery Service state:
+  AC powered: false
+  USB powered: false
+  Wireless powered: false
+  Dock powered: false
+  Max charging current: 0
+  Max charging voltage: 0
+  Charge counter: 10000
+  status: 4
+  health: 2
+  present: true
+  level: 100
+  scale: 100
+  voltage: 5000
+  temperature: 250
+  technology: Li-ion
+  Charging state: 0
+  Charging policy: 0

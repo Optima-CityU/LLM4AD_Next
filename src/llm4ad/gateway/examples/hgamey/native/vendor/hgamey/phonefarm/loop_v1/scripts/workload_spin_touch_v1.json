@@ -1,0 +1,7 @@
+[
+  { "action": "sleep", "ms": 3000 },
+  { "action": "exec", "cmd": "input swipe 900 400 2000 400 12000" },
+  { "action": "exec", "cmd": "input swipe 900 400 2000 400 12000" },
+  { "action": "exec", "cmd": "input swipe 900 400 2000 400 12000" },
+  { "action": "sleep", "ms": 1000 }
+]

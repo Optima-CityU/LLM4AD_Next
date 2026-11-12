@@ -1,0 +1,61 @@
+#version 450
+// 路线 B 第 2 步: 1/4 分辨率亮度上的块匹配。每个工作组负责一个 8x8 块, 在后帧里 ±16 (1/4 像素, 即全分辨率 ±64)
+// 全搜索 33x33=1089 个候选, 取 SAD 最小者; 并列时取位移更小的 (|dx|+|dy|), 再并列取扫描序靠前的 —
+// 避免平坦区域总落到搜索窗角上。窗口越界夹到边缘 (= numpy 的 edge 填充)。
+// 输出每块一个 (dx,dy) 整数 (1/4 分辨率像素单位)。调度: x = gw, y = gh (gw = ceil(qw/8), gh = ceil(qh/8))。
+#include "interp_common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, binding = 0) readonly buffer L0 { uint v[]; } la;
+layout(std430, binding = 1) readonly buffer L1 { uint v[]; } lb;
+layout(std430, binding = 2) writeonly buffer MV { int v[]; } mv;   // gh*gw*2
+layout(push_constant) uniform P { int qw; int qh; int gw; int gh; } pc;
+
+const int BS = 8, R = 16, WIN = BS + 2 * R, NC = (2 * R + 1) * (2 * R + 1);
+shared uint sA[BS * BS];
+shared uint sB[WIN * WIN];
+shared uvec3 sBest[256];
+
+bool less3(uvec3 a, uvec3 b) {
+    return a.x < b.x || (a.x == b.x && (a.y < b.y || (a.y == b.y && a.z < b.z)));
+}
+
+void main() {
+    uint lid = gl_LocalInvocationID.x;
+    ivec2 o = ivec2(gl_WorkGroupID.xy) * BS;
+    ivec2 lim = ivec2(pc.qw - 1, pc.qh - 1);
+    for (uint i = lid; i < uint(BS * BS); i += 256u) {
+        ivec2 p = clamp(o + ivec2(int(i) % BS, int(i) / BS), ivec2(0), lim);
+        sA[i] = la.v[p.y * pc.qw + p.x];
+    }
+    for (uint i = lid; i < uint(WIN * WIN); i += 256u) {
+        ivec2 p = clamp(o - R + ivec2(int(i) % WIN, int(i) / WIN), ivec2(0), lim);
+        sB[i] = lb.v[p.y * pc.qw + p.x];
+    }
+    barrier();
+    uvec3 best = uvec3(0xFFFFFFFFu);
+    for (uint c = lid; c < uint(NC); c += 256u) {
+        int dy = int(c) / (2 * R + 1) - R, dx = int(c) % (2 * R + 1) - R;
+        uint sad = 0u;
+        for (int y = 0; y < BS; y++) {
+            int rb = (y + dy + R) * WIN + dx + R;
+            for (int x = 0; x < BS; x++) {
+                uint a = sA[y * BS + x], b = sB[rb + x];
+                sad += a > b ? a - b : b - a;
+            }
+        }
+        uvec3 key = uvec3(sad, uint(abs(dx) + abs(dy)), c);
+        if (less3(key, best)) best = key;
+    }
+    sBest[lid] = best;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1u) {
+        if (lid < s && less3(sBest[lid + s], sBest[lid])) sBest[lid] = sBest[lid + s];
+        barrier();
+    }
+    if (lid == 0u) {
+        int c = int(sBest[0].z);
+        int bi = (int(gl_WorkGroupID.y) * pc.gw + int(gl_WorkGroupID.x)) * 2;
+        mv.v[bi] = c % (2 * R + 1) - R;
+        mv.v[bi + 1] = c / (2 * R + 1) - R;
+    }
+}

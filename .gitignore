@@ -9,6 +9,10 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+!/src/llm4ad/gateway/examples/hgamey/native/vendor/hgamey/**/build/
+/src/llm4ad/gateway/examples/hgamey/native/vendor/hgamey/**/build/*
+!/src/llm4ad/gateway/examples/hgamey/native/vendor/hgamey/**/build/*.sh
+!/src/llm4ad/gateway/examples/hgamey/native/vendor/hgamey/**/build/*.json
 develop-eggs/
 dist/
 downloads/
@@ -21,6 +25,11 @@ parts/
 sdist/
 var/
 wheels/
+!/src/llm4ad/gateway/examples/hgamey/deployment/wheels/
+/src/llm4ad/gateway/examples/hgamey/deployment/wheels/*
+!/src/llm4ad/gateway/examples/hgamey/deployment/wheels/.gitkeep
+/src/llm4ad/gateway/examples/hgamey/toolchain/
+/src/llm4ad/gateway/examples/hgamey/artifacts/
 share/python-wheels/
 *.egg-info/
 .installed.cfg

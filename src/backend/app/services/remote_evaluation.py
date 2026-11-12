@@ -84,10 +84,12 @@ def is_online(gateway: EvaluationGateway) -> bool:
 def job_payload(job: RemoteEvaluationJob, include_result: bool = False) -> dict:
     """Return runtime metadata, excluding storage internals and credentials."""
     report = {key: value for key, value in job.report.items() if key != "result_key"}
-    if include_result and job.state == "completed" and job.report.get("result_key"):
+    if include_result and job.state in {"completed", "failed", "cancelled"} and job.report.get("result_key"):
         from app.core.storage import storage
 
         report = json.loads(storage.download(job.report["result_key"]))
+        if job.state in {"failed", "cancelled"}:
+            report.update({name: job.report[name] for name in ("message", "error_type") if name in job.report})
     return {
         **job.request,
         "id": str(job.id),

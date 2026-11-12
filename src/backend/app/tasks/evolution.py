@@ -139,6 +139,13 @@ def _finalize_task(celery_task_id: str, status: TaskStatus) -> None:
                 logger.info(f"任务 {biz_task_id} 已被其他调用者 finalize，跳过")
                 return
 
+            try:
+                from app.tasks.evaluation_data import recover_uploads
+
+                recover_uploads.delay()
+            except Exception:
+                logger.warning("Evaluation recovery could not be queued after task finalization; durable records remain")
+
             from app.utils.log_persist import bulk_insert_task_logs, sanitize_for_json
 
             logs = read_all_logs(task.id)

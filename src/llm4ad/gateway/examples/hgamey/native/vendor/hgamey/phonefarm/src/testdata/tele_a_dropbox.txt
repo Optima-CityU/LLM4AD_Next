@@ -1,0 +1,5 @@
+0
+2026-08-31 10:01:44 system_server_lowmem (compressed text, 13765 bytes)
+2026-08-31 17:39:57 system_server_strictmode (text, 2692 bytes)
+
+Usage: dumpsys dropbox [--print|--file] [YYYY-mm-dd] [HH:MM:SS] [tag]

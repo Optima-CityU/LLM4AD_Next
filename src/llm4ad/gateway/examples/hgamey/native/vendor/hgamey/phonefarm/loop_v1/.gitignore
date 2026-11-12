@@ -1,0 +1,24 @@
+# 原始 ftrace 每轮约 21MB, 21 轮就是 439MB —— 是证据, 但不进 git。
+# 需要离线回放时从归档介质取回 runs/ 再跑 tools/replay_test.sh。
+runs/*/trace.txt
+runs/*.txt
+!runs/snap_*.txt
+
+# 解析产物体积很小, 保留在版本里, 它们才是可读的结论
+!runs/*/summary.json
+!runs/*/attribution.json
+!runs/*/snap_*.txt
+!runs/report.json
+!runs/report.cmd
+# report.cmd 里点名要它, 少这 2 个字节 report.json 就不可从零复现
+!runs/replay_exit.txt
+
+# Python 字节码
+__pycache__/
+*.pyc
+
+# vulkan-samples 载体: 同样的纪律 —— 原始 ftrace 是证据但不进 git,
+# 归档在 U 盘 /Volumes/USB/phonefarm-vks-traces/, 解析产物留在版本里。
+runs_vks/*/*/trace.txt
+runs_vks/*/*/run.log
+runs_vks/*/*/run_pre.log

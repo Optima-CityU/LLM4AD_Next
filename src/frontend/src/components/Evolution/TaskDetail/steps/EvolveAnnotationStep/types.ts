@@ -98,6 +98,8 @@ export interface AdviseResult<T> {
   updated_at: string | null
 }
 
+export const SHADER_FILE_EXTENSIONS = new Set(["comp", "glsl", "vert", "frag"])
+
 export const COMMENT_STYLES: Record<string, [string, string]> = {
   py: ["# EVOLVE_START", "# EVOLVE_END"],
   pyw: ["# EVOLVE_START", "# EVOLVE_END"],
@@ -124,11 +126,15 @@ export const COMMENT_STYLES: Record<string, [string, string]> = {
 
 export function getCommentStyle(filePath: string): [string, string] {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? ""
+  if (SHADER_FILE_EXTENSIONS.has(ext))
+    return ["// EVOLVE_START", "// EVOLVE_END"]
   return COMMENT_STYLES[ext] ?? ["# EVOLVE_START", "# EVOLVE_END"]
 }
 
 export function getLanguageFromPath(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase() ?? ""
+  // Monaco's existing C-family tokenizer also handles GLSL source syntax.
+  if (SHADER_FILE_EXTENSIONS.has(ext)) return "cpp"
   const map: Record<string, string> = {
     py: "python",
     pyw: "python",

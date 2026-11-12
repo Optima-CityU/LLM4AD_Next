@@ -56,6 +56,10 @@ class EvolveDetector(BaseRepositoryAnalyzer):
         ".sh": "shell",
         ".rb": "ruby",
         ".php": "php",
+        ".comp": "glsl",
+        ".glsl": "glsl",
+        ".vert": "glsl",
+        ".frag": "glsl",
     }
 
     def __init__(self, config: dict[str, Any]):
@@ -420,6 +424,10 @@ class EvolveDetector(BaseRepositoryAnalyzer):
         "*.php",
         "*.html",
         "*.xml",
+        "*.comp",
+        "*.glsl",
+        "*.vert",
+        "*.frag",
     ]
 
     DEFAULT_EXCLUDE_PATTERNS: list[str] = [

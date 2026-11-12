@@ -1,0 +1,8 @@
+services:
+  gateway:
+    build:
+      args:
+        LLM4AD_EXTRAS: gateway-ui
+    command: ["start", "--ui-host", "${LLM4AD_GATEWAY_UI_HOST:-127.0.0.1}", "--ui-port", "${LLM4AD_GATEWAY_UI_PORT:-8768}", "--no-open-browser"]
+    environment:
+      LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}

@@ -1,0 +1,8 @@
+0x00000000) active-count = 2; sampling_period(ms) = {66.7, 200.0}, selected = 66.67 ms; batching_period(ms) = {100.0, 2000.0}, selected = 100.00 ms
+Active sensors:
+Goldfish 3-axis Accelerometer (handle=0x00000000, connections=2)
+2 active connections
+0 direct connections
+17:53:21 + 0x00000000 pid=17776 uid=10144 package=com.google.android.location.collectionlib.SensorScanner samplingPeriod=20000us batchingPeriod=0us
+17:48:02 + 0x00000000 pid=17776 uid=10144 package=com.google.android.location.collectionlib.SensorScanner samplingPeriod=20000us batchingPeriod=0us
+17:42:44 + 0x00000000 pid=17776 uid=10144 package=com.google.android.location.collectionlib.SensorScanner samplingPeriod=20000us batchingPeriod=0us

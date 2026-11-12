@@ -64,13 +64,14 @@ import type {
   TaskResponse,
 } from "@/client"
 import { Llm4AdChatTuneService, Llm4AdTasksService, UtilsService } from "@/client"
-import OnboardingTour from "@/components/Onboarding/OnboardingTour"
-import { useTheme } from "@/components/theme-provider"
+import { getLanguageFromPath as getSourceLanguageFromPath } from "@/components/Evolution/TaskDetail/steps/EvolveAnnotationStep/types"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
   makeMarkdownComponents,
 } from "@/components/markdown/markdownComponents"
+import OnboardingTour from "@/components/Onboarding/OnboardingTour"
+import { useTheme } from "@/components/theme-provider"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2931,7 +2932,7 @@ function getLanguageFromPath(path: string): string {
     html: "html",
     css: "css",
   }
-  return map[ext] ?? "plaintext"
+  return map[ext] ?? getSourceLanguageFromPath(path)
 }
 
 function FilePreviewDialog({

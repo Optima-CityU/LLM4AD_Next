@@ -1,0 +1,16 @@
+{
+  "ndk_path": "/opt/android/ndk",
+  "phonefarm_root": "/opt/phonefarm",
+  "options": {
+    "a": "sr:1:2800x1272:0",
+    "b": "sr:1:2800x1272:0",
+    "rounds": 2,
+    "window": 10,
+    "settle": 20,
+    "enter_script": "s:35;t:0.5,0.93;s:20",
+    "pan": true,
+    "timeout_seconds": 1800,
+    "power_profile": "disabled",
+    "perfetto": true
+  }
+}

@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProposerInput",
+  "description": "game_opt_loop 交给出方案一方的输入 (协议 game_opt_loop/proposer@1)。一代一份: 外部进程从 stdin 读到它, 内置的大模型/本地变异器在进程内拿到同一份结构。每一份都落盘成 <out>/proposer/<kind>_g<代>.input.json。\n\n出方案的一方只看这份输入、只回候选; 设备、负载、测试条件、统计协议、判定都由 harness 与 phonefarm 掌握, 这里给出的 conditions / judging 是只读的说明, 改不了。",
+  "type": "object",
+  "required": ["protocol", "version", "kind", "generation", "n", "seed", "device", "target", "plan", "conditions", "judging", "constraints", "history"],
+  "properties": {
+    "protocol": { "const": "game_opt_loop/proposer@1" },
+    "version": { "const": 1, "description": "加字段不升版本 (读的一方必须容忍不认识的字段); 改已有字段的语义才升。" },
+    "kind": { "type": "string", "enum": ["sysparam", "gray", "whitebox"], "description": "这一代要哪一层的候选。sysparam = ③ 系统参数; gray = ② 画面流程改写 (Vulkan layer); whitebox = ④ 白盒引擎设置 (启动参数)。① 画面算子不经 optimize, 不会出现。" },
+    "generation": { "type": "integer", "minimum": 1 },
+    "n": { "type": "integer", "minimum": 1, "description": "这一代最多要几个候选。多回的只取前 n 个过了校验的, 其余记为打回、不上机。" },
+    "seed": { "type": "integer", "minimum": 0, "description": "随机种子。确定性的出方案一方应当只依赖 (这份输入, seed), 这样同一份输入能复现同一批候选。" },
+    "device": {
+      "type": "object",
+      "description": "设备能力 (摘自 caps.json)。null = 摸底时没探出来, 不是「否」。",
+      "required": ["serial", "platform", "note"],
+      "properties": {
+        "serial": { "type": "string" },
+        "platform": { "type": "string", "enum": ["adb", "hdc", "unknown"] },
+        "model": { "type": ["string", "null"] },
+        "sdk": { "type": ["string", "null"] },
+        "root": { "type": ["boolean", "null"] },
+        "charging_suspend": { "type": ["boolean", "null"] },
+        "vulkan_layer": { "type": ["boolean", "null"] },
+        "soc_temp_c": { "type": ["number", "null"] },
+        "note": { "type": "string", "description": "一句话设备说明 (内置大模型的提示词里原样用它)" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["game", "box_kind", "workload"],
+      "properties": {
+        "game": { "type": "string" },
+        "package": { "type": ["string", "null"] },
+        "box_kind": { "type": "string", "enum": ["white_box", "black_box"] },
+        "workload": { "type": "string", "description": "一句话负载说明" }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "required": ["route", "generations", "children", "rounds", "carrier", "estimate_s"],
+      "properties": {
+        "route": { "type": "string" },
+        "generations": { "type": "integer", "minimum": 1 },
+        "children": { "type": "integer", "minimum": 1 },
+        "rounds": { "type": "integer", "minimum": 1, "description": "每臂轮数 (判定的分辨率由它决定, 不随预算降)" },
+        "carrier": { "type": "string", "enum": ["headless", "refbench", "game_replay"] },
+        "estimate_s": { "type": "integer", "minimum": 0, "description": "这一层估计的真机时间 (秒)" }
+      }
+    },
+    "conditions": { "type": "object", "description": "冻结的测试条件, 形状同 eval_request.schema.json 的 conditions。只读。" },
+    "judging": {
+      "type": "object",
+      "description": "冻结的判定口径。只读: 判定在 phonefarm 端算, 出方案的一方改不了。",
+      "required": ["metrics", "p_threshold", "rule"],
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "better"],
+            "properties": {
+              "id": { "type": "string" },
+              "better": { "type": "string", "enum": ["lower", "higher"] },
+              "constraint": { "type": ["boolean", "null"] }
+            }
+          }
+        },
+        "p_threshold": { "type": "number" },
+        "multiple_comparison": { "type": ["string", "null"] },
+        "stat": { "type": ["string", "null"] },
+        "rule": { "type": "string" }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "description": "这一层准改什么。kind=sysparam 时有 whitelist + deny_keywords; kind=gray 时有 knobs。harness 会对回来的每个候选按这里再校验一遍, 越界整条打回。",
+      "properties": {
+        "whitelist": {
+          "type": ["object", "null"],
+          "description": "参数 id → { kind: sysfs|setting, path, values: [准写的取值, 原样文本], current, group, effect }。只能从 values 里挑。"
+        },
+        "deny_keywords": { "type": "array", "items": { "type": "string" }, "description": "温控保护关键词。参数 id 或路径命中即拒。" },
+        "whitebox": {
+          "type": ["array", "null"],
+          "description": "④ 白盒引擎设置旋钮目录。候选 payload.knobs 的键只能是这里的 id, 值只能取 values 里的 (values 为空时按 free 的说明写自由文本, 只许字母数字和 _,.-)。measure_only=true 的旋钮改了画面必然变, 接收端只量上限, 永远不会被保留。",
+          "items": {
+            "type": "object",
+            "required": ["id", "values", "measure_only", "what", "why"],
+            "properties": {
+              "id": { "type": "string" },
+              "values": { "type": "array", "items": { "type": "string" } },
+              "free": { "type": ["string", "null"] },
+              "measure_only": { "type": "boolean" },
+              "what": { "type": "string" },
+              "why": { "type": "string" }
+            }
+          }
+        },
+        "knobs": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "required": ["id", "status", "what", "why"],
+            "properties": {
+              "id": { "type": "string" },
+              "status": { "type": "string", "enum": ["landed", "declared", "withdrawn"], "description": "只有 landed 的能用; declared = 契约里声明了、层里还没实现; withdrawn = 实现过但证据表明会画错画面, 已撤回 (why 里写原因)" },
+              "what": { "type": "string" },
+              "why": { "type": "string" },
+              "scopes": {
+                "type": "array",
+                "description": "需要范围的开关 (storeop_dont_care) 准用的范围清单, 来自 phonefarm frame-audit analyze 判定「写回之后确定没人读」的附件。rewrite.scope 只能原样取其中一个的 scope。省略 = 这个开关不带范围。",
+                "items": {
+                  "type": "object",
+                  "required": ["scope", "pass", "bytes_per_frame", "why"],
+                  "properties": {
+                    "scope": { "type": "string", "pattern": "^[0-9a-f]{8,16}:[0-9]+$", "description": "<pass 特征码>:<附件下标>" },
+                    "pass": { "type": "string" },
+                    "bytes_per_frame": { "type": "number", "description": "每帧白写的字节数 (未压缩模型值)" },
+                    "why": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "steer": { "type": ["string", "null"], "description": "目标模式下人的掌舵指令: 「人刚刚的指令」(human.md 里机读不了的行) + 「目标说明」(goal.md 正文)。最高优先级的偏好, 与别的考虑冲突时以它为准; 白名单 / 开关目录 / 冻结判定仍是硬约束。普通 optimize 不带这个字段。" },
+    "history": {
+      "type": "array",
+      "description": "这一层之前上过机的候选, 按时间顺序, 含 ABORT。",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "generation", "candidate", "status", "measurement_valid", "kept", "p_value"],
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "generation": { "type": "integer", "minimum": 1 },
+          "candidate": { "$ref": "proposer_candidate.schema.json" },
+          "status": { "type": "string", "description": "PASS / REJECT / ABORT ... (同 eval_report.status)" },
+          "measurement_valid": { "type": "boolean", "description": "false = ABORT: 这次没量准, 既不是正样本也不是负样本" },
+          "kept": { "type": "boolean" },
+          "reason": { "type": ["string", "null"] },
+          "p_value": { "type": "number" },
+          "per_metric": { "type": "object", "description": "原样来自回包 verdict.per_metric: 指标 → { status, a_mean, b_mean, diff_mean, diff_pct, p }" },
+          "summary": { "type": "array", "items": { "type": "string" }, "description": "per_metric 的人话版" }
+        }
+      }
+    }
+  }
+}

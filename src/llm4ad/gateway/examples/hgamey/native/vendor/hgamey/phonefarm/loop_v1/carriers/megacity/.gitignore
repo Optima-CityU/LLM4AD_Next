@@ -1,0 +1,9 @@
+# 构建产物与实跑证据不进仓库
+out/
+upstream_commit.txt
+
+# route_a.json 是 make_route_a.py 从上游场景推导的产物, 必须进仓库 ——
+# 每台机器上的 sha256 要一致, 否则跨机器的轮之间没法比。手工临时路线才不进。
+routes/*.json
+!routes/route_a.json
+!routes/*.example.json

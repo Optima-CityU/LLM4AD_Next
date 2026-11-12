@@ -1,0 +1,72 @@
+#version 450
+// 路线 A 第 1 步: 两帧全分辨率 -> 576x256 (或任意更小尺寸) 的 NPU 输入 (uint8 RGB, NHWC 紧密排列)。
+// 缩小用 TF scale_and_translate 的三角核 (= tf.image.resize(bilinear, antialias=True) 缩小时的实现),
+// 与 I1 转换/评估 RIFE 时喂给模型的输入一致 (convert_eval.py 的 small())。
+// 每个线程 4 个目标像素 = 12 字节 = 3 个 uint; 要求 w*h 是 4 的倍数 (576*256 满足)。
+// 调度: x = ceil(w*h/4/64), y = 2 (y 选帧)。
+#include "interp_common.glsl"
+layout(local_size_x = 64) in;
+layout(binding = 0) uniform sampler2D src0;
+layout(binding = 1) uniform sampler2D src1;
+layout(std430, binding = 2) writeonly buffer Out0 { uint d[]; } out0;
+layout(std430, binding = 3) writeonly buffer Out1 { uint d[]; } out1;
+layout(push_constant) uniform P { int W; int H; int w; int h; float inv_scale; float zp; } pc;
+
+// 一维三角核权重: 目标下标 x (共 dst) 在源 (共 src) 上的抽头起点 start、抽头数 n 与归一化权重
+// 抽头数 = 2*ceil(src/dst)+1 以内; MAXT=12 够 src/dst <= 5.5 (2144/576=3.72, 976/256=3.81)
+#define MAXT 12
+int span(int x, int dst, int src, out int start, out float wt[MAXT]) {
+    float inv = float(src) / float(dst);
+    float ks = max(inv, 1.0);
+    float sf = (float(x) + 0.5) * inv;
+    int s0 = clamp(int(ceil(sf - ks - 0.5)), 0, src - 1);
+    int s1 = clamp(int(floor(sf + ks - 0.5)), 0, src - 1);
+    int n = min(s1 - s0 + 1, MAXT);
+    float tot = 0.0;
+    for (int i = 0; i < n; i++) {
+        float kp = (float(s0 + i) + 0.5 - sf) / ks;
+        float wv = max(0.0, 1.0 - abs(kp));
+        wt[i] = wv; tot += wv;
+    }
+    if (tot > 0.0) for (int i = 0; i < n; i++) wt[i] /= tot;
+    start = s0;
+    return n;
+}
+
+vec3 down_px(int x, int y, bool second) {
+    float wx[MAXT], wy[MAXT];
+    int sx, sy;
+    int nx = span(x, pc.w, pc.W, sx, wx);
+    int ny = span(y, pc.h, pc.H, sy, wy);
+    vec3 acc = vec3(0.0);
+    for (int j = 0; j < ny; j++) {
+        vec3 row = vec3(0.0);
+        for (int i = 0; i < nx; i++) {
+            ivec2 p = ivec2(sx + i, sy + j);
+            vec3 c = second ? texelFetch(src1, p, 0).rgb : texelFetch(src0, p, 0).rgb;
+            row += c * wx[i];
+        }
+        acc += row * wy[j];
+    }
+    return acc * 255.0;
+}
+
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    bool second = gl_GlobalInvocationID.y == 1u;
+    uint n = uint(pc.w * pc.h);
+    uint p0 = g * 4u;
+    if (p0 >= n) return;
+    uint b[12];
+    for (uint k = 0u; k < 4u; k++) {
+        uint p = p0 + k;
+        vec3 c = down_px(int(p % uint(pc.w)), int(p / uint(pc.w)), second);
+        b[k * 3u]      = quant8(c.r, pc.inv_scale, pc.zp);
+        b[k * 3u + 1u] = quant8(c.g, pc.inv_scale, pc.zp);
+        b[k * 3u + 2u] = quant8(c.b, pc.inv_scale, pc.zp);
+    }
+    for (uint j = 0u; j < 3u; j++) {
+        uint wv = pack4(b[j * 4u], b[j * 4u + 1u], b[j * 4u + 2u], b[j * 4u + 3u]);
+        if (second) out1.d[g * 3u + j] = wv; else out0.d[g * 3u + j] = wv;
+    }
+}

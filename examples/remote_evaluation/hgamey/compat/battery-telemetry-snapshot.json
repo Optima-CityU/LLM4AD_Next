@@ -1,0 +1,8 @@
+{
+  "path": "vendor/hgamey/phonefarm/src/hwcond.rs",
+  "original_sha256": "5d586b90de758bdd80f379b8b9c286bd33fc1751be18990200ae2a39bdb2108f",
+  "patched_sha256": "5e47c18ea04f2112a350ad1055a81e9959974f872655540402780a51f490fcf6",
+  "patch": "battery-telemetry.patch",
+  "patch_sha256": "689efe2cec5a882c8db46c70234c8ac7fb1ac3628b7ade6d0e64218da0b445d6",
+  "comparison": "exact pre-fix local extraction snapshot; not repository HEAD"
+}

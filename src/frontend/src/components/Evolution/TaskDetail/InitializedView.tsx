@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { TaskResponse } from "@/client"
 import { UtilsCodeServerService } from "@/client"
-import RemoteEvaluationProgress from "@/components/EvaluationGateway/RemoteEvaluationProgress"
+import EvaluationDetails from "@/components/EvaluationGateway/EvaluationDetails"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { useTheme } from "@/components/theme-provider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -51,9 +51,6 @@ interface InitializedViewProps {
 
 export default function InitializedView({ task }: InitializedViewProps) {
   const { t } = useTranslation()
-  const remote =
-    (task.input_args?.evaluator as Record<string, unknown> | undefined)
-      ?.type === "remote"
   const [ideState, setIdeState] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle")
@@ -96,6 +93,7 @@ export default function InitializedView({ task }: InitializedViewProps) {
   }, [activeTab, ideState, loadCodeToken, task.id])
 
   useEffect(() => {
+    if (activeTab === "remote-evaluation") setActiveTab("evaluations")
     if (activeTab === "memory") {
       setActiveTab("overview")
     }
@@ -202,11 +200,9 @@ export default function InitializedView({ task }: InitializedViewProps) {
             <Eye className="size-3.5" />
             {t("evolution.tabs.render")}
           </TabsTrigger>
-          {remote && (
-            <TabsTrigger value="remote-evaluation">
-              {t("remoteEvaluation.progress")}
-            </TabsTrigger>
-          )}
+          <TabsTrigger value="evaluations">
+            {t("evaluationData.title")}
+          </TabsTrigger>
           <TabsTrigger
             value="insights"
             className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
@@ -296,14 +292,19 @@ export default function InitializedView({ task }: InitializedViewProps) {
         </div>
       </TabsContent>
 
-      {remote && (
-        <TabsContent value="remote-evaluation" className="min-h-0 flex-1">
-          <RemoteEvaluationProgress
+      <TabsContent value="evaluations" className="min-h-0 flex-1">
+        {isDemoTaskId(task.id) ? (
+          <div className="rounded-lg border border-dashed p-6 text-sm leading-relaxed text-muted-foreground">
+            {t("evaluationData.demoHint")}
+          </div>
+        ) : (
+          <EvaluationDetails
+            key={task.id}
             taskId={task.id}
             active={task.status === "running" || task.status === "pending"}
           />
-        </TabsContent>
-      )}
+        )}
+      </TabsContent>
 
       <TabsContent
         value="render"

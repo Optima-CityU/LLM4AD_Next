@@ -1,0 +1,9 @@
+[
+  { "action": "gamepad_reset" },
+  { "action": "sleep", "ms": 3000 },
+  { "action": "gamepad_stick", "stick": "right", "val_x": 0.60, "val_y": 0.0, "duration_ms": 12000 },
+  { "action": "gamepad_stick", "stick": "right", "val_x": 0.60, "val_y": 0.0, "duration_ms": 12000 },
+  { "action": "gamepad_stick", "stick": "right", "val_x": 0.60, "val_y": 0.0, "duration_ms": 12000 },
+  { "action": "gamepad_reset" },
+  { "action": "sleep", "ms": 1000 }
+]

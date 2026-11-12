@@ -1,0 +1,366 @@
+{
+  "_fixture_kind": "constructed_not_device_validation",
+  "version": 1,
+  "stage": "conclusion",
+  "policy": {
+    "version": 1,
+    "goal": "render_efficiency",
+    "required_metrics": [
+      "frame_p95",
+      "fps_mean",
+      "power_w_mean"
+    ],
+    "required_pairs": 5,
+    "require_quality": false,
+    "temp_cap_c": 70,
+    "cool_c": 40,
+    "baseline_min_runs": 3,
+    "dispersion_max_pct": 5.0,
+    "monotonic_max_ratio": 0.9,
+    "minimum_pairs_for_conclusion": 5,
+    "alpha": 0.05
+  },
+  "device": {
+    "backend": "adb",
+    "root": true,
+    "trace_available": true,
+    "measurement_available": true,
+    "control_verified": true
+  },
+  "workload_verified": true,
+  "cold_ok": true,
+  "restored": true,
+  "quality_verified": null,
+  "baseline": [
+    {
+      "label": "base0",
+      "summary": {
+        "frame_p95": 20.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "base1",
+      "summary": {
+        "frame_p95": 20.02,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "base2",
+      "summary": {
+        "frame_p95": 19.98,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    }
+  ],
+  "control": [
+    {
+      "label": "ctrl0",
+      "summary": {
+        "frame_p95": 20.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "ctrl1",
+      "summary": {
+        "frame_p95": 20.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "ctrl2",
+      "summary": {
+        "frame_p95": 20.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "ctrl3",
+      "summary": {
+        "frame_p95": 20.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "ctrl4",
+      "summary": {
+        "frame_p95": 20.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    }
+  ],
+  "candidate": [
+    {
+      "label": "knob0",
+      "summary": {
+        "frame_p95": 19.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "knob1",
+      "summary": {
+        "frame_p95": 19.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "knob2",
+      "summary": {
+        "frame_p95": 19.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "knob3",
+      "summary": {
+        "frame_p95": 19.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    },
+    {
+      "label": "knob4",
+      "summary": {
+        "frame_p95": 19.0,
+        "fps_mean": 60.0,
+        "soc_temp_max_c": 40.0
+      },
+      "env": {
+        "power_w_mean": 5.0,
+        "power_rail": "battery",
+        "on_battery": true,
+        "power_window_verified": true,
+        "thermal_window_verified": true,
+        "trace_window_verified": true
+      },
+      "frame_evidence": {
+        "source": "synthetic_fixture",
+        "semantics": "gpu_submit_proxy",
+        "confidence": "inferred",
+        "submits_per_frame": 2,
+        "display_verified": false,
+        "acf_at_selected_period": 0.8
+      },
+      "workload_exit": 0
+    }
+  ],
+  "evidence_origin": "synthetic"
+}

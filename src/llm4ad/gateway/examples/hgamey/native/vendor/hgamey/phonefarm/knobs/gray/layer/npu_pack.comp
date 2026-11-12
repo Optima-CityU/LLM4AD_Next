@@ -1,0 +1,46 @@
+#version 450
+// npuop 打包: 游戏低分辨率画面 -> NPU 输入张量 (NHWC, 每通道 1 字节, 行优先紧密排列)。
+// 形状、通道数 (3 或 4)、有无符号、量化参数全部由层从模型里读出后经 push constant 传入, 不写死。
+//   q = round(v * qmul + zp), v 是 [0,1] 的像素值; qmul 已含「模型的浮点量程是 0..1 还是 0..255」。
+// 画面尺寸 (sw,sh) 与模型输入 (w,h) 不同时, 这里顺便做一次双线性重采样 (半像素对齐)。
+// 每个线程写一个 uint = 4 个字节, 不要求像素数是 4 的倍数 (缓冲按 4 字节取整分配)。
+layout(local_size_x = 64) in;
+layout(binding = 0) uniform sampler2D src;
+layout(std430, binding = 1) writeonly buffer Out { uint d[]; };
+layout(push_constant) uniform P { int sw; int sh; int w; int h; int c; int sgn; float qmul; float zp; } pc;
+
+vec3 fetch(int p) {
+    ivec2 xy = ivec2(p % pc.w, p / pc.w);
+    if (pc.sw == pc.w && pc.sh == pc.h) return texelFetch(src, xy, 0).rgb;
+    vec2 uv = (vec2(xy) + 0.5) * vec2(pc.sw, pc.sh) / vec2(pc.w, pc.h) - 0.5;
+    ivec2 b = ivec2(floor(uv));
+    vec2 f = uv - vec2(b);
+    ivec2 mx = ivec2(pc.sw - 1, pc.sh - 1);
+    vec3 a00 = texelFetch(src, clamp(b, ivec2(0), mx), 0).rgb;
+    vec3 a10 = texelFetch(src, clamp(b + ivec2(1, 0), ivec2(0), mx), 0).rgb;
+    vec3 a01 = texelFetch(src, clamp(b + ivec2(0, 1), ivec2(0), mx), 0).rgb;
+    vec3 a11 = texelFetch(src, clamp(b + ivec2(1, 1), ivec2(0), mx), 0).rgb;
+    return mix(mix(a00, a10, f.x), mix(a01, a11, f.x), f.y);
+}
+
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    uint total = uint(pc.w * pc.h * pc.c);
+    uint b0 = g * 4u;
+    if (b0 >= total) return;
+    float lo = pc.sgn != 0 ? -128.0 : 0.0;
+    uint word = 0u;
+    int lastp = -1;
+    vec3 col = vec3(0.0);
+    for (uint k = 0u; k < 4u; k++) {
+        uint b = b0 + k;
+        if (b >= total) break;
+        int p = int(b / uint(pc.c));
+        int ch = int(b % uint(pc.c));
+        if (p != lastp) { col = fetch(p); lastp = p; }
+        float v = ch < 3 ? col[ch] : 1.0;            // 第 4 通道 (若有) 填不透明
+        float q = clamp(round(v * pc.qmul + pc.zp), lo, lo + 255.0);
+        word |= (uint(int(q)) & 0xFFu) << (8u * k);  // int8 取补码低 8 位
+    }
+    d[g] = word;
+}

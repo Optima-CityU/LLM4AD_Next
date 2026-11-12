@@ -1,0 +1,20 @@
+{
+  "steps": [
+    {
+      "action": "instrument",
+      "pkg": "android.content.cts",
+      "runner": "androidx.test.runner.AndroidJUnitRunner",
+      "class_or_method": "android.content.pm.cts.PackageManagerTest#testGetPackageInfo",
+      "ms": 300000,
+      "idle_ms": 60000
+    },
+    {
+      "action": "instrument",
+      "pkg": "android.content.cts",
+      "runner": "androidx.test.runner.AndroidJUnitRunner",
+      "class_or_method": "android.content.pm.cts.PackageManagerTest#testGetPackageInfoVersionCode",
+      "ms": 300000,
+      "idle_ms": 60000
+    }
+  ]
+}

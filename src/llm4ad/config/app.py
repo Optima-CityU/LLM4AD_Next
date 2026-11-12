@@ -322,6 +322,10 @@ class RepoAnalyzerConfig(BaseModel):
             "*.php",
             "*.html",
             "*.xml",
+            "*.comp",
+            "*.glsl",
+            "*.vert",
+            "*.frag",
         ],
         description="List of glob patterns for files to include in analysis",
         json_schema_extra=ui(

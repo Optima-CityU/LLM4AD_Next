@@ -1,0 +1,12 @@
+{
+  "api": "getPackageInfo",
+  "module": "CtsContentTestCases",
+  "package": "android.content.cts",
+  "runner": "androidx.test.runner.AndroidJUnitRunner",
+  "cases": [
+    "android.content.pm.cts.PackageManagerTest#testGetPackageInfo",
+    "android.content.pm.cts.PackageManagerTest#testGetPackageInfoVersionCode"
+  ],
+  "expected_count": 2,
+  "apk_path": "CtsContentTestCases.apk"
+}

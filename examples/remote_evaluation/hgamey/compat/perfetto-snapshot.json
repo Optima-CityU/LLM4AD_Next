@@ -1,0 +1,19 @@
+{
+  "patch": "perfetto.patch",
+  "patch_sha256": "0ae6bf127490bd3691243a036f55585570d8d406802918779052526b99c895b8",
+  "requires": "game-ab.patch",
+  "prior_patch_sha256": "6e6c549e0229f3cf58345f13a00ee7d2100794e9eec566439d58e153479d618b",
+  "scope": "Checksum-bound binary Perfetto evidence downloads and loopback HTTP fixture tests; no native shader changes",
+  "files": [
+    {
+      "path": "executor.py",
+      "original_sha256": "17cf0607bc8d1463c90954df17a9e9ac24b748f27788f9f9baab523416bb741e",
+      "patched_sha256": "fb4530420b9dff88012d66e5678a9c8935b878bbfaab801386c10664438a44c9"
+    },
+    {
+      "path": "tests/test_game_ab_executor.py",
+      "original_sha256": "e8f122f87015e0e5b23cc141518ae3727ff66cef0518216436305eb6b01c07b2",
+      "patched_sha256": "16ccceab7cb89ae92f646a49045dabb38337c8d4c2e38bf3252ed2580240b7d3"
+    }
+  ]
+}

@@ -17,3 +17,14 @@ Accepted jobs SHALL retain gateway ownership across disconnections and require c
 #### Scenario: Gateway loses execution state
 - WHEN a restarted gateway cannot identify the external execution
 - THEN it reports recovery required instead of repeating the evaluation.
+
+### Requirement: SSE gateway notifications
+Gateways SHALL receive notifications through an authenticated outbound SSE connection. The server SHALL release database sessions before streaming and send periodic keepalive events. Durable HTTP heartbeats, claims and reports SHALL remain independent of notification delivery.
+
+#### Scenario: Notification stream disconnects
+- WHEN the SSE stream ends, stalls or receives a proxy error
+- THEN the gateway reconnects with a retry delay, preserves local job state and continues HTTP reconciliation without replaying accepted evaluations.
+
+#### Scenario: Invalid gateway requests notifications
+- WHEN a notification request has an unknown gateway identity or invalid bearer secret
+- THEN the server rejects it before opening an event stream.

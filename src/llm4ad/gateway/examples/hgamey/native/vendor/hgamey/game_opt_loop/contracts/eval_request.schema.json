@@ -1,0 +1,309 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EvaluationRequest",
+  "description": "game_opt_loop 下发给 phonefarm 的真机评测请求。\n\nv2 把三类改动面收进同一个信封: kind = shader (画面算子) / sysparam (系统参数) / gray (画面流程改写)。共同的部分 (设备、负载、测试条件、统计协议) 在信封上, 各类特有的东西在 payload 里。这样接收端 `phonefarm eval` 只有一个入口, 上层也只有一套证据格式。\n\nprotocol 与 conditions 在看到任何候选数据之前就已冻结, 事后不得调整 —— 这是防硬件噪声欺骗的前提。\n\nv1 是只有 shader 一类时的扁平格式, 由 `phonefarm gpu-op` 消费; 本 schema 仍然接受它 (见底部的 if/then), 上层的适配层负责在接收端还没实现 eval 之前把 v2 shader 请求降级成 v1 再发给 gpu-op。",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "version": { "type": "integer", "enum": [1, 2] },
+    "kind": {
+      "type": "string",
+      "enum": ["shader", "sysparam", "gray", "whitebox"],
+      "description": "改的是哪一层。shader = 画面算子 (超分/插帧/后处理算子, 白盒载体或能挂层的黑盒); sysparam = 系统参数 (需 root, 不动画面); gray = 画面流程改写 (Vulkan layer 注入, 改 LoadOp/精度/分辨率)。省略 = shader (兼容 v1)。"
+    },
+    "candidate_id": { "type": "string", "description": "上层给这个候选的唯一 id; 原样回到报告里" },
+    "serial": { "type": ["string", "null"], "description": "目标设备序列号; 省略则由 phonefarm 选择唯一在线设备" },
+    "package": { "type": "string", "description": "被测应用包名。白盒载体时是载体自己的包名 (如 io.github.hgamey.refbench)" },
+
+    "workload": {
+      "type": "object",
+      "description": "在什么东西上量。三类改动共用同一套负载描述 —— 换了改动面不等于换了被测场景, 同一个负载才比得了。",
+      "required": ["carrier"],
+      "properties": {
+        "carrier": {
+          "type": "string",
+          "enum": ["headless", "refbench", "game_replay"],
+          "description": "headless = vkop_runner 孤立跑 dispatch (只有 shader 类用得上, 量不到帧时); refbench = 第一方白盒靶场, 算子挂进它的管线; game_replay = 真实游戏 + 确定性回放脚本 (黑盒游戏唯一的路)。\n\n注意 headless 与 refbench 量的不是同一个量, 不可混着比 (见 phonefarm docs/SPEC_GPU_OP.md §4.3)。"
+        },
+        "script": { "type": ["string", "null"], "description": "game_replay 时的确定性回放脚本 id 或路径。原神这类手柄失效的游戏必须用触控负载 (见 phonefarm knobs/gray/workload_spin_touch_v1.json)" },
+        "seconds": { "type": ["integer", "null"], "minimum": 1, "description": "单轮负载时长 (秒)。game_replay 用" },
+        "frames": { "type": ["integer", "null"], "minimum": 1, "description": "refbench 每臂渲染帧数" },
+        "intensity": { "type": ["integer", "null"], "minimum": 0, "description": "refbench 场景 fragment 负载强度" },
+        "render_comm": { "type": ["string", "null"], "description": "game_replay 时解析帧时用的渲染线程名 (ftrace comm)。缺省按 Unity 的 UnityGfxDeviceW; 非 Unity 游戏由游戏档案 (game_profile.schema.json 的 workload.render_comm) 给出, 不给就解析出零帧。" },
+        "launch": {
+          "type": ["object", "null"],
+          "description": "自驱动负载: 应用带 intent extras 启动后自己跑确定性路线 (Megacity 的 city_flythrough)。有它就不看 script、不走进门。sysparam 每臂带 extras 重启应用, 等 marker 文件出现再采 seconds 秒; gray 挂层时带 extras 启动, 画面比对改为上机前用 static_extras 场景跑一次 storeop-check (孪生 pass 现场开关)。",
+          "required": ["extras"],
+          "properties": {
+            "extras": { "type": "string", "description": "am start 的 extras, 如 --es scene city_flythrough --es frames 3600 ..." },
+            "marker": { "type": ["string", "null"], "description": "应用进入被测窗口时在 Android/data/<包>/files/ 下落的文件名; null = 启动后固定等 20 秒" },
+            "static_extras": { "type": ["string", "null"], "description": "画面比对用的静态场景 extras (相机不动)" }
+          }
+        },
+        "enter": { "type": ["string", "null"], "enum": ["onboard", null], "description": "每臂重启游戏 (gray 挂层) 之后怎么回到游戏场景。onboard = 接收端跑 phonefarm onboard 的白名单进门状态机, 进不去整次作废; 缺省 = 不管 (旧行为)。有游戏档案的目标才这么填。" }
+      }
+    },
+
+    "conditions": {
+      "type": "object",
+      "description": "测试条件。**在看到候选数据之前冻结**, 并且原样回到报告里 —— 一份不写清测试条件的数字没法跨轮比较。",
+      "properties": {
+        "cool_c": { "type": ["number", "null"], "description": "等冷目标 (摄氏度): SoC 结温降到此值以下才开跑。null = 不等冷。\n\n这个数不是越低越好: 连跑几十轮之后设备根本降不到一个固定低温, 拿绝对值当门槛会把每组候选卡死在等冷超时上。参考 loop_v1/auto 的取法: min(max(40, 基线起跑温度+1), temp_cap_c - 2)。DESIGN 里写的 32C 假定挂了外置风扇强吹。" },
+        "temp_cap_c": { "type": ["number", "null"], "description": "温度上限。超了这一组直接作废并还原, 不参与比较。optimize 的取法: 农场安全线 70C (常数)。以前取「摸底温度 + 3」, 摸底时游戏多半没在跑, 一跑原神第 1 轮就超, 整组作废。与 cool_c 是两件事: cool_c 是起跑门槛 (超时不作废), temp_cap_c 是安全上限 (超了作废)。" },
+        "require_root": { "type": "boolean", "description": "这一轮是否必须有 root。sysparam 恒为 true; shader 在 refbench/headless 载体上也要 (锁频与 ftrace 都要 root)" },
+        "allow_missing_power": { "type": "boolean", "default": false, "description": "Shader measurement-only opt-in: unavailable whole-device power stays null, with the reason preserved. Cannot combine with required discharge or charging suspension." },
+        "require_discharging": { "type": "boolean", "description": "是否必须处于放电态才算数。充电时电池轨读到的是流入功率, USB 轨含着灌进电池的那一份, 两者都不是整机功耗。true 时接收端应先尝试停充 (charging_suspend), 停不掉就把 power_watt 如实报 null 而不是报一个假数字。" },
+        "charging_suspend": {
+          "type": ["object", "null"],
+          "description": "怎么停充。null = 不尝试。停充必须在这一轮结束时还原。",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "node": { "type": ["string", "null"], "description": "停充用的 sysfs 节点; null = 由接收端自己探。实际用了哪个原样回到报告的 power_source.charging_suspended_via" }
+          }
+        },
+        "fan": {
+          "type": ["string", "null"],
+          "enum": ["on", "off", "unknown", null],
+          "description": "外置风扇状态。**必须记**: 同一台机器挂不挂风扇, 稳态温度差十几度, 帧时与功耗都不可跨风扇状态比较。量不到就写 unknown, 别猜。"
+        },
+        "ingame_fps_setting": { "type": ["string", "null"], "description": "游戏内帧率/画质设置的原样记录 (如 \"60fps/高\")。游戏自己的设置改了, 之前所有基线全部作废; 不记下来就查不出为什么两批数据对不上。量不到写 null。" },
+        "screen_brightness": { "type": ["integer", "null"], "description": "屏幕亮度原值。屏幕是整机功耗的大头, 亮度变了功耗就不可比。" },
+        "quality_reference": { "type": ["string", "null"], "description": "画质真值: 一张 PNG, 或一整个装着真机截帧的目录。放在信封上而不是 shader 的 payload 里, 是因为**不止 shader 会动画面** —— 灰档的每一个改写 (LoadOp / 精度 / 渲染分辨率) 都改画面, 那一层的 psnr 约束没有真值就判不了。payload 里的同名字段优先 (那是单个候选的一次性覆盖); 两处都没有时接收端退回程序化图案, 并在报告的 quality_reference.kind 里如实写 procedural。" },
+        "notes": { "type": ["string", "null"], "description": "其它人工记录的条件" }
+      }
+    },
+
+    "protocol": {
+      "type": "object",
+      "description": "冻结的统计协议。",
+      "required": ["rounds", "alternating", "p_threshold"],
+      "properties": {
+        "cool_c": { "type": "number", "description": "**v1 遗留字段**, 等冷门槛。v2 请写 conditions.cool_c; 两处都有时以 conditions 为准。" },
+        "replay_seconds": { "type": "integer", "minimum": 1, "description": "**v1 遗留字段**, 单次回放时长。v2 请写 workload.seconds。" },
+        "rounds": { "type": "integer", "minimum": 1, "description": "**每臂**轮数; 总跑测次数 = rounds x 2" },
+        "alternating": { "type": "boolean", "description": "是否严格 A/B/A/B 交替 (而非跑完 A 再跑 B)。交替是防热漂移的关键: 分块跑时 B 臂全程在更热的机器上, 温度差会被整包算进候选差异里。" },
+        "p_threshold": { "type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "显著性门槛 (\"变差\"一侧用它, 不收紧)" },
+        "stat": {
+          "type": ["string", "null"],
+          "enum": ["welch_t", "exact_permutation", null],
+          "description": "用哪种检验。welch_t = Welch 两样本 t 检验 (gpu-op 现用, 不假设等方差); exact_permutation = 精确置换检验全枚举 (loop_v1/auto 现用, 小样本下不依赖分布假设)。省略 = 由接收端按 kind 选它既有的那一种。"
+        },
+        "multiple_comparison": {
+          "type": ["string", "null"],
+          "enum": ["none", "bonferroni_on_wins", null],
+          "description": "多重比较怎么处理。bonferroni_on_wins = 「改善」一侧收紧到 alpha/K、「变差」一侧仍用 p_threshold 不收紧 —— **两侧故意不对称**: 宁可漏掉一个真改善, 也不要把一个真退化放过去。同时看 K 个指标却两侧都按 0.05 判, 假阳性会抬到约 1-(1-0.05)^K。"
+        },
+        "metrics": {
+          "type": ["array", "null"],
+          "description": "这一轮看哪些指标、各自哪个方向算好。省略 = 接收端按 kind 用缺省表。判定口径是冻结规则的一部分, 显式写下来比让接收端猜更可靠。",
+          "items": {
+            "type": "object",
+            "required": ["id", "better"],
+            "properties": {
+              "id": { "type": "string", "description": "对应 eval_report.metrics 里的字段名" },
+              "better": { "type": "string", "enum": ["lower", "higher"] },
+              "constraint": { "type": ["boolean", "null"], "description": "true = 这一项是约束不是目标 (如画质): 不改善不算输, 掉下去一票否决" }
+            }
+          }
+        }
+      }
+    },
+
+    "payload": {
+      "type": "object",
+      "description": "各 kind 特有的部分。具体形状见下面的 if/then。"
+    },
+
+    "track": { "type": "string", "enum": ["sr", "frame_gen"], "description": "v1 扁平字段 (shader)" },
+    "replay_script": { "type": "string", "description": "v1 扁平字段" },
+    "shader_path": { "type": "string", "description": "v1 扁平字段" },
+    "spirv_path": { "type": "string", "description": "v1 扁平字段" },
+    "budget_ms": { "type": "number", "exclusiveMinimum": 0, "description": "v1 扁平字段" },
+    "quality_baseline_db": { "type": "number", "description": "v1 扁平字段" },
+    "incumbent_latency_ms": { "type": ["number", "null"], "description": "v1 扁平字段" },
+    "quality_reference": { "type": ["string", "null"], "description": "v1 扁平字段" }
+  },
+
+  "allOf": [
+    {
+      "if": { "properties": { "version": { "const": 1 } }, "required": ["version"] },
+      "then": {
+        "description": "v1: 扁平 shader 请求, 由 `phonefarm gpu-op` 消费。",
+        "required": ["candidate_id", "track", "package", "replay_script", "shader_path", "spirv_path", "budget_ms", "quality_baseline_db", "protocol"]
+      }
+    },
+    {
+      "if": { "properties": { "version": { "const": 2 } }, "required": ["version"] },
+      "then": {
+        "description": "v2: 带 kind 的信封, 由 `phonefarm eval` 消费。",
+        "required": ["kind", "candidate_id", "package", "workload", "conditions", "protocol", "payload"]
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "shader" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["track", "shader_path", "spirv_path", "budget_ms"],
+            "properties": {
+              "track": { "type": "string", "enum": ["sr", "frame_gen"], "description": "赛道 id" },
+              "shader_path": { "type": "string", "description": "算子 GLSL 源码路径" },
+              "spirv_path": { "type": "string", "description": "本地门禁已编译好的 SPIR-V 路径; 真机不必再编一遍, 而且坏字节码绝不下发真机" },
+              "budget_ms": { "type": "number", "exclusiveMinimum": 0, "description": "耗时硬预算; 超了判 SLOW" },
+              "quality_baseline_db": { "type": ["number", "null"], "description": "画质地板的兜底值。接收端**优先用本场基线臂的实测画质**当地板 —— 绝对 dB 不可跨参考图比较, 拿别处搬来的常数当地板会得出荒谬结论。" },
+              "incumbent_latency_ms": { "type": ["number", "null"], "description": "在位冠军算子的实测耗时; null = 还没有冠军。refbench 载体的 A 臂不挂算子 (耗时按定义为 0), 接收端必须拿这个值判候选是否比现任更便宜, 否则该判断恒假。" },
+              "quality_reference": { "type": ["string", "null"], "description": "画质真值: 一张 PNG, 或一整个装着真机截帧的目录 (目录里的图全部参与, 逐帧 PSNR 取均值)。null = 接收端退回 runner 内置程序化图案 —— 同一算子在两者上的绝对 dB 差约 11 dB, 不可互相比较。" },
+              "inject": {
+                "type": ["object", "null"],
+                "description": "黑盒游戏上怎么把算子挂进去。null = 白盒载体自己挂 (refbench 的 postfx 队列)。黑盒时走灰档 Vulkan layer, 与 kind=gray 同一套注入机制。",
+                "properties": {
+                  "via": { "type": "string", "enum": ["carrier_native", "vulkan_layer"] },
+                  "layer": { "type": ["string", "null"], "description": "层名, 如 VK_LAYER_refknobs_readonly" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "sysparam" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["params"],
+            "properties": {
+              "probe_only": {
+                "type": ["boolean", "null"],
+                "description": "true = **只探白名单, 不跑候选**: 在真机上逐个候选节点验「存在 + 可写 + 写了真生效」, 每次改动在同一个函数里立刻还原, 探完再做一次全量快照比对确认探测本身不留痕。回包把探测结果放在 conditions_observed 与 evidence_dir 里, 不产出任何指标。\n\n这一步必须在接收端做, 因为它要写节点: 白名单不是拍脑袋的常量表, 很多 sysfs 节点接受 write() 但随即被驱动或热策略夹回原值, 只看 write 的返回码会得出「能改」的假结论。probe_only=true 时 params 可以是空对象。"
+              },
+              "why": { "type": ["string", "null"], "description": "出主意的那一方 (大模型或本地变异器) 说这组想验证什么。只进证据, 不进判定。" },
+              "params": {
+                "type": "object",
+                "description": "参数 id → 值。id 与值都必须来自上层下发的 whitelist; 接收端**再校验一遍**, 不信上层。",
+                "additionalProperties": { "type": "string" }
+              },
+              "plan": {
+                "type": "array",
+                "description": "落到设备上的写入计划 —— 已经展开成 (kind, path, value) 三元组, 接收端不必再解释 param id。apply 前全量校验, 有任何一项越界就整份拒绝, 一个字节都不写。",
+                "items": {
+                  "type": "object",
+                  "required": ["kind", "path", "value"],
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["sysfs", "setting"], "description": "sysfs = 直接写节点; setting = `settings put <ns> <key>`" },
+                    "path": { "type": "string", "description": "sysfs 绝对路径, 或 \"<ns>:<key>\"" },
+                    "value": { "type": "string" }
+                  }
+                }
+              },
+              "whitelist": {
+                "type": ["object", "null"],
+                "description": "本轮允许改的参数与各自的合法取值表 (真机探测结果的函数, 不是拍脑袋的常量表)。随请求下发是为了让接收端能独立复核 —— 上层说某个值合法不算数。",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["sysfs", "setting"] },
+                    "path": { "type": "string" },
+                    "values": { "type": "array", "items": { "type": "string" } },
+                    "current": { "type": "string" },
+                    "group": { "type": ["string", "null"], "description": "跨项约束分组 (同组的 min/max 要成对合法)" }
+                  }
+                }
+              },
+              "deny_keywords": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "温控保护关键词。命中即拒, **不看探测结果, 不看大模型怎么说**。关热保护能立刻换来漂亮数字, 那是拿硬件安全换指标。上层拦一道, 接收端必须再拦一道 —— 故意冗余, 设备端是最后一道。缺省 [thermal, trip_point, cooling, fan, tsens, bcl, throttl]。"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "gray" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["rewrites"],
+            "properties": {
+              "why": { "type": ["string", "null"], "description": "这组改写想验证什么。只进证据, 不进判定。" },
+              "layer": { "type": ["string", "null"], "description": "Vulkan layer 名; null = 接收端用缺省层 (VK_LAYER_refknobs_*)" },
+              "rewrites": {
+                "type": "array",
+                "minItems": 1,
+                "description": "这一轮打开哪些改写。每一项对应层里一个受控开关 —— 层的开关集合是有限且已实现的, 上层不能凭空发明新开关, 发明了接收端应当拒绝整份请求。",
+                "items": {
+                  "type": "object",
+                  "required": ["knob"],
+                  "properties": {
+                    "knob": {
+                      "type": "string",
+                      "enum": ["loadop_dont_care", "storeop_dont_care", "attachment_precision", "render_scale", "shader_replace"],
+                      "description": "loadop_dont_care = 把 render pass 的 LoadOp LOAD 改写成 DONT_CARE (省一次 tile 回读); storeop_dont_care = StoreOp 同理; attachment_precision = 降 attachment 格式精度; render_scale = 改离屏 pass 的渲染分辨率; shader_replace = 用上层给的 SPIR-V 顶替某个 pass 的着色器 (与 kind=shader 的黑盒路径共用这条通道)"
+                    },
+                    "scope": { "type": ["string", "null"], "description": "作用范围。storeop_dont_care 必填: \"<pass 特征码前缀 ≥8 位十六进制>:<附件下标>\" (特征码取自 phonefarm frame-audit analyze), 只改那一个 pass 的那一个附件; 可以有多条, 接收端合成一个指定串一起施加。其余开关: null = 全部命中的 pass" },
+                    "args": { "type": ["object", "null"], "description": "该开关的参数, 如 render_scale 的 {\"scale\": 0.75}" }
+                  }
+                }
+              },
+              "image_check": {
+                "type": ["object", "null"],
+                "description": "画面比对。每轮两臂挂层、进场景后、负载开始前在同一位置各截一张, 改写臂对对照臂算 PSNR (RGB); 低于 min_psnr_db 整次 ABORT, 理由「画面出错」, 截图进 evidence_dir。接收端缺省就做 (门槛 30 dB), 上层显式写出来是为了把门槛冻结进请求。逐轮值与对照臂相邻两轮的参照值回在 conditions_observed.image_check。",
+                "properties": {
+                  "min_psnr_db": { "type": "number", "description": "门槛 (dB)。缺省 30" }
+                }
+              },
+              "require_hit": {
+                "type": "boolean",
+                "description": "候选臂必须真的命中过改写 (层自报的绑定计数 > 0), 否则整轮作废。**这一条必须为 true**: 改写没生效却当成有效样本, 等于拿 A 去和 A 比, 会稳定产出「无显著差异」的假阴性。缺省 true。"
+              },
+              "side_effect_ack": {
+                "type": ["string", "null"],
+                "description": "已知副作用的显式确认。debug.vulkan.layers 是全局属性, 挂层期间启动的、自己 lib 目录里没有这个 .so 的 Vulkan 应用会启动失败 (实测厂商应用 cn.nubia.gameassist 每 ~2 秒崩溃重启一次)。接收端应在层加载成功后立刻清属性, 并在这一轮结束时还原。"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "whitebox" } }, "required": ["kind"] },
+      "then": {
+        "required": ["workload"],
+        "properties": {
+          "workload": {
+            "if": { "properties": { "carrier": { "const": "refbench" } }, "required": ["carrier"] },
+            "then": { "required": ["frames", "intensity"] },
+            "else": { "required": ["launch"] }
+          },
+          "payload": {
+            "type": "object",
+            "required": ["knobs"],
+            "properties": {
+              "why": { "type": ["string", "null"], "description": "这组旋钮想验证什么。只进证据, 不进判定。" },
+              "quality_frames": { "type": "integer", "minimum": 60, "maximum": 100000, "description": "refbench native whitebox only: separate full offscreen GPU readback hash runs; excluded from timing." },
+              "knobs": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": { "enum": ["msaa", "store_opt", "feat_off", "fog_event", "ssao_src", "ssao_after_opaque", "shadowres", "depth_priming", "loadop"] },
+                "additionalProperties": { "type": ["string", "integer", "boolean"], "description": "旋钮值; 只许 [A-Za-z0-9_,.-], 长度 ≤ 64 (要拼进 am start)" },
+                "description": "白盒旋钮 (阶段 3 第三层) → 值。对照臂 = workload.launch.extras; 改写臂 = 它后面追加 `--es <旋钮> <值>`。语义见 phonefarm docs/MEGACITY_WHITEBOX_KNOBS.md 与 loop_v1/carriers/megacity/contract/launch.json: msaa=1/2/4, store_opt=auto/discard/store, feat_off=逗号分隔的渲染器特性名子串, fog_event=RenderPassEvent 名或整数, ssao_src=depth/depthnormals, ssao_after_opaque=0/1, shadowres=256..4096, depth_priming=off/auto/forced。接收端每臂核对 megacity_out.json 的 knobs 回读, 没生效整组 ABORT。msaa / feat_off / shadowres 改了画面必然变化, 只量上限 (报告 verdict.measure_only=true, status 恒 REJECT)。"
+              },
+              "measure_only": { "type": ["boolean", "null"], "description": "true = 不管旋钮是什么都只量上限 (status 恒 REJECT)。" },
+              "image_check": {
+                "type": ["object", "null"],
+                "properties": {
+                  "min_psnr_db": { "type": ["number", "null"], "description": "改写臂对对照臂 (workload.launch.static_extras 静态场景) 的 PSNR 下限; 缺省 30, 与 gray 相同。measure_only 时只记录不判。" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

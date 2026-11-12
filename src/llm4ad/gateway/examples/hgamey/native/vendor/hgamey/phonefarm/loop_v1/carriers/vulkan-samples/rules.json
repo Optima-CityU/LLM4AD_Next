@@ -1,0 +1,30 @@
+{
+ "_comment": "Vulkan-Samples 两臂判读规则 (冻结): 档位语义逐行读自上游样例构造函数。报告里的判读脚本 sha256 就是本文件的 sha256 —— 改这里的任何值, 新报告的哈希跟着变, 与切换点之前的归档证据不再可比。",
+ "knobs": {
+  "render_passes": {
+   "0": "颜色附件 loadOp=LOAD + 深度附件 storeOp=STORE, 不用 vkCmdClearAttachments",
+   "1": "颜色附件 loadOp=CLEAR + 深度附件 storeOp=DONT_CARE, 用 vkCmdClearAttachments"
+  },
+  "subpasses": {
+   "0": "subpass 合并: G-buffer 留在 tile memory (上游注释 Good settings)",
+   "1": "两个独立 render pass: G-buffer 走 DRAM 往返",
+   "2": "关掉 transient attachments: G-buffer 附件变成真实显存分配",
+   "3": "加大 G-buffer 格式精度"
+  },
+  "msaa": {
+   "0": "单 render pass, MSAA 在 tile 内 resolve",
+   "1": "开后处理 → 两个 render pass, 走 writeback resolve"
+  },
+  "afbc": {
+   "_note": "Arm AFBC; 在 Adreno 上对应 UBWC 被 VK_IMAGE_USAGE_STORAGE_BIT 顶掉, 本机语义靠实测说话, 不预判方向",
+   "0": "交换链 image 额外带 STORAGE usage → 压制帧缓冲压缩",
+   "1": "交换链 image 只带 COLOR_ATTACHMENT usage → 允许帧缓冲压缩"
+  }
+ },
+ "metric_meaning": {
+  "frame_p95": "帧时间 p95 (ms), 提交节奏推出来的真实出帧",
+  "frame_p50": "帧时间中位数 (ms)",
+  "gpu_active_mean": "每帧 GPU 真正在跑命令的时间 (ms), 不含排队",
+  "bw_median": "kgsl_buslevel 的 avg_bw 中位数, GPU 侧总线带宽投票 (直接观测量)"
+ }
+}

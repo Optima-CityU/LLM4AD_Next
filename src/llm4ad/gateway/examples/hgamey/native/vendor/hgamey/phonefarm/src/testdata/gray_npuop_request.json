@@ -1,0 +1,46 @@
+{
+  "version": 2,
+  "kind": "gray",
+  "candidate_id": "gray_g1c1",
+  "serial": "91253241019A",
+  "package": "com.miHoYo.Yuanshen",
+  "workload": {
+    "carrier": "game_replay",
+    "script": "knobs/gray/workload_spin_touch_v1.json",
+    "seconds": 36
+  },
+  "conditions": {
+    "cool_c": 40.0,
+    "temp_cap_c": 70.0,
+    "require_root": true,
+    "require_discharging": true,
+    "charging_suspend": { "enabled": true, "node": "/sys/class/qcom-battery/charging_enabled" },
+    "fan": "off"
+  },
+  "protocol": {
+    "cool_c": 40.0,
+    "replay_seconds": 36,
+    "rounds": 5,
+    "alternating": true,
+    "p_threshold": 0.05,
+    "stat": "exact_permutation",
+    "multiple_comparison": "bonferroni_on_wins",
+    "metrics": [
+      { "id": "frame_p95", "better": "lower" },
+      { "id": "fps_mean", "better": "higher" },
+      { "id": "power_w_mean", "better": "lower" },
+      { "id": "psnr_db", "better": "higher", "constraint": true }
+    ],
+    "image_policy": "report"
+  },
+  "payload": {
+    "why": "本地降级产出: NPU 超分, lag=1 (等本帧推理, 晚 1 帧、串行)",
+    "rewrites": [
+      { "knob": "npuop", "args": { "lag": 1 } }
+    ],
+    "require_hit": true,
+    "side_effect_ack": "debug.vulkan.layers 是全局属性; 层加载成功后立刻清属性, 收尾还原",
+    "image_check": { "min_psnr_db": 30.0 },
+    "min_applied_frac": 0.95
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "path": "vendor/hgamey/phonefarm/src/gray_session.rs",
+  "original_sha256": "ece02a9879eb6944a67334b01a30e9b5069a1b8b6e2c3580a60064fe7db900da",
+  "patched_sha256": "fe8db5a363e637df4530f783d5d1de435541e321043681618f3dd57a6208ea4f",
+  "patch": "display-rotation.patch",
+  "patch_sha256": "d73efb8d8d1af5064ea46744549e3d2a07cfbef8c5c9871682328b8520991fbb",
+  "comparison": "exact pre-fix local extraction snapshot; not repository HEAD"
+}

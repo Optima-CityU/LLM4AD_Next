@@ -1,0 +1,49 @@
+#version 450
+// selfsr_up.comp — 送显前超分: 游戏画在 swapchain 左上角的低分辨率内容 (先拷进 src) → 整张送显分辨率 dst。
+// Lanczos2 (4x4 tap) 重采样, 结果夹在最近 2x2 源像素的 [min, max] 内抑制振铃 (FSR1 EASU 同一个去振铃思路)。
+// 契约: binding 0 = 只读源 (combined sampler, 只用 texelFetch), binding 1 = 只写目标, 工作组 16x16。
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rgba8) uniform writeonly image2D dst;
+layout(push_constant) uniform PC {
+    ivec2 in_size;    // 源有效区域 (游戏实际画的宽高)
+    ivec2 out_size;   // 目标宽高
+} pc;
+
+float lanczos2(float x) {
+    x = abs(x);
+    if (x < 1e-5) return 1.0;
+    if (x >= 2.0) return 0.0;
+    const float PI = 3.14159265358979;
+    float px = PI * x;
+    return 2.0 * sin(px) * sin(px * 0.5) / (px * px);
+}
+
+vec3 fetch(ivec2 p) {
+    return texelFetch(src, clamp(p, ivec2(0), pc.in_size - 1), 0).rgb;
+}
+
+void main() {
+    ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(o, pc.out_size))) return;
+    vec2 scale = vec2(pc.in_size) / vec2(pc.out_size);
+    vec2 p = (vec2(o) + 0.5) * scale - 0.5;   // 目标像素中心在源坐标里的位置
+    ivec2 b = ivec2(floor(p));
+    vec2 f = p - vec2(b);
+    vec4 wx = vec4(lanczos2(f.x + 1.0), lanczos2(f.x), lanczos2(f.x - 1.0), lanczos2(f.x - 2.0));
+    vec4 wy = vec4(lanczos2(f.y + 1.0), lanczos2(f.y), lanczos2(f.y - 1.0), lanczos2(f.y - 2.0));
+    vec3 acc = vec3(0.0);
+    float wsum = 0.0;
+    vec3 lo = vec3(1.0), hi = vec3(0.0);
+    for (int j = 0; j < 4; j++) {
+        for (int i = 0; i < 4; i++) {
+            vec3 c = fetch(b + ivec2(i - 1, j - 1));
+            float w = wx[i] * wy[j];
+            acc += c * w;
+            wsum += w;
+            if ((i == 1 || i == 2) && (j == 1 || j == 2)) { lo = min(lo, c); hi = max(hi, c); }
+        }
+    }
+    vec3 c = clamp(acc / wsum, lo, hi);
+    imageStore(dst, o, vec4(c, 1.0));
+}

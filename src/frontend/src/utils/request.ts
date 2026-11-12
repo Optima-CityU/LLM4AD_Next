@@ -11,6 +11,16 @@ export const initOpenApi = () => {
     return localStorage.getItem("access_token") || ""
   }
 
+  // The legacy generated axios client needs a binary response mode for files.
+  OpenAPI.interceptors.request.use((request) => {
+    if (
+      /\/tasks\/[^/]+\/evaluations\/[^/]+\/artifacts\//.test(request.url ?? "")
+    ) {
+      request.responseType = "blob"
+    }
+    return request
+  })
+
   OpenAPI.interceptors.response.use(async (response: AxiosResponse) => {
     if (response.status === 503 && response.headers["x-maintenance"]) {
       showMaintenanceOverlay()

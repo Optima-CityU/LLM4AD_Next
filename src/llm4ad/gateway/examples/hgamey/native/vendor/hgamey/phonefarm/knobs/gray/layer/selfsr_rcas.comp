@@ -1,0 +1,28 @@
+#version 450
+// selfsr_rcas.comp — 超分后的对比度自适应锐化 (AMD FSR1 RCAS 的同一思路, 简化版):
+// 十字邻域, 负瓣权重按局部对比度设上限 (结果不会被推出邻域 [min, max], 不出光晕), 再乘强度 sharp。
+// 契约同 selfsr_up.comp: binding 0 = 只读源 (combined sampler, 只用 texelFetch), binding 1 = 只写目标, 工作组 16x16。
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0) uniform sampler2D src;
+layout(binding = 1, rgba8) uniform writeonly image2D dst;
+layout(push_constant) uniform PC {
+    ivec2 size;
+    float sharp;   // 0..1
+} pc;
+
+vec3 at(ivec2 p) { return texelFetch(src, clamp(p, ivec2(0), pc.size - 1), 0).rgb; }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(p, pc.size))) return;
+    vec3 c = at(p);
+    vec3 n = at(p + ivec2(0, -1)), s = at(p + ivec2(0, 1)), w = at(p + ivec2(-1, 0)), e = at(p + ivec2(1, 0));
+    vec3 mn = min(min(min(n, s), min(w, e)), c);
+    vec3 mx = max(max(max(n, s), max(w, e)), c);
+    vec3 hit_min = mn / (4.0 * mx + 1e-5);
+    vec3 hit_max = (1.0 - mx) / (4.0 * mn - 4.0 + 1e-5);
+    vec3 l3 = max(-hit_min, hit_max);
+    float lobe = clamp(max(l3.r, max(l3.g, l3.b)), -0.1875, 0.0) * pc.sharp;   // 0.1875 = RCAS_LIMIT
+    vec3 o = (lobe * (n + s + w + e) + c) / (4.0 * lobe + 1.0);
+    imageStore(dst, p, vec4(clamp(o, 0.0, 1.0), 1.0));
+}

@@ -1,0 +1,8 @@
+Starting: Intent { cmp=com.ss.android.article.news/.activity.MainActivity }
+Warning: Activity not started, its current task has been brought to the front
+Status: ok
+LaunchState: COLD
+Activity: com.ss.android.article.news/com.ss.android.newmedia.activity.browser.BrowserActivity
+TotalTime: 2310
+WaitTime: 2322
+Complete

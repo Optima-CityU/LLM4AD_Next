@@ -1,0 +1,57 @@
+#version 450
+// refbench selftest —— 已知答案负载算子 (挂在 sr_pipeline 的 postfx 插槽上)
+//
+// 用途: 给 phonefarm 的判定链出「答案已知」的考题。A/B 两臂装的是同一份字节码,
+// 只有三个特化常量的缺省值不同 —— 宿主侧 (phonefarm selftest) 按 SpecId 改写
+// OpSpecConstant 的字面量, refbench 本身不传 VkSpecializationInfo, 所以用的就是
+// 改写后的缺省值。代码路径、寄存器分配、循环体在两臂之间逐字节相同, 差别只在
+// 「多少个工作组跑重循环」这一个整数上 —— 负载差的幅度由构造给定, 不靠估。
+//
+//   SpecId 0  HEAVY_WG  按线性工作组号 (y*nx + x) 计, 前 HEAVY_WG 个工作组跑重循环。
+//                       判断在工作组粒度上一致, 不产生波内分叉; 输出 1920x1080、
+//                       工作组 16x16 时共 120x68 = 8160 个, 其中前 8040 个是满的
+//                       (最后一行只有 8 行像素有效)。
+//   SpecId 1  ITERS     重循环每像素迭代数 (依赖链, 不可并行化掉)。
+//   SpecId 2  DOWNS     采样降分辨率倍数。1 = 正常最近邻放大; >1 = 只取每 DOWNS×DOWNS
+//                       块左上角一个输入样本 —— 画质作弊考题用, 帧时不变、画面变糙。
+//
+// 重循环的结果只在一个数学上不可能成立的分支里写回 (v 是小数部分, 永远 < 1),
+// 编译器证明不了, 所以删不掉; 实际输出与 HEAVY_WG / ITERS 无关 —— 同一 DOWNS 下
+// 两臂画面逐位相同, 画质判据看到的差别只可能来自 DOWNS。
+//
+// 缺省值是安全值 (不跑重循环、不降采样): 未改写直接装上去也只是一个最近邻放大。
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba8) uniform readonly image2D u_InputTexture;
+layout(binding = 1, rgba8) uniform writeonly image2D u_OutputTexture;
+
+layout(constant_id = 0) const uint HEAVY_WG = 0u;
+layout(constant_id = 1) const uint ITERS = 1u;
+layout(constant_id = 2) const uint DOWNS = 1u;
+
+void main() {
+    ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 os = imageSize(u_OutputTexture);
+    if (o.x >= os.x || o.y >= os.y) return;
+
+    ivec2 is = imageSize(u_InputTexture);
+    vec2 uv = (vec2(o) + 0.5) / vec2(os);
+    ivec2 ip = ivec2(uv * vec2(is));
+    if (DOWNS > 1u) ip = (ip / int(DOWNS)) * int(DOWNS);
+    vec4 c = imageLoad(u_InputTexture, ip);
+
+    uint wg = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    if (wg < HEAVY_WG) {
+        vec2 p = uv * 2.0 - 1.0;
+        vec2 z = p + c.rg * 0.1;
+        float v = c.b;
+        for (uint i = 0u; i < ITERS; i++) {
+            z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) * 0.99 + p * 0.01;
+            z = clamp(z, -2.0, 2.0);
+            v = fma(v, 0.9993, dot(z, p));
+            v = v - floor(v);
+        }
+        if (v > 1.5) c = vec4(1.0, 0.0, 1.0, 1.0);
+    }
+    imageStore(u_OutputTexture, o, c);
+}

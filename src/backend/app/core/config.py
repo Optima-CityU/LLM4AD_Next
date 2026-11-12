@@ -393,6 +393,7 @@ class Settings(BaseSettings):
 
     # ---- 任务运行时其它限制 ----
     # 容器内依赖安装（uv pip install -r requirements.txt）的超时（秒）
+    EVALUATION_PREVIEW_MAX_BYTES: int = 2 * 1024 * 1024
     TASK_DEP_INSTALL_TIMEOUT: int = 600
     # 任务实时日志 Redis Stream 的近似最大长度（XADD MAXLEN）。超出后最早的日志会被裁剪
     TASK_LOGS_MAXLEN: int = 50000
