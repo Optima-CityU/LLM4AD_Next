@@ -12,7 +12,6 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import type { TaskResponse } from "@/client"
 import { UtilsCodeServerService } from "@/client"
-import EvaluationDetails from "@/components/EvaluationGateway/EvaluationDetails"
 import OnboardingTour from "@/components/Onboarding/OnboardingTour"
 import { useTheme } from "@/components/theme-provider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -93,8 +92,7 @@ export default function InitializedView({ task }: InitializedViewProps) {
   }, [activeTab, ideState, loadCodeToken, task.id])
 
   useEffect(() => {
-    if (activeTab === "remote-evaluation") setActiveTab("evaluations")
-    if (activeTab === "memory") {
+    if (["remote-evaluation", "evaluations", "memory"].includes(activeTab)) {
       setActiveTab("overview")
     }
   }, [activeTab, setActiveTab])
@@ -200,9 +198,6 @@ export default function InitializedView({ task }: InitializedViewProps) {
             <Eye className="size-3.5" />
             {t("evolution.tabs.render")}
           </TabsTrigger>
-          <TabsTrigger value="evaluations">
-            {t("evaluationData.title")}
-          </TabsTrigger>
           <TabsTrigger
             value="insights"
             className="font-bold text-sm gap-1.5 data-[state=active]:bg-primary/15 data-[state=active]:text-primary data-[state=active]:shadow-[0_0_10px] data-[state=active]:shadow-primary/15"
@@ -290,20 +285,6 @@ export default function InitializedView({ task }: InitializedViewProps) {
         >
           <MultiPanelLayout task={task} />
         </div>
-      </TabsContent>
-
-      <TabsContent value="evaluations" className="min-h-0 flex-1">
-        {isDemoTaskId(task.id) ? (
-          <div className="rounded-lg border border-dashed p-6 text-sm leading-relaxed text-muted-foreground">
-            {t("evaluationData.demoHint")}
-          </div>
-        ) : (
-          <EvaluationDetails
-            key={task.id}
-            taskId={task.id}
-            active={task.status === "running" || task.status === "pending"}
-          />
-        )}
       </TabsContent>
 
       <TabsContent

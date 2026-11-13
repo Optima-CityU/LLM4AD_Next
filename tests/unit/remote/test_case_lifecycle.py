@@ -1,13 +1,17 @@
 """Case lifecycle regressions using synthetic compilers, local files and fake RPCs."""
 
+import asyncio
 import copy
+import hashlib
 import json
 import py_compile
 import subprocess
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import aiohttp
 import pytest
 from test_hgamey_game_adapter import connect
 from test_hgamey_game_adapter import local as hgamey_fixture
@@ -64,6 +68,102 @@ async def test_fresh_prepares_once_and_recovery_reuses_frozen_measurements(attem
     assert reporter.saved_state == frozen
     folder = Path(frozen["evidence_directory"])
     assert all((folder / name).is_file() for name in frozen["files"])
+
+
+@pytest.mark.parametrize("failure", [404, 409, 429, 503, "timeout", "connection", "checksum", "cancel"])
+async def test_optional_screenshot_failure_preserves_measurement(attempt, local, monkeypatch, failure):
+    """Optional transport failures retain real results and remain bounded and cancellable."""
+    adapter, reporter, executor = attempt
+    content = b"synthetic screenshot transport bytes, not device evidence"
+    checksum = hashlib.sha256(content).hexdigest()
+    executor.game_changes["artifacts"] = [{
+        "name": "shots/A1.png", "sha256": checksum, "size": len(content), "media_type": "image/png",
+    }]
+    timeouts = []
+
+    class Response:
+        """Expose one failing image request without replacing executor RPC behavior."""
+
+        async def __aenter__(self):
+            if failure == "timeout":
+                raise TimeoutError("synthetic optional image timeout")
+            if failure == "connection":
+                raise aiohttp.ClientConnectionError("synthetic image outage")
+            if failure == "cancel":
+                raise asyncio.CancelledError()
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def raise_for_status(self):
+            if isinstance(failure, int):
+                raise aiohttp.ClientResponseError(
+                    SimpleNamespace(real_url="http://executor.example.org/image"), (), status=failure
+                )
+
+        @property
+        def content(self):
+            async def chunks(size):
+                yield b"x" * len(content)
+            return SimpleNamespace(iter_chunked=chunks)
+
+    def get(session, url, **kwargs):
+        timeouts.append(kwargs["timeout"].total)
+        return Response()
+
+    monkeypatch.setattr(aiohttp.ClientSession, "get", get)
+    operation = invoke(adapter, "evaluate", local.job, reporter)
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await operation
+    else:
+        result = await asyncio.wait_for(operation, timeout=5)
+        assert result.success and result.score == -2.5 and result.error_message is None
+        assert result.metadata["evaluation_summary"]["game_validation"] == "passed"
+        assert result.metadata["artifact_errors"][0].startswith("game/shots/A1.png:")
+        assert reporter.journal.artifacts(local.job.id, local.job.attempt_id) == []
+    assert timeouts == [15]
+
+
+async def test_screenshot_cleanup_cannot_swallow_task_cancellation(attempt, local, monkeypatch):
+    """A failing partial-file cleanup preserves the original task cancellation."""
+    adapter, reporter, executor = attempt
+    executor.game_changes["artifacts"] = [{
+        "name": "shots/A1.png", "sha256": "a" * 64, "size": 1024, "media_type": "image/png",
+    }]
+    entered = asyncio.Event()
+
+    class Response:
+        """Block only optional-image transport until the test cancels its owner."""
+
+        async def __aenter__(self):
+            entered.set()
+            await asyncio.Event().wait()
+
+        async def __aexit__(self, *args):
+            return False
+
+    original_unlink = Path.unlink
+
+    def unlink(path, *args, **kwargs):
+        if path.suffix == ".partial":
+            raise PermissionError("synthetic partial cleanup denial")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(aiohttp.ClientSession, "get", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(Path, "unlink", unlink)
+    task = asyncio.create_task(invoke(adapter, "evaluate", local.job, reporter))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert task.cancelled()
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_unprepared_evaluate_cannot_silently_compile(attempt, local, monkeypatch):

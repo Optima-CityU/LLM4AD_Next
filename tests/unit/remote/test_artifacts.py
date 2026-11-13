@@ -1,9 +1,11 @@
 """Exercise immutable evaluation evidence and retry-safe upload acknowledgements."""
 
+import base64
 import hashlib
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
@@ -79,6 +81,93 @@ async def test_upload_retries_original_bytes_and_reuses_ack(evidence):
     assert first == second and first[0]["object_key"] == "owned-object"
     worker.request.assert_awaited_once()
     assert job["task_id"] in first[0]["download_path"]
+
+
+async def test_hgamey_png_retains_description_and_uploads_original_bytes(evidence):
+    """Carry an executor screenshot through durable SDK retention and upload."""
+    from llm4ad.gateway.examples.hgamey.evaluator import HGameyShaderEvaluator
+
+    journal, job, source = evidence
+    image = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    digest = hashlib.sha256(image).hexdigest()
+    description = "Candidate (B1, round 1); captured after the measurement window."
+    response = MagicMock()
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+
+    async def chunks(size):
+        yield image
+
+    response.content.iter_chunked = chunks
+    session = MagicMock()
+    session.get.return_value = response
+    adapter = HGameyShaderEvaluator.__new__(HGameyShaderEvaluator)
+    adapter.benchmark = SimpleNamespace(url="http://executor.example.org", poll_interval=0.001)
+    state = {"evidence_directory": str(source.parent / "attempt"), "game": {"external_job_id": "a" * 32}}
+    report = {"artifacts": [{
+        "name": "shots/B1.png", "sha256": digest, "size": len(image),
+        "media_type": "image/png", "description": description,
+    }]}
+    reporter = Reporter(journal, job["id"])
+    await adapter.retain_game_artifacts(session, reporter, state, report)
+    await adapter.retain_game_artifacts(session, reporter, state, report)
+    session.get.assert_called_once()
+    (Path(state["evidence_directory"]) / "game-artifacts" / digest).unlink()
+
+    worker = Gateway.__new__(Gateway)
+    worker.journal, worker.identity = journal, {"id": str(uuid.uuid4())}
+    worker.request = AsyncMock(side_effect=aiohttp.ClientConnectionError("offline"))
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await worker.upload_artifacts(None, job)
+    retained = journal.artifacts(job["id"], job["attempt_id"])[0]
+    assert Path(retained["path"]).read_bytes() == image
+
+    async def uploaded(session, method, suffix, **kwargs):
+        assert kwargs["data"].read() == image
+        assert kwargs["headers"]["Content-Type"] == "image/png"
+        return {"object_key": "owned-png-object"}
+
+    worker.request = AsyncMock(side_effect=uploaded)
+    manifest = await worker.upload_artifacts(None, job)
+    assert manifest[0]["name"] == "game/shots/B1.png"
+    assert manifest[0]["description"] == description
+    assert manifest[0]["media_type"] == "image/png"
+    assert await worker.upload_artifacts(None, job) == manifest
+    worker.request.assert_awaited_once()
+
+
+async def test_missing_optional_screenshot_does_not_skip_other_images(evidence):
+    """A missing A arm preserves the available B image in the real SDK outbox."""
+    from llm4ad.gateway.examples.hgamey.evaluator import HGameyShaderEvaluator
+
+    journal, job, source = evidence
+    image = b"synthetic optional screenshot transport fixture"
+    checksum = hashlib.sha256(image).hexdigest()
+    missing = MagicMock()
+    missing.__aenter__ = AsyncMock(side_effect=aiohttp.ClientResponseError(None, (), status=404))
+    present = MagicMock()
+    present.__aenter__ = AsyncMock(return_value=present)
+    present.__aexit__ = AsyncMock(return_value=False)
+
+    async def chunks(size):
+        yield image
+
+    present.content.iter_chunked = chunks
+    session = MagicMock()
+    session.get.side_effect = [missing, present]
+    adapter = HGameyShaderEvaluator.__new__(HGameyShaderEvaluator)
+    adapter.benchmark = SimpleNamespace(url="http://executor.example.org", poll_interval=0.001)
+    state = {"evidence_directory": str(source.parent / "attempt"), "game": {"external_job_id": "a" * 32}}
+    files = [
+        {"name": f"shots/{side}1.png", "sha256": checksum, "size": len(image), "media_type": "image/png"}
+        for side in "AB"
+    ]
+    errors = await adapter.retain_game_artifacts(session, Reporter(journal, job["id"]), state, {"artifacts": files})
+    assert errors == ["game/shots/A1.png: ClientResponseError (HTTP 404)"]
+    assert [item["name"] for item in journal.artifacts(job["id"], job["attempt_id"])] == ["game/shots/B1.png"]
+    assert session.get.call_count == 2
 
 
 @pytest.mark.parametrize("acknowledged,uploaded,managed,removed", [

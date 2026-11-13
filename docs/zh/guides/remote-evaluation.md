@@ -145,7 +145,7 @@ evaluator:
 | --- | --- |
 | 状态事件 | 网关面板，支持筛选和历史查询；最终保留于 `metadata.evaluation_messages` |
 | 本地执行日志 | 网关面板中的 stdout/stderr；不自动上传，按日志保留时间清理 |
-| 明确声明的附件 | 平台「评估详情」，支持文本、JSON、Markdown、图片预览及原文件下载 |
+| 明确声明的附件 | 点击演化节点，在右侧「节点信息」查看 metadata 和附件；图片缩略图可点击放大，其他文件以紧凑列表展示并支持预览、下载 |
 | 生命周期计时 | 面板展示真实开始、结束及含前后处理的总耗时；`duration_ms` 保留评估器原值 |
 
 本地评估器在 `cfg.artifact_dir` 写文件，并通过 `EvaluationResult.artifacts` 声明；远程评估器可使用 `reporter.artifact()` 或 `job.artifact_dir`。文件保存在 RustFS/S3，只收集明确声明的附件和返回的行为可视化数据，示例见 [evaluation_artifacts](../../../examples/evaluation_artifacts/)。
@@ -197,7 +197,7 @@ llm4ad evaluator-gateway resolve JOB_UUID --action cancelled --state-dir ./.llm4
 | `HGAMEY_GAME_CHECK_CONFIG` | 可选游戏验证 JSON；部署环境示例使用 `/config/game-check.json` |
 | `HGAMEY_EVAL_SECONDS` / `HGAMEY_EVAL_ROUNDS` | `5` / `8`，常规评估每臂秒数和轮数 |
 | `HGAMEY_ELITE_EVAL_SECONDS` / `HGAMEY_ELITE_EVAL_ROUNDS` | 默认至少 `5` / `16`，精英复评预算 |
-| `HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT` | `1`，确认改善所需的最低百分比，取值 `[1, 100)`；不改变原始得分 |
+| `HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT` | `1`，确认改善所需的最低百分比，取值 `[1, 100)`；未确认改善记为 `no_advantage`，仍是有效评估，不改变原始得分 |
 | `HGAMEY_COMPILE_TIMEOUT` / `HGAMEY_POLL_INTERVAL` | `60` / `2` 秒，编译超时和结果轮询间隔 |
 | `RUST_IMAGE` / `PYTHON_IMAGE` | `rust:1.99-slim-bookworm` / `python:3.13.16-slim-bookworm`，构建基础镜像 |
 | `HGAMEY_NATIVE_IMAGE` | `native-runtime`，默认从本案例源码构建；可指定已验证的原生运行时镜像 |
@@ -205,6 +205,8 @@ llm4ad evaluator-gateway resolve JOB_UUID --action cancelled --state-dir ./.llm4
 | `ANDROID_REPOSITORY_BASE` / `PIP_INDEX_URL` / `TRACE_PROCESSOR_URL` | 可选工具链、Python 包和 Trace Processor 下载源 |
 
 每台设备串行评估。当前画质检查使用第一张固定参考图的中心裁剪区域，参考图至少为 1920×1080；它衡量静态重建质量，算子耗时改善不能直接代表游戏帧率提升。功耗默认关闭，不可用指标保持未测得。密钥、设备配置及真实参考帧只保存在本地。
+
+游戏验证会将前两轮实际测量后截取的 PNG 作为附件上传，最多 4 张，位于 `game/shots/`，说明中标注 baseline、候选（或对照）及轮次。点击对应演化节点，在右侧「节点信息」的图片缩略图中放大查看或下载。截图仅供查看当时画面，不是同帧 PSNR 对比；截图清单和原图副本会固定保存，重试复用相同字节；可选截图获取失败仅记录附件诊断，不影响有效评分。缺失时不会补拍或生成图片，录屏和私有参考帧不自动上传。
 
 ## 平台部署配置
 
@@ -220,4 +222,4 @@ docker compose -f compose-cloud.yml -f compose.remote-evaluation.yml up -d --bui
 | `LLM4AD_COMPOSE_BASE` | 标准部署为 `compose.yml`；上述生产命令需在 `.env` 设置为 `compose-cloud.yml` |
 | `REMOTE_EVALUATION_CONCURRENCY` | `10`，平台远程评估 worker 并发 |
 | `LLM_PROXY_ENABLE` / `LLM_PROXY_BASE_URL` | 长时间等待后继续调用模型时，设为 `True` 并填写任务容器可达的代理地址 |
-| `EVALUATION_PREVIEW_MAX_BYTES` | `2097152`（2 MiB），仅限制附件预览，不影响原文件下载 |
+| `EVALUATION_PREVIEW_MAX_BYTES` | `2097152`（2 MiB），限制服务端内联预览；图片缩略图和放大查看使用原图下载接口，原文件下载不受此限制 |

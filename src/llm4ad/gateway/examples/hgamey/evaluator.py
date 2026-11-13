@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -298,6 +299,12 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             if report is None:
                 return None
             result = self.convert_report(report, state)
+            if (
+                result is not None
+                and result.success
+                and not result.metadata["evaluation_summary"]["operator_improvement_confirmed"]
+            ):
+                reporter.progress("Measurement completed with no confirmed advantage; retained as a valid evaluation")
             if not game_required or result is None or not result.success:
                 return result
             game_report = await self.follow_job(session, reporter, state, game=True)
@@ -340,60 +347,104 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         ):
             return
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            await self.retain_game_artifacts(session, reporter, state, json.loads(report.read_text()))
+            errors = await self.retain_game_artifacts(session, reporter, state, json.loads(report.read_text()))
+            if errors and isinstance(result, EvaluationResult):
+                result.metadata.setdefault("artifact_errors", []).extend(errors)
 
-    async def retain_game_artifacts(self, session, reporter, state: dict, report: dict) -> None:
-        """Retrieve checksum-bound traces and queue them in the SDK evidence outbox."""
-        folder = Path(state["evidence_directory"]) / "game-artifacts"
+    async def retain_game_artifacts(self, session, reporter, state: dict, report: dict) -> list[str]:
+        """Retain declared evidence without letting optional images invalidate measurements.
+
+        Args:
+            session: Executor HTTP session.
+            reporter: Attempt-scoped artifact reporter.
+            state: Frozen executor identity and staging directory.
+            report: Completed game report and declared artifacts.
+
+        Returns:
+            Diagnostics for optional screenshots that could not be retained.
+        """
+        errors = []
         for item in report.get("artifacts", []):
-            name = item.get("name", "")
-            checksum = item.get("sha256", "")
-            size = item.get("size")
-            if (
-                not name
-                or PurePosixPath(name).is_absolute()
-                or ".." in PurePosixPath(name).parts
-                or "\\" in name
-                or not re.fullmatch(r"[a-f0-9]{64}", checksum)
-                or type(size) is not int
-                or not 0 < size <= 64 * 1024 * 1024
-            ):
-                raise ValueError("Invalid executor evidence manifest")
-            folder.mkdir(parents=True, exist_ok=True)
-            target = folder / checksum
-            if not target.exists():
-                while True:
-                    temporary = target.with_suffix(".partial")
+            optional = (
+                isinstance(item, dict)
+                and isinstance(item.get("name"), str)
+                and re.fullmatch(r"shots/[AB][12]\.png", item["name"]) is not None
+                and item.get("media_type") == "image/png"
+            )
+            try:
+                await self.retain_game_artifact(session, reporter, state, item, optional=optional)
+            except (aiohttp.ClientError, TimeoutError, OSError, ValueError, TypeError) as error:
+                if not optional:
+                    raise
+                status = f" (HTTP {error.status})" if isinstance(error, aiohttp.ClientResponseError) else ""
+                errors.append(f"game/{item['name']}: {type(error).__name__}{status}")
+                reporter.progress(f"Optional screenshot {item['name']} unavailable; measurement result retained")
+        return errors
+
+    async def retain_game_artifact(self, session, reporter, state: dict, item: dict, *, optional: bool) -> None:
+        """Retrieve one checksum-bound file, with bounded optional screenshot transport."""
+        if not isinstance(item, dict):
+            raise ValueError("Invalid executor evidence manifest")
+        folder = Path(state["evidence_directory"]) / "game-artifacts"
+        name = item.get("name", "")
+        checksum = item.get("sha256", "")
+        size = item.get("size")
+        if (
+            not name
+            or PurePosixPath(name).is_absolute()
+            or ".." in PurePosixPath(name).parts
+            or "\\" in name
+            or not re.fullmatch(r"[a-f0-9]{64}", checksum)
+            or type(size) is not int
+            or not 0 < size <= 64 * 1024 * 1024
+        ):
+            raise ValueError("Invalid executor evidence manifest")
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / checksum
+        if not target.exists():
+            while True:
+                temporary = target.with_suffix(".partial")
+                try:
+                    async with session.get(
+                        self.benchmark.url + f"/v1/jobs/{state['game']['external_job_id']}/artifacts/{checksum}",
+                        timeout=aiohttp.ClientTimeout(total=15 if optional else 120),
+                    ) as response:
+                        response.raise_for_status()
+                        written = 0
+                        with temporary.open("wb") as stream:
+                            async for chunk in response.content.iter_chunked(65536):
+                                written += len(chunk)
+                                if written > size:
+                                    raise ValueError("Executor evidence exceeds its declared size")
+                                stream.write(chunk)
+                    if written != size or digest(temporary.read_bytes()) != checksum:
+                        raise ValueError("Executor evidence checksum mismatch")
+                    temporary.replace(target)
+                    break
+                except aiohttp.ClientResponseError as error:
+                    if optional or (error.status < 500 and error.status != 429):
+                        raise
+                    reporter.progress("Waiting to retrieve completed phone trace evidence")
+                    await asyncio.sleep(self.benchmark.poll_interval)
+                except (aiohttp.ClientError, TimeoutError):
+                    if optional:
+                        raise
+                    reporter.progress("Waiting to retrieve completed phone trace evidence")
+                    await asyncio.sleep(self.benchmark.poll_interval)
+                finally:
+                    original_error = sys.exception()
                     try:
-                        async with session.get(
-                            self.benchmark.url + f"/v1/jobs/{state['game']['external_job_id']}/artifacts/{checksum}",
-                            timeout=aiohttp.ClientTimeout(total=120),
-                        ) as response:
-                            response.raise_for_status()
-                            written = 0
-                            with temporary.open("wb") as stream:
-                                async for chunk in response.content.iter_chunked(65536):
-                                    written += len(chunk)
-                                    if written > size:
-                                        raise ValueError("Executor evidence exceeds its declared size")
-                                    stream.write(chunk)
-                        if written != size or digest(temporary.read_bytes()) != checksum:
-                            raise ValueError("Executor evidence checksum mismatch")
-                        temporary.replace(target)
-                        break
-                    except aiohttp.ClientResponseError as error:
-                        if error.status < 500 and error.status != 429:
-                            raise
-                        reporter.progress("Waiting to retrieve completed phone trace evidence")
-                        await asyncio.sleep(self.benchmark.poll_interval)
-                    except (aiohttp.ClientError, TimeoutError):
-                        reporter.progress("Waiting to retrieve completed phone trace evidence")
-                        await asyncio.sleep(self.benchmark.poll_interval)
-                    finally:
                         temporary.unlink(missing_ok=True)
-            if target.stat().st_size != size or digest(target.read_bytes()) != checksum:
-                raise ValueError("Retained executor evidence changed")
-            reporter.artifact("game/" + name, target, item.get("media_type", "application/octet-stream"))
+                    except OSError:
+                        # Cleanup must not replace an in-flight cancellation or transport error.
+                        if original_error is None:
+                            raise
+        if target.stat().st_size != size or digest(target.read_bytes()) != checksum:
+            raise ValueError("Retained executor evidence changed")
+        reporter.artifact(
+            "game/" + name, target, item.get("media_type", "application/octet-stream"),
+            description=item.get("description", ""),
+        )
 
     async def follow_job(self, session, reporter, state: dict, game: bool = False) -> dict | None:
         """Follow one frozen external identity and retain its cleanup evidence."""
@@ -565,7 +616,8 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                 and metrics["operator_improvement_pct"] >= self.benchmark.min_operator_improvement_pct
             )
             summary["operator_improvement_confirmed"] = (
-                verdict.get("is_pareto_improvement") is True
+                status == "PASS"
+                and verdict.get("is_pareto_improvement") is True
                 and isinstance(p_value, (int, float))
                 and not isinstance(p_value, bool)
                 and math.isfinite(p_value)
@@ -577,6 +629,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                 return None
             score = metrics["operator_improvement_pct"]
         summary["score_mode"] = self.benchmark.score_mode
+        summary["comparison_outcome"] = "improved" if summary["operator_improvement_confirmed"] else "no_advantage"
         primary = "operator_improvement_pct" if self.benchmark.score_mode == "relative_latency" else "operator_latency_ms"
         return EvaluationResult(
             score=score,

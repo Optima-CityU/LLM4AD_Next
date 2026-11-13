@@ -13,6 +13,7 @@ import {
   resolveMigrationParentIds,
 } from "@/hooks/evolutionMigration"
 import { useDemoState } from "@/hooks/useDemoMode"
+import { normalizeNodeEvaluation } from "@/lib/evaluationData"
 import { taskKeys } from "@/lib/task-queries"
 
 /* ── Raw generated entry from SSE / REST ── */
@@ -82,6 +83,7 @@ function toRawGANode(
     fileName: entry.file_name,
     score: 0,
     rawScore: raw,
+    evaluation: normalizeNodeEvaluation(d),
     parentIds,
   }
 }

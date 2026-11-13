@@ -5546,9 +5546,26 @@
     }
   },
   "evaluationData": {
-    "title": "评估详情",
-    "candidate": "候选算法",
-    "allCandidates": "全部候选",
+    "unscored": "暂无评分",
+    "thisEvaluation": "本次评估",
+    "rawData": "评估原始数据",
+    "storageDiagnostics": "附件保存诊断（{{count}}）",
+    "metricNames": {
+      "operator_latency_ms": "算子耗时",
+      "baseline_operator_latency_ms": "基准耗时",
+      "operator_improvement_pct": "改善幅度",
+      "psnr_db": "PSNR",
+      "game_baseline_display_fps": "基准帧率",
+      "game_comparison_display_fps": "候选帧率",
+      "game_baseline_power_watt": "基准功耗",
+      "game_comparison_power_watt": "候选功耗"
+    },
+    "moreRecords": "加载更早的数据",
+    "downloadFile": "下载 {{name}}",
+    "viewFile": "预览 {{name}}",
+    "recordSelection": "选择此节点的数据",
+    "pending": "待保存",
+    "attachments": "附件",
     "profile": "评估阶段",
     "profiles": {
       "all": "全部阶段",
@@ -5572,9 +5589,8 @@
     },
     "loading": "正在加载评估数据…",
     "loadFailed": "评估数据加载失败，请重试。",
-    "empty": "评估开始后，记录会显示在这里。可先在演化图中选择候选查看对应数据，也可查看全部候选。",
+    "empty": "此节点尚无附加数据。",
     "unnamed": "评估候选",
-    "evaluations": "评估记录",
     "instance": "评估实例",
     "source": "代码版本",
     "progress": "评估进度",
@@ -5583,10 +5599,9 @@
     "kind": "类型",
     "metrics": "评估指标",
     "monitor_metrics": "监测指标",
-    "results": "结果与指标",
     "files": "附件（{{count}}）",
     "fileCount": "{{count}} 个文件",
-    "metadata": "额外信息与实例详情",
+    "metadata": "Metadata",
     "score": "评分",
     "noFiles": "本次评估未保留附件。评估器可以明确声明需要保存的报告、图片或原始数据。",
     "storagePending": "附件正在等待保存，不影响评估结果；传输会自动重试。",
@@ -5601,7 +5616,6 @@
     "previous": "上一页",
     "next": "下一页",
     "storageUnavailable": "该历史评估的原始资料已不可读取；仍保留的指标和进度会继续显示。",
-    "demoHint": "演示任务不连接真实评估器。实际运行的任务会在这里展示评估进度、测量指标和保留的附件。",
     "storageOffline": "文件存储暂时不可用。已有进度和本地记录仍可查看，连接会自动重试。"
   }
 }

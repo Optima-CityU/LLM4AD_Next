@@ -1,9 +1,11 @@
 """Qualify upstream game reports without manufacturing evolutionary fitness."""
 
+import base64
 import copy
 import hashlib
 import importlib.util
 import json
+import os
 import signal
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,11 +13,16 @@ from unittest.mock import Mock
 
 import pytest
 
+from llm4ad.gateway.examples.hgamey.evidence import measurement_screenshots
+
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = importlib.util.spec_from_file_location("hgamey_game_ab_test", ROOT / "src/llm4ad/gateway/examples/hgamey/protocol/game_ab.py")
 game = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(game)
 pytestmark = pytest.mark.unit
+PNG_FIXTURE = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 @pytest.fixture
@@ -74,6 +81,132 @@ def test_game_qualification_is_not_candidate_fitness(trial):
     assert "score" not in report
     assert report["unsupported_metrics"] == ["game_fps"]
     assert "comparison_game_fps" not in report["metrics"]
+
+
+def test_measurement_screenshots_are_retained_with_arm_labels(trial):
+    """Declare original fixture PNGs without collecting private reference images."""
+    path, options, _, arms, save = trial
+    image = PNG_FIXTURE
+    shots = path / "shots"
+    shots.mkdir()
+    for arm in arms:
+        source = shots / f"{arm['arm']}.png"
+        source.write_bytes(image)
+        arm["shot"] = str(source)
+    (path / "private-reference.png").write_bytes(image)
+    save()
+
+    report = game.summarize(path, options, True, 0)
+
+    assert report["status"] == "PASS"
+    assert report["metrics"] == {"baseline_display_fps": 30, "comparison_display_fps": 29}
+    files = {item["name"]: item for item in measurement_screenshots(path, options, arms)}
+    assert set(files) == {"shots/A1.png", "shots/B1.png"}
+    for name, item in files.items():
+        assert item["media_type"] == "image/png"
+        assert item["sha256"] == hashlib.sha256(image).hexdigest()
+        assert item["size"] == len(image)
+        assert Path(name).stem in item["description"]
+        assert "after the measurement window" in item["description"]
+    assert "Baseline" in files["shots/A1.png"]["description"]
+    assert "Comparison" in files["shots/B1.png"]["description"]
+
+
+def test_screenshots_keep_two_pairs_and_distinguish_candidate(tmp_path):
+    """A longer trial retains four labelled images instead of all screenshots."""
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    arms = []
+    options = {"rounds": 3, "candidate_id": "c" * 64}
+    for pair in range(1, 4):
+        for side in "AB":
+            source = shots / f"{side}{pair}.png"
+            source.write_bytes(PNG_FIXTURE)
+            arms.append({"arm": source.stem, "side": side, "pair": pair, "in_game": True, "shot": str(source)})
+    (shots / "unrecorded.png").write_bytes(PNG_FIXTURE)
+
+    artifacts = measurement_screenshots(tmp_path, options, list(reversed(arms)))
+
+    assert [item["name"] for item in artifacts] == ["shots/A1.png", "shots/B1.png", "shots/A2.png", "shots/B2.png"]
+    assert "Candidate" in artifacts[1]["description"]
+    assert "round 2" in artifacts[3]["description"]
+
+
+@pytest.mark.parametrize("failure", ["missing", "invalid_png", "wrong_source", "oversized", "symlink", "directory_symlink"])
+def test_optional_screenshots_skip_unowned_or_unusable_files(trial, failure):
+    """Invalid optional images never expose local files or invalidate measurements."""
+    path, options, _, arms, save = trial
+    shots = path / "shots"
+    shots.mkdir()
+    for arm in arms:
+        source = shots / f"{arm['arm']}.png"
+        source.write_bytes(PNG_FIXTURE)
+        arm["shot"] = str(source)
+    source = shots / "A1.png"
+    if failure == "missing":
+        source.unlink()
+    elif failure == "invalid_png":
+        source.write_bytes(b"not an actual PNG screenshot")
+    elif failure == "wrong_source":
+        arms[0]["shot"] = str(path / "private-reference.png")
+        (path / "private-reference.png").write_bytes(PNG_FIXTURE)
+    elif failure == "oversized":
+        with source.open("wb") as stream:
+            stream.truncate(64 * 1024 * 1024 + 1)
+    else:
+        if os.name != "posix":
+            pytest.skip("Requires filesystem symlinks")
+        if failure == "symlink":
+            source.unlink()
+            private = path / "private-reference.png"
+            private.write_bytes(PNG_FIXTURE)
+            source.symlink_to(private)
+        else:
+            private = path / "private-shots"
+            shots.rename(private)
+            shots.symlink_to(private, target_is_directory=True)
+    save()
+
+    report = game.summarize(path, options, True, 0)
+
+    assert report["status"] == "PASS"
+    assert report["metrics"] == {"baseline_display_fps": 30, "comparison_display_fps": 29}
+    expected = set() if failure == "directory_symlink" else {"shots/B1.png"}
+    assert {item["name"] for item in measurement_screenshots(path, options, arms)} == expected
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Requires filesystem symlinks")
+@pytest.mark.parametrize("component", ["evidence", "job", "jobs"])
+def test_measurement_screenshots_reject_symlinked_ancestors(tmp_path, component):
+    """A matching recorded path does not authorize files through directory aliases."""
+    evidence = tmp_path / "jobs" / "job" / "evidence"
+    shots = evidence / "shots"
+    shots.mkdir(parents=True)
+    source = shots / "A1.png"
+    source.write_bytes(PNG_FIXTURE)
+    arms = [{"arm": "A1", "side": "A", "pair": 1, "in_game": True, "shot": str(source)}]
+    paths = {"evidence": evidence, "job": evidence.parent, "jobs": evidence.parent.parent}
+    path = paths[component]
+    private = path.with_name(path.name + "-private")
+    path.rename(private)
+    path.symlink_to(private, target_is_directory=True)
+
+    assert measurement_screenshots(evidence, {"rounds": 1}, arms) == []
+
+
+@pytest.mark.parametrize("options,arms", [
+    ({"rounds": True}, None), ({"rounds": -1}, None), ({"rounds": "2"}, None), ([], None),
+    ({"rounds": 1}, {}), ({"rounds": 1}, [None]),
+])
+def test_invalid_optional_screenshot_records_are_ignored(tmp_path, options, arms):
+    """Invalid optional metadata produces no declarations or measurement exceptions."""
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    source = shots / "A1.png"
+    source.write_bytes(PNG_FIXTURE)
+    if arms is None:
+        arms = [{"arm": "A1", "side": "A", "pair": 1, "in_game": True, "shot": str(source)}]
+    assert measurement_screenshots(tmp_path, options, arms) == []
 
 
 @pytest.mark.parametrize("value", [None, 0, -1, float("nan")])

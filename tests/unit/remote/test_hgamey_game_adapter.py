@@ -717,27 +717,32 @@ def fidelity(local):
     (100, 0.001, True, False),
     (101, 0.001, True, False),
 ])
+@pytest.mark.parametrize('status', ['PASS', 'REJECT'])
 def test_confirmed_improvement_requires_minimum_magnitude(
-    fidelity, candidate, p_value, native_improvement, confirmed,
+    fidelity, candidate, p_value, native_improvement, confirmed, status,
 ):
     """A tiny but significant gain stays valid evidence, without confirmation."""
+    confirmed = confirmed and status == 'PASS'
     adapter = fidelity.adapter()
     for profile in ('standard', 'elite'):
         state = adapter.prepare(fidelity.job.model_copy(update={'evaluation_profile': profile}))
         result = adapter.convert_report({
             'source': 'phonefarm', 'kind': 'shader', 'candidate_id': state['idempotency_key'],
-            'status': 'PASS', 'conditions_observed': {'restored': True},
+            'status': status, 'conditions_observed': {'restored': True},
             'metrics': {'operator_latency_ms': candidate, 'psnr_db': 35},
             'baseline_metrics': {'operator_latency_ms': 100},
             'verdict': {'is_pareto_improvement': native_improvement, 'p_value': p_value},
         }, state)
         assert result.success
+        assert result.error_message is None
         summary = result.metadata['evaluation_summary']
         assert summary['operator_improvement_confirmed'] is confirmed
         assert summary['min_operator_improvement_pct'] == 1
         assert summary['operator_improvement_threshold_met'] is (candidate <= 99)
         assert result.metrics['operator_improvement_pct'] == pytest.approx(100 - candidate)
         assert result.score == result.metrics['operator_improvement_pct']
+        assert summary['comparison_outcome'] == ('improved' if confirmed else 'no_advantage')
+        assert result.metadata['report']['status'] == status
         assert result.evolution_feedback['assessment'] == summary
 
 
@@ -800,6 +805,25 @@ async def test_fidelity_selects_budget_and_game_execution(fidelity, monkeypatch,
     assert (folder / 'candidate-layer').exists() == (profile == 'elite')
     assert adapter.contract.metrics[0].name == 'operator_improvement_pct'
     assert await adapter.cancel(job, reporter.saved_state) is True
+
+
+@pytest.mark.parametrize('profile', ['standard', 'elite'])
+async def test_reject_is_a_completed_measurement_without_advantage(fidelity, monkeypatch, profile):
+    """A native statistical rejection remains successful across both SDK lifecycles."""
+    adapter, reporter = fidelity.adapter(), Reporter()
+    job = fidelity.job.model_copy(update={'evaluation_profile': profile})
+    executor = connect(adapter, reporter, monkeypatch)
+    executor.headless_status = 'REJECT'
+    result = await run_adapter(adapter, job, reporter)
+    assert result.success and result.error_message is None
+    assert result.score == 50
+    assert result.metadata['report']['status'] == 'REJECT'
+    summary = result.metadata['evaluation_summary']
+    assert summary['comparison_outcome'] == 'no_advantage'
+    assert summary['operator_improvement_confirmed'] is False
+    assert summary['game_validation'] == ('passed' if profile == 'elite' else 'not_requested')
+    assert result.evolution_feedback['assessment'] == summary
+    assert any('no confirmed advantage' in message for message in reporter.messages)
 
 
 @pytest.mark.parametrize('baseline', [None, 0, -1, float('nan'), float('inf'), True])

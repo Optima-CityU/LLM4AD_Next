@@ -145,7 +145,7 @@ The following extensions are optional. Ordinary evaluators need no scheduling, r
 | --- | --- |
 | Status events | Gateway dashboard with filters/history; retained in `metadata.evaluation_messages` |
 | Local execution logs | Gateway stdout/stderr views; not automatically uploaded, expire by log-retention policy |
-| Declared artifacts | Platform **Evaluation details**; text, JSON, Markdown and image previews, plus original-file downloads |
+| Declared artifacts | Select an evolution node to see metadata and attachments in the right-hand **Node information** panel; click image thumbnails to enlarge, or preview and download other files from the compact list |
 | Lifecycle timing | Actual start/end and total elapsed time including hooks; evaluator `duration_ms` remains unchanged |
 
 Local evaluators write inside `cfg.artifact_dir` and declare `EvaluationResult.artifacts`. Remote evaluators use `reporter.artifact()` or `job.artifact_dir`. RustFS/S3 stores declared files and returned behavior visualizations. See [evaluation_artifacts](../../../examples/evaluation_artifacts/) for a runnable example.
@@ -197,7 +197,7 @@ Create `.env` from [env.example](../../../src/llm4ad/gateway/examples/hgamey/dep
 | `HGAMEY_GAME_CHECK_CONFIG` | Optional game-validation JSON; deployment environment example uses `/config/game-check.json` |
 | `HGAMEY_EVAL_SECONDS` / `HGAMEY_EVAL_ROUNDS` | `5` / `8`, standard seconds per arm and rounds |
 | `HGAMEY_ELITE_EVAL_SECONDS` / `HGAMEY_ELITE_EVAL_ROUNDS` | Defaults to at least `5` / `16`, elite measurement budget |
-| `HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT` | `1`, minimum percentage for confirming improvement, in `[1, 100)`; does not change the raw score |
+| `HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT` | `1`, minimum percentage for confirming improvement, in `[1, 100)`; unconfirmed improvement remains a valid `no_advantage` evaluation with unchanged raw scores |
 | `HGAMEY_COMPILE_TIMEOUT` / `HGAMEY_POLL_INTERVAL` | `60` / `2` seconds, compilation timeout and result polling |
 | `RUST_IMAGE` / `PYTHON_IMAGE` | `rust:1.99-slim-bookworm` / `python:3.13.16-slim-bookworm`, build base images |
 | `HGAMEY_NATIVE_IMAGE` | `native-runtime`, built from bundled source by default; may select a verified native runtime image |
@@ -205,6 +205,8 @@ Create `.env` from [env.example](../../../src/llm4ad/gateway/examples/hgamey/dep
 | `ANDROID_REPOSITORY_BASE` / `PIP_INDEX_URL` / `TRACE_PROCESSOR_URL` | Optional Android-toolchain, Python-package and Trace Processor download sources |
 
 Each device evaluates serially. The current quality check center-crops the first fixed reference frame, which must be at least 1920×1080. This measures static reconstruction quality; operator latency gains alone do not establish game FPS gains. Power is disabled by default and unavailable metrics remain unmeasured. Keep keys, device configuration and real reference frames local.
+
+Game validation uploads the existing post-window PNGs from its first two measurement pairs, at most four files under `game/shots/`. Descriptions identify the baseline, candidate (or comparison) and round. Select the corresponding evolution node to enlarge or download its thumbnails in the right-hand **Node information** panel. These show the observed scene, not a same-frame PSNR comparison. The screenshot manifest and original-byte snapshots are frozen for retries; optional retrieval failures are recorded as artifact diagnostics without invalidating measured scores. Missing screenshots are not recaptured or generated; recordings and private reference frames are not uploaded automatically.
 
 ## Platform deployment settings
 
@@ -220,4 +222,4 @@ docker compose -f compose-cloud.yml -f compose.remote-evaluation.yml up -d --bui
 | `LLM4AD_COMPOSE_BASE` | `compose.yml` for standard deployment; set `compose-cloud.yml` in `.env` for the production command above |
 | `REMOTE_EVALUATION_CONCURRENCY` | `10`, platform remote-evaluation worker concurrency |
 | `LLM_PROXY_ENABLE` / `LLM_PROXY_BASE_URL` | For model calls after long waits, set `True` and a proxy URL reachable by task containers |
-| `EVALUATION_PREVIEW_MAX_BYTES` | `2097152` (2 MiB), affects artifact previews only, not original-file downloads |
+| `EVALUATION_PREVIEW_MAX_BYTES` | `2097152` (2 MiB); limits server-side inline previews. Image thumbnails and enlarged views use authenticated original downloads, which are unaffected |

@@ -14,7 +14,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { type SelectedNodeInfo, useEvolution } from "@/hooks/useEvolution"
+import { useEvolution } from "@/hooks/useEvolution"
+import {
+  toSelectedNodeInfo,
+  visibleNodeSelection,
+} from "@/lib/evolutionSelection"
 import { cn, formatScore } from "@/lib/utils"
 import { getCSSVar, getPrimaryRGB } from "@/utils/theme-colors"
 import {
@@ -1122,6 +1126,7 @@ function drawVisualization(
     const p = posMap.get(id)
     if (!p) return
     const node = p.node
+    if (node.unscored) return
     const cls = classifications.get(id) ?? DEFAULT_CLS
     const isActive = node.generation <= currentGeneration
     if (hovered && !isActive) return
@@ -1150,22 +1155,35 @@ function drawVisualization(
   for (const pos of positions) {
     const node = pos.node
 
-    // Unscored nodes: gray, non-interactive, no classification rings, no labels.
-    // Rendered for visibility only; click/hover are disabled so they never enter selection.
+    // Gray nodes expose diagnostics without entering fitness classifications.
     if (node.unscored) {
       const isActive = node.generation <= currentGeneration
+      const isSelected = selectedNodeIds.has(node.id)
       const g = nodesG
         .append("g")
         .attr("class", "node-group node-unscored")
+        .attr("data-id", node.id)
         .attr("transform", `translate(${pos.x},${pos.y})`)
-        .style("cursor", "default")
-        .style("pointer-events", "none")
+        .style("cursor", isActive ? "pointer" : "default")
+      if (isSelected) {
+        g.append("circle")
+          .attr("r", NODE_RADIUS + 5)
+          .attr("fill", "none")
+          .attr("stroke", mutedColor)
+          .attr("stroke-width", 2)
+      }
       g.append("circle")
-        .attr("r", NODE_RADIUS - 1)
+        .attr("r", isSelected ? NODE_RADIUS + 2 : NODE_RADIUS - 1)
         .attr("fill", borderColor)
         .attr("stroke", mutedColor)
         .attr("stroke-width", 1)
         .attr("opacity", isActive ? 0.45 : 0.18)
+      if (quality !== "performance") {
+        g.on("click", (event: MouseEvent) => {
+          event.stopPropagation()
+          if (isActive) onNodeClick(node, event)
+        })
+      }
       continue
     }
 
@@ -1346,7 +1364,7 @@ function drawVisualization(
   if (quality === "performance") {
     const groupFromEvent = (event: Event): SVGGElement | null => {
       const el = (event.target as Element).closest<SVGGElement>(".node-group")
-      if (!el || el.classList.contains("node-unscored")) return null
+      if (!el) return null
       return el
     }
     nodesG
@@ -1539,24 +1557,15 @@ export default function IslandGAVisualization() {
 
   const handleNodeClick = useCallback(
     (node: GANode, event: MouseEvent) => {
-      const info: SelectedNodeInfo = {
-        id: node.id,
-        generation: node.generation,
-        island: node.island,
-        islandId: node.islandId,
-        name: node.name,
-        fileName: node.fileName,
-        score: node.score,
-        rawScore: node.rawScore,
-        parentIds: node.parentIds,
-      }
+      const info = visibleNodeSelection(node, currentGeneration)
+      if (!info) return
       if (event.ctrlKey || event.metaKey) {
         toggleSelectedNode(info)
       } else {
         setSelectedNodes([info])
       }
     },
-    [setSelectedNodes, toggleSelectedNode],
+    [currentGeneration, setSelectedNodes, toggleSelectedNode],
   )
 
   const handleBlankClick = useCallback(() => {
@@ -1710,19 +1719,7 @@ export default function IslandGAVisualization() {
     // Only replace the selection when the request asks for it; a pure "locate"
     // pans/highlights the camera without changing what is selected.
     if (focusNodeRequest.select) {
-      setSelectedNodes([
-        {
-          id: node.id,
-          generation: node.generation,
-          island: node.island,
-          islandId: node.islandId,
-          name: node.name,
-          fileName: node.fileName,
-          score: node.score,
-          rawScore: node.rawScore,
-          parentIds: node.parentIds,
-        },
-      ])
+      setSelectedNodes([toSelectedNodeInfo(node)])
     }
 
     const { width: pxW, height: pxH } = svgEl.getBoundingClientRect()

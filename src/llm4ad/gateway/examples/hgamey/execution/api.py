@@ -1,14 +1,15 @@
 """Private executor HTTP API and operator client."""
 
-import hashlib
 import json
 import queue
 import re
-import shutil
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
+from llm4ad.gateway.sdk.retention import owned_path
+
+from ..evidence import EvidenceChangedError, artifact_bytes, exported_result
 from .contracts import SubmissionConflictError
 from .devices import load_devices
 from .storage import read_json
@@ -46,34 +47,49 @@ def make_handler(engine):
                 artifact = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})/artifacts/([0-9a-f]{64})", self.path)
                 if artifact:
                     key, digest = artifact.groups()
+                    try:
+                        folder = owned_path(engine.jobs / key, engine.jobs)
+                        owned_path(folder / "job.json", folder)
+                        owned_path(folder / "result.json", folder)
+                    except (OSError, RuntimeError, ValueError):
+                        return self.reply(404, {"error": "unknown evidence"})
                     engine.get(key)
-                    folder = engine.jobs / key / "evidence"
-                    result = read_json(engine.jobs / key / "result.json")
-                    item = next((item for item in result.get("artifacts", []) if item.get("sha256") == digest), None)
+                    result = exported_result(folder)
+                    artifacts = result.get("artifacts", []) if isinstance(result, dict) else []
+                    if not isinstance(artifacts, list):
+                        return self.reply(404, {"error": "unknown evidence"})
+                    item = next((item for item in artifacts if isinstance(item, dict) and item.get("sha256") == digest), None)
                     if item is None:
                         return self.reply(404, {"error": "unknown evidence"})
-                    path = (folder / item["name"]).resolve()
-                    if not path.is_relative_to(folder.resolve()) or not path.is_file():
-                        return self.reply(404, {"error": "unknown evidence"})
-                    if path.stat().st_size != item["size"] or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                    try:
+                        content = artifact_bytes(folder, item)
+                    except EvidenceChangedError:
                         return self.reply(409, {"error": "evidence changed"})
+                    except (OSError, RuntimeError, ValueError):
+                        return self.reply(404, {"error": "unknown evidence"})
                     self.send_response(200)
                     self.send_header("Content-Type", "application/octet-stream")
-                    self.send_header("Content-Length", str(item["size"]))
+                    self.send_header("Content-Length", str(len(content)))
                     self.end_headers()
-                    with path.open("rb") as stream:
-                        shutil.copyfileobj(stream, self.wfile)
+                    self.wfile.write(content)
                     return
                 match = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})(?:/(result|logs))?", self.path)
                 if not match:
                     return self.reply(404, {"error": "unknown endpoint"})
                 key, part = match.groups()
+                try:
+                    folder = owned_path(engine.jobs / key, engine.jobs)
+                    owned_path(folder / "job.json", folder)
+                    if part == "result":
+                        owned_path(folder / "result.json", folder)
+                except (OSError, RuntimeError, ValueError):
+                    return self.reply(404, {"error": "unknown job"})
                 job = engine.get(key)
                 if part == "result":
-                    path = engine.jobs / key / "result.json"
+                    path = folder / "result.json"
                     return self.reply(
                         200 if path.exists() else 409,
-                        read_json(path) if path.exists() else {"error": "result not available", "job": job},
+                        exported_result(folder) if path.exists() else {"error": "result not available", "job": job},
                     )
                 if part == "logs":
                     logs = {}
