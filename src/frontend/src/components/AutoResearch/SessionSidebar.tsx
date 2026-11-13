@@ -1118,17 +1118,21 @@ function SessionRow({
         className="flex-1 min-w-0 flex flex-col justify-center gap-1 pl-3 pr-1 py-1.5 h-full text-left cursor-pointer"
       >
         {/* 第一行：状态点 + 标题 + 最优目标。ARL 会话创建后状态不再流转，
-            圆点恒为灰色没有信息量，直接不渲染。 */}
+            圆点恒为灰色没有信息量，故对 ARL 行隐藏圆点——但仍保留占位元素
+            （invisible 而非不渲染），否则标题会吃掉圆点 + gap 的宽度而左移，
+            与其它行的标题对不齐。 */}
         <div className="flex items-center gap-2 min-w-0">
-          {!isArl && (
-            <span
-              className={cn(
-                "size-1.5 rounded-full shrink-0",
-                statusDot(session.status),
-              )}
-              title={t(`autoResearch.status.${session.status}`, session.status)}
-            />
-          )}
+          <span
+            className={cn(
+              "size-1.5 rounded-full shrink-0",
+              isArl ? "invisible" : statusDot(session.status),
+            )}
+            title={
+              isArl
+                ? undefined
+                : t(`autoResearch.status.${session.status}`, session.status)
+            }
+          />
           <span
             className="flex-1 truncate text-[13px] font-medium"
             title={session.title}
@@ -1148,13 +1152,9 @@ function SessionRow({
             边框胶囊）——它出现在每一行，若做成高对比 chip 会连成彩色条带、和标题抢
             视觉；降为低饱和小字后仍可一眼辨血统，却退回到「元数据」的层级。
             llm4ad 用主色淡标，原生（autoresearch 等）用中性灰——避免琥珀色喧宾夺主。 */}
-        <div
-          className={cn(
-            "flex items-center gap-1.5 min-w-0",
-            // 非 ARL 行有状态圆点，缩进让血统标注与标题左对齐；ARL 行无圆点，不缩进。
-            !isArl && "pl-3.5",
-          )}
-        >
+        {/* 缩进让血统标注与第一行标题左对齐（跨过圆点 + gap 的宽度）。ARL 行现在
+            也保留了隐形占位圆点，故两类行统一缩进。 */}
+        <div className="flex items-center gap-1.5 min-w-0 pl-3.5">
           <span
             className={cn(
               "shrink-0 text-[10px] font-medium leading-none",
