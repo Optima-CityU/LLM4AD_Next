@@ -254,6 +254,7 @@ services:
       network: host
       args:
         DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+        APT_MIRROR: ${APT_MIRROR:-}
         CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://github.com/SaladDay/cc-switch-cli/releases/download}
     restart: "no"
     entrypoint: ["true"]
@@ -267,6 +268,7 @@ services:
       network: host
       args:
         DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     restart: "no"
     entrypoint: ["true"]
 
