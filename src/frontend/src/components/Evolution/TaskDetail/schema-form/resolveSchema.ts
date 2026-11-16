@@ -4,6 +4,8 @@
  * and discriminated union parsing.
  */
 
+import { poolSelectionMode } from "../../../../lib/gatewayPool.ts"
+
 export interface SchemaUi {
   required?: boolean
   order?: number
@@ -358,13 +360,17 @@ export function mergeSchemaDefaults(
     !Array.isArray(current)
   ) {
     const currentObject = current as Record<string, unknown>
-    const merged: Record<string, unknown> = { ...currentObject }
+    // Infer legacy membership before new schema defaults can widen its pool.
+    const source =
+      currentObject.type === "remote" &&
+      resolved.properties.gateway_ids &&
+      resolved.properties.selection_mode &&
+      currentObject.selection_mode === undefined
+        ? { ...currentObject, selection_mode: poolSelectionMode(currentObject) }
+        : currentObject
+    const merged: Record<string, unknown> = { ...source }
     for (const [key, propertySchema] of Object.entries(resolved.properties)) {
-      const value = mergeSchemaDefaults(
-        propertySchema,
-        root,
-        currentObject[key],
-      )
+      const value = mergeSchemaDefaults(propertySchema, root, source[key])
       if (value !== undefined) merged[key] = value
     }
     return merged

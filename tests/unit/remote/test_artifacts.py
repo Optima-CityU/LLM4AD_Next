@@ -13,6 +13,8 @@ import pytest
 from llm4ad.remote.gateway import Gateway
 from llm4ad.remote.journal import Journal, Reporter
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def evidence(tmp_path):
@@ -88,9 +90,7 @@ async def test_hgamey_png_retains_description_and_uploads_original_bytes(evidenc
     from llm4ad.gateway.examples.hgamey.evaluator import HGameyShaderEvaluator
 
     journal, job, source = evidence
-    image = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-    )
+    image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
     digest = hashlib.sha256(image).hexdigest()
     description = "Candidate (B1, round 1); captured after the measurement window."
     response = MagicMock()
@@ -106,10 +106,17 @@ async def test_hgamey_png_retains_description_and_uploads_original_bytes(evidenc
     adapter = HGameyShaderEvaluator.__new__(HGameyShaderEvaluator)
     adapter.benchmark = SimpleNamespace(url="http://executor.example.org", poll_interval=0.001)
     state = {"evidence_directory": str(source.parent / "attempt"), "game": {"external_job_id": "a" * 32}}
-    report = {"artifacts": [{
-        "name": "shots/B1.png", "sha256": digest, "size": len(image),
-        "media_type": "image/png", "description": description,
-    }]}
+    report = {
+        "artifacts": [
+            {
+                "name": "shots/B1.png",
+                "sha256": digest,
+                "size": len(image),
+                "media_type": "image/png",
+                "description": description,
+            }
+        ]
+    }
     reporter = Reporter(journal, job["id"])
     await adapter.retain_game_artifacts(session, reporter, state, report)
     await adapter.retain_game_artifacts(session, reporter, state, report)
@@ -160,20 +167,22 @@ async def test_missing_optional_screenshot_does_not_skip_other_images(evidence):
     adapter = HGameyShaderEvaluator.__new__(HGameyShaderEvaluator)
     adapter.benchmark = SimpleNamespace(url="http://executor.example.org", poll_interval=0.001)
     state = {"evidence_directory": str(source.parent / "attempt"), "game": {"external_job_id": "a" * 32}}
-    files = [
-        {"name": f"shots/{side}1.png", "sha256": checksum, "size": len(image), "media_type": "image/png"}
-        for side in "AB"
-    ]
+    files = [{"name": f"shots/{side}1.png", "sha256": checksum, "size": len(image), "media_type": "image/png"} for side in "AB"]
     errors = await adapter.retain_game_artifacts(session, Reporter(journal, job["id"]), state, {"artifacts": files})
     assert errors == ["game/shots/A1.png: ClientResponseError (HTTP 404)"]
     assert [item["name"] for item in journal.artifacts(job["id"], job["attempt_id"])] == ["game/shots/B1.png"]
     assert session.get.call_count == 2
 
 
-@pytest.mark.parametrize("acknowledged,uploaded,managed,removed", [
-    (False, True, False, False), (True, False, False, False),
-    (True, True, True, False), (True, True, False, True),
-])
+@pytest.mark.parametrize(
+    "acknowledged,uploaded,managed,removed",
+    [
+        (False, True, False, False),
+        (True, False, False, False),
+        (True, True, True, False),
+        (True, True, False, True),
+    ],
+)
 def test_gateway_prunes_only_acknowledged_sdk_bulk(tmp_path, acknowledged, uploaded, managed, removed):
     """Generic cleanup must respect transfer ACKs and adapter-owned retention."""
     from types import SimpleNamespace
@@ -214,19 +223,18 @@ def test_returned_missing_artifact_keeps_remote_score(tmp_path, monkeypatch):
     if hasattr(__import__("os"), "setsid"):
         monkeypatch.setattr("os.setsid", lambda: None)
     adapter = tmp_path / "adapter.py"
-    adapter.write_text('''from llm4ad.remote.contracts import GatewayEvaluator, EvaluationContract
+    adapter.write_text("""from llm4ad.remote.contracts import GatewayEvaluator, EvaluationContract
 from llm4ad.evaluator.models import EvaluationResult, EvaluationArtifact, Metric
 class Adapter(GatewayEvaluator):
     contract = EvaluationContract(evaluator_id="files", version="1", data_version="1", metrics=[Metric(name="value")])
     async def evaluate(self, job, reporter):
         return EvaluationResult(score=7, metrics={"value": 7}, artifacts=[EvaluationArtifact(name="missing.txt", path="missing.txt")])
-''')
+""")
     journal = Journal(tmp_path / "journal.sqlite3")
     job = {key: str(uuid.uuid4()) for key in ("id", "attempt_id", "task_id")}
     job.update(timeout=60, project_root=str(tmp_path))
     journal.accept(job)
-    execute(journal.path, f"{adapter}:Adapter", job)
-    row = journal.get(job["id"])
-    result = __import__("json").loads(row["report"])
-    assert row["state"] == "completed" and result["score"] == 7 and result["success"]
+    outcome = execute(journal.path, f"{adapter}:Adapter", job)
+    result = outcome["report"]
+    assert outcome["retryable"] is False and result["score"] == 7 and result["success"]
     assert result["metadata"]["artifact_errors"]

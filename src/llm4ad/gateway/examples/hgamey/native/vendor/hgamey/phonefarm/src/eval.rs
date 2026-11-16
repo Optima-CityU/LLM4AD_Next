@@ -363,18 +363,41 @@ fn eval_shader_v2(req: &Value, a: &EvalArgs) -> i32 {
         "--out".into(),
         dir.to_string_lossy().into_owned(),
     ]);
-    // Same process: gpu-op owns one lease and emits the v2 envelope on measured outcomes.
-    // Exit 1 is still a valid non-PASS report. Exit 2 means unverified conditions, hence ABORT.
-    let rc = crate::gpuop::run_gpu_op(&args);
-    if rc == 2 {
-        println!(
-            "{}",
-            crate::shaderplan::abort(
-                req,
-                "gpu-op execution/conditions failed; see stderr",
-                Some(&plan.resolved)
-            )
-        );
+    run_shader(
+        req,
+        &plan.resolved,
+        |emit| crate::gpuop::run_gpu_op_with_report(&args, emit),
+        &mut |output| println!("{}", serde_json::to_string_pretty(output).unwrap_or_default()),
+    )
+}
+
+/// Forward a shader result, adding an ABORT only for an unreported execution failure.
+///
+/// Args:
+///     req: Original v2 request.
+///     resolved: Planned configuration for an early failure without a report.
+///     run: Executes GPU evaluation and emits any available structured result.
+///     emit_report: Writes the structured result for this invocation.
+///
+/// Returns:
+///     The unchanged GPU operation exit code.
+fn run_shader(
+    req: &Value,
+    resolved: &Value,
+    run: impl FnOnce(&mut dyn FnMut(&Value)) -> i32,
+    emit_report: &mut dyn FnMut(&Value),
+) -> i32 {
+    let mut report_emitted = false;
+    let rc = run(&mut |output| {
+        emit_report(output);
+        report_emitted = true;
+    });
+    if rc == 2 && !report_emitted {
+        emit_report(&crate::shaderplan::abort(
+            req,
+            "gpu-op execution/conditions failed; see stderr",
+            Some(resolved),
+        ));
     }
     rc
 }
@@ -496,6 +519,24 @@ pub(crate) struct GpuLevelLock {
 }
 
 impl GpuLevelLock {
+    /// Restore only the bounded fixed-format record created by this owner.
+    pub(crate) fn recover_record(serial: &str, evidence: &Path) -> Result<Option<Value>, String> {
+        let state_path = evidence.join("gpu_level_lock.txt");
+        if !state_path.exists() { return Ok(None); }
+        let bytes = crate::confirmation_transport::bounded(&state_path, 65536)?;
+        let text = std::str::from_utf8(&bytes).map_err(|e| e.to_string())?;
+        if !text.starts_with("# gpu_level_lock v1\n") { return Err("unknown evaluation GPU lock record".into()); }
+        let field = |name: &str| -> Result<u32, String> {
+            let values: Vec<_> = text.lines().filter_map(|line| line.strip_prefix(name)).collect();
+            if values.len() != 1 { return Err("incomplete evaluation GPU lock identity".into()); }
+            values[0].parse().map_err(|_| "invalid evaluation GPU lock value".into())
+        };
+        let before = (field("before_max=")?, field("before_min=")?);
+        if before.0 > 1024 || before.1 > 1024 { return Err("invalid saved GPU lock bounds".into()); }
+        let lock = Self {serial:serial.into(), level:field("level=")?, before, state_path};
+        Ok(Some(lock.restore()))
+    }
+
     pub(crate) fn apply(serial: &str, level: u32, evidence: &Path) -> Result<Self, String> {
         let _ = std::fs::create_dir_all(evidence);
         let rd = su(serial, &pwrlevel_read_cmd(), 15);
@@ -4397,6 +4438,90 @@ fn finish_gray_statistics(report:&mut Value, knob_runs:&[Value], ctrl_runs:&[Val
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn shader_output_fixture() -> (Value, Value) {
+        (
+            json!({"version":2,"kind":"shader","candidate_id":"synthetic-abort",
+                "conditions":{"cool_c":42},"workload":{"carrier":"headless","seconds":1},
+                "payload":{"inject":false}}),
+            json!({"serial":"synthetic-device","carrier":"headless","seconds":1}),
+        )
+    }
+
+    #[test]
+    fn shader_conditions_abort_emits_one_json_and_preserves_restoration_evidence() {
+        let (req, resolved) = shader_output_fixture();
+        for restored in [json!(true), json!(false), Value::Null] {
+            let reason = "synthetic candidate cooldown sensor failure after baseline completion";
+            let mut report = crate::shaderplan::abort(&req, reason, Some(&resolved));
+            report["conditions_observed"] = json!({"root_verified":true,"restored":restored,
+                "frequency_restored":restored,"charging_restored":null,
+                "arms":[{"arm":"baseline","index":0,"restored":true,"runner_exit_status":0}]});
+            let mut stdout = Vec::new();
+            let mut emissions = 0;
+            let rc = run_shader(
+                &req,
+                &resolved,
+                |emit| { emit(&report); 2 },
+                &mut |output| {
+                    emissions += 1;
+                    serde_json::to_writer_pretty(&mut stdout, output).unwrap();
+                    stdout.push(b'\n');
+                },
+            );
+            assert_eq!(rc, 2);
+            assert_eq!(emissions, 1);
+            let decoded: Value = serde_json::from_slice(&stdout)
+                .expect("the entire output must contain exactly one JSON result");
+            assert_eq!(decoded, report);
+            assert_eq!(decoded["status"], "ABORT");
+            assert_eq!(decoded["verdict"]["reason"], reason);
+            assert_eq!(decoded["conditions_observed"]["restored"], restored);
+            assert_eq!(decoded["conditions_observed"]["arms"][0]["restored"], true);
+            assert_eq!(decoded["resolved_config"], resolved);
+        }
+    }
+
+    #[test]
+    fn shader_unreported_early_error_emits_one_fallback_with_unknown_restoration() {
+        let (req, resolved) = shader_output_fixture();
+        let mut stdout = Vec::new();
+        let mut emissions = 0;
+        let rc = run_shader(
+            &req,
+            &resolved,
+            |emit| crate::gpuop::run_gpu_op_with_report(&[], emit),
+            &mut |output| {
+                emissions += 1;
+                serde_json::to_writer_pretty(&mut stdout, output).unwrap();
+                stdout.push(b'\n');
+            },
+        );
+        assert_eq!(rc, 2);
+        assert_eq!(emissions, 1);
+        let decoded: Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(decoded["status"], "ABORT");
+        assert_eq!(decoded["candidate_id"], req["candidate_id"]);
+        assert_eq!(decoded["conditions_observed"]["restored"], Value::Null);
+        assert_eq!(decoded["conditions_observed"]["root_verified"], Value::Null);
+        assert_eq!(decoded["resolved_config"], resolved);
+        assert!(decoded["verdict"]["reason"].as_str().unwrap().contains("see stderr"));
+    }
+
+    #[test]
+    fn shader_reported_pass_and_reject_keep_their_exit_codes() {
+        let (req, resolved) = shader_output_fixture();
+        for (exit_code, status) in [(0, "PASS"), (1, "SLOW")] {
+            let report = json!({"status":status});
+            let mut reports = Vec::new();
+            let rc = run_shader(
+                &req, &resolved, |emit| { emit(&report); exit_code },
+                &mut |output| reports.push(output.clone()),
+            );
+            assert_eq!(rc, exit_code);
+            assert_eq!(reports, vec![report]);
+        }
+    }
 
     /// 审查 R1 #1 #6: 旧脚本的 summary (没有 frame_attribution) 与目标进程没找到 (n_target_tids=0) 都 Err。
     #[test]

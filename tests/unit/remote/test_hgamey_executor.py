@@ -358,7 +358,8 @@ def test_leased_probe_runs_packaged_device_worker(tmp_path, monkeypatch):
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "args = sys.argv[1:]\n"
-        "for fd in os.environ['PF_LOCK_FDS'].split(','):\n"
+        "assert args == ['start-server'] or os.environ.get('PF_LOCK_FDS'), 'Device command requires its phone lease'\n"
+        "for fd in filter(None, os.environ.get('PF_LOCK_FDS', '').split(',')):\n"
         "    try:\n"
         "        os.fstat(int(fd))\n"
         "    except OSError:\n"
@@ -367,13 +368,19 @@ def test_leased_probe_runs_packaged_device_worker(tmp_path, monkeypatch):
         "        raise SystemExit('ADB inherited the phone lease')\n"
         "with Path(os.environ['FIXTURE_ADB_LOG']).open('a') as stream:\n"
         "    stream.write(json.dumps(args)+'\\n')\n"
-        "if args[:1] == ['connect']:\n"
+        "if args == ['start-server']:\n"
+        "    print('Synthetic ADB daemon ready')\n"
+        "elif args[:1] == ['connect']:\n"
         "    assert args[1] == '192.0.2.10:5555'\n"
         "    print('connected')\n"
         "else:\n"
         "    assert args[:2] == ['-s', '192.0.2.10:5555']\n"
-        "    if args[2:] == ['get-state']:\n"
+        "    if args[2:] == ['wait-for-device']:\n"
+        "        pass\n"
+        "    elif args[2:] == ['get-state']:\n"
         "        print('device')\n"
+        "    elif args[-1] == '/proc/sys/kernel/random/boot_id':\n"
+        "        print('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')\n"
         "    elif args[-1] == 'ro.serialno':\n"
         "        print('fixture-serial')\n"
         "    else:\n"
@@ -390,8 +397,12 @@ def test_leased_probe_runs_packaged_device_worker(tmp_path, monkeypatch):
         "id": "fixture", "label": "Synthetic phone", "host": "192.0.2.10", "port": 5555,
         "expected_serial": "fixture-serial", "enabled": True,
     }]}))
+    from llm4ad.gateway.examples.hgamey.execution.backend import start_runtime
+
+    start_runtime(tmp_path / "queue", devices)
     engine = Engine(tmp_path / "queue", devices)
     try:
+        assert [json.loads(line) for line in (tmp_path / "adb.jsonl").read_text().splitlines()] == [["start-server"]]
         accepted = engine.submit({"operation": "probe"})
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -405,6 +416,17 @@ def test_leased_probe_runs_packaged_device_worker(tmp_path, monkeypatch):
         result = json.loads((folder / "result.json").read_text())
         assert result["root_verified"] is True
         assert result["connection"]["physical_serial"] == "fixture-serial"
-        assert len((tmp_path / "adb.jsonl").read_text().splitlines()) == 4
+        commands = [json.loads(line) for line in (tmp_path / "adb.jsonl").read_text().splitlines()]
+        assert commands[0] == ["start-server"] and commands.count(["start-server"]) == 1
+        assert len(commands[1:]) == 6
+        assert commands[1] == ["connect", "192.0.2.10:5555"]
+        assert commands[2] == ["-s", "192.0.2.10:5555", "wait-for-device"]
+        assert commands[3] == ["-s", "192.0.2.10:5555", "get-state"]
+        assert commands[4] == ["-s", "192.0.2.10:5555", "shell", "getprop", "ro.serialno"]
+        assert commands[5] == ["-s", "192.0.2.10:5555", "shell", "cat", "/proc/sys/kernel/random/boot_id"]
+        assert commands[6] == [
+            "-s", "192.0.2.10:5555", "shell", "getprop ro.product.model; getprop ro.build.version.release; su -c id",
+        ]
+        assert all(command[:2] == ["-s", "192.0.2.10:5555"] for command in commands[2:])
     finally:
         engine.close()

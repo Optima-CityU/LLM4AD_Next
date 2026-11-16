@@ -24,6 +24,55 @@ import { formatDateTime } from "@/lib/utils"
 import NodeArtifacts from "./NodeArtifacts"
 import NodeMetrics from "./NodeMetrics"
 
+function metadataRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function QualityPenalty({ metadata }: { metadata: unknown }) {
+  const { t } = useTranslation()
+  const assessment = metadataRecord(
+    metadataRecord(metadata)?.quality_assessment,
+  )
+  if (assessment?.penalized !== true) return null
+
+  const reasons = Array.isArray(assessment.reasons)
+    ? assessment.reasons.filter(
+        (reason): reason is string =>
+          typeof reason === "string" && reason.trim().length > 0,
+      )
+    : []
+  const badge = (
+    <Badge
+      variant="secondary"
+      className="max-w-full self-start whitespace-normal break-words text-left"
+      data-node-quality-penalty
+    >
+      {t(
+        assessment.status === "beyond_reference"
+          ? "evaluationData.qualityPenalty.gap"
+          : "evaluationData.qualityPenalty.unverified",
+      )}
+    </Badge>
+  )
+  return reasons.length > 0 ? (
+    <details
+      className="min-w-0 max-w-full self-start"
+      data-node-quality-reasons
+    >
+      <summary className="cursor-pointer">{badge}</summary>
+      <ul className="mt-2 max-h-40 list-disc overflow-auto pl-4 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+        {reasons.map((reason, index) => (
+          <li key={`${index}:${reason}`}>{reason}</li>
+        ))}
+      </ul>
+    </details>
+  ) : (
+    badge
+  )
+}
+
 function MetadataEntries({ data }: { data: Record<string, unknown> }) {
   return (
     <dl className="flex min-w-0 flex-col gap-2 text-sm leading-relaxed">
@@ -96,6 +145,7 @@ function ResultMetadata({
         </p>
       )}
       <NodeMetrics result={result ?? {}} evaluationScore={score} />
+      <QualityPenalty metadata={result?.metadata} />
       {Object.keys(rawData).length > 0 && (
         <details className="min-w-0" data-node-raw-metadata>
           <summary className="cursor-pointer text-sm text-muted-foreground">
@@ -198,6 +248,11 @@ function SavedNodeData({
     retry: 1,
   })
   const record = query.data?.record
+  const metadata = record?.result?.metadata
+  const comparisons =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>).evidence_comparisons
+      : undefined
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {summary.state && summary.state !== "completed" && (
@@ -227,6 +282,13 @@ function SavedNodeData({
       )}
       {record && (
         <>
+          <NodeArtifacts
+            taskId={taskId}
+            evaluationId={record.id}
+            files={record.artifacts ?? []}
+            availableIds={query.data?.available_artifact_ids ?? []}
+            comparisons={comparisons}
+          />
           <ResultMetadata
             result={record.result}
             evaluationState={record.state ?? summary.state}
@@ -235,12 +297,6 @@ function SavedNodeData({
           <StorageWarning
             state={record.storage_state}
             errors={record.storage_errors}
-          />
-          <NodeArtifacts
-            taskId={taskId}
-            evaluationId={record.id}
-            files={record.artifacts ?? []}
-            availableIds={query.data?.available_artifact_ids ?? []}
           />
         </>
       )}
@@ -332,7 +388,7 @@ export default function NodeEvaluationData({
               </SelectContent>
             </Select>
           ) : (
-            <p className="break-words text-xs text-muted-foreground">
+            <p className="break-words text-sm text-muted-foreground">
               {labelFor(selected)}
             </p>
           )}

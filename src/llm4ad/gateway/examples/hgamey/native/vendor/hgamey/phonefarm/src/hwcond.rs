@@ -1294,23 +1294,44 @@ pub fn wait_cool(
     timeout_s: u64,
 ) -> Result<(String, f64, u64), String> {
     let t0 = Instant::now();
+    wait_cool_with(tag, cool_c, Duration::from_secs(timeout_s),
+        |remaining| {
+            let timeout = remaining.as_millis().min(15_000).max(1) as u64;
+            let text = phone.shell("su -c 'for z in /sys/class/thermal/thermal_zone*; do echo \"$(cat $z/type) $(cat $z/temp)\"; done 2>/dev/null'", timeout);
+            soc_max_c(&parse_thermal(&text))
+        }, || t0.elapsed(), std::thread::sleep)
+}
+
+fn wait_cool_with(
+    tag: &str, cool_c: f64, budget: Duration,
+    mut read: impl FnMut(Duration) -> Option<(String, f64)>,
+    elapsed: impl Fn() -> Duration, mut sleep: impl FnMut(Duration),
+) -> Result<(String, f64, u64), String> {
+    let mut missing = 0;
     loop {
-        let (zone, c) =
-            soc_max_c(&read_thermal(phone)).ok_or("读不到任何 cpu-/gpuss 热区, 无法做冷机判定")?;
+        let remaining = budget.checked_sub(elapsed()).filter(|d| !d.is_zero())
+            .ok_or("cooling deadline elapsed before a verified thermal read")?;
+        let sample = read(remaining);
+        if elapsed() >= budget { return Err("cooling deadline elapsed during thermal read".into()); }
+        let Some((zone, c)) = sample else {
+            missing += 1;
+            if missing >= 3 { return Err("thermal read unavailable after 3 consecutive attempts; no temperature inferred".into()); }
+            progress(tag, "thermal transport read unavailable; retrying within the original cooling deadline");
+            sleep(Duration::from_secs(missing).min(budget.saturating_sub(elapsed())));
+            continue;
+        };
+        missing = 0;
         if c < cool_c {
-            return Ok((zone, c, t0.elapsed().as_secs()));
-        }
-        if t0.elapsed() > Duration::from_secs(timeout_s) {
-            return Err(format!("等冷超时 {timeout_s}s: {zone}={c:.1}C 仍 >= {cool_c}C"));
+            return Ok((zone, c, elapsed().as_secs()));
         }
         progress(
             tag,
             &format!(
                 "等冷: {zone}={c:.1}C >= {cool_c}C, 3s 后重测 (已等 {}s)",
-                t0.elapsed().as_secs()
+                elapsed().as_secs()
             ),
         );
-        std::thread::sleep(Duration::from_secs(3));
+        sleep(Duration::from_secs(3).min(budget.saturating_sub(elapsed())));
     }
 }
 
@@ -1562,6 +1583,44 @@ pub fn gpu_control_backend(snapshot: &Snapshot) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cooling_retries_missing_reads_without_inventing_a_temperature() {
+        use std::cell::{Cell, RefCell};
+        use std::collections::VecDeque;
+        let now = Cell::new(Duration::ZERO);
+        let reads = RefCell::new(VecDeque::from([None, None, Some(("gpuss".into(), 30.0))]));
+        let sleeps = RefCell::new(Vec::new());
+        let result = wait_cool_with("fake", 40.0, Duration::from_secs(10),
+            |remaining| { assert!(remaining <= Duration::from_secs(10) - now.get()); reads.borrow_mut().pop_front().unwrap() },
+            || now.get(), |delay| { sleeps.borrow_mut().push(delay); now.set(now.get() + delay); }).unwrap();
+        assert_eq!(result, ("gpuss".into(), 30.0, 3));
+        assert_eq!(*sleeps.borrow(), [Duration::from_secs(1), Duration::from_secs(2)]);
+    }
+
+    #[test]
+    fn cooling_missing_reads_stop_after_three_attempts() {
+        use std::cell::Cell;
+        let now = Cell::new(Duration::ZERO);
+        let count = Cell::new(0);
+        let error = wait_cool_with("fake", 40.0, Duration::from_secs(10),
+            |_| { count.set(count.get() + 1); None }, || now.get(), |delay| now.set(now.get() + delay)).unwrap_err();
+        assert!(error.contains("3 consecutive attempts"));
+        assert_eq!(count.get(), 3);
+    }
+
+    #[test]
+    fn cooling_cannot_accept_a_read_or_retry_after_its_original_deadline() {
+        use std::cell::Cell;
+        let now = Cell::new(Duration::ZERO);
+        let count = Cell::new(0);
+        let error = wait_cool_with("fake", 40.0, Duration::from_millis(20),
+            |remaining| { assert_eq!(remaining, Duration::from_millis(20)); count.set(count.get() + 1);
+                now.set(now.get() + remaining); Some(("gpuss".into(), 20.0)) },
+            || now.get(), |_| panic!("expired cooling budget slept")).unwrap_err();
+        assert!(error.contains("deadline"));
+        assert_eq!(count.get(), 1);
+    }
+
     use super::*;
 
     #[test]

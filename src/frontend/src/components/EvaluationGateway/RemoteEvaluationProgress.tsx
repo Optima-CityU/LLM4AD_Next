@@ -10,6 +10,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  type PoolJob,
+  remoteAttemptHistory,
+  remoteFailureCategory,
+} from "@/lib/gatewayPool"
 
 export default function RemoteEvaluationProgress({
   taskId,
@@ -18,7 +23,7 @@ export default function RemoteEvaluationProgress({
   taskId: string
   active: boolean
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const query = useQuery({
     queryKey: ["remoteEvaluationJobs", taskId, active],
     queryFn: () => Llm4AdEvaluationGatewaysService.taskJobs({ taskId }),
@@ -56,7 +61,7 @@ export default function RemoteEvaluationProgress({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {query.data?.map((job) => {
+            {query.data?.map((job: PoolJob) => {
               const completed = job.report.completed
               const total = job.report.total
               const known =
@@ -66,6 +71,15 @@ export default function RemoteEvaluationProgress({
               const waiting =
                 !job.gateway_online &&
                 ["accepted", "running"].includes(job.state)
+              const category = remoteFailureCategory(job.failure_category)
+              const history = remoteAttemptHistory(job.attempt_history)
+              const hasAttempts =
+                typeof job.attempt_count === "number" &&
+                Number.isInteger(job.attempt_count) &&
+                job.attempt_count >= 0 &&
+                typeof job.max_attempts === "number" &&
+                Number.isInteger(job.max_attempts) &&
+                job.max_attempts > 0
               return (
                 <TableRow key={job.id}>
                   <TableCell>
@@ -82,16 +96,35 @@ export default function RemoteEvaluationProgress({
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge
-                      variant={
-                        job.state === "failed" ? "destructive" : "outline"
-                      }
-                    >
-                      {t(
-                        `remoteEvaluation.states.${waiting ? "reconnecting" : job.state}`,
-                        { defaultValue: job.state },
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge
+                        variant={
+                          job.state === "failed" ? "destructive" : "outline"
+                        }
+                      >
+                        {t(
+                          `remoteEvaluation.states.${waiting ? "reconnecting" : job.state}`,
+                          { defaultValue: job.state },
+                        )}
+                      </Badge>
+                      {hasAttempts && (
+                        <Badge variant="outline">
+                          {t("remoteEvaluation.attemptCount", {
+                            count: job.attempt_count,
+                            max: job.max_attempts,
+                          })}
+                        </Badge>
                       )}
-                    </Badge>
+                      {category && (
+                        <Badge
+                          variant={
+                            job.state === "failed" ? "destructive" : "secondary"
+                          }
+                        >
+                          {t(`remoteEvaluation.failureCategories.${category}`)}
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="max-w-md whitespace-normal">
                     {known && (
@@ -120,6 +153,74 @@ export default function RemoteEvaluationProgress({
                           })}
                         </span>
                       )}
+                    {history.length > 0 && (
+                      <details className="mt-2 text-sm">
+                        <summary className="cursor-pointer text-muted-foreground">
+                          {t("remoteEvaluation.attemptHistory", {
+                            count: history.length,
+                          })}
+                        </summary>
+                        <ol className="mt-2 flex flex-col gap-2">
+                          {history.map((attempt, index) => (
+                            <li
+                              key={`${attempt.number}-${index}`}
+                              className="flex flex-col gap-1 border-l-2 pl-3"
+                            >
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="font-medium">
+                                  {t("remoteEvaluation.attemptNumber", {
+                                    number: attempt.number,
+                                  })}
+                                </span>
+                                <span className="break-all">
+                                  ·{" "}
+                                  {attempt.gateway ??
+                                    t("remoteEvaluation.unknownGateway")}
+                                </span>
+                                {attempt.category && (
+                                  <Badge variant="outline">
+                                    {t(
+                                      `remoteEvaluation.failureCategories.${attempt.category}`,
+                                    )}
+                                  </Badge>
+                                )}
+                                {attempt.state && (
+                                  <Badge variant="outline">
+                                    {t(
+                                      `remoteEvaluation.states.${attempt.state}`,
+                                    )}
+                                  </Badge>
+                                )}
+                              </div>
+                              {(attempt.startedAt || attempt.finishedAt) && (
+                                <p className="text-xs text-muted-foreground">
+                                  {attempt.startedAt && (
+                                    <time dateTime={attempt.startedAt}>
+                                      {new Date(
+                                        attempt.startedAt,
+                                      ).toLocaleString(i18n.language)}
+                                    </time>
+                                  )}
+                                  {attempt.startedAt &&
+                                    attempt.finishedAt &&
+                                    " → "}
+                                  {attempt.finishedAt && (
+                                    <time dateTime={attempt.finishedAt}>
+                                      {new Date(
+                                        attempt.finishedAt,
+                                      ).toLocaleString(i18n.language)}
+                                    </time>
+                                  )}
+                                </p>
+                              )}
+                              {attempt.message && (
+                                <p className="break-words">{attempt.message}</p>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
                   </TableCell>
                 </TableRow>
               )

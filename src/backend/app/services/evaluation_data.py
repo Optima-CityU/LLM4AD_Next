@@ -184,7 +184,7 @@ def remote_record(
         instance_id=request.get("instance_id", ""),
         origin="remote",
         state=job.state,
-        created_at=job.created_at.replace(tzinfo=UTC).isoformat(),
+        created_at=request.get("attempt_started_at") or job.created_at.replace(tzinfo=UTC).isoformat(),
         storage_state="saved"
         if result
         else ("unavailable" if job.state in {"completed", "failed", "cancelled"} else "pending"),

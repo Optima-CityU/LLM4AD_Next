@@ -11,10 +11,12 @@ import tempfile
 import threading
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from aiohttp import web
 
 from llm4ad.gateway.examples import hgamey
@@ -23,6 +25,27 @@ from llm4ad.gateway.examples.hgamey.benchmark import Benchmark
 from llm4ad.gateway.examples.hgamey.configuration import configure
 from llm4ad.gateway.examples.hgamey.runtime import HGameyRuntime
 from llm4ad.gateway.sdk.service import GatewayService as Service
+
+pytestmark = pytest.mark.unit
+
+
+class LocalPool:
+    """Keep fake phone and compiler hooks local while exercising the SDK queue.
+
+    Process-tree termination is covered by SDK and real loky HGamey tests.
+    """
+
+    def __init__(self, max_workers, **kwargs):
+        """Replace only the worker implementation, never its SDK scheduling."""
+        self.pool = ThreadPoolExecutor(max_workers=max_workers)
+
+    def submit(self, *args, **kwargs):
+        """Run the exact SDK importable packet with local fixture dependencies."""
+        return self.pool.submit(*args, **kwargs)
+
+    def shutdown(self, wait=True, kill_workers=False):
+        """Finish deterministic fixture work without creating external processes."""
+        self.pool.shutdown(wait=wait)
 
 
 class GatewayFixture:
@@ -37,6 +60,15 @@ class GatewayFixture:
         self.adapter = load_evaluator(evaluator)
         self.root = directory
         self.root.mkdir(parents=True, exist_ok=True)
+        self.admission_paused = False
+
+    def pause_accepting(self):
+        """Observe claims being paused independently from reconciliation."""
+        self.admission_paused = True
+
+    def resume_accepting(self):
+        """Observe claims resuming after resource readiness."""
+        self.admission_paused = False
 
     async def run(self):
         """Remain connected until the service deliberately cancels transport."""
@@ -72,9 +104,12 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             "HGAMEY_ADAPTER_DIR": str(Path(os.environ.get("HGAMEY_TEST_ADAPTER_DIR", str(Path(hgamey.__file__).parent)))),
             "HGAMEY_STARTUP_CHECK": "true",
             "HGAMEY_STARTUP_CHECK_TIMEOUT": "10",
+            "HGAMEY_EVALUATOR_MODES": "legacy",
             "HGAMEY_POLL_INTERVAL": "0.001",
         }
         self.patches = [
+            patch("llm4ad.gateway.sdk.scheduling.ProcessPoolExecutor", LocalPool),
+            patch("llm4ad.gateway.examples.hgamey.execution.jobs.run_backend", self.backend),
             patch.object(Benchmark, "tool_version", return_value="fixture-compiler"),
             patch.object(
                 Benchmark, "compile", lambda self, source, output: output.write_bytes(b"\x03\x02\x23\x07" + source.read_bytes())
@@ -118,7 +153,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
                 "kind": "shader",
                 "candidate_id": request.get("candidate_id"),
                 "source": "phonefarm",
-                "status": self.status,
+                "status": getattr(self, "device_status", {}).get(body.get("device_id"), self.status),
                 "metrics": {"operator_latency_ms": 2.5, "psnr_db": 40, "power_watt": None},
                 "baseline_metrics": {"operator_latency_ms": 2.5, "psnr_db": 40},
                 "verdict": {"is_pareto_improvement": False, "p_value": 1},
@@ -139,10 +174,18 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     def launch(self, gateway_factory=GatewayFixture):
         """Run the real lifecycle around a deterministic executor backend."""
+        def engine(data, config, **kwargs):
+            instance = executor.Engine(data, config, **kwargs)
+            if gateway_factory is GatewayFixture:
+                # This registration fixture omits the SDK restoration lifecycle.
+                for delivery in instance.executors.values():
+                    delivery.release("sdk-restoration")
+            return instance
+
         module = SimpleNamespace(
             load_devices=executor.load_devices,
             make_handler=executor.make_handler,
-            Engine=lambda data, config: executor.Engine(data, config, self.backend),
+            Engine=engine,
         )
         service = Service(HGameyRuntime(self.environment, "llm4ad.gateway.examples.hgamey.evaluator:HGameyShaderEvaluator", module), gateway_factory)
         task = asyncio.create_task(service.run())
@@ -156,7 +199,13 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             if predicate():
                 return
             await asyncio.sleep(0.005)
-        self.fail("fixture transition did not complete")
+        observations = []
+        for service in self.services:
+            observations.append({"readiness": service.readiness, "error": service.error,
+                                 "retention": service.retention_status})
+            for receipt in service.options["root"].rglob("retention/**/*.json"):
+                observations.append(json.loads(receipt.read_text()))
+        self.fail("fixture transition did not complete: " + repr(observations))
 
     async def test_idle_startup_does_not_evaluate_without_explicit_readiness_check(self):
         """Disabling the one-shot check leaves the executor idle and unlocked."""
@@ -190,6 +239,30 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Journal(service.gateway.root / "jobs.sqlite3").rows(), [])
         await asyncio.sleep(0.02)
         self.assertEqual(len(self.calls), 1)
+
+    async def test_finalization_exception_records_failed_readiness_after_confirmed_cleanup(self):
+        """An artifact failure cannot leave a completed phone probe permanently running."""
+        from llm4ad.gateway.examples.hgamey import runtime
+        from llm4ad.gateway.sdk.journal import Journal
+
+        original = runtime.run_operation
+
+        async def fail_finalization(adapter, operation, *args, **kwargs):
+            value = await original(adapter, operation, *args, **kwargs)
+            if operation == "evaluate":
+                raise ValueError("fixture artifact finalization failure")
+            return value
+
+        with patch.object(runtime, "run_operation", side_effect=fail_finalization):
+            service, _ = self.launch()
+            await self.until(lambda: bool(service.error))
+        rows = Journal(service.gateway.root / "startup.sqlite3").rows()
+        self.assertEqual(rows[0]["state"], "failed")
+        report = json.loads(rows[0]["report"])
+        self.assertTrue(report["external_cleanup_confirmed"])
+        self.assertIn("fixture artifact finalization failure", report["message"])
+        self.assertEqual(GatewayFixture.registrations, 0)
+        self.assertEqual(service.runtime.engine.health()["blocked_jobs"], [])
 
     async def test_completed_readiness_bulk_evidence_is_collected(self):
         """Retain the readiness receipt while removing its completed bulk files."""
@@ -249,7 +322,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         """A quality failure retains one diagnostic check and no usable gateway."""
         self.status = "POOR_QUALITY"
         service, _ = self.launch()
-        await self.until(lambda: service.readiness == "unready")
+        await self.until(lambda: bool(service.error))
         self.assertEqual(GatewayFixture.registrations, 0)
         self.assertFalse(service.health()["ready"])
         self.assertIn("POOR_QUALITY", service.error)
@@ -275,8 +348,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.runtime.engine.get(pending["id"])["state"], "queued")
         self.assertEqual(len(self.calls), 1)
 
-    async def test_restart_reconciles_incomplete_check_without_second_measurement(self):
-        """An interrupted polling task reuses the completed executor experiment."""
+    async def test_restart_cleans_interrupted_readiness_before_fresh_measurement(self):
+        """A restarted SDK generation cleans the old identity before a fresh check."""
         self.release.clear()
         first, first_task = self.launch()
         await self.until(self.entered.is_set)
@@ -287,7 +360,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         second, _ = self.launch()
         await self.until(lambda: GatewayFixture.registrations == 1)
         self.assertTrue(second.health()["ready"])
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
 
     async def test_service_lease_rejects_second_instance_before_starting_an_executor(self):
         """Two containers cannot share SDK/queue state through a second service."""
@@ -354,8 +427,10 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.multiple_devices()
         service, _ = self.launch()
         await self.until(lambda: GatewayFixture.registrations == 2)
-        self.assertEqual([call["device_id"] for call in self.calls], ["phone-a", "phone-b"])
-        self.assertEqual([call["request"]["serial"] for call in self.calls], ["192.0.2.10:37123", "[2001:db8::2]:41235"])
+        self.assertEqual(
+            {call["device_id"]: call["request"]["serial"] for call in self.calls},
+            {"phone-a": "192.0.2.10:37123", "phone-b": "[2001:db8::2]:41235"},
+        )
         gateways = list(service.gateways.values())
         self.assertNotEqual(gateways[0].root, gateways[1].root)
         self.assertNotEqual(gateways[0].adapter.contract, gateways[1].adapter.contract)
@@ -472,76 +547,116 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(journal.get(job.id)["state"], "completed")
         self.assertEqual(json.loads((platform / "legacy-device.json").read_text()), {"device_id": "phone-a"})
 
-    async def test_one_failed_device_prevents_claims_without_repeating_checks(self):
-        """Never register usable gateways while a selected device failed readiness."""
+    async def test_one_failed_device_pauses_only_its_claims_without_repeating_checks(self):
+        """Keep a healthy device usable when another device fails readiness."""
         self.multiple_devices()
-        original = self.backend
-
-        def backend(folder):
-            body = executor.read_json(folder / "input.json")["submission"]
-            self.status = "POOR_QUALITY" if body["device_id"] == "phone-b" else "PASS"
-            return original(folder)
-
-        self.backend = backend
+        self.device_status = {"phone-b": "POOR_QUALITY"}
         service, _ = self.launch()
-        await self.until(lambda: service.readiness == "unready")
-        self.assertEqual(GatewayFixture.registrations, 0)
-        self.assertIn("phone-b", service.error)
+        await self.until(lambda: GatewayFixture.registrations == 2)
+        self.assertEqual(service.readiness, "ready")
+        self.assertFalse(service.gateways["phone-a"].admission_paused)
+        self.assertTrue(service.gateways["phone-b"].admission_paused)
+        self.assertTrue(service.health()["gateways"]["phone-b"]["startup_error"])
         self.assertEqual(service.binding_status, {"phone-a": "ready", "phone-b": "unready"})
         await asyncio.sleep(0.02)
         self.assertEqual(len(self.calls), 2)
 
-    @unittest.skipUnless(shutil.which("glslangValidator") and shutil.which("spirv-val"), "Native shader compiler tools required")
     async def test_spawned_sdk_workers_keep_device_bindings_without_environment_switches(self):
-        """Run two real SDK child processes into the shared serialized executor."""
-        from llm4ad.remote.contracts import RemoteJob
-        from llm4ad.remote.gateway import Gateway
+        """Real SDK controllers commit direct native outcomes without HTTP or shader tools."""
+        from llm4ad.gateway.sdk.contracts import RemoteJob
+        from llm4ad.gateway.sdk.gateway import Gateway
 
-        class WorkerGateway(Gateway):
-            async def run(self):
-                await asyncio.Event().wait()
+        self.patches[0].stop()  # This integration test uses the actual public loky pool.
+        devices = [{key: value for key, value in device.items() if key != "device_profile"} | {
+            "label": device["id"], "enabled": True,
+        } for device in self.multiple_devices()]
+        config, data = self.root / "physical-devices.json", self.root / "direct-executor"
+        executor.write_json(config, {"version": 1, "devices": devices})
+        engine = executor.Engine(data, config)
+        gateways, jobs = [], []
+        fixture = r'''
+import hashlib
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from llm4ad.gateway.sdk import EvaluationContract, EvaluationResult, Metric
+from llm4ad.gateway.examples.hgamey.evaluator import HGameyShaderEvaluator
+from llm4ad.gateway.examples.hgamey.execution import jobs
+from llm4ad.gateway.examples.hgamey.execution.storage import read_json, write_json
 
-        self.multiple_devices()
-        self.environment["HGAMEY_STARTUP_CHECK"] = "false"
-        for fixture in self.patches:
-            fixture.stop()
-        service, _ = self.launch(WorkerGateway)
-        await self.until(lambda: service.readiness == "ready")
-        jobs = []
+def native_fixture(folder):
+    device = read_json(folder / "input.json")["device"]
+    write_json(folder / "result.json", {"status":"PASS", "fixture_only":True,
+               "device_id":device["id"], "serial":device["expected_serial"], "native_pid":os.getpid()})
+    return 0
+
+class Evaluator(HGameyShaderEvaluator):
+    contract = EvaluationContract(evaluator_id="hgamey-direct-fixture", version="1", data_version="1",
+                                  metrics=[Metric(name="quality")])
+    def __init__(self):
+        self.benchmark = SimpleNamespace(settings=SETTINGS, game_check=None)
+    async def before_task(self, job, reporter, operation):
+        if operation != "evaluate":
+            return
+        token = hashlib.sha256((job.id + job.attempt_id + job.execution_id).encode()).hexdigest()
+        stage = Path(job.project_root) / "native-stage"
+        stage.mkdir()
+        reporter.save_state({"remote_job_id":job.id, "remote_attempt_id":job.attempt_id,
+            "execution_id":job.execution_id, "idempotency_key":token, "evidence_directory":str(stage),
+            "request":{"operation":"probe", "device_id":SETTINGS["device_id"], "idempotency_key":token}})
+    async def evaluate(self, job, reporter):
+        jobs.run_backend = native_fixture
+        report = await self.follow_direct(reporter.saved_state, reporter)
+        return EvaluationResult(score=1, metrics={"quality":1},
+                                metadata={**report, "worker_pid":os.getpid(), "execution_id":job.execution_id})
+    async def after_task(self, job, reporter, operation, *, result=None, error=None):
+        pass
+    async def rpc(self, *args, **kwargs):
+        raise AssertionError("Integrated native execution used HTTP")
+'''
         try:
-            for gateway in service.gateways.values():
-                work = gateway.root / "candidate"
+            for device in devices:
+                settings = {"execution_backend": "direct", "executor_data": str(data),
+                            "executor_config": str(config), "device_id": device["id"]}
+                module = self.root / (device["id"] + "-direct.py")
+                module.write_text("SETTINGS = " + repr(settings) + "\n" + fixture)
+                gateway = Gateway("http://fixture-platform.invalid", device["id"], [str(uuid.uuid4())],
+                                  f"{module}:Evaluator", self.root / device["id"])
+                gateway.executor, gateway.executor_owned = engine.executors[device["id"]], False
+                gateways.append(gateway)
+                work = self.root / (device["id"] + "-candidate")
                 work.mkdir()
-                (work / "shader.comp").write_bytes(gateway.adapter.benchmark.baseline.read_bytes())
-                job = RemoteJob(
-                    id=str(uuid.uuid4()),
-                    attempt_id=str(uuid.uuid4()),
-                    task_id=str(uuid.uuid4()),
-                    project_root=str(work),
-                    timeout=30,
-                )
-                payload = job.model_dump(mode="json")
-                gateway.journal.accept(payload)
-                # Actual child processes must load the profile from the evaluator spec.
-                with patch.dict(os.environ, {"HGAMEY_GATEWAY_CONFIG": "/does/not/exist.json"}):
-                    gateway.start_process(payload)
-                jobs.append((gateway, job))
-            await self.until(
-                lambda: all(gateway.journal.get(job.id)["state"] in {"completed", "failed"} for gateway, job in jobs)
-            )
-            for gateway, job in jobs:
-                row = gateway.journal.get(job.id)
+                (work / "candidate.py").write_text("# Synthetic input, not a phone measurement\n")
+                job = RemoteJob(id=str(uuid.uuid4()), attempt_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()),
+                                project_root=str(work), timeout=30).model_dump(mode="json")
+                gateway.journal.accept(job)
+                jobs.append(job)
+            with patch.dict(os.environ, {"HGAMEY_GATEWAY_CONFIG": "/does/not/exist.json"}):
+                async with asyncio.timeout(25):
+                    while True:
+                        for gateway, job in zip(gateways, jobs, strict=True):
+                            await gateway.reconcile(None, job)
+                        if all(gateway.journal.get(job["id"])["state"] in {"completed", "failed"}
+                               for gateway, job in zip(gateways, jobs, strict=True)):
+                            break
+                        await asyncio.sleep(0.02)
+            worker_pids = []
+            for device, gateway, job in zip(devices, gateways, jobs, strict=True):
+                row = gateway.journal.get(job["id"])
                 self.assertEqual(row["state"], "completed", row["report"])
-                self.assertTrue(json.loads(row["report"])["success"])
-            self.assertEqual(sorted(call["device_id"] for call in self.calls), ["phone-a", "phone-b"])
-            self.assertEqual(service.runtime.engine.health()["max_active_jobs"], 1)
+                observed = json.loads(row["report"])["metadata"]
+                self.assertEqual(observed["device_id"], device["id"])
+                self.assertEqual(observed["serial"], device["expected_serial"])
+                self.assertEqual(observed["native_pid"], observed["worker_pid"])
+                self.assertNotEqual(observed["worker_pid"], os.getpid())
+                worker_pids.append(observed["worker_pid"])
+                saved = json.loads(row["saved"])
+                self.assertEqual(engine.get(saved["external_job_id"])["cleanup_status"], "completed")
+                self.assertEqual(json.loads(row["job"])["execution_id"], observed["execution_id"])
+                self.assertFalse(gateway.executor.entries())
+            self.assertEqual(len(set(worker_pids)), 2)
         finally:
-            for gateway, _ in jobs:
-                for process in gateway.processes.values():
-                    await asyncio.to_thread(process.join, 5)
-                    if process.is_alive():
-                        process.terminate()
-                        process.join(5)
+            await asyncio.to_thread(engine.close)
 
     async def test_actual_sdk_registers_only_after_readiness_and_keeps_platform_outages_local(self):
         """Exercise the real SDK against loopback registration/heartbeat endpoints."""
@@ -584,10 +699,30 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             service.gateway.wakeup.set()
             await self.until(lambda: bool(getattr(service.gateway, "last_error", None)))
             self.assertTrue(service.health()["ready"])
-            self.assertTrue(service.runtime.engine.thread.is_alive())
+            self.assertTrue(service.runtime.alive())
         finally:
             await runner.cleanup()
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_case_source_upgrade_gets_a_new_frozen_settings_filename(tmp_path):
+    """An idle source upgrade must not reuse a profile pinned to different measurements."""
+    adapter = tmp_path / 'adapter'
+    (adapter / 'config').mkdir(parents=True)
+    shutil.copyfile(Path(hgamey.__file__).parent / 'config/settings.json', adapter / 'config/settings.json')
+    implementation = adapter / 'scoring.py'
+    implementation.write_text('SCORING_REVISION = 1\n')
+    environment = {
+        'LLM4AD_SERVER_URL': 'http://fixture-platform.invalid', 'LLM4AD_GATEWAY_NAME': 'fixture',
+        'LLM4AD_ALLOWED_USER_IDS': str(uuid.uuid4()), 'HGAMEY_RUNTIME_DIR': str(tmp_path / 'runtime'),
+        'HGAMEY_DEVICE_HOST': '192.0.2.5', 'HGAMEY_DEVICE_SERIAL': 'fixture-serial',
+        'HGAMEY_DEVICE_PROFILE': 'fixture-driver',
+    }
+    before = configure(environment, executor, adapter)['profiles'][0]
+    implementation.write_text('SCORING_REVISION = 2\n')
+    after = configure(environment, executor, adapter)['profiles'][0]
+    assert before['settings'] == after['settings']
+    assert before['settings_path'] != after['settings_path']

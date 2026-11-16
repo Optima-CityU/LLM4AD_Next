@@ -19,11 +19,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   evaluationPreviewKind,
   formatEvaluationBytes,
 } from "@/lib/evaluationArtifacts"
+import { resolveEvidenceComparisons } from "@/lib/evidenceComparisons"
 
 const ArtifactCodeEditor = lazy(
   () => import("@/components/AutoResearch/ArtifactCodeEditor"),
@@ -111,13 +120,15 @@ function DownloadArtifact(props: ArtifactProps) {
   )
 }
 
-function ImageThumbnail(props: ArtifactProps & { onOpen: () => void }) {
+function ImageThumbnail(
+  props: ArtifactProps & { onOpen: () => void; eager?: boolean },
+) {
   const { t } = useTranslation()
   const ref = useRef<HTMLButtonElement>(null)
-  const [visible, setVisible] = useState(false)
+  const [visible, setVisible] = useState(props.eager ?? false)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
-    if (!ref.current) return
+    if (props.eager || !ref.current) return
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -129,7 +140,7 @@ function ImageThumbnail(props: ArtifactProps & { onOpen: () => void }) {
     )
     observer.observe(ref.current)
     return () => observer.disconnect()
-  }, [])
+  }, [props.eager])
   const query = useArtifactContent(props, visible)
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -158,13 +169,23 @@ function ImageThumbnail(props: ArtifactProps & { onOpen: () => void }) {
       </Button>
       <div className="flex min-w-0 items-center gap-1">
         <span
-          className="min-w-0 flex-1 truncate text-xs"
+          className="min-w-0 flex-1 truncate text-sm"
           title={props.file.name}
         >
           {props.file.name.split("/").pop()}
         </span>
         <DownloadArtifact {...props} />
       </div>
+      {!props.saved && (
+        <p className="text-sm text-muted-foreground">
+          {t("evaluationData.pendingFile")}
+        </p>
+      )}
+      {props.saved && (query.isError || failed) && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t("evaluationData.previewUnavailable")}
+        </p>
+      )}
     </div>
   )
 }
@@ -233,17 +254,37 @@ export default function NodeArtifacts({
   evaluationId,
   files,
   availableIds,
+  comparisons,
 }: {
   taskId: string
   evaluationId: string
   files: EvaluationFile[]
   availableIds: string[]
+  comparisons?: unknown
 }) {
   const { t } = useTranslation()
   const [openedId, setOpenedId] = useState<string | null>(null)
+  const [comparisonId, setComparisonId] = useState<string>()
+  const uniqueFiles = [
+    ...new Map(files.map((file) => [file.id, file])).values(),
+  ]
   const opened = files.find((file) => file.id === openedId)
-  const images = files.filter((file) => evaluationPreviewKind(file) === "image")
-  const others = files.filter((file) => evaluationPreviewKind(file) !== "image")
+  const groups = resolveEvidenceComparisons(comparisons, uniqueFiles)
+  const selectedIndex = Math.max(
+    0,
+    groups.findIndex((group) => group.id === comparisonId),
+  )
+  const selected = groups[selectedIndex]
+  const comparedIds = new Set(
+    groups.flatMap((group) => group.images.map((image) => image.file.id)),
+  )
+  const images = uniqueFiles.filter(
+    (file) =>
+      evaluationPreviewKind(file) === "image" && !comparedIds.has(file.id),
+  )
+  const others = uniqueFiles.filter(
+    (file) => evaluationPreviewKind(file) !== "image",
+  )
   const propsFor = (file: EvaluationFile): ArtifactProps => ({
     taskId,
     evaluationId,
@@ -253,51 +294,145 @@ export default function NodeArtifacts({
   if (files.length === 0) return null
   return (
     <section
-      className="flex min-w-0 flex-col gap-2"
+      className="@container flex min-w-0 flex-col gap-3"
       aria-label={t("evaluationData.attachments")}
     >
-      <h4 className="text-sm font-medium">
-        {t("evaluationData.files", { count: files.length })}
-      </h4>
+      {selected && (
+        <section
+          className="flex min-w-0 flex-col gap-3"
+          aria-label={t("evaluationData.comparisons.title")}
+        >
+          <h4 className="text-sm font-semibold">
+            {t("evaluationData.comparisons.title")}
+          </h4>
+          {groups.length > 1 ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Select value={selected.id} onValueChange={setComparisonId}>
+                <SelectTrigger
+                  className="min-w-0 flex-1"
+                  aria-label={t("evaluationData.comparisons.selectGroup")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {groups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={selectedIndex === 0}
+                onClick={() => setComparisonId(groups[selectedIndex - 1].id)}
+                aria-label={t("evaluationData.comparisons.previous")}
+              >
+                {t("evaluationData.previous")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={selectedIndex === groups.length - 1}
+                onClick={() => setComparisonId(groups[selectedIndex + 1].id)}
+                aria-label={t("evaluationData.comparisons.next")}
+              >
+                {t("evaluationData.next")}
+              </Button>
+            </div>
+          ) : (
+            <p className="break-words text-sm font-medium">{selected.label}</p>
+          )}
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {t(`evaluationData.comparisons.${selected.kind}Hint`)}
+          </p>
+          <div
+            className={
+              selected.kind === "static"
+                ? "grid min-w-0 grid-cols-1 gap-3 @sm:grid-cols-3"
+                : "grid min-w-0 grid-cols-1 gap-3 @xs:grid-cols-2"
+            }
+          >
+            {selected.images.map(({ role, file }) => (
+              <div
+                key={`${selected.id}:${role}:${file.id}`}
+                className="flex min-w-0 flex-col gap-2"
+              >
+                <h5 className="text-sm font-medium">
+                  {t(
+                    `evaluationData.comparisons.${selected.kind}Roles.${role}`,
+                  )}
+                </h5>
+                <ImageThumbnail
+                  {...propsFor(file)}
+                  eager
+                  onOpen={() => setOpenedId(file.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       {images.length > 0 && (
-        <div className="grid min-w-0 grid-cols-2 gap-2">
-          {images.map((file) => (
-            <ImageThumbnail
-              key={file.id}
-              {...propsFor(file)}
-              onOpen={() => setOpenedId(file.id)}
-            />
-          ))}
-        </div>
+        <section
+          className="flex min-w-0 flex-col gap-2"
+          aria-label={t("evaluationData.comparisons.gallery")}
+        >
+          <h4 className="text-sm font-medium">
+            {t("evaluationData.comparisons.gallery")}
+          </h4>
+          <div className="grid min-w-0 grid-cols-2 gap-2">
+            {images.map((file) => (
+              <ImageThumbnail
+                key={file.id}
+                {...propsFor(file)}
+                onOpen={() => setOpenedId(file.id)}
+              />
+            ))}
+          </div>
+        </section>
       )}
       {others.length > 0 && (
-        <ul className="min-w-0 divide-y rounded-md border">
-          {others.map((file) => (
-            <li
-              key={file.id}
-              className="flex min-w-0 items-center gap-1 px-2 py-1"
-            >
-              <Button
-                variant="ghost"
-                className="h-auto min-w-0 flex-1 justify-start gap-2 px-1 py-1.5 text-left"
-                onClick={() => setOpenedId(file.id)}
-                title={file.description || file.name}
-                aria-label={t("evaluationData.viewFile", { name: file.name })}
+        <details
+          className="min-w-0"
+          open={selected || images.length > 0 ? undefined : true}
+        >
+          <summary className="cursor-pointer text-sm font-medium">
+            {t("evaluationData.files", { count: others.length })}
+          </summary>
+          <ul className="mt-2 min-w-0 divide-y rounded-md border">
+            {others.map((file) => (
+              <li
+                key={file.id}
+                className="flex min-w-0 items-center gap-1 px-2 py-1"
               >
-                <FileText className="shrink-0 text-muted-foreground" />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate text-sm">{file.name}</span>
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {formatEvaluationBytes(file.size)}
-                    {!availableIds.includes(file.id) &&
-                      ` · ${t("evaluationData.pending")}`}
+                <Button
+                  variant="ghost"
+                  className="h-auto min-w-0 flex-1 justify-start gap-2 px-1 py-1.5 text-left"
+                  onClick={() => setOpenedId(file.id)}
+                  title={file.description || file.name}
+                  aria-label={t("evaluationData.viewFile", { name: file.name })}
+                >
+                  <FileText className="shrink-0 text-muted-foreground" />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-sm">{file.name}</span>
+                    <span className="text-sm font-normal text-muted-foreground">
+                      {formatEvaluationBytes(file.size)}
+                      {!availableIds.includes(file.id) &&
+                        ` · ${t("evaluationData.pending")}`}
+                    </span>
                   </span>
-                </span>
-              </Button>
-              <DownloadArtifact {...propsFor(file)} />
-            </li>
-          ))}
-        </ul>
+                </Button>
+                <DownloadArtifact {...propsFor(file)} />
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       <Dialog
         open={!!opened}

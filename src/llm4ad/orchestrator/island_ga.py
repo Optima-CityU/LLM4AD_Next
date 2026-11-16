@@ -145,6 +145,16 @@ def is_repairable_evaluation_error(error: str | None) -> bool:
     return any(marker in normalized for marker in _REPAIRABLE_EVALUATION_ERROR_MARKERS)
 
 
+def is_repairable_evaluation_result(result: EvaluationResult) -> bool:
+    """Respect structured pool failures before applying legacy text heuristics."""
+    category = result.metadata.get("failure_category")
+    if isinstance(category, str) and category in {"infrastructure", "evaluator", "configuration"}:
+        return False
+    if result.metadata.get("infrastructure_failure") is True:
+        return False
+    return result.metadata.get("candidate_failure") is True or is_repairable_evaluation_error(result.error_message)
+
+
 
 
 class Island(BaseModel):
@@ -1105,10 +1115,7 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
             self._save_evaluation_profile(algorithm, result, "elite")
             self._record_evaluation_outcome(algorithm, success=result.success)
             if not result.success:
-                if (
-                    result.metadata.get("candidate_failure") is True
-                    or is_repairable_evaluation_error(result.error_message or "")
-                ):
+                if is_repairable_evaluation_result(result):
                     algorithm.set_evaluation_failure(result.error_message or "Elite candidate validation failed")
                 logger.warning(
                     "Elite reevaluation failed for {}: {}",
@@ -1155,6 +1162,9 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
             "monitor_metrics": dict(result.monitor_metrics),
             "error": result.error_message,
             "candidate_failure": result.metadata.get("candidate_failure") is True,
+            **{key: result.metadata[key] for key in (
+                "failure_category", "attempt_count", "max_attempts", "attempts_exhausted", "attempt_history",
+            ) if key in result.metadata},
             "source_fingerprint": algorithm.code_fingerprint(),
             "assessment": result.metadata.get("evaluation_summary", {}),
             "evidence": {
@@ -1925,7 +1935,7 @@ and leave the corrected files in the working directory for reevaluation.
 
             if (
                 repair_attempt >= max_retries
-                or not is_repairable_evaluation_error(error)
+                or not is_repairable_evaluation_result(result)
             ):
                 self.version_control.delete_worktree(algorithm.worktree, force=True)
                 return algorithm

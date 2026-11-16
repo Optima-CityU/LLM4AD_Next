@@ -16,6 +16,30 @@ from llm4ad.evaluator.models import EvaluationResult
 from llm4ad.gateway.sdk.bundles import pack_candidate
 
 
+async def configuration_error_detail(response: aiohttp.ClientResponse) -> str:
+    """Read an actionable API error without echoing request inputs or archives.
+
+    Args:
+        response: Rejected platform HTTP response.
+
+    Returns:
+        A bounded reason containing only the server's diagnostic fields.
+    """
+    try:
+        payload = await response.json(content_type=None)
+    except (ValueError, aiohttp.ClientError):
+        return ""
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, str):
+        return detail[:1000]
+    if isinstance(detail, list):
+        return "; ".join(
+            f"{'.'.join(str(part) for part in item.get('loc', []))}: {item.get('msg', '')}"
+            for item in detail[:3] if isinstance(item, dict)
+        )[:1000]
+    return ""
+
+
 async def evaluate_remote(config, cfg) -> EvaluationResult:
     """Submit once, then wait without treating network loss as candidate failure."""
     url = os.environ.get("LLM4AD_REMOTE_URL", "")
@@ -57,6 +81,10 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
     body = {
         "id": request_id,
         "gateway_ids": config.gateway_ids,
+        "selection_mode": config.selection_mode,
+        "max_attempts": config.max_attempts,
+        "lease_timeout": config.lease_timeout,
+        "dispatch_version": 2,
         "contract": config.contract,
         "timeout": cfg.timeout,
         "evaluation_profile": cfg.evaluation_profile,
@@ -82,7 +110,11 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
                     if response.status == 409:
                         raise asyncio.CancelledError("Platform task is no longer active")
                     if response.status >= 400 and response.status < 500:
-                        raise RuntimeError(f"Remote evaluation configuration/channel error: HTTP {response.status}")
+                        detail = await configuration_error_detail(response)
+                        raise RuntimeError(
+                            f"Remote evaluation configuration/channel error: HTTP {response.status}"
+                            + (f": {detail}" if detail else "")
+                        )
                     response.raise_for_status()
                     job = await response.json()
                 submitted = True
@@ -105,6 +137,10 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
                     })
                     result.metadata.update(remote_job_id=request_id, remote_attempt_id=job.get("attempt_id", ""))
                     result.metadata.setdefault("failure_type", report.get("error_type", "RemoteExecutionError"))
+                    category = result.metadata.get("failure_category")
+                    if isinstance(category, str) and category in {"infrastructure", "evaluator", "configuration"}:
+                        result.metrics = {}
+                        result.score = 0.0
                     return result
                 if job["state"] in {"cancelled", "cancel_requested"}:
                     raise asyncio.CancelledError("Remote evaluation cancelled")

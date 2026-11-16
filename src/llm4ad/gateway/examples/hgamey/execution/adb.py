@@ -36,7 +36,7 @@ def adb(*args, timeout=30):
     Returns:
         Decoded standard output from a successful ADB command.
     """
-    result = command([os.environ.get("ADB_BIN", "adb"), *args], capture_output=True, text=True, timeout=timeout)
+    result = command([os.environ.get("ADB_BIN", "adb"), *args], capture_output=True, text=True, timeout=timeout, unmarked=True)
     if result.returncode:
         raise RuntimeError("ADB: " + result.stdout + result.stderr)
     return result.stdout

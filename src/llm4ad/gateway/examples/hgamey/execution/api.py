@@ -16,7 +16,7 @@ from .storage import read_json
 
 
 def make_handler(engine):
-    """Bind the private executor API to one serialized device queue."""
+    """Bind the private executor API to the persistent device queues."""
     class Handler(BaseHTTPRequestHandler):
         def reply(self, status, value):
             raw = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()

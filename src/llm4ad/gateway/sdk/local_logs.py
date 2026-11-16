@@ -112,9 +112,7 @@ class LocalLogStore:
             for component in (*reversed(path.parents), path):
                 if component.is_symlink():
                     raise ValueError("Local log path contains a symlink")
-            fd = os.open(
-                path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o600
-            )
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0), 0o600)
             os.close(fd)
             data["sources"][name] = {"path": str(path), "managed": True, "description": description}
             data.pop("expired_at", None)
@@ -345,10 +343,7 @@ class LocalLogStore:
         result = {"cleaned": 0, "errors": 0, "removed_bytes": 0}
         rows = [(row, False) for row in self.journal.rows()]
         with self.journal.connect() as db:
-            rows += [
-                (json.loads(row[0]), True)
-                for row in db.execute("SELECT snapshot FROM local_log_attempts")
-            ]
+            rows += [(json.loads(row[0]), True) for row in db.execute("SELECT snapshot FROM local_log_attempts")]
         for row, retired in rows:
             job = json.loads(row["job"])
             if not retired and row["state"] not in {"completed", "failed", "cancelled"}:
@@ -383,9 +378,7 @@ class LocalLogStore:
                     if not permitted:
                         continue
                     with self._manifest(row["id"], job["attempt_id"], retired=retired) as current:
-                        if not retired and self._current(row["id"], job["attempt_id"])[
-                            "state"
-                        ] not in {
+                        if not retired and self._current(row["id"], job["attempt_id"])["state"] not in {
                             "completed",
                             "failed",
                             "cancelled",
@@ -434,10 +427,8 @@ def capture_worker_logs(journal, payload):
     saved, handles, stream_settings = {}, [], []
     try:
         store = LocalLogStore(journal)
-        paths = [
-            store.create(payload["id"], payload["attempt_id"], f"worker.{name}")
-            for name in ("stdout", "stderr")
-        ]
+        prefix = f"executions/{payload['execution_id']}/" if payload.get("execution_id") else ""
+        paths = [store.create(payload["id"], payload["attempt_id"], f"{prefix}worker.{name}") for name in ("stdout", "stderr")]
         for stream in (sys.stdout, sys.stderr):
             with suppress(OSError, ValueError):
                 stream.flush()

@@ -29,7 +29,13 @@ class RemoteJob(BaseModel):
     attempt_id: str
     task_id: str
     project_root: str = ""
+    execution_id: str = ""
     timeout: float = Field(gt=0)
+    managed_attempt: bool = False
+    dispatch_attempt: int = Field(default=1, gt=0)
+    dispatch_max_attempts: int = Field(default=3, gt=0)
+    lease_remaining: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    lease_expires_at: str | None = None
     evaluation_profile: Literal["standard", "elite"] = "standard"
     behavior_storage: Literal["rendered", "raw", "none"] = "none"
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -51,6 +57,7 @@ class GatewayEvaluator:
 
     contract: EvaluationContract
     manages_evidence_retention: bool = False
+    cleanup_timeout: float = 30.0
 
     @classmethod
     def create_runtime(cls, environment: dict, evaluator: str):
@@ -65,8 +72,13 @@ class GatewayEvaluator:
         """Optionally prepare resources before SDK-selected evaluate/recover/cancel."""
 
     async def after_task(
-        self, job: RemoteJob, reporter: Reporter, operation: str,
-        *, result: EvaluationResult | bool | None = None, error: BaseException | None = None,
+        self,
+        job: RemoteJob,
+        reporter: Reporter,
+        operation: str,
+        *,
+        result: EvaluationResult | bool | None = None,
+        error: BaseException | None = None,
     ) -> None:
         """Optionally finalize an operation, including preparation/evaluation errors.
 
@@ -75,14 +87,16 @@ class GatewayEvaluator:
         """
 
     async def recover(self, job: RemoteJob, reporter: Reporter) -> EvaluationResult | None:
-        """Replay stopped local work; external handles require backend-specific recovery."""
-        if reporter.saved_state:
-            return None
+        """Retain compatibility; bounded fresh executions are managed by the SDK."""
         return await self.evaluate(job, reporter)
 
     async def cancel(self, job: RemoteJob, saved_state: dict) -> bool:
-        """Confirm SDK-local cancellation after worker termination; guard external work."""
-        return not saved_state
+        """Confirm local cancellation after the SDK terminates its process pool slot.
+
+        External resource adapters override this hook to restore device state.
+        Saving evaluator checkpoints alone does not create external execution.
+        """
+        return True
 
 
 def normalize_spec(spec: str) -> str:

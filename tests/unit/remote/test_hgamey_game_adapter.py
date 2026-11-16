@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import aiohttp
 import pytest
 
+from llm4ad.gateway.sdk.errors import EvaluationPreparationError, EvaluationUnavailableError
 from llm4ad.gateway.sdk.lifecycle import run_operation
 from llm4ad.remote.contracts import RemoteJob, load_evaluator
 
@@ -308,8 +309,12 @@ async def test_unsuccessful_headless_never_dispatches_game(local, monkeypatch, s
     adapter, reporter = local.adapter(), Reporter()
     executor = connect(adapter, reporter, monkeypatch)
     executor.headless_status = status
-    result = await run_adapter(adapter, local.job, reporter)
-    assert result is None if status in {"ABORT", "ERROR"} else not result.success
+    if status in {"ABORT", "ERROR"}:
+        with pytest.raises(EvaluationUnavailableError):
+            await run_adapter(adapter, local.job, reporter)
+    else:
+        result = await run_adapter(adapter, local.job, reporter)
+        assert not result.success
     assert [body["operation"] for body in executor.posts] == ["eval"]
     assert reporter.saved_state["game"]["submission_started"] is False
 
@@ -342,7 +347,8 @@ async def test_invalid_game_sample_is_infrastructure_not_candidate_success(local
     adapter, reporter = local.adapter(), Reporter()
     executor = connect(adapter, reporter, monkeypatch)
     executor.game_changes = changes
-    assert await run_adapter(adapter, local.job, reporter) is None
+    with pytest.raises(EvaluationUnavailableError):
+        await run_adapter(adapter, local.job, reporter)
     assert len(executor.jobs) == 2
 
 
@@ -363,7 +369,9 @@ async def test_unavailable_game_execution_is_unscored(local, monkeypatch, field,
     adapter, reporter = local.adapter(), Reporter()
     executor = connect(adapter, reporter, monkeypatch)
     setattr(executor, field, value)
-    assert await run_adapter(adapter, local.job, reporter) is None
+    expected = EvaluationPreparationError if field == "unsupported" else EvaluationUnavailableError
+    with pytest.raises(expected):
+        await run_adapter(adapter, local.job, reporter)
 
 
 async def test_game_metrics_cannot_replace_headless_objective(local, monkeypatch):
@@ -432,6 +440,51 @@ async def test_crash_between_headless_and_game_recovers_frozen_request(local, mo
     assert executor.posts[1] == body and len(executor.posts) == 2
 
 
+async def test_interrupted_compilation_recovers_frozen_inputs(local, monkeypatch):
+    """Resume local preparation without changing the candidate or repeating a finished layer."""
+    adapter, reporter = local.adapter(), Reporter()
+    executor = connect(adapter, reporter, monkeypatch)
+    build = adapter.benchmark.build_game_layer
+    built = []
+
+    def interrupt(source, output, kind):
+        built.append(kind)
+        if kind == "candidate":
+            output.mkdir()
+            (output / "incomplete").write_text("Interrupted compilation")
+            raise asyncio.CancelledError("Synthetic worker interruption")
+        return build(source, output, kind)
+
+    monkeypatch.setattr(adapter.benchmark, "build_game_layer", interrupt)
+    with pytest.raises(asyncio.CancelledError):
+        await run_adapter(adapter, local.job, reporter)
+    assert not reporter.saved_state and not executor.posts
+    frozen = (local.candidate / "shader.comp").read_bytes()
+    (local.candidate / "shader.comp").write_text("Changed after preparation started")
+    restarted = local.adapter()
+    monkeypatch.setattr(restarted, "rpc", executor.rpc)
+    original_build = restarted.benchmark.build_game_layer
+
+    def finish(source, output, kind):
+        built.append(kind)
+        return original_build(source, output, kind)
+
+    monkeypatch.setattr(restarted.benchmark, "build_game_layer", finish)
+    assert (await run_adapter(restarted, local.job, reporter, operation="recover")).success
+    assert built == ["seed", "candidate", "candidate"]
+    assert (Path(reporter.saved_state["evidence_directory"]) / "candidate.comp").read_bytes() == frozen
+    assert len(executor.posts) == 2
+
+
+async def test_recovery_without_preparation_receipt_does_not_dispatch(local, monkeypatch):
+    """Missing local ownership must remain uncertain rather than creating a new experiment."""
+    adapter, reporter = local.adapter(), Reporter()
+    executor = connect(adapter, reporter, monkeypatch)
+    with pytest.raises(EvaluationUnavailableError):
+        await run_adapter(adapter, local.job, reporter, operation="recover")
+    assert not reporter.saved_state and not executor.posts
+
+
 @pytest.mark.parametrize("operation", ["eval", "game-ab"])
 async def test_accepted_job_missing_from_executor_is_never_replayed(local, monkeypatch, operation):
     """A known external identity cannot turn into a fresh experiment."""
@@ -440,7 +493,8 @@ async def test_accepted_job_missing_from_executor_is_never_replayed(local, monke
     assert (await run_adapter(adapter, local.job, reporter)).success
     key = next(key for key, item in executor.jobs.items() if item["operation"] == operation)
     del executor.jobs[key]
-    assert await run_adapter(adapter, local.job, reporter, operation="recover") is None
+    with pytest.raises(EvaluationUnavailableError):
+        await run_adapter(adapter, local.job, reporter, operation="recover")
     assert len(executor.posts) == 2
 
 

@@ -83,6 +83,7 @@ import {
 import { useTaskLogs } from "@/hooks/useTaskLogs"
 import { canUseTaskAgent, type TaskWorkbenchView } from "@/lib/autoDesign"
 import { resetTaskCaches, taskKeys } from "@/lib/task-queries"
+import { linkedTaskVersionOverride } from "@/lib/task-version"
 import { cn } from "@/lib/utils"
 import { getInitials } from "@/utils"
 import icon from "/assets/images/logo.svg"
@@ -110,15 +111,18 @@ function CollapsedTaskSelector({
   projectValid,
   selectedTask,
   setSelectedTask,
+  setSelectedChildTaskId,
   setLeftCollapsed,
 }: {
   projectId: string
   projectValid: boolean
   selectedTask: TaskResponse | null
   setSelectedTask: (task: TaskResponse | null) => void
+  setSelectedChildTaskId: (taskId: string | null) => void
   setLeftCollapsed: (v: boolean) => void
 }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const {
     data: tasksPages,
@@ -225,7 +229,14 @@ function CollapsedTaskSelector({
                   return (
                     <DropdownMenuItem
                       key={task.id}
-                      onSelect={() => setSelectedTask(task)}
+                      onSelect={() => {
+                        setSelectedChildTaskId(null)
+                        setSelectedTask(task)
+                        void navigate({
+                          to: "/evolution",
+                          search: { projectId, taskId: task.id },
+                        })
+                      }}
                       className={`flex items-center gap-2 cursor-pointer ${
                         isActive ? "bg-primary/10" : ""
                       }`}
@@ -577,13 +588,14 @@ function Layout() {
     const selection = `${projectId}:${linkedTaskId}`
     if (
       !linkedTask.data ||
+      linkedTask.data.id !== linkedTaskId ||
       linkedTask.data.project_id !== projectId ||
       linkedSelectionRef.current === selection
     )
       return
     linkedSelectionRef.current = selection
     setSelectedTask(linkedTask.data)
-    setSelectedChildTaskId(linkedTask.data.id)
+    setSelectedChildTaskId(linkedTaskVersionOverride(linkedTask.data))
   }, [linkedTask.data, linkedTaskId, projectId, setSelectedTask])
 
   // Visualization state
@@ -789,7 +801,8 @@ function Layout() {
 
   const runningFamilyTaskId = family.data
     ? [family.data.root, ...family.data.children].find(
-        (version) => version.status === "pending" || version.status === "running",
+        (version) =>
+          version.status === "pending" || version.status === "running",
       )?.id
     : undefined
   useEffect(() => {
@@ -1023,6 +1036,7 @@ function Layout() {
                 projectValid={projectValid}
                 selectedTask={selectedTask}
                 setSelectedTask={setSelectedTask}
+                setSelectedChildTaskId={setSelectedChildTaskId}
                 setLeftCollapsed={setLeftCollapsed}
               />
             )}

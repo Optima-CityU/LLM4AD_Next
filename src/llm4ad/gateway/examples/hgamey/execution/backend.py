@@ -8,29 +8,72 @@ from .process import command
 from .storage import read_json, verify_frozen_inputs, write_json
 
 
+def start_runtime(data, config):
+    """Prepare shared registry and daemon ownership before any SDK slot runs.
+
+    Args:
+        data: Shared executor data directory.
+        config: Operator-owned device configuration.
+    """
+    from pathlib import Path
+
+    from .adb import adb
+    from .devices import load_devices
+
+    for device in load_devices(config):
+        if device["enabled"]:
+            directory = Path(data) / "registry" / device["id"]
+            directory.mkdir(parents=True, exist_ok=True)
+            sync_registry(device, directory)
+    adb("start-server", timeout=30)
+
+
 def sync_registry(device, folder):
-    """Register the selected device with revision-checked phonefarm state."""
-    current = command(["phonefarm", "lease", "devices", "--json"], capture_output=True, text=True, timeout=15)
-    if current.returncode:
-        raise RuntimeError(current.stdout + current.stderr)
-    registry = json.loads(current.stdout)
+    """Serialize local registry transactions and retry bounded external revision conflicts.
+
+    Args:
+        device: Frozen device with both physical and wireless aliases.
+        folder: Owned job directory below the shared executor jobs directory.
+    """
+    import fcntl
+
     desired = {
         "device_id": device["id"],
         "label": device["label"],
         "aliases": [device["expected_serial"], device["endpoint"]],
         "enabled": True,
     }
-    existing = next((d for d in registry["devices"] if d["device_id"] == device["id"]), None)
-    if existing == desired:
-        return
-    file = folder / "registry-request.json"
-    write_json(file, {"expected_revision": registry["revision"], "device": desired})
-    result = command(
-        ["phonefarm", "lease", "devices-set", "--request", str(file), "--json"], capture_output=True, text=True, timeout=30
-    )
-    (folder / "registry-receipt.json").write_text(result.stdout)
-    if result.returncode:
-        raise RuntimeError("device registration failed: " + result.stdout + result.stderr)
+    with (folder.parent.parent / "phonefarm-registry.lock").open("a") as guard:
+        fcntl.flock(guard, fcntl.LOCK_EX)
+        for attempt in range(3):
+            current = command(["phonefarm", "lease", "devices", "--json"], capture_output=True, text=True, timeout=15)
+            if current.returncode:
+                raise RuntimeError(current.stdout + current.stderr)
+            registry = json.loads(current.stdout)
+            existing = next((d for d in registry["devices"] if d["device_id"] == device["id"]), None)
+            if existing == desired:
+                return
+            file = folder / "registry-request.json"
+            write_json(file, {"expected_revision": registry["revision"], "device": desired})
+            result = command(
+                ["phonefarm", "lease", "devices-set", "--request", str(file), "--json"],
+                capture_output=True, text=True, timeout=30,
+            )
+            (folder / "registry-receipt.json").write_text(result.stdout)
+            if not result.returncode:
+                return
+            try:
+                failure = json.loads(result.stdout)
+            except ValueError:
+                failure = {}
+            if (
+                attempt < 2
+                and isinstance(failure, dict)
+                and failure.get("code") == "conflict"
+                and str(failure.get("error", "")).startswith("expected_revision does not match current revision")
+            ):
+                continue
+            raise RuntimeError("device registration failed: " + result.stdout + result.stderr)
 
 
 def run_backend(folder):
@@ -58,11 +101,13 @@ def run_backend(folder):
         sync_registry(frozen["device"], folder)
     except Exception as error:
         raise BackendNotStartedError(str(error)) from error
-    # Global PF lease enforces the one-phone-at-a-time rule even across restarts
-    # and other local PF clients sharing /work. Its FDs survive in task children.
+    # Physical and wireless aliases share the native registry's canonical device
+    # lease. Its FDs survive in task children without blocking other phones.
     argv = [
         "phonefarm",
         "lease",
+        "--serial",
+        frozen["device"]["expected_serial"],
         "--label",
         "executor:" + folder.name,
         "--timeout-ms",

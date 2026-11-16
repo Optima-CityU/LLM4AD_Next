@@ -7,7 +7,7 @@
       "path": "selfsr/selfsr_ab.py",
       "source_url": "https://github.com/HGamey/experiments/blob/3ea2d8cfb4dfbd76690ee12b25ad8afd9bcb06c6/selfsr/selfsr_ab.py",
       "upstream_sha256": "d54bd4df00ec1b6241724f8e65c658ef0c14a74b19698d140c1de79bc38abeba",
-      "packaged_sha256": "8a3c9bc9b8cef86f649582009fe939085e174a88f59b574d49635960e7a51fa1"
+      "packaged_sha256": "e70ac14ad47569bd15f5ef5cdd5b058a9618f40d6798573673aa0fd43da27faa"
     },
     {
       "path": "gfrc/gfrc_ab.py",
@@ -37,7 +37,8 @@
     "Use process-scoped asynchronous ATrace window pairs because Android printf may emit from different child threads; timeouts terminate the entire owned host transport process group so orphaned ADB proxies cannot retain device leases. Remote recorder cleanup still requires a receipt.",
     "Retrieve completed pan recordings through checkpointed bounded root reads; verify physical/file identity and full SHA-256 before local publication or remote removal. A failed transfer retains the original recording and does not replay the experiment.",
     "Preserve terminal failed capture diagnostics and recovery status instead of following a self-referencing report path. Native screenshot acquisition stages and verifies one lossless PNG without changing image content.",
-    "Probe pan resolution through checked existing Dev.adb calls with bounded retries and device waits; retain raw wm size responses/errors per arm, honor observed overrides, and abort before recording or input if no positive size is available. No invented dimensions, native changes, measurement replay or scoring changes."
+    "Probe pan resolution through checked existing Dev.adb calls with bounded retries and device waits; retain raw wm size responses/errors per arm, honor observed overrides, and abort before recording or input if no positive size is available. No invented dimensions, native changes, measurement replay or scoring changes.",
+    "Defer screenshot IQ for same-input GPU replay after restored game performance windows; preserve original captures and official IQ metrics."
   ],
   "capture_contract": {
     "repository": "https://github.com/HGamey/hgamey",

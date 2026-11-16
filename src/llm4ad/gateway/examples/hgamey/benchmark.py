@@ -38,6 +38,13 @@ def canonical(value: dict) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+def profile_key(filename: Path, evaluation_mode: str | None = None) -> str:
+    """Separate independent capabilities while preserving legacy profile directories."""
+    if evaluation_mode is None:
+        return digest(str(filename).encode())
+    return digest(canonical({"settings": str(filename), "evaluation_mode": evaluation_mode}))
+
+
 def write_json(path: Path, value: dict) -> None:
     """Atomically replace a local evidence record."""
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
@@ -65,6 +72,8 @@ def compiler_logs(folder: Path, job, data_version: str) -> dict[str, Path]:
     if not owner.is_file():
         return {}
     expected = {"job_id": job.id, "attempt_id": job.attempt_id, "task_id": job.task_id, "data_version": data_version}
+    if getattr(job, "execution_id", None):
+        expected["execution_id"] = job.execution_id
     if json.loads(owner.read_text()) != expected:
         raise ValueError("Compiler logs belong to another accepted attempt")
     result = {}
@@ -76,17 +85,21 @@ def compiler_logs(folder: Path, job, data_version: str) -> dict[str, Path]:
 
 
 class Benchmark:
-    """Freeze the operator benchmark outside the candidate worktree.
+    """Freeze device measurement inputs outside the candidate worktree.
 
     Args:
         filename: Operator-owned JSON settings file.
+        evaluation_mode: Independent static/game mode, or None for legacy settings.
     """
 
-    def __init__(self, filename: str | Path):
+    def __init__(self, filename: str | Path, evaluation_mode: str | None = None):
         """Load and pin the local device, data and measurement contract."""
         self.filename = Path(filename).expanduser().resolve()
         self.settings = json.loads(self.filename.read_text(encoding="utf-8"))
         settings = self.settings
+        self.evaluation_mode = evaluation_mode or settings.get("evaluation_mode")
+        if self.evaluation_mode not in {None, "static", "game"}:
+            raise ValueError("evaluation_mode must be static or game")
         if settings.get("game") != "genshin":
             raise ValueError("This example supports game=genshin only")
         for field in ("device_id", "expected_serial", "device_profile"):
@@ -99,17 +112,20 @@ class Benchmark:
         if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ValueError("executor_url must be an HTTP(S) service URL without credentials")
         self.inputs = self.local_path(settings["inputs_root"])
-        reference = self.local_path(settings["reference_path"])
-        frames = (
-            [reference]
-            if reference.is_file()
-            else sorted(
+        reference = self.local_path(settings["reference_path"]) if self.evaluation_mode != "game" else None
+        if reference is None:
+            frames = []
+        elif reference.is_file():
+            frames = [reference]
+        else:
+            frames = sorted(
                 path for path in reference.iterdir() if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg"}
             )
-        )
         if len(frames) > 32:
             frames = [frames[(index * (len(frames) - 1) + 15) // 31] for index in range(32)]
-        if not frames or any(path.suffix.lower() not in {".png", ".jpg", ".jpeg"} for path in frames):
+        if self.evaluation_mode != "game" and (
+            not frames or any(path.suffix.lower() not in {".png", ".jpg", ".jpeg"} for path in frames)
+        ):
             raise ValueError("Provide Genshin reference PNG/JPEG frames (up to 32 evenly sampled sorted frames)")
         self.baseline = Path(__file__).with_name("assets") / "baseline.comp"
         self.compile_timeout = self.positive("compile_timeout", 60)
@@ -126,7 +142,7 @@ class Benchmark:
             raise ValueError("Use full A/B measurement; screen results do not establish improvement")
         if any(key in self.request.get("payload", {}) for key in ("shader_path", "spirv_path", "quality_reference")):
             raise ValueError("Candidate and reference paths are owned by the adapter")
-        self.evaluation_profiles = self.load_profiles()
+        self.evaluation_profiles = self.load_profiles() if self.evaluation_mode is None else None
         self.score_mode = settings.get("score_mode", "latency")
         if self.score_mode not in {"latency", "relative_latency"}:
             raise ValueError("score_mode must be latency or relative_latency")
@@ -136,9 +152,8 @@ class Benchmark:
             raise ValueError("executor_inputs_prefix must be an absolute container path")
         self.manifest = {
             "adapter_version": "1",
+            "comparison_identity_version": "1",
             "game": "genshin",
-            "device_id": settings["device_id"],
-            "expected_serial": settings["expected_serial"],
             "device_profile": settings["device_profile"],
             "baseline_sha256": digest(self.baseline.read_bytes()),
             "frames": [{"name": path.name, "sha256": digest(path.read_bytes())} for path in frames],
@@ -146,7 +161,9 @@ class Benchmark:
             "tools": self.tools,
             "compile_flags": ["-V", "--target-env", "vulkan1.0", "-S", "comp"],
         }
-        self.game_check = self.load_game_check() if "game_check" in settings else None
+        self.game_check = self.load_game_check() if "game_check" in settings and self.evaluation_mode != "static" else None
+        if self.evaluation_mode == "game" and self.game_check is None:
+            raise ValueError("The real-game evaluator requires a game_check configuration")
         if self.game_check is not None:
             self.manifest["game_check"] = self.game_identity()
         if self.evaluation_profiles is not None or self.score_mode != "latency":
@@ -161,30 +178,58 @@ class Benchmark:
                 adapter_version="3",
                 min_operator_improvement_pct=self.min_operator_improvement_pct,
             )
+        self.game_scoring = None
+        if self.evaluation_mode:
+            self.manifest.update(adapter_version="4", evaluation_mode=self.evaluation_mode)
+            if self.evaluation_mode == "game":
+                from .scoring import normalize_game_scoring
+
+                self.game_scoring = normalize_game_scoring(settings.get("game_scoring"))
+                self.manifest["game_scoring"] = self.game_scoring
+                self.manifest["score_definition"] = "weighted_game_baseline_relative_components"
+        self.local_binding = {
+            "device_id": settings["device_id"],
+            "expected_serial": settings["expected_serial"],
+            "executor_url": self.url,
+            "executor_inputs_prefix": str(self.prefix),
+            "execution_backend": settings.get("execution_backend", "http"),
+            "executor_data": settings.get("executor_data"),
+            "executor_config": settings.get("executor_config"),
+            "game_check": copy.deepcopy(self.game_check),
+        }
         self.version = digest(canonical(self.manifest))
         self.contract = EvaluationContract(
-            evaluator_id="hgamey-genshin-sr-headless",
+            evaluator_id=f"hgamey-genshin-sr-{self.evaluation_mode}" if self.evaluation_mode else "hgamey-genshin-sr-headless",
             version="1",
             data_version=self.version,
-            metrics=[
+            metrics=[Metric(name="game_score", type=MetricType.MAXIMIZE)] if self.evaluation_mode == "game" else [
                 Metric(name="operator_improvement_pct", type=MetricType.MAXIMIZE)
                 if self.score_mode == "relative_latency"
                 else Metric(name="operator_latency_ms", type=MetricType.MINIMIZE)
             ],
         )
-        profile_name = digest(str(self.filename).encode())
+        profile_name = profile_key(self.filename, self.evaluation_mode)
         self.profile = self.inputs / "llm4ad-hgamey" / profile_name
         self.profile.mkdir(parents=True, exist_ok=True)
         pin = self.profile / "benchmark.json"
         # A worker must never silently switch the contract registered by its parent.
         try:
             with pin.open("x", encoding="utf-8") as stream:
-                json.dump({"data_version": self.version, "manifest": self.manifest}, stream, allow_nan=False)
+                json.dump(
+                    {"data_version": self.version, "manifest": self.manifest, "local_binding": self.local_binding},
+                    stream,
+                    allow_nan=False,
+                )
                 stream.flush()
                 os.fsync(stream.fileno())
         except FileExistsError:
-            if json.loads(pin.read_text(encoding="utf-8"))["data_version"] != self.version:
+            pinned = json.loads(pin.read_text(encoding="utf-8"))
+            if pinned["data_version"] != self.version:
                 raise ValueError("Benchmark changed: use a new settings filename and restart/register its gateway") from None
+            if pinned.get("local_binding") != self.local_binding:
+                raise ValueError(
+                    "Benchmark changed: local binding differs; use a new settings filename and restart/register its gateway"
+                ) from None
         self.references = self.profile / "reference"
         self.references.mkdir(exist_ok=True)
         for index, (frame, facts) in enumerate(zip(frames, self.manifest["frames"], strict=True)):
@@ -236,12 +281,16 @@ class Benchmark:
         return request
 
     def uses_game(self, profile: str) -> bool:
-        """Run configured game validation only for elite in fidelity-aware settings."""
+        """Select game execution for an independent mode or legacy fidelity profile."""
+        if self.evaluation_mode is not None:
+            return self.evaluation_mode == "game"
         return self.game_check is not None and (self.evaluation_profiles is None or profile == "elite")
 
     def attempt_key(self, job) -> str:
         """Keep legacy identities recoverable and bind new attempts to their profile."""
         identity = {"job": job.id, "attempt": job.attempt_id, "benchmark": self.version}
+        if getattr(job, "execution_id", None):
+            identity["execution_id"] = job.execution_id
         if self.evaluation_profiles is not None:
             identity["evaluation_profile"] = job.evaluation_profile
         return digest(canonical(identity))
@@ -267,13 +316,15 @@ class Benchmark:
             "window": 8,
             "settle": 5,
             "enter_script": "s:35;t:0.5,0.93;s:20",
-            "pan": True,
+            "pan": self.evaluation_mode != "game",
             "timeout_seconds": 900,
             "cool_max": 0,
             "power_profile": "disabled",
             "perfetto": True,
         }
         options = config.get("options", {})
+        if self.evaluation_mode == "game" or isinstance(options, dict) and "quality_samples" in options:
+            defaults["quality_samples"] = 3 if self.evaluation_mode == "game" else 0
         if not isinstance(options, dict) or options.keys() - defaults.keys():
             raise ValueError("Unsupported game_check options; candidate identities and layer paths are adapter-owned")
         options = defaults | options
@@ -303,6 +354,10 @@ class Benchmark:
             raise ValueError("Unsupported battery power profile")
         if any(type(options[key]) is not bool for key in ("pan", "perfetto")):
             raise ValueError("game_check pan and perfetto must be boolean")
+        if "quality_samples" in options and (
+            type(options["quality_samples"]) is not int or not 0 <= options["quality_samples"] <= 8
+        ):
+            raise ValueError("game_check quality_samples must be an integer within 0..8")
         entry = options["enter_script"]
         if entry is not None:
             if not isinstance(entry, str) or not entry or len(entry) > 4096:
@@ -316,7 +371,11 @@ class Benchmark:
         return config
 
     def game_identity(self) -> dict:
-        """Hash the builder, native inputs and NDK tools used by both arms."""
+        """Hash build contents and measurement options independently of local paths.
+
+        Returns:
+            Semantic game inputs shared by compatible device pool members.
+        """
         config = self.game_check
         ndk = Path(config["ndk_path"])
         native = Path(config["phonefarm_root"]) / "knobs/gray"
@@ -341,6 +400,12 @@ class Benchmark:
             "upstream/gfrc/gfrc_ab.py",
         ):
             paths[f"protocol/{name}"] = adapter / "protocol" / name
+        if self.evaluation_mode == "game" or self.game_check["options"].get("quality_samples", 0):
+            paths["protocol/game_quality.py"] = adapter / "protocol/game_quality.py"
+            paths["protocol/quality_replay.py"] = adapter / "protocol/quality_replay.py"
+            paths["protocol/same_frame_quality.py"] = adapter / "protocol/same_frame_quality.py"
+        if self.evaluation_mode == "game":
+            paths["scoring.py"] = adapter / "scoring.py"
         # Android target drivers can be shell wrappers around the actual compiler.
         for name in ("clang++", "ld.lld"):
             path = paths["cxx"].parent / name
@@ -357,7 +422,7 @@ class Benchmark:
         for name, path in (paths | native_files).items():
             with path.open("rb") as stream:
                 hashes[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-        return json.loads(canonical({**config, "mode": "resize", "files": hashes}))
+        return json.loads(canonical({"options": config["options"], "mode": "resize", "files": hashes}))
 
     def check_game_identity(self) -> None:
         """Refuse to build under an identity that changed after registration."""
@@ -365,7 +430,7 @@ class Benchmark:
             current = self.game_identity()
         except (OSError, ValueError) as error:
             raise RuntimeError(f"Game build inputs are unavailable: {error}") from error
-        if current != self.manifest["game_check"]:
+        if self.game_check != self.local_binding["game_check"] or current != self.manifest["game_check"]:
             raise RuntimeError("Game build inputs changed after benchmark registration")
 
     def build_game_layer(self, source: Path, output: Path, kind: str) -> Path:

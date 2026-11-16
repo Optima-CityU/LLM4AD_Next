@@ -5,7 +5,7 @@ use crate::{
     graylayer::{self, LAYER_NAME, LAYER_PROPERTIES, SO, STATE},
 };
 use serde_json::{json, Map, Value};
-use std::{cell::RefCell, collections::HashSet, fs, path::{Path, PathBuf}, time::Duration};
+use std::{cell::RefCell, collections::HashSet, fs, path::{Path, PathBuf}, time::{Duration, Instant}};
 
 const LEGACY_SCHEMA: &str = "phonefarm/gray-capture-session@1";
 const SCHEMA: &str = "phonefarm/gray-capture-session@2";
@@ -45,6 +45,42 @@ pub(crate) struct RefbenchOutputs {
     pub started: Option<RefbenchOutput>,
 }
 const CAP: u64 = 8 * 1024 * 1024;
+const READ_ATTEMPT: Duration = Duration::from_secs(5);
+const READ_FAILURE: &str = "phonefarm/gray-read-transport-failure@1";
+
+// Clock and transport are injected together so retries can be tested without
+// sleeping, changing process environment, or opening a real ADB connection.
+trait ReadTransport {
+    fn remaining(&mut self) -> Result<Duration, String>;
+    fn run(&mut self, operation: &str, args: &[String], timeout: Duration) -> Result<crate::lease_command::Output, String>;
+    fn delay(&mut self, delay: Duration) -> Result<(), String>;
+}
+
+struct NativeTransport<'a> {
+    session: &'a Session,
+    deadline: Instant,
+    poll_cancel: &'a mut dyn FnMut() -> Result<(), String>,
+}
+impl ReadTransport for NativeTransport<'_> {
+    fn remaining(&mut self) -> Result<Duration, String> {
+        (self.poll_cancel)()?;
+        self.deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())
+            .ok_or_else(|| "original gray command deadline elapsed".into())
+    }
+    fn run(&mut self, operation: &str, args: &[String], timeout: Duration) -> Result<crate::lease_command::Output, String> {
+        crate::lease_command::run(&self.session.lease.borrow(), &self.session.adb, args,
+            &self.session.dir.join("commands"), operation, timeout)
+    }
+    fn delay(&mut self, delay: Duration) -> Result<(), String> {
+        if self.remaining()? <= delay { return Err("original gray command deadline does not cover reconnect delay".into()); }
+        let until = Instant::now() + delay;
+        while Instant::now() < until {
+            let remaining = self.remaining()?;
+            std::thread::sleep(until.saturating_duration_since(Instant::now()).min(remaining).min(Duration::from_millis(20)));
+        }
+        self.remaining().map(|_| ())
+    }
+}
 
 pub(crate) struct Session {
     lease: RefCell<Lease>,
@@ -153,7 +189,7 @@ impl Session {
         if owner == EVAL_OWNER {
             if !matches!(completion_owner(&state)?,EVAL_OWNER|SCRIPT_OWNER) {return Err("this session requires its dedicated recovery entry point".into());}
         } else { require_owner(&state, owner)?; }
-        pending_clear(&state)?;
+        resume_pending_clear(&state, &dir)?;
         let storage = crate::lease_storage::resolve();
         let lease = if let Some(binding) = state.get("device_binding") {
             let binding = crate::device_registry::parse_binding(&binding.to_string())?;
@@ -162,8 +198,35 @@ impl Session {
             let (root, legacy) = storage.roots()?;
             Lease::acquire_recovery(&root, &legacy, serial, &dir, crate::devlease::wait_timeout()?)?
         };
-        Ok(Self {lease:RefCell::new(lease), adb:adb_path()?, dir, state:RefCell::new(state),
-            stopped:RefCell::new(None), known_dirs:RefCell::new(HashSet::new())})
+        let session = Self {lease:RefCell::new(lease), adb:adb_path()?, dir, state:RefCell::new(state),
+            stopped:RefCell::new(None), known_dirs:RefCell::new(HashSet::new())};
+        if session.state.borrow()["transport_uncertain"] == true {
+            if !session.retire_unstarted_read()? {
+                let mut poll_cancel = || Ok(());
+                let mut transport = NativeTransport {session:&session, deadline:Instant::now() + Duration::from_secs(30), poll_cancel:&mut poll_cancel};
+                if let Err(error) = session.recover_read_transport(&mut transport, None) { return session.stop(error); }
+            }
+        }
+        Ok(session)
+    }
+
+    fn retire_unstarted_read(&self) -> Result<bool, String> {
+        let Some(failure) = unstarted_read_failure(&self.state.borrow(), &self.dir)? else { return Ok(false); };
+        let previous = self.state.borrow().clone();
+        {
+            let mut state = self.state.borrow_mut();
+            // This proves an abandoned read acquired no device state. It does
+            // not certify a connection, a measurement, or physical restoration.
+            state["unstarted_read_abort"] = json!({"schema":"phonefarm/gray-unstarted-read-abort@1",
+                "no_device_mutations":true,"failed_read":failure,"at":chrono::Utc::now().to_rfc3339()});
+            state["transport_uncertain"] = json!(false);
+            state["transport_failure"] = Value::Null;
+        }
+        if let Err(error) = self.save() {
+            *self.state.borrow_mut() = previous;
+            return Err(error);
+        }
+        Ok(true)
     }
 
     fn save(&self) -> Result<(), String> {
@@ -183,31 +246,142 @@ impl Session {
         Err(error)
     }
 
-    fn command(&self, operation: &str, args: &[String], timeout: u64) -> Result<crate::lease_command::Output, String> {
+    fn command(&self, operation: &str, args: &[String], timeout: u64, mutation: bool) -> Result<crate::lease_command::Output, String> {
+        let deadline = Instant::now().checked_add(Duration::from_millis(timeout)).ok_or("gray command timeout is too large")?;
+        let mut poll_cancel = || Ok(());
+        self.command_until(operation, args, deadline, mutation, &mut poll_cancel)
+    }
+    fn command_until(&self, operation: &str, args: &[String], deadline: Instant, mutation: bool,
+        poll_cancel: &mut dyn FnMut() -> Result<(), String>) -> Result<crate::lease_command::Output, String> {
+        let mut transport = NativeTransport {session:self, deadline, poll_cancel};
+        self.command_using(operation, args, mutation, &mut transport)
+    }
+    fn command_once(&self, operation: &str, args: &[String], mutation: bool, transport: &mut impl ReadTransport) -> Result<crate::lease_command::Output, String> {
+        let remaining = transport.remaining()?;
+        if remaining.is_zero() { return Err("original gray command deadline elapsed".into()); }
         let args: Vec<String> = [vec!["-s".into(), self.lease.borrow().serial.clone()], args.to_vec()].concat();
-        journal(&self.dir, json!({"event":"command_intent","operation":operation,"args":args}))?;
-        let result = crate::lease_command::run(&self.lease.borrow(), &self.adb, &args,
-            &self.dir.join("commands"), operation, Duration::from_millis(timeout));
-        let output = match result {
-            Ok(output) => output,
-            Err(error) => {
-                self.state.borrow_mut()["transport_uncertain"] = json!(true);
-                let saved = self.save();
-                let held = self.hold();
-                return self.stop(format!("{operation}: {error}; uncertainty_saved={}; hold_saved={}", saved.is_ok(), held.is_ok()));
-            }
-        };
+        journal(&self.dir, json!({"event":"command_intent","operation":operation,"args":args,"mutation":mutation}))?;
+        let remaining = transport.remaining()?;
+        let output = transport.run(operation, &args, if mutation {remaining} else {remaining.min(READ_ATTEMPT)})?;
         // These raw transport files exist independently of later result JSON.
         journal(&self.dir, json!({"event":"command_result","operation":operation,
             "code":output.code,"stdout_path":output.stdout_path}))?;
+        transport.remaining()?;
         if output.code != 0 {
-            return self.stop(format!("{operation}: exit {}: {}", output.code, output.stderr.trim()));
+            return Err(format!("{operation}: exit {}: {} {}", output.code, output.stderr.trim(), output.stdout.trim()));
         }
         Ok(output)
     }
+    fn command_using(&self, operation: &str, args: &[String], mutation: bool, transport: &mut impl ReadTransport) -> Result<crate::lease_command::Output, String> {
+        if !mutation { self.ready()?; }
+        match self.command_once(operation, args, mutation, transport) {
+            Ok(output) => Ok(output),
+            Err(error) => {
+                self.record_transport_failure(operation, args, mutation, &error)?;
+                if !mutation && transient_transport_error(&error) {
+                    match self.recover_read_transport(transport, Some((operation, args))) {
+                        Ok(Some(output)) => return Ok(output),
+                        Err(error) => return self.stop(error),
+                        Ok(None) => unreachable!("read retry requires its actual output"),
+                    }
+                }
+                self.stop(error)
+            }
+        }
+    }
+    fn record_transport_failure(&self, operation: &str, args: &[String], mutation: bool, error: &str) -> Result<(), String> {
+        self.hold()?;
+        {
+            let mut state = self.state.borrow_mut();
+            state["transport_uncertain"] = json!(true);
+            state["transport_failure"] = json!({"schema":READ_FAILURE,"operation":operation,"args":args,"mutation":mutation,"error":error});
+            if state["schema"] != LEGACY_SCHEMA { state["base_recovery"] = Value::Null; }
+        }
+        if let Err(saved) = self.save() { return self.stop(format!("{error}; transport uncertainty persistence failed: {saved}")); }
+        Ok(())
+    }
+    fn recover_read_transport(&self, transport: &mut impl ReadTransport, retry: Option<(&str, &[String])>) -> Result<Option<crate::lease_command::Output>, String> {
+        resume_pending_clear(&self.state.borrow(), &self.dir)?;
+        // Preserve legacy read classification before recovery adds new intents.
+        let failure = read_failure(&self.state.borrow(), &self.dir)?;
+        self.state.borrow_mut()["transport_failure"] = failure;
+        self.save()?;
+        let mut last = "read transport recovery exhausted".to_owned();
+        for attempt in 0..3 {
+            resume_pending_clear(&self.state.borrow(), &self.dir)?;
+            if let Some(error) = &*self.stopped.borrow() { return Err(error.clone()); }
+            if attempt > 0 { transport.delay(Duration::from_secs(attempt))?; }
+            transport.remaining()?;
+            let proof = match self.read_transport_proof(transport) {
+                Ok(proof) => proof,
+                Err(error) if transient_transport_error(&error) => { last = error; continue; }
+                Err(error) => return Err(error),
+            };
+            self.save_read_transport_proof(proof)?;
+            let Some((operation, args)) = retry else { return Ok(None); };
+            match self.command_once(operation, args, false, transport) {
+                Ok(output) => return Ok(Some(output)),
+                Err(error) => {
+                    self.record_transport_failure(operation, args, false, &error)?;
+                    if !transient_transport_error(&error) { return Err(error); }
+                    last = error;
+                }
+            }
+        }
+        Err(format!("read transport recovery exhausted after 3 attempts: {last}"))
+    }
+    fn read_transport_proof(&self, transport: &mut impl ReadTransport) -> Result<Value, String> {
+        let state = self.state.borrow().clone();
+        validate(&state, &self.dir, &self.lease.borrow().serial)?;
+        let serial = state["serial"].as_str().ok_or("missing original transport serial")?;
+        // Reset a stale acknowledged-online TCP connection too. Both commands
+        // name only this endpoint; no daemon restart or offline-all is allowed.
+        let reconnect = if serial.rsplit_once(':').is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0)) {
+            self.command_once("read_disconnect", &["disconnect".into(), serial.into()], false, transport)?;
+            vec!["connect".into(), serial.into()]
+        } else { vec!["reconnect".into()] };
+        self.command_once("read_reconnect", &reconnect, false, transport)?;
+        let ready = self.command_once("read_wait_ready", &["wait-for-device".into()], false, transport)?;
+        let online = self.command_once("read_device_state", &["get-state".into()], false, transport)?;
+        if online.stdout.trim() != "device" { return Err(format!("ADB device not ready: {}", online.stdout.trim())); }
+        let physical = self.command_once("read_physical_identity", &["shell".into(), "getprop ro.serialno".into()], false, transport)?;
+        let physical_serial = identity_line(&physical.stdout).ok_or("invalid fresh physical device identity")?;
+        if state["physical_serial"].as_str().is_some_and(|expected| expected != physical_serial) {
+            return Err("physical device identity changed; read transport recovery refused".into());
+        }
+        let boot = self.command_once("read_boot_identity", &["shell".into(), "cat /proc/sys/kernel/random/boot_id".into()], false, transport)?;
+        if state["boot_id"].as_str() != Some(boot.stdout.trim()) {
+            return Err("device boot changed; read transport recovery refused".into());
+        }
+        // Old sessions lack a physical-serial baseline. Their original boot UUID
+        // anchors identity; retain the fresh physical serial for subsequent checks.
+        Ok(json!({"schema":"phonefarm/gray-read-transport-proof@1","serial":serial,
+            "physical_serial":physical_serial,"previous_physical_serial":state["physical_serial"],
+            "boot_id":state["boot_id"],"completion_owner":completion_owner(&state)?,
+            "evidence_origin":state["evidence_origin"],"failed_read":read_failure(&state, &self.dir)?,
+            "stdout_paths":[ready.stdout_path,online.stdout_path,physical.stdout_path,boot.stdout_path],
+            "at":chrono::Utc::now().to_rfc3339()}))
+    }
+    fn save_read_transport_proof(&self, proof: Value) -> Result<(), String> {
+        let previous = self.state.borrow().clone();
+        {
+            let mut state = self.state.borrow_mut();
+            state["physical_serial"] = proof["physical_serial"].clone();
+            state["read_transport_proof"] = proof;
+            state["transport_uncertain"] = json!(false);
+            state["transport_failure"] = Value::Null;
+            if state["schema"] != LEGACY_SCHEMA { state["base_recovery"] = Value::Null; }
+        }
+        if let Err(error) = self.save() {
+            *self.state.borrow_mut() = previous;
+            return self.stop(format!("fresh read transport proof persistence failed: {error}"));
+        }
+        self.known_dirs.borrow_mut().clear();
+        Ok(())
+    }
     fn read(&self, operation: &str, command: &str) -> Result<String, String> {
         self.ready()?;
-        Ok(self.command(operation, &["shell".into(), command.into()], 30_000)?.stdout)
+        Ok(self.command(operation, &["shell".into(), command.into()], 30_000, false)?.stdout)
     }
     fn root_read(&self, operation: &str, command: &str) -> Result<String, String> {
         self.read(operation, &format!("su -c {}", q(command)))
@@ -225,7 +399,7 @@ impl Session {
             if state["schema"] == SCHEMA || state["schema"] == CONTROL_RESOURCE_SCHEMA { state["base_recovery"] = Value::Null; }
         }
         self.save()?;
-        let output = self.command(operation, args, timeout)?;
+        let output = self.command(operation, args, timeout, true)?;
         {
             let mut state = self.state.borrow_mut();
             update(&mut state);
@@ -294,8 +468,15 @@ impl Session {
             if self.state.borrow()["stage"] != "active" { return Err("eval mutations require an active gray installation session".into()); }
             self.mutate(operation, args, timeout_ms, |_| {})
         } else {
-            self.command(operation, args, timeout_ms)
+            self.command(operation, args, timeout_ms, false)
         }
+    }
+    /// Reads can share an enclosing native deadline and cancellation boundary.
+    /// Cancellation is polled before/after commands and throughout backoff.
+    pub fn eval_read_transport_until(&self, operation: &str, args: &[String], deadline: Instant,
+        poll_cancel: &mut dyn FnMut() -> Result<(), String>) -> Result<crate::lease_command::Output, String> {
+        self.eval_ready()?;
+        self.command_until(operation, args, deadline, false, poll_cancel)
     }
     pub fn eval_present(&self, path: &str) -> Result<bool, String> { self.eval_ready()?; self.present(path) }
     pub fn eval_stop_target(&self) -> Result<(), String> {
@@ -392,6 +573,8 @@ impl Session {
         if boot.is_empty() || !boot.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
             return self.stop("invalid device boot identity".into());
         }
+        let physical = self.read("physical_identity", "getprop ro.serialno")?;
+        let physical = identity_line(&physical).map(str::to_owned);
         let native = self.native_dir()?;
         for path in [STATE.to_string(), format!("{native}/{SO}"), self.remote()] {
             if self.present(&path)? { return self.stop(format!("pre-existing installation/session path; refusing overwrite: {path}")); }
@@ -415,6 +598,7 @@ impl Session {
         }
         let mut state = self.state.borrow_mut();
         state["boot_id"] = json!(boot); state["native_dir"] = json!(native);
+        state["physical_serial"] = json!(physical);
         state["properties"] = Value::Object(properties); state["files"] = json!(files);
         state["stage"] = json!("prepared");
         drop(state);
@@ -694,7 +878,7 @@ impl Session {
     fn refbench_raw(&self, paths: impl IntoIterator<Item=String>) -> Result<Option<RefbenchOutput>, String> {
         for path in paths {
             if !self.present(&path)? { continue; }
-            let output = self.command("refbench_output", &["shell".into(), format!("su -c {}", q(&format!("cat {}", q(&path))))], 30_000)?;
+            let output = self.command("refbench_output", &["shell".into(), format!("su -c {}", q(&format!("cat {}", q(&path))))], 30_000, false)?;
             return Ok(Some(RefbenchOutput { bytes: bounded(&output.stdout_path, CAP)?, source_path: path }));
         }
         Ok(None)
@@ -790,7 +974,7 @@ impl Session {
     }
     pub fn screenshot_bytes(&self) -> Result<Vec<u8>, String> {
         self.ready()?;
-        let output = self.command("screenshot", &["exec-out".into(), "screencap".into(), "-p".into()], 30_000)?;
+        let output = self.command("screenshot", &["exec-out".into(), "screencap".into(), "-p".into()], 30_000, false)?;
         let bytes = bounded(&output.stdout_path, CAP)?;
         if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") { return Err("screenshot is not a PNG".into()); }
         Ok(bytes)
@@ -804,7 +988,7 @@ impl Session {
             bounded(Path::new(&prior), CAP).map_err(|e| format!("recorded archive unreadable: {e}"))?;
             return Ok(());
         }
-        let output = self.command("archive_output", &["shell".into(), format!("su -c {}", q(&format!("cat {}", q(path))))], 30_000)?;
+        let output = self.command("archive_output", &["shell".into(), format!("su -c {}", q(&format!("cat {}", q(path))))], 30_000, false)?;
         let generation = self.state.borrow()["generation"].as_u64().unwrap_or(0);
         let name = format!("output-g{generation}-{index}-{}-{}.raw", std::process::id(), stamp()?);
         let destination = self.dir.join(name);
@@ -1109,6 +1293,100 @@ fn pending_clear(state: &Value) -> Result<(), String> {
     } else { Ok(()) }
 }
 
+fn identity_line(text: &str) -> Option<&str> {
+    let value = text.trim();
+    (!value.is_empty() && value.len() <= 256 && !value.chars().any(|c| c.is_whitespace() || c.is_control()))
+        .then_some(value)
+}
+
+fn transient_transport_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    if ["cancel", "local_group_gone=false", "live/unknown"].iter().any(|s| error.contains(s)) { return false; }
+    ["device offline", "device not ready", "read timeout", "timed out", "deadline exceeded",
+        "connection reset", "connection refused", "connection closed", "error: closed",
+        "failed to connect", "cannot connect", "no devices/emulators found"].iter().any(|s| error.contains(s))
+        || (error.contains("error: device") && error.contains("not found"))
+}
+
+fn resume_pending_clear(state: &Value, dir: &Path) -> Result<(), String> {
+    if pending_clear(state).is_ok() { return Ok(()); }
+    if state.get("write_pending") != Some(&Value::Null) || state["transport_uncertain"] != true {
+        return pending_clear(state);
+    }
+    completion_owner(state)?;
+    if unstarted_read_failure(state, dir)?.is_some() { return Ok(()); }
+    if state["boot_id"].as_str().is_none_or(|s| s.is_empty() || !s.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')) {
+        return Err("read transport recovery requires the original boot identity".into());
+    }
+    read_failure(state, dir).map(|_| ())
+}
+
+fn unstarted_read_failure(state: &Value, dir: &Path) -> Result<Option<Value>, String> {
+    if state["transport_uncertain"] != true || state["write_pending"] != Value::Null
+        || state["stage"] != "new" || !state["boot_id"].is_null() || !state["native_dir"].is_null()
+        || ["staging_created", "installation_owned", "state_owned"].iter().any(|key| state[*key] != false)
+        || state["files"].as_array().is_none_or(|v| !v.is_empty())
+        || state["properties"].as_object().is_none_or(|v| !v.is_empty()) {
+        return Ok(None);
+    }
+    let failure = read_failure(state, dir)?;
+    let bytes = bounded(&dir.join("journal.jsonl"), CAP)?;
+    let text = std::str::from_utf8(&bytes).map_err(|e| e.to_string())?;
+    let mut intents = 0;
+    for line in text.lines() {
+        let event: Value = serde_json::from_str(line).map_err(|e| format!("invalid command journal: {e}"))?;
+        if event["event"] == "command_intent" {
+            if event["mutation"] != false { return Ok(None); }
+            intents += 1;
+        }
+    }
+    Ok((intents > 0).then_some(failure))
+}
+
+fn read_failure(state: &Value, dir: &Path) -> Result<Value, String> {
+    if let Some(failure) = state.get("transport_failure").filter(|v| !v.is_null()) {
+        if failure["schema"] == READ_FAILURE && failure["mutation"] == false
+            && failure["operation"].as_str().is_some_and(|s| !s.is_empty())
+            && failure["args"].as_array().is_some_and(|a| !a.is_empty() && a.iter().all(Value::is_string)) {
+            return Ok(failure.clone());
+        }
+        return Err("transport uncertainty is not a positively identified read; independent reconciliation is required".into());
+    }
+    let bytes = bounded(&dir.join("journal.jsonl"), CAP)?;
+    let text = std::str::from_utf8(&bytes).map_err(|e| e.to_string())?;
+    for line in text.lines().rev() {
+        let event: Value = serde_json::from_str(line).map_err(|e| format!("invalid command journal: {e}"))?;
+        if event["event"] != "command_intent" { continue; }
+        let args: Vec<String> = serde_json::from_value(event["args"].clone()).map_err(|e| e.to_string())?;
+        if args.len() >= 3 && args[0] == "-s" && state["serial"] == args[1]
+            && (event["mutation"] == false || (event.get("mutation").is_none() && legacy_read_command(&event, &args[2..], state))) {
+            return Ok(json!({"schema":READ_FAILURE,"operation":event["operation"],"args":&args[2..],"mutation":false,"legacy_journal":true}));
+        }
+        break;
+    }
+    Err("transport uncertainty has no proven read-only command intent; independent reconciliation is required".into())
+}
+
+fn legacy_read_command(event: &Value, args: &[String], state: &Value) -> bool {
+    let [shell, command] = args else { return false; };
+    if shell != "shell" { return false; }
+    match event["operation"].as_str() {
+        Some("recovery_boot" | "boot_identity" | "refbench_boot" | "whitebox_boot" | "restart_boot") => command == "cat /proc/sys/kernel/random/boot_id",
+        Some("native_directory") => state["package"].as_str().is_some_and(|p| *command == format!("dumpsys package {}", q(p))),
+        Some("property_readback") => LAYER_PROPERTIES.iter().any(|p| *command == format!("getprop {}", q(p))),
+        Some("directory_listing") => {
+            let unquote = |text: &str| -> Option<String> {
+                let value = text.strip_prefix('\'')?.strip_suffix('\'')?.replace("'\\''", "'");
+                (q(&value) == text).then_some(value)
+            };
+            command.strip_prefix("su -c ").and_then(unquote)
+                .and_then(|cmd| cmd.strip_prefix("ls -1A -- ").and_then(unquote))
+                .is_some_and(|path| path == "/" || graylayer::valid_install_dir(&path))
+        }
+        _ => false,
+    }
+}
+
 fn valid_session_directory(dir: &Path, owner: &str, token: &str) -> bool {
     let Some(name) = dir.file_name().and_then(|s| s.to_str()) else { return false; };
     if owner != CONTROL_OWNER { return name == format!("gray-{token}"); }
@@ -1181,6 +1459,10 @@ fn storeop_rule(rule: &str) -> Result<String, String> {
 
 fn validate(state: &Value, dir: &Path, serial: &str) -> Result<(), String> {
     let owner = completion_owner(state)?;
+    if state.get("physical_serial").is_some_and(|v| !v.is_null()
+        && v.as_str().is_none_or(|s| identity_line(s) != Some(s))) {
+        return Err("invalid original physical device identity".into());
+    }
     if let Some(value) = state.get("device_binding") {
         let binding = crate::device_registry::parse_binding(&value.to_string())?;
         if owner != CONTROL_OWNER || binding.serial != serial || state["lease_scope"] != "device" {
@@ -1305,6 +1587,371 @@ fn intent_extras(text: &str) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
+    const TEST_SERIAL: &str = "192.0.2.1:5555";
+    const TEST_BOOT: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    struct RecoveryFixture(PathBuf);
+    impl RecoveryFixture {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("gray-read-recovery-{}-{}", std::process::id(), stamp().unwrap()));
+            fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+        fn session(&self) -> Session {
+            let lease = Lease::acquire(&self.0.join("devices"), &self.0.join("locks"), TEST_SERIAL,
+                "fake-gray-read", Duration::from_millis(100)).unwrap();
+            let dir = self.0.join("gray-session-1-1234");
+            fs::create_dir(&dir).unwrap();
+            let token = lease.token().to_owned();
+            let mut state = json!({"schema":CONTROL_RESOURCE_SCHEMA,"serial":TEST_SERIAL,"token":token,
+                "package":"com.example.fixture","completion_owner":CONTROL_OWNER,
+                "control_session_id":"gray-session-1-1234","control_resources":{"path":"eval-session.json","schema":CONTROL_PARENT_SCHEMA},
+                "generation":0,"round_label":null,"base_recovery":null,"launch_marker":null,
+                "stage":"active","boot_id":TEST_BOOT,"physical_serial":"physical-a",
+                "native_dir":"/data/app/fixture/lib/arm64","properties":{},"files":[],
+                "remote":format!("/data/local/tmp/phonefarm-gray-{token}"),"staging_created":true,
+                "installation_owned":true,"state_owned":true,"write_pending":null,
+                "transport_uncertain":false,"evidence_origin":"synthetic"});
+            for property in LAYER_PROPERTIES { state["properties"][property] = json!(""); }
+            state["files"] = json!(session_output_paths(&state).unwrap().iter().map(|path| {
+                let (parent, name) = split_path(path).unwrap();
+                json!({"path":path,"backup":format!("{parent}/.phonefarm-gray-{token}-{name}.bak"),
+                    "original_present":false,"acquired":true,"backup_done":false,"restored":false,"archive":null})
+            }).collect::<Vec<_>>());
+            validate(&state, &dir, TEST_SERIAL).unwrap();
+            let session = Session {lease:RefCell::new(lease), adb:PathBuf::from("/never-use-real-adb"), dir,
+                state:RefCell::new(state), stopped:RefCell::new(None), known_dirs:RefCell::new(HashSet::new())};
+            session.save().unwrap();
+            session
+        }
+    }
+    impl Drop for RecoveryFixture {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+
+    struct FakeReadTransport {
+        dir: PathBuf,
+        elapsed: Duration,
+        budget: Duration,
+        cancel_at: Option<Duration>,
+        read_failures: usize,
+        connect_failures: usize,
+        timeout_read: bool,
+        boot: String,
+        physical: String,
+        break_proof_save: bool,
+        calls: Vec<(String, Vec<String>, Duration)>,
+        delays: Vec<Duration>,
+    }
+    impl FakeReadTransport {
+        fn new(session: &Session) -> Self {
+            Self {dir:session.dir.clone(), elapsed:Duration::ZERO, budget:Duration::from_secs(30),
+                cancel_at:None, read_failures:1, connect_failures:0, timeout_read:false,
+                boot:TEST_BOOT.into(), physical:"physical-a".into(), break_proof_save:false,
+                calls:Vec::new(), delays:Vec::new()}
+        }
+        fn count(&self, operation: &str) -> usize { self.calls.iter().filter(|c| c.0 == operation).count() }
+    }
+    impl ReadTransport for FakeReadTransport {
+        fn remaining(&mut self) -> Result<Duration, String> {
+            if self.cancel_at.is_some_and(|at| self.elapsed >= at) { return Err("read recovery cancelled".into()); }
+            self.budget.checked_sub(self.elapsed).filter(|d| !d.is_zero()).ok_or("original gray command deadline elapsed".into())
+        }
+        fn run(&mut self, operation: &str, args: &[String], timeout: Duration) -> Result<crate::lease_command::Output, String> {
+            assert!(timeout > Duration::ZERO && timeout <= self.remaining().unwrap());
+            assert_eq!(&args[..2], &["-s", TEST_SERIAL]);
+            assert!(!args.iter().any(|s| matches!(s.as_str(), "kill-server" | "offline" | "devices")));
+            if operation == "read_disconnect" { assert_eq!(&args[2..], &["disconnect", TEST_SERIAL]); }
+            if operation == "read_reconnect" { assert_eq!(&args[2..], &["connect", TEST_SERIAL]); }
+            self.calls.push((operation.into(), args.into(), timeout));
+            let read_failed = operation == "directory_listing" && self.read_failures > 0;
+            let connect_failed = operation == "read_reconnect" && self.connect_failures > 0;
+            if read_failed { self.read_failures -= 1; }
+            if connect_failed { self.connect_failures -= 1; }
+            if read_failed && self.timeout_read {
+                self.elapsed += timeout;
+                return Err("command deadline exceeded; local_group_gone=true".into());
+            }
+            self.elapsed += Duration::from_millis(10).min(timeout);
+            let stdout = match operation {
+                "read_device_state" => "device".into(),
+                "read_physical_identity" => self.physical.clone(),
+                "read_boot_identity" => self.boot.clone(),
+                _ => "fresh-read".into(),
+            };
+            let stdout_path = self.dir.join(format!("fake-{}.stdout", self.calls.len()));
+            fs::write(&stdout_path, &stdout).unwrap();
+            if operation == "read_boot_identity" && self.break_proof_save {
+                fs::remove_file(self.dir.join("session.json")).unwrap();
+                fs::create_dir(self.dir.join("session.json")).unwrap();
+            }
+            Ok(crate::lease_command::Output {code:if read_failed || connect_failed {1} else {0}, stdout,
+                stderr:if read_failed || connect_failed {"error: device offline".into()} else {String::new()}, stdout_path})
+        }
+        fn delay(&mut self, delay: Duration) -> Result<(), String> {
+            if self.remaining()? <= delay { return Err("original gray command deadline does not cover reconnect delay".into()); }
+            self.delays.push(delay);
+            self.elapsed += delay;
+            self.remaining().map(|_| ())
+        }
+    }
+    fn listing_args() -> Vec<String> { vec!["shell".into(), format!("su -c {}", q(&format!("ls -1A -- {}", q("/data/local/tmp"))))] }
+    fn persisted_state(session: &Session) -> Value { serde_json::from_slice(&fs::read(session.dir.join("session.json")).unwrap()).unwrap() }
+    fn unstarted_failure(session: &Session) {
+        {
+            let mut state = session.state.borrow_mut();
+            state["stage"] = json!("new");
+            state["boot_id"] = Value::Null;
+            state["native_dir"] = Value::Null;
+            state["files"] = json!([]);
+            state["properties"] = json!({});
+            for key in ["staging_created", "installation_owned", "state_owned"] { state[key] = json!(false); }
+        }
+        let args = vec!["shell".into(), "cat /proc/sys/kernel/random/boot_id".into()];
+        journal(&session.dir, json!({"event":"command_intent","operation":"boot_identity",
+            "args":["-s",TEST_SERIAL,"shell","cat /proc/sys/kernel/random/boot_id"],"mutation":false})).unwrap();
+        session.record_transport_failure("boot_identity", &args, false, "error: device not found").unwrap();
+        session.save().unwrap();
+    }
+
+    #[test]
+    fn unstarted_boot_read_failure_can_finish_without_adb_or_original_boot() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        unstarted_failure(&session);
+        validate(&session.state.borrow(), &session.dir, TEST_SERIAL).unwrap();
+        assert!(resume_pending_clear(&session.state.borrow(), &session.dir).is_ok());
+        assert!(session.retire_unstarted_read().unwrap());
+        let report = session.restore_for_eval(None).unwrap();
+        assert_eq!(report["status"], "verified");
+        assert_eq!(report["scope"], "no_device_mutations");
+        let state = persisted_state(&session);
+        assert_eq!(state["unstarted_read_abort"]["failed_read"]["operation"], "boot_identity");
+        assert_eq!(state["unstarted_read_abort"]["no_device_mutations"], true);
+        assert!(state["read_transport_proof"].is_null());
+        assert!(state["boot_id"].is_null());
+    }
+
+    #[test]
+    fn unstarted_abort_refuses_any_write_intent_or_acquired_state() {
+        for fault in ["write_pending", "installation_owned", "state_owned", "staging_created", "journal_write", "journal_unknown"] {
+            let fixture = RecoveryFixture::new();
+            let session = fixture.session();
+            unstarted_failure(&session);
+            match fault {
+                "write_pending" => session.state.borrow_mut()[fault] = json!({"operation":"install"}),
+                "journal_write" | "journal_unknown" => {
+                    let mut event = json!({"event":"command_intent","operation":"install","mutation":true});
+                    if fault == "journal_unknown" { event.as_object_mut().unwrap().remove("mutation"); }
+                    journal(&session.dir, event).unwrap();
+                },
+                _ => session.state.borrow_mut()[fault] = json!(true),
+            }
+            assert!(resume_pending_clear(&session.state.borrow(), &session.dir).is_err(), "{fault}");
+            assert!(!session.retire_unstarted_read().unwrap(), "{fault}");
+            assert_eq!(persisted_state(&session)["transport_uncertain"], true);
+        }
+    }
+
+    fn legacy_failure(session: &Session, operation: &str, args: Vec<String>) {
+        session.state.borrow_mut()["transport_uncertain"] = json!(true);
+        session.state.borrow_mut().as_object_mut().unwrap().remove("transport_failure");
+        session.save().unwrap();
+        let args = [vec!["-s".into(), TEST_SERIAL.into()], args].concat();
+        journal(&session.dir, json!({"event":"command_intent","operation":operation,"args":args})).unwrap();
+    }
+
+    #[test]
+    fn read_offline_then_online_saves_fresh_proof_without_completing_resources() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let original = session.state.borrow().clone();
+        let token = session.lease.borrow().token().to_owned();
+        let mut fake = FakeReadTransport::new(&session);
+        let result = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap();
+        assert_eq!(fs::read_to_string(result.stdout_path).unwrap(), "fresh-read");
+        assert_eq!(fake.count("directory_listing"), 2);
+        assert_eq!(fake.count("read_disconnect"), 1);
+        assert_eq!(session.lease.borrow().token(), token);
+        assert_eq!(session.lease.borrow().recovery_context(), Some(session.dir.as_path()));
+        assert!(Lease::acquire(&fixture.0.join("devices"), &fixture.0.join("locks"), TEST_SERIAL,
+            "contender", Duration::ZERO).is_err());
+        let state = persisted_state(&session);
+        assert_eq!(state["transport_uncertain"], false);
+        assert_eq!(state["read_transport_proof"]["physical_serial"], "physical-a");
+        assert_eq!(state["read_transport_proof"]["boot_id"], TEST_BOOT);
+        for path in state["read_transport_proof"]["stdout_paths"].as_array().unwrap() { assert!(Path::new(path.as_str().unwrap()).is_file()); }
+        for key in ["files", "properties", "stage", "installation_owned", "state_owned", "control_resources"] { assert_eq!(state[key], original[key]); }
+        assert!(state["base_recovery"].is_null());
+        assert!(session.complete_eval(&session.dir.join("missing-parent-report.json")).is_err());
+        assert!(require_local_completion(&state, CONTROL_OWNER).is_err());
+        assert!(session.ready().is_ok());
+    }
+    #[test]
+    fn read_timeout_retries_with_only_the_original_remaining_budget() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let mut fake = FakeReadTransport::new(&session);
+        fake.timeout_read = true;
+        session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap();
+        assert_eq!(fake.calls[0].2, READ_ATTEMPT);
+        assert!(fake.elapsed >= READ_ATTEMPT && fake.elapsed < fake.budget);
+        assert_eq!(fake.count("directory_listing"), 2);
+    }
+    #[test]
+    fn reconnect_is_bounded_to_three_attempts_with_one_and_two_second_backoff() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let mut fake = FakeReadTransport::new(&session);
+        fake.connect_failures = 3;
+        let error = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap_err();
+        assert!(error.contains("after 3 attempts"), "{error}");
+        assert_eq!(fake.count("read_disconnect"), 3);
+        assert_eq!(fake.count("read_reconnect"), 3);
+        assert_eq!(fake.count("directory_listing"), 1);
+        assert_eq!(fake.delays, [Duration::from_secs(1), Duration::from_secs(2)]);
+        assert_eq!(persisted_state(&session)["transport_uncertain"], true);
+        assert!(session.ready().is_err());
+    }
+    #[test]
+    fn changed_boot_or_physical_identity_never_clears_uncertainty_or_replays_read() {
+        for physical_change in [false, true] {
+            let fixture = RecoveryFixture::new();
+            let session = fixture.session();
+            let mut fake = FakeReadTransport::new(&session);
+            if physical_change { fake.physical = "physical-b".into(); } else { fake.boot = "ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee".into(); }
+            let error = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap_err();
+            assert!(error.contains(if physical_change {"physical device identity changed"} else {"device boot changed"}), "{error}");
+            assert_eq!(fake.count("directory_listing"), 1);
+            assert_eq!(persisted_state(&session)["transport_uncertain"], true);
+            assert!(persisted_state(&session)["read_transport_proof"].is_null());
+        }
+    }
+    #[test]
+    fn legacy_directory_listing_and_recovery_boot_can_reconcile_but_do_not_certify_cleanup() {
+        for (operation, args) in [("directory_listing", listing_args()),
+            ("recovery_boot", vec!["shell".into(), "cat /proc/sys/kernel/random/boot_id".into()])] {
+            let fixture = RecoveryFixture::new();
+            let session = fixture.session();
+            session.state.borrow_mut().as_object_mut().unwrap().remove("physical_serial");
+            legacy_failure(&session, operation, args);
+            assert!(pending_clear(&session.state.borrow()).is_err());
+            assert!(resume_pending_clear(&session.state.borrow(), &session.dir).is_ok());
+            let mut fake = FakeReadTransport::new(&session);
+            assert!(session.recover_read_transport(&mut fake, None).unwrap().is_none());
+            let state = persisted_state(&session);
+            assert_eq!(state["transport_uncertain"], false);
+            assert_eq!(state["read_transport_proof"]["failed_read"]["operation"], operation);
+            assert_eq!(state["physical_serial"], "physical-a");
+            assert!(state["base_recovery"].is_null());
+            assert_eq!(state["installation_owned"], true);
+            assert_eq!(fake.count(operation), 0);
+            assert!(session.complete_eval(&session.dir.join("missing-report.json")).is_err());
+        }
+    }
+    #[test]
+    fn pending_write_unknown_owner_and_unclassified_legacy_command_are_refused_before_transport() {
+        for case in ["pending", "owner", "unknown-command", "disguised-write", "missing-pending"] {
+            let fixture = RecoveryFixture::new();
+            let session = fixture.session();
+            legacy_failure(&session, "directory_listing", listing_args());
+            match case {
+                "pending" => session.state.borrow_mut()["write_pending"] = json!({"operation":"property_write"}),
+                "owner" => session.state.borrow_mut()["completion_owner"] = json!("unknown"),
+                "missing-pending" => { session.state.borrow_mut().as_object_mut().unwrap().remove("write_pending"); },
+                "unknown-command" => legacy_failure(&session, "unknown", vec!["shell".into(), "id".into()]),
+                _ => legacy_failure(&session, "directory_listing", vec!["shell".into(), "su -c 'ls -1A -- /data; setprop debug.vulkan.layers x'".into()]),
+            }
+            let mut fake = FakeReadTransport::new(&session);
+            assert!(session.recover_read_transport(&mut fake, None).is_err(), "accepted {case}");
+            assert!(fake.calls.is_empty(), "transport used for {case}");
+            assert_eq!(session.state.borrow()["transport_uncertain"], true);
+        }
+    }
+    #[test]
+    fn mutations_are_never_replayed_even_if_transport_returns() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let pending = json!({"operation":"directory_listing","args":["shell","setprop debug.vulkan.layers x"]});
+        session.state.borrow_mut()["write_pending"] = pending.clone();
+        session.save().unwrap();
+        let mut fake = FakeReadTransport::new(&session);
+        assert!(session.command_using("directory_listing", &["shell".into(), "setprop debug.vulkan.layers x".into()], true, &mut fake).is_err());
+        assert_eq!(fake.calls.len(), 1);
+        assert_eq!(persisted_state(&session)["write_pending"], pending);
+        assert_eq!(persisted_state(&session)["transport_failure"]["mutation"], true);
+        session.state.borrow_mut()["write_pending"] = Value::Null;
+        assert!(resume_pending_clear(&session.state.borrow(), &session.dir).is_err());
+    }
+    #[test]
+    fn expired_deadline_or_cancellation_prevents_any_transport() {
+        for cancelled in [false, true] {
+            let fixture = RecoveryFixture::new();
+            let session = fixture.session();
+            let mut fake = FakeReadTransport::new(&session);
+            if cancelled { fake.cancel_at = Some(Duration::ZERO); } else { fake.budget = Duration::ZERO; }
+            let error = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap_err();
+            assert!(error.contains(if cancelled {"cancelled"} else {"deadline"}), "{error}");
+            assert!(fake.calls.is_empty());
+        }
+    }
+    #[test]
+    fn consumed_deadline_cannot_be_replaced_by_a_new_retry_timeout() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let mut fake = FakeReadTransport::new(&session);
+        fake.budget = READ_ATTEMPT;
+        fake.timeout_read = true;
+        let error = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap_err();
+        assert!(error.contains("deadline"), "{error}");
+        assert_eq!(fake.calls.len(), 1);
+        assert_eq!(fake.elapsed, fake.budget);
+        assert!(fake.delays.is_empty());
+    }
+    #[test]
+    fn cancellation_and_deadline_during_backoff_prevent_further_reconnects() {
+        for cancelled in [false, true] {
+            let fixture = RecoveryFixture::new();
+            let session = fixture.session();
+            let mut fake = FakeReadTransport::new(&session);
+            fake.connect_failures = 3;
+            if cancelled { fake.cancel_at = Some(Duration::from_millis(500)); } else { fake.budget = Duration::from_secs(1); }
+            let error = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap_err();
+            assert!(error.contains(if cancelled {"cancelled"} else {"deadline"}), "{error}");
+            assert_eq!(fake.count("read_reconnect"), 1);
+            assert_eq!(fake.count("directory_listing"), 1);
+            assert!(fake.elapsed <= fake.budget);
+            assert_eq!(persisted_state(&session)["transport_uncertain"], true);
+        }
+    }
+    #[test]
+    fn failed_fresh_proof_save_preserves_uncertainty_and_never_retries_original_read() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let mut fake = FakeReadTransport::new(&session);
+        fake.break_proof_save = true;
+        let error = session.command_using("directory_listing", &listing_args(), false, &mut fake).unwrap_err();
+        assert!(error.contains("proof persistence failed"), "{error}");
+        assert_eq!(session.state.borrow()["transport_uncertain"], true);
+        assert_eq!(fake.count("directory_listing"), 1);
+        assert!(session.ready().is_err());
+    }
+    #[test]
+    fn native_absolute_deadline_and_cancellation_api_checks_before_spawn() {
+        let fixture = RecoveryFixture::new();
+        let session = fixture.session();
+        let mut poll_cancel = || Err("native read cancelled".into());
+        let error = session.eval_read_transport_until("directory_listing", &listing_args(),
+            Instant::now() + Duration::from_secs(30), &mut poll_cancel).unwrap_err();
+        assert!(error.contains("cancelled"), "{error}");
+        assert!(!session.dir.join("commands").exists());
+    }
+    #[test]
+    fn uncertain_local_group_and_nontransport_errors_are_not_retried() {
+        for error in ["read recovery cancelled", "command deadline exceeded; local_group_gone=false",
+            "command exited but its process group remains live/unknown", "permission denied", "cat: no such file"] {
+            assert!(!transient_transport_error(error), "{error}");
+        }
+    }
     #[test]
     fn native_whitebox_has_its_own_completion_and_timestamp_hash_outputs() {
         let state=serde_json::json!({"schema":super::SCHEMA,"completion_owner":super::WHITEBOX_OWNER,

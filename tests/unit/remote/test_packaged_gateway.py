@@ -8,12 +8,14 @@ import shutil
 import signal
 import subprocess
 import sys
+import tomllib
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from packaging.requirements import Requirement
 from typer.testing import CliRunner
 
 from llm4ad.gateway.cli import app
@@ -21,7 +23,37 @@ from llm4ad.gateway.sdk.service import serve as _serve
 from llm4ad.remote import EvaluationArtifact, EvaluationContract, EvaluationResult, GatewayEvaluator, Reporter
 from llm4ad.remote.check import check_evaluator
 
+pytestmark = pytest.mark.unit
+
 USER = str(uuid.uuid4())
+
+
+def test_backend_lock_satisfies_gateway_runtime_dependencies():
+    """Keep backend container resolution compatible with the bundled gateway SDK."""
+    root = Path(__file__).resolve().parents[3]
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    backend = tomllib.loads((root / "src/backend/pyproject.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((root / "src/backend/uv.lock").read_text(encoding="utf-8"))
+    core = {
+        requirement.name: requirement
+        for value in project["project"]["dependencies"]
+        if (requirement := Requirement(value)).name in {"transitions", "persist-queue", "loky", "tenacity", "psutil"}
+    }
+    direct = {
+        requirement.name: requirement
+        for value in backend["project"]["dependencies"]
+        if (requirement := Requirement(value)).name in core
+    }
+    sdk = next(package for package in lock["package"] if package["name"] == "llm4ad-next")
+    declared = {item["name"]: item for item in sdk["metadata"]["requires-dist"] if not item.get("marker")}
+    bundled = {item["name"] for item in sdk["dependencies"]}
+    for name, requirement in core.items():
+        versions = [package["version"] for package in lock["package"] if package["name"] == name]
+        assert versions and all(requirement.specifier.contains(version) for version in versions), name
+        assert name in bundled
+        assert Requirement(name + declared[name]["specifier"]).specifier == requirement.specifier
+        if name in direct:
+            assert all(direct[name].specifier.contains(version) for version in versions), name
 
 
 @pytest.mark.parametrize("relative", ["templates/custom", "examples/basic/deployment", "examples/hgamey/deployment"])
@@ -35,9 +67,7 @@ def test_compose_dashboard_defaults_and_headless_optout(tmp_path, relative, over
     configuration.mkdir()
     command = [docker, "--config", str(configuration), "compose"]
     environment = {"PATH": os.defpath}
-    version = subprocess.run(
-        [*command, "version"], env=environment, text=True, capture_output=True, timeout=10
-    )
+    version = subprocess.run([*command, "version"], env=environment, text=True, capture_output=True, timeout=10)
     if version.returncode:
         pytest.skip("Docker Compose plugin is not installed")
     root = Path(__file__).resolve().parents[3] / "src/llm4ad/gateway" / relative
@@ -159,11 +189,11 @@ def test_check_reports_candidate_failure(workspace, tmp_path, code):
     assert result["result"]["message"]
 
 
-def test_check_deadline_preserves_uncertainty(workspace, tmp_path):
+def test_check_deadline_returns_failure_after_process_cleanup(workspace, tmp_path):
     """A killed candidate cannot be reported as successful or silently retried."""
     (workspace / "candidate/solution.py").write_text("import time\ndef solve(x):\n    time.sleep(60)\n    return x\n")
     result = check_evaluator(f"{workspace / 'evaluator.py'}:Evaluator", workspace / "candidate", tmp_path / "check", 3)
-    assert not result["ok"] and result["state"] == "recovery_required"
+    assert not result["ok"] and result["state"] == "failed"
     assert "timed out" in result["result"]["message"]
 
 
@@ -172,9 +202,14 @@ def test_start_environment_and_cli_override(tmp_path, monkeypatch):
     calls = []
 
     def construct(environment, spec):
-        args = (environment["LLM4AD_SERVER_URL"], environment["LLM4AD_GATEWAY_NAME"],
-                environment["LLM4AD_ALLOWED_USER_IDS"].split(","), spec,
-                Path(environment["LLM4AD_GATEWAY_STATE_DIR"]), int(environment["LLM4AD_GATEWAY_CONCURRENCY"]))
+        args = (
+            environment["LLM4AD_SERVER_URL"],
+            environment["LLM4AD_GATEWAY_NAME"],
+            environment["LLM4AD_ALLOWED_USER_IDS"].split(","),
+            spec,
+            Path(environment["LLM4AD_GATEWAY_STATE_DIR"]),
+            int(environment["LLM4AD_GATEWAY_CONCURRENCY"]),
+        )
         calls.append(args)
         return SimpleNamespace(options={"root": args[4]})
 
@@ -205,8 +240,9 @@ def test_invalid_startup_never_creates_identity(tmp_path, server, user):
     """Bad connection or sharing settings fail before acquiring state."""
     state = tmp_path / "state"
     result = CliRunner().invoke(
-        app, ["start", "--no-ui", "--server", server, "--name", "lab", "--state-dir", str(state)],
-        env={"LLM4AD_ALLOWED_USER_IDS": user}
+        app,
+        ["start", "--no-ui", "--server", server, "--name", "lab", "--state-dir", str(state)],
+        env={"LLM4AD_ALLOWED_USER_IDS": user},
     )
     assert result.exit_code != 0 and not state.exists()
 
@@ -340,9 +376,14 @@ def test_explicit_custom_evaluator_overrides_builtin_environment(tmp_path, monke
     calls = []
 
     def construct(environment, spec):
-        args = (environment["LLM4AD_SERVER_URL"], environment["LLM4AD_GATEWAY_NAME"],
-                environment["LLM4AD_ALLOWED_USER_IDS"].split(","), spec,
-                Path(environment["LLM4AD_GATEWAY_STATE_DIR"]), int(environment["LLM4AD_GATEWAY_CONCURRENCY"]))
+        args = (
+            environment["LLM4AD_SERVER_URL"],
+            environment["LLM4AD_GATEWAY_NAME"],
+            environment["LLM4AD_ALLOWED_USER_IDS"].split(","),
+            spec,
+            Path(environment["LLM4AD_GATEWAY_STATE_DIR"]),
+            int(environment["LLM4AD_GATEWAY_CONCURRENCY"]),
+        )
         calls.append((args, os.environ.get("CUSTOM_DATA_ROOT")))
         return SimpleNamespace(options={"root": args[4]})
 
@@ -361,7 +402,16 @@ def test_explicit_custom_evaluator_overrides_builtin_environment(tmp_path, monke
     )
     result = CliRunner().invoke(
         app,
-        ["start", "--no-ui", "--config", str(config), "--evaluator", "./custom.py:Evaluator", "--state-dir", str(tmp_path / "state")],
+        [
+            "start",
+            "--no-ui",
+            "--config",
+            str(config),
+            "--evaluator",
+            "./custom.py:Evaluator",
+            "--state-dir",
+            str(tmp_path / "state"),
+        ],
         env={"LLM4AD_GATEWAY_ADAPTER": "hgamey"},
     )
     assert result.exit_code == 0, result.output

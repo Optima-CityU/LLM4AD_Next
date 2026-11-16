@@ -7,6 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { normalizeGatewayPool } from "@/lib/gatewayPool"
 import DiverseIslandStrategyPreview from "./DiverseIslandStrategyPreview"
 import FieldLabel from "./FieldLabel"
 import type { JsonSchema } from "./resolveSchema"
@@ -73,7 +74,8 @@ export default function SchemaDiscriminatedField({
     const defaults = getDefaultValue(option.schema, root) as
       | Record<string, unknown>
       | undefined
-    onChange({ ...defaults, [info.propertyName]: newType })
+    const next = { ...defaults, [info.propertyName]: newType }
+    onChange(newType === "remote" ? normalizeGatewayPool(next) : next)
   }
 
   const filteredProperties = { ...selectedOption.schema.properties }
@@ -83,6 +85,9 @@ export default function SchemaDiscriminatedField({
     for (const key of [
       "gateway_ids",
       "contract",
+      "selection_mode",
+      "max_attempts",
+      "lease_timeout",
       "dataset",
       "provider",
       "max_retries",

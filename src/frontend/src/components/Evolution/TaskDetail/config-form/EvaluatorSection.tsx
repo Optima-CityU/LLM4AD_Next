@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { normalizeGatewayPool } from "@/lib/gatewayPool"
 
 import CollapsibleSection from "./CollapsibleSection"
 
@@ -244,7 +245,13 @@ export default function EvaluatorSection() {
       <Select
         value={remote ? "remote" : "custom"}
         onValueChange={(type) =>
-          setValue("evaluator", { ...value, type }, { shouldDirty: true })
+          setValue(
+            "evaluator",
+            type === "remote"
+              ? normalizeGatewayPool({ ...value, type })
+              : { ...value, type },
+            { shouldDirty: true },
+          )
         }
       >
         <SelectTrigger aria-label={t("remoteEvaluation.type")}>

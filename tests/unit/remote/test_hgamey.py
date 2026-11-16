@@ -17,11 +17,13 @@ from aiohttp import web
 from llm4ad.coder.custom_naive_coder import CustomNaiveCoder
 from llm4ad.config.app import AppConfig
 from llm4ad.config.coder import CustomCoderConfig
-from llm4ad.gateway.sdk.errors import EvaluationError
+from llm4ad.gateway.sdk.errors import EvaluationError, EvaluationUnavailableError
 from llm4ad.gateway.sdk.lifecycle import run_operation
 from llm4ad.infra.provider.base import GenerationResult
 from llm4ad.remote.contracts import RemoteJob, load_evaluator
 from llm4ad.remote.gateway import Gateway, stop_process
+
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE = ROOT / "src/llm4ad/gateway/examples/hgamey"
@@ -239,7 +241,8 @@ async def test_aborted_measurement_remains_unscored(local, executor):
     """An aborted experiment is not a negative algorithm training sample."""
     executor.status = "ABORT"
     reporter = Reporter()
-    assert await operate(local.adapter(), local.job(), reporter) is None
+    with pytest.raises(EvaluationUnavailableError):
+        await operate(local.adapter(), local.job(), reporter)
     assert reporter.saved_state["external_job_id"]
 
 
@@ -249,6 +252,100 @@ async def test_real_candidate_rejection_retains_feedback(local, executor, status
     executor.status = status
     result = await operate(local.adapter(), local.job(), Reporter())
     assert not result.success and result.evolution_feedback["status"] == status
+
+
+@pytest.fixture
+def measured_static_report(local):
+    """Provide an isolated report with the observed same-run PSNR measurements."""
+    adapter = local.adapter()
+    state = adapter.prepare(local.job())
+    report = {
+        "source": "phonefarm",
+        "kind": "shader",
+        "candidate_id": state["idempotency_key"],
+        "conditions_observed": {"restored": True},
+        "status": "POOR_QUALITY",
+        "metrics": {"operator_latency_ms": 0.6489997506141663, "psnr_db": 41.74100112915039},
+        "baseline_metrics": {"operator_latency_ms": 0.8507402539253235, "psnr_db": 41.7484016418457},
+        "verdict": {"is_pareto_improvement": False, "p_value": 0.5},
+    }
+    return adapter, report, state
+
+
+@pytest.mark.parametrize("score_mode", ["latency", "relative_latency"])
+def test_measured_quality_rejection_retains_gate_and_precision_guidance(measured_static_report, score_mode):
+    """The observed small regression remains failed with actionable measured feedback."""
+    adapter, report, state = measured_static_report
+    adapter.benchmark.score_mode = score_mode
+    result = adapter.convert_report(report, state)
+
+    assert result is not None and not result.success and result.score == 0.0
+    assert result.metrics == report["metrics"]
+    assert result.metadata["failure_type"] == "CandidateQualityRejected"
+    assert result.metadata["candidate_failure"] is True
+    assert result.metadata["evaluation_summary"]["quality_passed"] is False
+    assert result.metadata["evaluation_summary"]["measurement_valid"] is True
+    feedback = result.evolution_feedback
+    assert feedback["status"] == "POOR_QUALITY"
+    assert feedback["candidate_psnr_db"] == 41.74100112915039
+    assert feedback["baseline_psnr_db"] == 41.7484016418457
+    assert feedback["psnr_delta_db"] == 41.74100112915039 - 41.7484016418457
+    assert feedback["quality_gate"] == {
+        "min_psnr_db": 41.7484016418457,
+        "source": "same_run_baseline",
+        "comparison": "candidate_psnr_db >= min_psnr_db",
+    }
+    assert "Consider preserving" in feedback["guidance"] and "may" in feedback["guidance"]
+    assert "coordinate and interpolation" in feedback["guidance"]
+    assert "41.74100113" in result.error_message and "41.74840164" in result.error_message
+    assert "-0.00740051" in result.error_message and "same-run baseline" in result.error_message
+
+
+@pytest.mark.parametrize("status", ["PASS", "REJECT"])
+@pytest.mark.parametrize("score_mode", ["latency", "relative_latency"])
+def test_equal_quality_without_confirmed_improvement_keeps_existing_score(measured_static_report, score_mode, status):
+    """An equal-quality native pass or non-improvement keeps its finite score."""
+    adapter, report, state = measured_static_report
+    adapter.benchmark.score_mode = score_mode
+    report["status"] = status
+    report["metrics"]["psnr_db"] = report["baseline_metrics"]["psnr_db"]
+    result = adapter.convert_report(report, state)
+
+    assert result is not None and result.success
+    expected = -report["metrics"]["operator_latency_ms"]
+    if score_mode == "relative_latency":
+        baseline = report["baseline_metrics"]["operator_latency_ms"]
+        expected = 100 * (baseline - report["metrics"]["operator_latency_ms"]) / baseline
+    assert result.score == expected
+    assert result.metadata["evaluation_summary"]["quality_passed"] is True
+    assert result.metadata["evaluation_summary"]["comparison_outcome"] == "no_advantage"
+    assert result.metadata["evaluation_summary"]["operator_improvement_confirmed"] is False
+    assert "failure_type" not in result.metadata
+
+
+@pytest.mark.parametrize("baseline_psnr", [None, True, "41.7484", float("nan"), float("inf"), float("-inf")])
+def test_quality_rejection_does_not_invent_a_baseline_gate(measured_static_report, baseline_psnr):
+    """Unavailable or nonnumeric baseline PSNR never becomes measured gate feedback."""
+    adapter, report, state = measured_static_report
+    report["baseline_metrics"]["psnr_db"] = baseline_psnr
+    result = adapter.convert_report(report, state)
+
+    assert result is not None and not result.success
+    assert result.metadata["failure_type"] == "CandidateQualityRejected"
+    assert result.evolution_feedback["candidate_psnr_db"] == 41.74100112915039
+    assert not {"baseline_psnr_db", "psnr_delta_db", "quality_gate"} & result.evolution_feedback.keys()
+
+
+def test_crash_without_measurements_does_not_inherit_quality_feedback(measured_static_report):
+    """A native crash cannot acquire candidate PSNR or latency from its baseline."""
+    adapter, report, state = measured_static_report
+    report.update(status="CRASH", metrics={"operator_latency_ms": None, "psnr_db": None})
+    result = adapter.convert_report(report, state)
+
+    assert result is not None and not result.success and result.score == 0.0
+    assert result.metrics == {}
+    assert result.evolution_feedback == {"status": "CRASH", "verdict": report["verdict"], "metrics": {}}
+    assert result.error_message == "HGamey candidate verdict: CRASH"
 
 
 async def test_cancellation_waits_for_external_cleanup(local, executor):
@@ -281,6 +378,7 @@ async def test_missing_job_does_not_confirm_cancellation_after_a_lost_submission
     """An in-flight POST can still create work after an absent-job lookup."""
     adapter, job = local.adapter(), local.job()
     state = adapter.prepare(job)
+    state["submission_started"] = True
     assert await adapter.cancel(job, state) is False
 
 
@@ -319,20 +417,19 @@ def test_tampered_staging_cannot_be_recovered_as_the_original_job(local):
         asyncio.run(operate(adapter, job, reporter, "recover"))
 
 
-def test_example_is_a_draft_until_an_authorized_gateway_is_selected(local):
-    """The shipped template contains no invented gateway or account identity."""
+def test_example_uses_an_automatic_pool_without_invented_device_identity(local):
+    """Select a real benchmark without requiring physical IDs in the task template."""
     import yaml
-    from pydantic import ValidationError
 
     data = yaml.safe_load((TEMPLATE / "config.yaml").read_text())
     assert data["evaluator"]["gateway_ids"] == []
     assert (TEMPLATE / data["version_control"]["local_path"] / "shader.comp").is_file()
-    with pytest.raises(ValidationError) as error:
-        AppConfig.model_validate(data)
-    assert [item["loc"] for item in error.value.errors()] == [("evaluator", "remote", "gateway_ids")]
-    data["evaluator"].update(gateway_ids=[str(uuid.uuid4())], contract=local.adapter().contract.model_dump(mode="json"))
+    draft = AppConfig.model_validate(data)
+    assert draft.evaluator.selection_mode == "auto" and draft.evaluator.contract == {}
+    data["evaluator"]["contract"] = local.adapter().contract.model_dump(mode="json")
     config = AppConfig.model_validate(data)
     assert config.evaluator.type == "remote" and config.coder.context_max_tokens >= 24000
+    assert config.evaluator.gateway_ids == [] and config.evaluator.batch_size > 1
 
 
 def test_real_glsl_compilation_and_spirv_validation(tmp_path, monkeypatch):

@@ -380,6 +380,8 @@ if lifeline is not None:
     threading.Thread(target=watch,daemon=True).start()
 env=dict(os.environ)
 for name in ('PF_LOCK_FDS','PF_LOCK_SCOPE'): env.pop(name,None)
+for name in tuple(env):
+    if name.startswith('LLM4AD_PROCESS_'): env.pop(name,None)
 hdc,program,*args=sys.argv[1:]
 if hdc=='1':
     # HDC's ProgramMutex uses a POSIX record lock here. Check that live lock,

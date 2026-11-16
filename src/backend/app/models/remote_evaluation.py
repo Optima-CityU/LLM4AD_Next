@@ -18,11 +18,13 @@ class EvaluationGateway(SQLModel, table=True):
     contract: dict = Field(sa_column=Column(JSON, nullable=False))
     contract_key: str = Field(index=True, max_length=64)
     capacity: int = Field(default=1)
+    protocol_version: int = Field(default=1)
+    ready: bool = Field(default=True)
     last_seen: datetime = Field(default_factory=lambda: datetime.now(UTC), sa_type=DateTime(timezone=True))
 
 
 class RemoteEvaluationJob(SQLModel, table=True):
-    """One idempotent whole-candidate job; accepted work is never auto-reassigned."""
+    """One candidate with durable, fenced device-attempt ownership."""
 
     __tablename__ = "remote_evaluation_job"
     id: uuid.UUID = Field(primary_key=True)
@@ -31,6 +33,11 @@ class RemoteEvaluationJob(SQLModel, table=True):
     user_id: uuid.UUID = Field(foreign_key="user.id", index=True, ondelete="CASCADE")
     gateway_id: uuid.UUID | None = Field(default=None, foreign_key="evaluation_gateway.id", index=True)
     selected_gateway_ids: list[str] = Field(sa_column=Column(JSON, nullable=False))
+    selection_mode: str = Field(default="selected", max_length=16)
+    max_attempts: int = Field(default=1)
+    attempt_count: int = Field(default=0)
+    attempt_history: list[dict] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    lease_expires_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True), index=True)
     contract_key: str = Field(max_length=64, index=True)
     state: str = Field(default="queued", index=True, max_length=32)
     object_key: str = Field(max_length=1024)

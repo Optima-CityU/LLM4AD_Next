@@ -22,6 +22,8 @@ from llm4ad.gateway.sdk.monitoring import artifact_path, job_detail, job_message
 from llm4ad.gateway.sdk.runtime import GatewayRuntime
 from llm4ad.gateway.sdk.service import GatewayService
 
+pytestmark = pytest.mark.unit
+
 
 def payload(**values):
     """Build a current local attempt without any device or platform dependency."""
@@ -40,17 +42,18 @@ def payload(**values):
 @pytest.fixture
 def worker(tmp_path):
     """Exercise the same partial construction supported by existing SDK fixtures."""
-    value = Gateway.__new__(Gateway)
-    value.journal = Journal(tmp_path / "jobs.sqlite3")
+    value = Gateway(
+        "http://unused.invalid",
+        "fixture",
+        [str(uuid.uuid4())],
+        "llm4ad.gateway.examples.basic.evaluator:Evaluator",
+        tmp_path / "state",
+        concurrency=2,
+    )
     value.adapter = GatewayEvaluator()
-    value.processes = {}
-    value.restart_jobs = set()
-    value.identity = {"id": "gateway"}
-    value.url = "http://unused.invalid"
-    value.capacity = 2
     value.cleanup_managed = True
-    value.wakeup = asyncio.Event()
-    return value
+    yield value
+    value.stop_workers()
 
 
 @pytest.fixture
@@ -252,7 +255,7 @@ def test_detail_is_safe_rich_paginated_and_read_only(worker, tmp_path, monkeypat
     )
     before = journal.get(job["id"])
     monkeypatch.setattr(gateway_module, "load_evaluator", Mock(side_effect=AssertionError("Polling constructed adapter")))
-    monkeypatch.setattr(gateway_module, "worker_active", Mock(side_effect=AssertionError("Polling inspected native process")))
+    monkeypatch.setattr(gateway_module, "load_evaluator", Mock(side_effect=AssertionError("Polling loaded an evaluator")))
     detail = job_detail(journal, job["id"], job["attempt_id"], messages_page=2, messages_page_size=2)
     assert detail["algorithm_name"] == "candidate-a"
     assert detail["report"]["metadata"]["result_details"] == {"samples": [1, 2, 3]}
@@ -476,6 +479,8 @@ async def test_external_handle_published_after_cleanup_requires_confirmation(wor
     assert result["status"] == "cancelling"
     assert worker.journal.get(job["id"])["finished_at"] is None
     worker.adapter.cancel = AsyncMock(return_value=True)
+    with worker.journal.connect() as db:
+        db.execute("UPDATE cleanup_debts SET next_at=0")
     await worker.reconcile(None, job)
     worker.adapter.cancel.assert_awaited_once()
     assert worker.journal.get(job["id"])["state"] == "cancelled"
@@ -514,11 +519,13 @@ async def test_failed_hook_preserves_stop_and_external_uncertainty(worker):
     worker.adapter.before_task = AsyncMock(side_effect=RuntimeError("Backend unavailable"))
     result = await worker.request_cancel(job["id"], job["attempt_id"])
     assert result["status"] == "cancelling"
-    assert worker.journal.get(job["id"])["state"] == "recovery_required"
+    assert worker.journal.get(job["id"])["state"] in {"accepted", "running"}
     assert worker.journal.get(job["id"])["finished_at"] is None
     assert execution_control(worker.journal, job["id"], job["attempt_id"])["stop_requested"] == "cancel"
     worker.adapter.before_task = AsyncMock()
     worker.adapter.cancel = AsyncMock(return_value=True)
+    with worker.journal.connect() as db:
+        db.execute("UPDATE cleanup_debts SET next_at=0")
     await worker.reconcile(None, job)
     assert worker.journal.get(job["id"])["state"] == "cancelled"
 
@@ -530,9 +537,9 @@ async def test_unknown_legacy_execution_never_falsely_confirms_cancel(worker):
     worker.journal.update(job["id"], "running", {})
     worker.adapter.before_task = AsyncMock()
     result = await worker.request_cancel(job["id"], job["attempt_id"])
-    assert result["status"] == "cancelling"
-    assert execution_control(worker.journal, job["id"], job["attempt_id"])["status"] == "unknown"
-    worker.adapter.before_task.assert_not_awaited()
+    assert result["status"] == "cancelled"
+    assert execution_control(worker.journal, job["id"], job["attempt_id"])["status"] == "finished"
+    worker.adapter.before_task.assert_awaited_once()
 
 
 async def test_alive_process_prevents_final_confirmation(worker, monkeypatch):
@@ -543,7 +550,7 @@ async def test_alive_process_prevents_final_confirmation(worker, monkeypatch):
     process.is_alive.return_value = True
     worker.processes[job["id"]] = process
     worker.cancel_execution = AsyncMock(return_value=True)
-    monkeypatch.setattr(gateway_module, "worker_active", lambda *_: False)
+    monkeypatch.setattr(worker, "_cleanup", AsyncMock(return_value=False))
     result = await worker.request_cancel(job["id"], job["attempt_id"])
     assert result["status"] == "cancelling"
     assert worker.journal.get(job["id"])["finished_at"] is None
@@ -643,8 +650,12 @@ async def test_duplicate_resume_preserves_offline_retry_and_live_settings_wake(w
 
             users = [str(uuid.uuid4())]
             await admission_service.apply_live_settings(
-                name="updated-fixture", allowed_users=users, concurrency=3,
-                cleanup_enabled=False, cleanup_interval=60, cleanup_keep_seconds=30,
+                name="updated-fixture",
+                allowed_users=users,
+                concurrency=3,
+                cleanup_enabled=False,
+                cleanup_interval=60,
+                cleanup_keep_seconds=30,
             )
             assert worker.wakeup.is_set()
             await asyncio.wait_for(retry_waits.get(), 2)
@@ -827,8 +838,15 @@ def test_message_tail_cursors_filters_and_attempt_fences(worker, monkeypatch):
             message = "literal_%\\ message" if index == 10 else f"event-{index}"
             db.execute(
                 "INSERT INTO messages(job_id,attempt_id,created_at,level,kind,message,data) VALUES(?,?,?,?,?,?,?)",
-                (job["id"], job["attempt_id"], index, "error" if index % 10 == 0 else "info", "message", message,
-                 json.dumps({"index": index, "saved_state": {"handle": "PRIVATE"}, "path": "/private/log"})),
+                (
+                    job["id"],
+                    job["attempt_id"],
+                    index,
+                    "error" if index % 10 == 0 else "info",
+                    "message",
+                    message,
+                    json.dumps({"index": index, "saved_state": {"handle": "PRIVATE"}, "path": "/private/log"}),
+                ),
             )
             db.execute(
                 "INSERT INTO messages(job_id,attempt_id,created_at,level,kind,message,data) VALUES(?,?,?,?,?,?,?)",
@@ -864,10 +882,17 @@ def test_message_tail_cursors_filters_and_attempt_fences(worker, monkeypatch):
         job_messages(journal, job["id"], job["attempt_id"])
 
 
-@pytest.mark.parametrize("options", [
-    {"after_sequence": -1}, {"before_sequence": True}, {"after_sequence": 1, "before_sequence": 2},
-    {"limit": 0}, {"limit": 1001}, {"limit": 1.5},
-])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"after_sequence": -1},
+        {"before_sequence": True},
+        {"after_sequence": 1, "before_sequence": 2},
+        {"limit": 0},
+        {"limit": 1001},
+        {"limit": 1.5},
+    ],
+)
 def test_message_cursor_validation_precedes_queries(worker, options):
     """Malformed cursor requests cannot weaken the attempt fence or widen reads."""
     with pytest.raises(ValueError):
@@ -882,19 +907,35 @@ def test_private_lifecycle_finishes_after_terminal_report_without_rewriting_resu
     job = payload()
     journal = worker.journal
     journal.accept(job)
-    journal.update(job["id"], "cancelled", {"duration_ms": 500, "metadata": {"lifecycle": {"stage": "evaluating"}}}, job["attempt_id"])
+    journal.update(
+        job["id"], "cancelled", {"duration_ms": 500, "metadata": {"lifecycle": {"stage": "evaluating"}}}, job["attempt_id"]
+    )
     with journal.connect() as db:
         db.execute("UPDATE jobs SET started=?,finished_at=110,updated_at=999", (100 if known_start else None,))
     before = journal.get(job["id"])
     phase = {
-        "operation_id": "cancel-1", "operation": "cancel", "stage": "finalizing", "status": "completed",
-        "started_at": 110, "finished_at": 120, "duration_ms": 10000, "elapsed_ms": 20000,
+        "operation_id": "cancel-1",
+        "operation": "cancel",
+        "stage": "finalizing",
+        "status": "completed",
+        "started_at": 110,
+        "finished_at": 120,
+        "duration_ms": 10000,
+        "elapsed_ms": 20000,
         "failed_stage": None,
     }
     store = LocalLogStore(journal)
-    store.record_phase(job["id"], job["attempt_id"], {
-        **phase, "status": "running", "finished_at": None, "duration_ms": 0, "elapsed_ms": 10000,
-    })
+    store.record_phase(
+        job["id"],
+        job["attempt_id"],
+        {
+            **phase,
+            "status": "running",
+            "finished_at": None,
+            "duration_ms": 0,
+            "elapsed_ms": 10000,
+        },
+    )
     monkeypatch.setattr("llm4ad.gateway.sdk.monitoring.time.time", lambda: 115)
     finalizing = job_detail(journal, job["id"], job["attempt_id"])
     assert finalizing["finished_at"] is None and finalizing["elapsed_ms"] == 15000

@@ -210,6 +210,133 @@ test("score labels use the active locale and render zero only for successful rec
   assert.doesNotMatch(missing, /This evaluation/)
 })
 
+test("game score labels describe the weighted score in English and Chinese", async () => {
+  const record: EvaluationRecord = {
+    ...base,
+    result: { score: 1.5, success: true, metrics: { game_score: 1.5 } },
+  }
+  for (const [locale, label] of [
+    ["en", "Game weighted score"],
+    ["zh", "游戏加权分"],
+  ]) {
+    const html = await renderRecord(record, locale)
+    assert.ok(html.includes(label))
+    assert.match(html, /data-node-metric="game_score"/)
+  }
+})
+
+test("automatic quality penalties remain scored results with localized badges", async () => {
+  for (const [status, en, zh] of [
+    [
+      "beyond_reference",
+      "Image quality gap; automatically scored low",
+      "画质差距，已自动记低分",
+    ],
+    [
+      "unverified",
+      "Image quality unverified; automatically scored low",
+      "画质未确认，已自动记低分",
+    ],
+    [
+      "not_scored",
+      "Image quality unverified; automatically scored low",
+      "画质未确认，已自动记低分",
+    ],
+  ]) {
+    for (const [locale, label] of [
+      ["en", en],
+      ["zh", zh],
+    ]) {
+      const html = await renderRecord(
+        {
+          ...base,
+          result: {
+            score: -100,
+            success: true,
+            metrics: { game_score: -100 },
+            metadata: {
+              quality_assessment: {
+                status,
+                penalized: true,
+                penalty_score: -100,
+                reasons: ["Automatic quality penalty"],
+              },
+            },
+          },
+        },
+        locale,
+      )
+      assert.ok(html.includes(label))
+      assert.match(html, /data-node-metric="score"/)
+      assert.match(html, /-100/)
+      assert.match(html, /Automatic quality penalty/)
+      assert.match(html, /<details[^>]*data-node-quality-reasons/)
+      assert.doesNotMatch(
+        html,
+        /role="alert"|manual review|waiting for user|人工核对|等待用户/i,
+      )
+    }
+  }
+})
+
+test("malformed metadata and non-boolean penalties cannot create a quality badge", async () => {
+  for (const metadata of [
+    undefined,
+    null,
+    "invalid",
+    [],
+    { quality_assessment: null },
+    { quality_assessment: [] },
+    { quality_assessment: "invalid" },
+    { quality_assessment: {} },
+    { quality_assessment: { status: "within_reference", penalized: false } },
+    { quality_assessment: { status: "beyond_reference", penalized: false } },
+    { quality_assessment: { status: "unverified", penalized: "true" } },
+    { quality_assessment: { penalized: 1 } },
+  ]) {
+    const html = await renderRecord({
+      ...base,
+      result: { score: 1.5, success: true, metadata },
+    })
+    assert.doesNotMatch(
+      html,
+      /automatically scored low|data-node-quality-reasons/,
+    )
+    assert.match(html, /data-node-metric="score"/)
+  }
+})
+
+test("malformed quality reasons are ignored and valid reasons are escaped", async () => {
+  for (const reasons of [
+    null,
+    "invalid",
+    {},
+    [null, false, 3, {}, "", "  "],
+    [null, "<script>unsafe</script>"],
+  ]) {
+    const html = await renderRecord({
+      ...base,
+      result: {
+        score: -100,
+        success: true,
+        metadata: {
+          quality_assessment: { status: {}, penalized: true, reasons },
+        },
+      },
+    })
+    assert.match(html, /Image quality unverified; automatically scored low/)
+    assert.doesNotMatch(html, /\[object Object\]|<script>unsafe<\/script>/)
+    if (
+      Array.isArray(reasons) &&
+      reasons.some((reason) => typeof reason === "string" && reason.trim())
+    ) {
+      assert.match(html, /&lt;script&gt;unsafe&lt;\/script&gt;/)
+    } else {
+      assert.doesNotMatch(html, /data-node-quality-reasons/)
+    }
+  }
+})
+
 test("storage diagnostics preserve unavailable state and escape untrusted filenames", async () => {
   const html = await renderRecord({
     ...base,

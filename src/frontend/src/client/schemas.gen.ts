@@ -3870,6 +3870,16 @@ export const GatewayViewSchema = {
         queued: {
             type: 'integer',
             title: 'Queued'
+        },
+        protocol_version: {
+            type: 'integer',
+            title: 'Protocol Version',
+            default: 1
+        },
+        ready: {
+            type: 'boolean',
+            title: 'Ready',
+            default: true
         }
     },
     type: 'object',
@@ -3939,6 +3949,35 @@ export const JobViewSchema = {
             type: 'string',
             format: 'date-time',
             title: 'Updated At'
+        },
+        attempt_count: {
+            type: 'integer',
+            title: 'Attempt Count',
+            default: 0
+        },
+        max_attempts: {
+            type: 'integer',
+            title: 'Max Attempts',
+            default: 1
+        },
+        failure_category: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Failure Category'
+        },
+        attempt_history: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Attempt History'
         }
     },
     type: 'object',

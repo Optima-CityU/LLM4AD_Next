@@ -1,250 +1,358 @@
-"""Persistent serialized execution, idempotency and restart reconciliation."""
+"""Private executor compatibility facade over SDK durable resource executors."""
 
-import copy
+from __future__ import annotations
+
 import fcntl
-import hashlib
-import json
-import queue
+import logging
 import threading
 import time
-import uuid
-from collections import deque
-from pathlib import Path
 
 from .backend import run_backend
-from .contracts import FEATURES, IDEMPOTENCY_KEY, JOB_ID, BackendNotStartedError, SubmissionConflictError
-from .device import cleanup_completed
-from .devices import load_devices, prepare_submission
-from .storage import freeze_shader_inputs, read_json, sync_directory, write_json
+from .contracts import FEATURES, SubmissionConflictError
+from .jobs import JobStore
+from .storage import write_json
+
+logger = logging.getLogger(__name__)
+NATIVE_TARGET = "llm4ad.gateway.examples.hgamey.execution.jobs:"
 
 
 class Engine:
-    """Serialize device jobs with durable idempotency and recovery records."""
-    def __init__(self, data, config, runner=run_backend):
-        """Recover queued jobs and hold the exclusive executor directory lock."""
-        self.data, self.config, self.runner = Path(data), Path(config), runner
-        self.jobs = self.data / "jobs"
-        self.jobs.mkdir(parents=True, exist_ok=True)
+    """Expose native receipts while the SDK owns every standalone worker.
+
+    Args:
+        data: Shared native receipt directory.
+        config: Operator-owned physical device configuration.
+        runner: Importable synchronous backend for standalone execution.
+        executor_factory: Optional SDK executor factory for deterministic tests.
+    """
+
+    def __init__(self, data, config, runner=run_backend, *, executor_factory=None, defer_dispatch=False):
+        """Open durable SDK slots without starting a custom queue or thread."""
+        from .devices import load_devices
+
+        if executor_factory is None:
+            from llm4ad.gateway.sdk.scheduling import DurableExecutor
+
+            executor_factory = DurableExecutor
+        self.store = JobStore(data, config)
+        self.data, self.config, self.jobs = self.store.data, self.store.config, self.store.jobs
+        self.devices = {d["id"]: d for d in load_devices(self.config) if d["enabled"]}
+        if not self.devices:
+            raise ValueError("executor requires at least one enabled device")
         self.guard = (self.data / "service.lock").open("a+")
         try:
             fcntl.flock(self.guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self.guard.close()
             raise RuntimeError("another executor already owns this data directory") from None
+        self.mutex, self.stopping = threading.RLock(), threading.Event()
+        self.closed, self.runner = False, runner
+        self._dispatch_ready = not defer_dispatch
+        self.executors = {}
+        self._observed = set()
+        self._pump_lock = threading.Lock()
+        self._known, self.errors = {}, {}
+        self._cancelling = set()
+        self._cancel_locks = {key: threading.Lock() for key in self.devices}
         try:
-            load_devices(self.config)
-            self.pending, self.mutex, self.stopping = deque(), threading.Lock(), threading.Event()
-            self.ready = threading.Condition(self.mutex)
-            self.active, self.by_key, self.blocked_jobs = None, {}, set()
-            recovered = []
-            for folder in self.jobs.iterdir():
-                if not JOB_ID.fullmatch(folder.name) or not (folder / "job.json").is_file():
+            self.executors = {key: executor_factory(self.data / "scheduling" / key, concurrency=1) for key in self.devices}
+            for executor in self.executors.values():
+                # Only the SDK controller may release recovered foreign packets.
+                if defer_dispatch or any(
+                    not packet.get("target", "").startswith(NATIVE_TARGET)
+                    for packet in executor.entries().values()
+                ):
+                    executor.hold("sdk-restoration")
+                if any(packet.get("target") == "llm4ad.gateway.examples.hgamey.runtime:run_startup_operation"
+                       for packet in executor.entries().values()):
+                    executor.hold("hgamey-startup-restoration")
+            for job in sorted(self.store.records(), key=lambda j: j["created_at"]):
+                self._known[job["id"]] = job
+                if job.get("dispatch") == "direct":
                     continue
-                job = read_json(folder / "job.json")
-                token = job.get("idempotency_key")
-                if token is not None:
-                    if not isinstance(token, str) or not IDEMPOTENCY_KEY.fullmatch(token) or token in self.by_key:
-                        raise ValueError("invalid or duplicate persisted idempotency key")
-                    if not isinstance(job.get("submission_hash"), str) or not IDEMPOTENCY_KEY.fullmatch(job["submission_hash"]):
-                        raise ValueError("invalid persisted submission hash")
-                    self.by_key[token] = folder.name
-                if job["state"] in ("running", "cancel_requested"):
-                    job.update(
-                        state="interrupted",
-                        cleanup_status="uncertain",
-                        error="executor restarted; cleanup unknown, original evidence retained, task not replayed",
-                        finished_at=time.time(),
-                    )
-                    write_json(folder / "job.json", job)
-                if job["state"] in ("uncertain", "interrupted") or job.get("cleanup_status") == "uncertain":
-                    self.blocked_jobs.add(folder.name)
-                elif job["state"] == "queued":
-                    recovered.append(job)
-            for job in sorted(recovered, key=lambda j: j["created_at"]):
-                self.pending.append(job["id"])
-            self.thread = threading.Thread(target=self._work, name="single-phone-worker")
-            self.thread.start()
+                if job["state"] == "queued":
+                    self._submit(job)
+                elif job["state"] in {"running", "cancel_requested", "uncertain", "interrupted"}:
+                    self._recover(job)
+            for executor in self.executors.values():
+                for key, packet in executor.entries().items():
+                    if packet.get("target", "").startswith(NATIVE_TARGET):
+                        self._observe(executor, key)
+                self._poll_executor(executor)
         except BaseException:
-            self.guard.close()
+            self.close()
             raise
 
-    def submit(self, body):
-        """Persist a validated immutable submission before making it runnable."""
-        if not isinstance(body, dict):
-            raise ValueError("submission must be an object")
-        body = copy.deepcopy(body)
-        has_token = "idempotency_key" in body
-        token = body.pop("idempotency_key", None)
-        if has_token and (not isinstance(token, str) or not IDEMPOTENCY_KEY.fullmatch(token)):
-            raise ValueError("idempotency_key must be 64 lowercase hexadecimal characters")
-        digest = hashlib.sha256(
-            json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
-        ).hexdigest()
+    @property
+    def active_jobs(self):
+        """Derive active resource observations from durable receipts."""
+        return {job["device_id"]: job["id"] for job in self.store.records() if job["state"] in {"running", "cancel_requested"}}
+
+    @property
+    def active(self):
+        """Retain the legacy oldest-active observation."""
+        return next(iter(self.active_jobs.values()), None)
+
+    @property
+    def blocked_jobs(self):
+        """Expose outstanding restoration receipts for evidence retention."""
+        return {job["id"] for job in self.store.records() if job.get("cleanup_status") == "uncertain"}
+
+    def activate(self):
+        """Open integrated dispatch after every SDK binding has been restored.
+
+        This does not clear a resource pause or its persisted cleanup debts.
+        """
+        self._dispatch_ready = True
+        self.poll()
+
+    def _poll_executor(self, executor):
+        """Keep health/API polling behind the integrated startup fence."""
+        if self._dispatch_ready:
+            executor.poll()
+
+    def _submit(self, job):
+        """Delegate runnable work to its SDK resource slot."""
+        from .jobs import execute_job
+
+        executor = self.executors[job["device_id"]]
+        executor.submit(
+            job["id"], execute_job,
+            args=(str(self.jobs / job["id"]),), kwargs={"runner": self._runner_spec()},
+        )
+        self._observe(executor, job["id"])
+
+    def _runner_spec(self):
+        """Persist only an importable backend reference in SDK task arguments."""
+        if isinstance(self.runner, str):
+            return self.runner
+        if self.runner is run_backend:
+            return None
+        name = getattr(self.runner, "__qualname__", "")
+        if not name or "<locals>" in name:
+            raise ValueError("standalone backend must be an importable callable")
+        return self.runner.__module__ + ":" + name
+
+    def _recover(self, job):
+        """Schedule automatic restoration through the same SDK slot."""
+        from .jobs import restore_job
+
+        count = job.get("cleanup_attempts", 0)
+        if count >= 3 and job.get("next_probe_at", 0) > time.time():
+            return
+        if count >= 3:
+            job["cleanup_probes"] = job.get("cleanup_probes", 0) + 1
+        else:
+            job["cleanup_attempts"] = count + 1
+        job["next_probe_at"] = time.time() + 5
+        write_json(self.jobs / job["id"] / "job.json", job)
+        executor = self.executors[job["device_id"]]
+        executor.submit(
+            "restore-" + job["id"], restore_job,
+            args=(str(self.jobs / job["id"]),),
+        )
+        self._observe(executor, "restore-" + job["id"])
+
+    def _observe(self, executor, key):
+        """Attach durable receipt reconciliation to an SDK completion."""
+        identity = (id(executor), key)
+        if identity in self._observed:
+            return
+        self._observed.add(identity)
+        future = executor.future(key)
+        if future is not None:
+            future.add_done_callback(lambda done: self._complete(executor, key, done))
+
+    def _complete(self, executor, key, future):
+        """Notify a guarded pump; poll revisits any unfinished receipt commit."""
+        try:
+            self._drain(executor, key, future)
+        except Exception as error:
+            self.errors[key] = {"error_type": type(error).__name__, "message": str(error)}
+            logger.exception("Native completion receipt retained for retry: %s", key)
+
+    def _drain(self, executor, key, future):
+        """Commit native outcomes without owning another scheduling lifecycle."""
+        from llm4ad.gateway.sdk.retries import retry_read
+
+        if not self._pump_lock.acquire(blocking=False):
+            return
+        try:
+            self._drain_owned(executor, key, future, retry_read)
+        finally:
+            self._pump_lock.release()
+
+    def _drain_owned(self, executor, key, future, retry_read):
+        """Reconcile exactly the Future generation still retained by the SDK."""
+        if self.closed:
+            return
+        if executor.future(key) is not future:
+            return
+        restoring = key.startswith("restore-")
+        native_id = key[8:] if restoring else key
+        if native_id in self._cancelling:
+            return
+        try:
+            job = retry_read(self.store.get, native_id)
+        except Exception as error:
+            job = dict(self._known.get(native_id, {}))
+            if not job:
+                raise
+            job.update(state="failed", cleanup_status="uncertain", error_type="NativeReceiptFailure",
+                       error=str(error), started_at=job.get("started_at") or time.time(), finished_at=time.time())
+            write_json(self.jobs / native_id / "job.json", job)
+        if not restoring and job["state"] == "cancel_requested":
+            return
+        try:
+            future.result()
+        except BaseException as error:
+            job.update(state="interrupted", cleanup_status="uncertain", error=str(error), finished_at=time.time())
+            write_json(self.jobs / native_id / "job.json", job)
+        if job.get("cleanup_status") != "completed" and job.get("cleanup_attempts", 0) >= 3:
+            job.update(state="failed", error_type="NativeCleanupExhausted",
+                       error=job.get("cleanup_error") or job.get("error") or "Native cleanup attempts exhausted",
+                       finished_at=time.time(), next_probe_at=time.time() + 5)
+            write_json(self.jobs / native_id / "job.json", job)
+        self._known[native_id] = job
+        executor.ack(key)
+        self._observed.discard((id(executor), key))
+        if job.get("cleanup_status") != "completed":
+            self._recover(job)
+        self.errors.pop(key, None)
+        self._poll_executor(executor)
+
+    def poll(self):
+        """Acknowledge SDK completions only after native receipts are durable."""
         with self.mutex:
-            if token in self.by_key:
-                job = self.get(self.by_key[token])
-                if job["submission_hash"] != digest:
-                    raise SubmissionConflictError("idempotency_key already used with a different submitted body")
-                return job
+            if self.closed:
+                return
+            for executor in self.executors.values():
+                for key, packet in list(executor.entries().items()):
+                    if not packet.get("target", "").startswith(NATIVE_TARGET):
+                        continue
+                    self._observe(executor, key)
+                    future = executor.future(key)
+                    if future is not None and future.done():
+                        self._complete(executor, key, future)
+                self._poll_executor(executor)
+            for job in self.store.records():
+                if (job["id"] in self._cancelling or job.get("dispatch") == "direct"
+                    or job.get("cleanup_status") != "uncertain"):
+                    continue
+                executor = self.executors[job["device_id"]]
+                if ("restore-" + job["id"] not in executor.entries()
+                    and job.get("next_probe_at", 0) <= time.time()):
+                    self._recover(job)
+                    self._poll_executor(executor)
+
+    def submit(self, body):
+        """Preserve idempotent private submissions without a second scheduler."""
+        with self.mutex:
             if self.stopping.is_set():
                 raise RuntimeError("executor is stopping")
-            if len(self.pending) >= 64:
-                raise queue.Full("executor queue is full")
-            frozen = prepare_submission(body, load_devices(self.config))
-            frozen.update(submitted_body=body, submission_hash=digest, idempotency_key=token)
-            key = uuid.uuid4().hex
-            folder = self.jobs / key
-            folder.mkdir()
-            sync_directory(self.jobs)
-            freeze_shader_inputs(folder, frozen)
-            if frozen["submission"]["operation"] == "game-ab":
-                from llm4ad.gateway.examples.hgamey.protocol import game_ab
-
-                game_ab.freeze_inputs(folder, frozen)
-            write_json(folder / "input.json", frozen)
-            job = {
-                "id": key,
-                "state": "queued",
-                "device_id": frozen["device"]["id"],
-                "endpoint": frozen["device"]["endpoint"],
-                "operation": frozen["submission"]["operation"],
-                "created_at": time.time(),
-                "evidence_directory": str(folder),
-                "submission_hash": digest,
-                "idempotency_key": token,
-                "cleanup_status": "pending",
-            }
-            try:
-                write_json(folder / "job.json", job)
-            finally:
-                # A directory fsync failure can follow a successful atomic rename.
-                if (folder / "job.json").is_file():
-                    if token is not None:
-                        self.by_key[token] = key
-                    self.pending.append(key)
-                    self.ready.notify()
+            self.poll()
+            job = self.store.prepare(body)
+            self._known[job["id"]] = job
+            if job["state"] == "queued" and job.get("dispatch") != "direct":
+                self._submit(job)
+                self._poll_executor(self.executors[job["device_id"]])
             return job
 
     def get(self, key):
-        """Read an existing job by its validated identifier."""
-        if not JOB_ID.fullmatch(key):
-            raise KeyError("invalid job id")
-        path = self.jobs / key / "job.json"
-        if not path.is_file():
-            raise KeyError("unknown job")
-        return read_json(path)
+        """Read current committed state after observing SDK completions."""
+        self.poll()
+        return self.store.get(key)
 
     def get_by_key(self, token):
-        """Find the original job accepted for an idempotent submission."""
-        if not isinstance(token, str) or not IDEMPOTENCY_KEY.fullmatch(token):
-            raise KeyError("invalid idempotency key")
-        with self.mutex:
-            if token not in self.by_key:
-                raise KeyError("unknown idempotency key")
-            return self.get(self.by_key[token])
+        """Preserve lookup after a lost private API submit response."""
+        self.poll()
+        return self.store.get_by_key(token)
 
     def cancel(self, key):
-        """Cancel pending work or record cancellation of an active device job."""
+        """Restore one fenced device without blocking independent device queues.
+
+        Args:
+            key: Original native operation identity to cancel.
+
+        Returns:
+            Its durable cancellation or pending-restoration receipt. The device
+            slot remains reserved until its original worker is stopped and the
+            restoration receipt has been committed.
+        """
+        from .jobs import restore_job
+
         with self.mutex:
-            job = self.get(key)
-            if job["state"] == "queued":
-                job.update(
-                    state="cancelled", cancel_requested_at=time.time(), finished_at=time.time(), cleanup_status="completed"
-                )
-            elif job["state"] == "running":
-                job.update(state="cancel_requested", cancel_requested_at=time.time())
-            else:
-                if job["state"] == "cancelled" and key in self.pending:
-                    self.pending.remove(key)
-                return job
+            device_id = self.store.get(key)["device_id"]
+        with self._cancel_locks[device_id]:
+            with self.mutex:
+                job = self.store.get(key)
+                if job["state"] in {"completed", "failed", "cancelled"} and job.get("cleanup_status") == "completed":
+                    return job
+                if job.get("dispatch") == "direct" and job["state"] == "running":
+                    job.update(state="cancel_requested", cancel_requested_at=time.time())
+                    write_json(self.jobs / key / "job.json", job)
+                    return job
+                executor = self.executors[device_id]
+                hold = "native-cancellation:" + key
+                executor.hold(hold)
+                self._cancelling.add(key)
+                job.update(state="cancel_requested", cancel_requested_at=time.time(), cleanup_status="uncertain")
+                write_json(self.jobs / key / "job.json", job)
+            try:
+                executor.cancel(key)
+                restore_job(self.jobs / key)
+                with self.mutex:
+                    job = self.store.get(key)
+                    executor.ack(key)
+                    self._observed.discard((id(executor), key))
+                    self._known[key] = job
+                    if job.get("cleanup_status") != "completed":
+                        self._recover(job)
+            finally:
+                with self.mutex:
+                    self._cancelling.discard(key)
+                    executor.release(hold)
+            with self.mutex:
+                self._poll_executor(executor)
+                return self.store.get(key)
+
+    def resolve(self, key, confirmation):
+        """Retain explicit operator acknowledgement for legacy private clients."""
+        if (confirmation != {"confirmed_stopped": True, "confirmed_restored": True}
+            or any(type(v) is not bool for v in confirmation.values())):
+            raise ValueError("confirm both stopped execution and restored device state")
+        with self.mutex:
+            job = self.store.get(key)
+            if key in self._cancelling or job["state"] not in {"uncertain", "interrupted"}:
+                raise SubmissionConflictError("only inactive uncertain/interrupted jobs can be resolved")
+            job.update(state="cancelled", cleanup_status="completed", finished_at=time.time(),
+                       cleanup_confirmation={"source": "operator", "confirmed_at": time.time(), **confirmation})
             write_json(self.jobs / key / "job.json", job)
-            if job["state"] == "cancelled":
-                self.pending.remove(key)
             return job
 
     def health(self):
-        """Report queue activity and jobs requiring device restoration."""
-        with self.mutex:
-            return {
-                "status": "blocked" if self.blocked_jobs else "ok",
-                "max_active_jobs": 1,
-                "active_job": self.active,
-                "queued": len(self.pending),
-                "transport": "wireless_adb",
-                "features": FEATURES,
-                "blocked_jobs": sorted(self.blocked_jobs),
-            }
-
-    def resolve(self, key, confirmation):
-        """Release quarantined work after an explicit local operator confirmation.
-
-        Args:
-            key: Interrupted or uncertain executor job ID.
-            confirmation: Boolean assertions that old work stopped and was restored.
-
-        Returns:
-            Terminal metadata retaining operator attribution and original evidence.
-        """
-        if not isinstance(confirmation, dict) or confirmation != {"confirmed_stopped": True, "confirmed_restored": True}:
-            raise ValueError("confirm both stopped execution and restored device state")
-        if any(type(value) is not bool for value in confirmation.values()):
-            raise ValueError("operator confirmation values must be boolean true")
-        with self.ready:
-            job = self.get(key)
-            if self.active == key or job["state"] not in {"uncertain", "interrupted"}:
-                raise SubmissionConflictError("only inactive uncertain/interrupted jobs can be operator-resolved")
-            job.update(
-                state="cancelled",
-                cleanup_status="completed",
-                finished_at=time.time(),
-                cleanup_confirmation={"source": "operator", "confirmed_at": time.time(), **confirmation},
-            )
-            write_json(self.jobs / key / "job.json", job)
-            self.blocked_jobs.discard(key)
-            self.ready.notify_all()
-            return job
-
-    def _work(self):
-        while True:
-            with self.ready:
-                while (not self.pending or self.blocked_jobs) and not self.stopping.is_set():
-                    self.ready.wait(timeout=0.2)
-                if self.stopping.is_set():
-                    return
-                key = self.pending.popleft()
-                folder = self.jobs / key
-                job = self.get(key)
-                if job["state"] != "queued":
-                    continue
-                job.update(state="running", started_at=time.time())
-                write_json(folder / "job.json", job)
-                self.active = key
-            try:
-                code = self.runner(folder)
-                completed = cleanup_completed(folder, job["operation"])
-                outcome = {"state": "completed" if code in (0, 1) else "failed", "backend_exit_code": code}
-            except BackendNotStartedError as error:
-                completed = True
-                outcome = {"state": "failed", "error": str(error)}
-            except Exception as error:
-                completed = False
-                outcome = {"state": "failed", "error": str(error)}
-            with self.mutex:
-                job = self.get(key)
-                cancelled = job["state"] == "cancel_requested"
-                job.update(outcome, finished_at=time.time(), cleanup_status="completed" if completed else "uncertain")
-                if not completed:
-                    job["state"] = "uncertain"
-                    self.blocked_jobs.add(key)
-                elif cancelled:
-                    job["state"] = "cancelled"
-                write_json(folder / "job.json", job)
-                self.active = None
+        """Report SDK slot liveness and automatic restoration progress."""
+        self.poll()
+        jobs = self.store.records()
+        active = self.active_jobs
+        blocked = {job["device_id"] for job in jobs if job.get("cleanup_status") == "uncertain"}
+        return {
+            "status": "degraded" if blocked else "ok", "max_active_jobs": len(self.devices),
+            "active_job": self.active, "active_jobs": active,
+            "queued": sum(job["state"] == "queued" for job in jobs),
+            "transport": "wireless_adb", "features": FEATURES, "blocked_jobs": sorted(self.blocked_jobs),
+            "errors": dict(self.errors),
+            "devices": {key: {"status": "recovering" if key in blocked else "ok", "active_job": active.get(key),
+                              "queued": sum(j["state"] == "queued" and j["device_id"] == key for j in jobs),
+                              "worker_alive": not self.closed} for key in self.devices},
+        }
 
     def close(self):
-        """Stop accepting work and join the worker before releasing its lock."""
-        with self.ready:
-            self.stopping.set()
-            self.ready.notify_all()
-        self.thread.join()
+        """Leave unacknowledged SDK work durable while closing resource pools."""
+        if self.closed:
+            return
+        self.stopping.set()
+        self.closed = True
+        for executor in self.executors.values():
+            executor.close()
         self.guard.close()

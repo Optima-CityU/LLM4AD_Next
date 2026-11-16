@@ -11,20 +11,32 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from .api import http_call, make_handler
-from .device import execute_on_device
+from .device import execute_on_device, preparation_not_started
 from .queue import Engine
 from .storage import read_json, write_json
 
 
 def main():
     """Run the executor CLI or execute one inherited device lease."""
+    if len(sys.argv) == 3 and sys.argv[1] == "_restore":
+        from .recovery import restore_on_device
+
+        try:
+            proof = restore_on_device(Path(sys.argv[2]))
+        except Exception as error:
+            proof = {"job_id": Path(sys.argv[2]).name, "restored": False, "error": str(error)}
+        print(json.dumps(proof), flush=True)
+        return 0 if proof["restored"] else 2
     if len(sys.argv) == 3 and sys.argv[1] == "_device":
         try:
             return execute_on_device(Path(sys.argv[2]))
         except Exception as error:
             folder = Path(sys.argv[2])
             error_file = "worker-error.json" if (folder / "result.json").exists() else "result.json"
-            write_json(folder / error_file, {"status": "ERROR", "error": str(error)})
+            report = {"status": "ERROR", "error": str(error)}
+            if preparation_not_started(folder):
+                report.update(preparation=read_json(folder / "device-preparation.json"), external_cleanup_confirmed=True)
+            write_json(folder / error_file, report)
             print(str(error), file=sys.stderr)
             return 2
     parser = argparse.ArgumentParser(description=__doc__)
@@ -39,9 +51,19 @@ def main():
         commands.add_parser(name).add_argument("id")
     args = parser.parse_args()
     if args.action == "serve":
+        from .backend import start_runtime
+
+        start_runtime(os.environ.get("EXECUTOR_DATA", "/data"), os.environ.get("EXECUTOR_CONFIG", "/config/devices.json"))
         engine = Engine(os.environ.get("EXECUTOR_DATA", "/data"), os.environ.get("EXECUTOR_CONFIG", "/config/devices.json"))
         try:
-            server = ThreadingHTTPServer(
+            class ExecutorHTTPServer(ThreadingHTTPServer):
+                """Use the existing server loop to reconcile durable completions."""
+
+                def service_actions(self):
+                    """Retry receipt commits and resource probes without a worker loop."""
+                    engine.poll()
+
+            server = ExecutorHTTPServer(
                 (os.environ.get("EXECUTOR_BIND", "127.0.0.1"), int(os.environ.get("EXECUTOR_PORT", "8767"))), make_handler(engine)
             )
 

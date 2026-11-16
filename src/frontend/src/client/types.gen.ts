@@ -1325,6 +1325,8 @@ export type GatewayView = {
     last_seen: string;
     running: number;
     queued: number;
+    protocol_version?: number;
+    ready?: boolean;
 };
 
 export type HTTPValidationError = {
@@ -1344,6 +1346,12 @@ export type JobView = {
         [key: string]: unknown;
     };
     updated_at: string;
+    attempt_count?: number;
+    max_attempts?: number;
+    failure_category?: (string | null);
+    attempt_history?: Array<{
+        [key: string]: unknown;
+    }>;
 };
 
 export type knowledge_add_source_files = {

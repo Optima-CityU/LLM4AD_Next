@@ -133,6 +133,11 @@ def container_name(session_id: str, role: ARLRole) -> str:
     return f"{CONTAINER_NAME_PREFIX}{abbrev}-{session_id}"
 
 
+def _paseo_hostnames(session_id: str) -> str:
+    """Build the comma-separated Docker DNS allowlist shared by both daemons."""
+    return ",".join(container_name(session_id, role) for role in ARLRole)
+
+
 def derive_password(session_id: str, role: ARLRole) -> str:
     """派生每会话每角色的 Paseo daemon 密码（HMAC-SHA256，十六进制）。
 
@@ -269,6 +274,8 @@ def _config_fingerprint(daemon_config: ARLDaemonConfig) -> str:
         # 验证服务环境变量（CONTREJOUR_*）同样固化在容器里：早期容器没有它们，
         # 改端口也需重建。v2：宿主机模式下 Validator 额外发布验证服务端口
         f"contrejour-v2:{settings.ARL_VALIDATION_PORT}",
+        # Hash the shared allowlist template so hostname changes refresh existing containers.
+        f"paseo-hostnames-v1:{_paseo_hostnames('{session_id}')}",
     ]
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:16]
 
@@ -620,11 +627,8 @@ def _build_container_env(
         # 验证服务的地址与 token 由 backend 事先约定，Worker 侧写进 CLAUDE.md
         env.update(validator_env(session.session_id))
 
-    # PASEO_HOSTNAMES：让两个容器能互相通信（validator 调 worker 的 script RPC）
-    env["PASEO_HOSTNAMES"] = (
-        f"worker={container_name(session.session_id, ARLRole.WORKER)}:{settings.ARL_PASEO_PORT}\n"
-        f"validator={container_name(session.session_id, ARLRole.VALIDATOR)}:{settings.ARL_PASEO_PORT}"
-    )
+    # Paseo checks HTTP and WebSocket Host headers against comma-separated hostnames.
+    env["PASEO_HOSTNAMES"] = _paseo_hostnames(session.session_id)
     return env
 
 

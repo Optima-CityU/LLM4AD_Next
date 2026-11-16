@@ -23,6 +23,9 @@ EXECUTOR_RECEIPTS = frozenset(
         "input.json",
         "result.json",
         "foreground.json",
+        "device-preparation.json",
+        "connection.json",
+        "sdk-restoration.json",
         "game-original.json",
         "worker-error.json",
         "evidence-cleanup.json",
@@ -348,7 +351,7 @@ def native_jobs(engine, saved: dict) -> list[tuple[Path, dict]]:
         job = engine.get(key)
         expected_device = intent.get("request", {}).get("device_id")
         if (
-            engine.active == key
+            key in getattr(engine, "active_jobs", {"legacy": engine.active}).values()
             or key in engine.blocked_jobs
             or job.get("state") not in {"completed", "failed", "cancelled"}
             or job.get("cleanup_status") != "completed"
@@ -360,7 +363,7 @@ def native_jobs(engine, saved: dict) -> list[tuple[Path, dict]]:
         ):
             raise ValueError("Native job is active, unowned or restoration is unconfirmed")
         plans.append((owned_path(engine.jobs / key, engine.jobs), job))
-    if saved.get("game_required") and "game" not in saved:
+    if saved.get("game_required") and "game" not in saved and saved.get("operation") != "game-ab":
         raise ValueError("Game restoration obligation is missing")
     return plans
 

@@ -9,6 +9,8 @@ import pytest
 from llm4ad.gateway.sdk.check import check_evaluator
 from llm4ad.gateway.sdk.journal import Journal, Reporter
 
+pytestmark = pytest.mark.unit
+
 
 def accepted(tmp_path):
     """Create a real isolated journal and a candidate workspace."""
@@ -96,10 +98,9 @@ def test_initialization_errors_are_reported_with_original_traceback(tmp_path, mo
         raise RuntimeError("fixture initialization failed")
 
     monkeypatch.setattr(gateway, "load_evaluator", broken)
-    gateway.execute(journal.path, "fixture:Evaluator", job)
-    row = journal.get(job["id"])
-    assert row["state"] == "failed"
-    result = json.loads(row["report"])
+    outcome = gateway.execute(journal.path, "fixture:Evaluator", job)
+    result = outcome["report"]
+    assert outcome["retryable"] is False
     assert result["error_type"] == "RuntimeError"
     assert result["success"] is False
     assert result["duration_ms"] >= 0
@@ -111,13 +112,13 @@ def test_initialization_errors_are_reported_with_original_traceback(tmp_path, mo
 def test_offline_check_retains_constructor_failure(tmp_path):
     """The local check must not construct an adapter outside the reporting worker."""
     evaluator = tmp_path / "evaluator.py"
-    evaluator.write_text('''
+    evaluator.write_text("""
 from llm4ad.gateway.sdk import GatewayEvaluator, EvaluationContract, Metric
 class Evaluator(GatewayEvaluator):
     contract = EvaluationContract(evaluator_id="initialization", version="1", data_version="1", metrics=[Metric(name="value")])
     def __init__(self):
         raise RuntimeError("fixture device initialization failed")
-''')
+""")
     candidate = tmp_path / "source"
     candidate.mkdir()
     (candidate / "solution.py").write_text("pass\n")
@@ -158,7 +159,7 @@ class Evaluator(GatewayEvaluator):
 
 @pytest.mark.parametrize("failure", ["unavailable", "subprocess", "timeout", "reporting"])
 def test_generic_errors_preserve_recovery_and_subprocess_diagnostics(tmp_path, monkeypatch, failure):
-    """Unavailable work waits; process errors retain output; reporting errors retain the cause."""
+    """Unavailable outcomes request retry; diagnostics and original causes remain available."""
     import subprocess
     from types import SimpleNamespace
 
@@ -186,10 +187,9 @@ def test_generic_errors_preserve_recovery_and_subprocess_diagnostics(tmp_path, m
             raise OSError("diagnostic disk unavailable")
 
         monkeypatch.setattr(gateway, "exception_report", broken)
-    gateway.execute(journal.path, "fixture:Evaluator", job)
-    row = journal.get(job["id"])
-    data = json.loads(row["report"])
-    assert row["state"] == ("recovery_required" if failure == "unavailable" else "failed")
+    outcome = gateway.execute(journal.path, "fixture:Evaluator", job)
+    data = outcome["report"]
+    assert outcome["retryable"] == (failure == "unavailable")
     if failure == "unavailable":
         assert data["metadata"]["device"] == "fixture"
         assert data["metadata"]["phase"] == "device"
@@ -248,8 +248,10 @@ async def test_outbox_delivers_messages_and_artifact_description(tmp_path, termi
         assert report["completed"] == 1 and report["total"] == 2
 
 
-@pytest.mark.parametrize("rich", [False, True])
-async def test_remote_client_preserves_full_failure_result(tmp_path, monkeypatch, rich):
+@pytest.mark.parametrize(
+    ("rich", "failure_type"), [(False, "CompilerError"), (True, "syntax"), (True, "CandidateQualityRejected")]
+)
+async def test_remote_client_preserves_full_failure_result(tmp_path, monkeypatch, rich, failure_type):
     """A failed remote evaluation keeps all rich fields and still accepts old reports."""
     from aiohttp import web
 
@@ -263,8 +265,21 @@ async def test_remote_client_preserves_full_failure_result(tmp_path, monkeypatch
             monitor_metrics={"samples": 2},
             duration_ms=145,
             evolution_feedback={"hint": "Fix syntax"},
-            metadata={"failure_type": "syntax", "evaluation_messages": [{"message": "Compiling"}]},
+            metadata={"failure_type": failure_type, "evaluation_messages": [{"message": "Compiling"}]},
         )
+    if failure_type == "CandidateQualityRejected":
+        report.pop("error_type")
+        report.update(
+            error_message="HGamey candidate verdict: POOR_QUALITY; candidate PSNR is below the same-run baseline",
+            metrics={"psnr_db": 41.74100112915039},
+            evolution_feedback={
+                "status": "POOR_QUALITY",
+                "candidate_psnr_db": 41.74100112915039,
+                "baseline_psnr_db": 41.7484016418457,
+                "psnr_delta_db": 41.74100112915039 - 41.7484016418457,
+            },
+        )
+        report["metadata"]["candidate_failure"] = True
 
     async def submit(request):
         return web.json_response({"state": "failed", "attempt_id": "attempt-1", "report": report})
@@ -285,13 +300,17 @@ async def test_remote_client_preserves_full_failure_result(tmp_path, monkeypatch
         result = await evaluate_remote(config, EvalContext(project_root=str(tmp_path)))
     finally:
         await runner.cleanup()
-    assert result.success is False and result.error_message == "Candidate failed"
+    assert result.success is False
+    assert result.error_message == report.get("error_message", "Candidate failed")
     assert result.metadata["remote_attempt_id"] == "attempt-1"
     if rich:
         assert result.duration_ms == 145
         assert result.monitor_metrics == {"samples": 2}
-        assert result.evolution_feedback == {"hint": "Fix syntax"}
+        assert result.metrics == report["metrics"]
+        assert result.evolution_feedback == report["evolution_feedback"]
         assert result.metadata["evaluation_messages"] == [{"message": "Compiling"}]
-        assert result.metadata["failure_type"] == "syntax"
+        assert result.metadata["failure_type"] == failure_type
+        if failure_type == "CandidateQualityRejected":
+            assert result.metadata["candidate_failure"] is True
     else:
         assert result.metadata["failure_type"] == "CompilerError"

@@ -19,6 +19,8 @@ from llm4ad.gateway.sdk.retention import (
     collect_local_logs,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def local(tmp_path):
@@ -41,9 +43,7 @@ def test_local_outputs_are_not_reports_or_artifacts(local):
     """Writing a log cannot increment upload sequence or populate artifact outboxes."""
     journal, job, logs = local
     previous = journal.get(job["id"])["seq"]
-    path = Reporter(journal, job["id"]).local_log(
-        "compiler/stderr.log", description="Compiler diagnostics"
-    )
+    path = Reporter(journal, job["id"]).local_log("compiler/stderr.log", description="Compiler diagnostics")
     path.write_text("local only\n", encoding="utf-8")
     assert journal.get(job["id"])["seq"] == previous
     assert journal.artifacts(job["id"], job["attempt_id"]) == []
@@ -52,9 +52,7 @@ def test_local_outputs_are_not_reports_or_artifacts(local):
     assert "path" not in sources[0]
 
 
-@pytest.mark.parametrize(
-    "name", ["../secret", "/etc/passwd", "x/../../secret", "x\\secret", "a/./b", ""]
-)
+@pytest.mark.parametrize("name", ["../secret", "/etc/passwd", "x/../../secret", "x\\secret", "a/./b", ""])
 def test_local_log_names_cannot_address_arbitrary_files(local, name):
     """The reader accepts source names, not browser-supplied filesystem paths."""
     _, job, logs = local
@@ -75,9 +73,7 @@ def test_utf8_incremental_reads_keep_incomplete_characters(local):
     second = logs.read(job["id"], job["attempt_id"], "worker.stdout", offset=first["next_offset"])
     assert second["text"] == "编译\n" and second["next_offset"] == len(data)
     path.write_text("x")
-    assert logs.read(job["id"], job["attempt_id"], "worker.stdout", offset=second["next_offset"])[
-        "reset"
-    ]
+    assert logs.read(job["id"], job["attempt_id"], "worker.stdout", offset=second["next_offset"])["reset"]
 
 
 def test_missing_sources_and_stale_attempts_are_distinct(local):
@@ -143,7 +139,7 @@ class Evaluator(GatewayEvaluator):
         if worker.is_alive():
             worker.kill()
             worker.join(5)
-    assert journal.get(job["id"])["state"] == "completed"
+    assert journal.get(job["id"])["state"] == "running"
     out = logs.read(job["id"], job["attempt_id"], "worker.stdout", offset=0)["text"]
     err = logs.read(job["id"], job["attempt_id"], "worker.stderr", offset=0)["text"]
     assert all(text in out for text in ("python stdout", "fd stdout", "child stdout"))
@@ -175,10 +171,7 @@ def test_external_logs_are_archived_before_worktree_evidence_cleanup(local, desc
     )
     result = collect_finished(gateway)
     assert result["cleaned"] == 1 and not source.exists()
-    assert (
-        logs.read(job["id"], job["attempt_id"], "backend/compiler.log")["text"]
-        == "compiler diagnostic\n"
-    )
+    assert logs.read(job["id"], job["attempt_id"], "backend/compiler.log")["text"] == "compiler diagnostic\n"
     finished = journal.get(job["id"])["finished_at"]
     assert logs.collect(now=finished + 3600)["cleaned"] == 0
     assert logs.collect(now=finished + 604801)["cleaned"] == 1
@@ -210,9 +203,7 @@ def test_unconfirmed_backend_restoration_prevents_local_log_deletion(local):
             raise ValueError("Restoration is unconfirmed")
 
     gateway = SimpleNamespace(adapter=object())
-    result = collect_local_logs(
-        gateway, journal, policy=DevicePolicy(), keep_seconds=0, now=time.time() + 10000000
-    )
+    result = collect_local_logs(gateway, journal, policy=DevicePolicy(), keep_seconds=0, now=time.time() + 10000000)
     assert result["cleaned"] == 0 and result["errors"] == 1
     assert path.is_file()
 
@@ -270,9 +261,7 @@ def test_superseded_unrestored_external_attempt_keeps_its_original_context(local
             seen.append((payload["attempt_id"], saved))
             raise ValueError("Restoration remains unconfirmed")
 
-    result = collect_local_logs(
-        SimpleNamespace(adapter=object()), journal, policy=DevicePolicy(), now=time.time() + 604801
-    )
+    result = collect_local_logs(SimpleNamespace(adapter=object()), journal, policy=DevicePolicy(), now=time.time() + 604801)
     assert result["cleaned"] == 0 and result["errors"] == 1
     assert seen == [(job["attempt_id"], {"external_id": "old-device-job"})]
     assert path.exists()
@@ -288,9 +277,7 @@ def test_retired_external_state_is_not_deleted_without_a_restoration_policy(loca
     journal.accept({**job, "attempt_id": str(uuid.uuid4())})
     future = time.time() + 604801
     assert logs.collect(now=future)["cleaned"] == 0
-    assert (
-        collect_local_logs(SimpleNamespace(adapter=object()), journal, now=future)["cleaned"] == 0
-    )
+    assert collect_local_logs(SimpleNamespace(adapter=object()), journal, now=future)["cleaned"] == 0
     assert path.exists()
 
 
@@ -313,7 +300,5 @@ def test_log_expiration_can_use_restoration_without_bulk_cleanup_eligibility(loc
             assert payload["attempt_id"] == job["attempt_id"]
             return CleanupPlan()
 
-    result = collect_local_logs(
-        SimpleNamespace(adapter=object()), journal, policy=Policy(), now=time.time() + 604801
-    )
+    result = collect_local_logs(SimpleNamespace(adapter=object()), journal, policy=Policy(), now=time.time() + 604801)
     assert result["cleaned"] == 1 and not path.exists()

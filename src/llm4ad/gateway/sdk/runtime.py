@@ -42,6 +42,7 @@ class GatewayBinding:
     directory: Path
     capacity: int = 1
     metadata: dict = field(default_factory=dict)
+    resource_key: str | None = None
 
 
 class GatewayRuntime:
@@ -88,6 +89,10 @@ class GatewayRuntime:
         """Optionally extend the common local health server with a backend API."""
         return None
 
+    def executor_for(self, binding: GatewayBinding):
+        """Optionally share SDK resource pools with a private executor facade."""
+        return None
+
     async def check(self, gateway) -> None:
         """Perform optional backend readiness without registering platform work."""
 
@@ -105,6 +110,10 @@ class GatewayRuntime:
 
     def ready(self) -> bool:
         """Report backend readiness separately from platform connectivity."""
+        return True
+
+    def binding_ready(self, binding: GatewayBinding) -> bool:
+        """Allow resource-specific admission without interrupting accepted work."""
         return True
 
     def evidence_policy(self, gateway):

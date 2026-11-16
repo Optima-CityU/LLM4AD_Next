@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { evaluatorId, poolSelectionMode } from "../../../../lib/gatewayPool.ts"
 
 // --- Provider ---
 export const providerConfigSchema = z.object({
@@ -28,6 +29,9 @@ export const evaluatorConfigSchema = z
     type: z.string().default("custom"),
     module: z.string().optional(),
     gateway_ids: z.array(z.string().uuid()).default([]),
+    selection_mode: z.enum(["auto", "selected"]).optional(),
+    max_attempts: z.coerce.number().int().positive().optional(),
+    lease_timeout: z.coerce.number().positive().optional(),
     contract: z.record(z.string(), z.unknown()).default({}),
     parameters: z.record(z.string(), z.unknown()).default({}),
     candidate_paths: z.array(z.string()).default([]),
@@ -39,11 +43,33 @@ export const evaluatorConfigSchema = z
     batch_size: z.coerce.number().int().positive().default(10),
   })
   .superRefine((value, ctx) => {
-    if (value.type === "remote" && value.gateway_ids.length === 0) {
+    if (
+      value.type === "remote" &&
+      poolSelectionMode(value) === "selected" &&
+      value.gateway_ids.length === 0
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["gateway_ids"],
         message: "Select at least one remote evaluation gateway",
+      })
+    }
+    if (
+      value.type === "remote" &&
+      poolSelectionMode(value) === "auto" &&
+      (!evaluatorId(value.contract) ||
+        typeof value.contract.version !== "string" ||
+        !value.contract.version.trim() ||
+        typeof value.contract.data_version !== "string" ||
+        !value.contract.data_version.trim() ||
+        !value.contract.metrics ||
+        typeof value.contract.metrics !== "object" ||
+        Object.keys(value.contract.metrics).length === 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["contract"],
+        message: "Select an evaluation benchmark contract",
       })
     }
     if (value.type !== "remote" && !value.module) {
@@ -52,6 +78,17 @@ export const evaluatorConfigSchema = z
         path: ["module"],
         message: "Module is required",
       })
+    }
+  })
+  .transform((value) => {
+    if (value.type !== "remote") return value
+    const selection_mode = poolSelectionMode(value)
+    return {
+      ...value,
+      selection_mode,
+      gateway_ids: selection_mode === "auto" ? [] : value.gateway_ids,
+      max_attempts: value.max_attempts ?? 3,
+      lease_timeout: value.lease_timeout ?? 60,
     }
   })
 

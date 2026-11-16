@@ -782,16 +782,16 @@
       "size": 19001
     },
     "phonefarm/src/eval.rs": {
-      "sha256": "c69fc5f8e94d9b8c8c7fa0f8caf4e771f68027a347cced8bc011a929ddbbe4e9",
-      "size": 320029
+      "sha256": "85897cbd341e872013671f6b62931effb749d38b926981c8f88144ffe5d42a2d",
+      "size": 325690
     },
     "phonefarm/src/experiment.rs": {
       "sha256": "e97ff2ea6f88d2b6296fafa439fa286d5dbfa7df1b16656600291dacc08861b6",
       "size": 49907
     },
     "phonefarm/src/fd_lock.rs": {
-      "sha256": "6180d997bd78721aab703f74aea66828f262c61b973ce265671989fd3879c223",
-      "size": 19335
+      "sha256": "cbfb13df95017d181d1a3f85b8cd532e7f9ff4b2c52dab4841f3d8d6c9961734",
+      "size": 19421
     },
     "phonefarm/src/fleet.rs": {
       "sha256": "0b07260bddd4aed12c88492c11acabf567a698b17ecd594c02bc749677d1ab02",
@@ -850,8 +850,8 @@
       "size": 46273
     },
     "phonefarm/src/gpuop.rs": {
-      "sha256": "2812752fa914ec2a1a333dd0e063bdc9429dfc3447970ff08a17cc16495cd421",
-      "size": 142290
+      "sha256": "3bf460ab085323d403208a507e693169f7864c9c77340feb5b6e8f286bb7fa44",
+      "size": 199324
     },
     "phonefarm/src/gpustat.rs": {
       "sha256": "cfd08969146683090887689751d44712081fe6a82c84d6bdf6b7ceba2ff88c1a",
@@ -878,8 +878,8 @@
       "size": 14459
     },
     "phonefarm/src/gray_session.rs": {
-      "sha256": "fe8db5a363e637df4530f783d5d1de435541e321043681618f3dd57a6208ea4f",
-      "size": 87834
+      "sha256": "af86fbfa71129d0f0721d392f2f11c346b11dfa2e80976ade97acff604624693",
+      "size": 126157
     },
     "phonefarm/src/grayab.rs": {
       "sha256": "a4f48daa8502a96669403d8a2234f999a4e232affcc082b4ba7cdd0d26a2ee2e",
@@ -898,8 +898,8 @@
       "size": 6366
     },
     "phonefarm/src/hwcond.rs": {
-      "sha256": "5e47c18ea04f2112a350ad1055a81e9959974f872655540402780a51f490fcf6",
-      "size": 107715
+      "sha256": "1eff919f44e70e752e49b2c8c505a41be98e8c719b199bd44469ad8d2d343107",
+      "size": 110783
     },
     "phonefarm/src/hypo.rs": {
       "sha256": "174ae7139236367d4cc0f4c375c03566de2ca9da8f77e2a86926d4224bbed983",

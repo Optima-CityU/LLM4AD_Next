@@ -22,6 +22,7 @@ services:
     env_file: .env
     environment:
       LLM4AD_GATEWAY_ADAPTER: hgamey
+      # Capacity per evaluator binding; independent phones have separate workers.
       LLM4AD_GATEWAY_CONCURRENCY: '1'
       LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}
       LLM4AD_GATEWAY_STATE_DIR: /data/gateway
@@ -31,7 +32,7 @@ services:
       PHONEFARM_STATE_DIR: /work/state
     volumes:
       - ${HGAMEY_DATA_DIR:?Set a persistent data directory}:/data
-      - ${HGAMEY_INPUTS_DIR:?Set the directory containing Genshin reference frames}:/inputs:ro
+      - ${HGAMEY_INPUTS_DIR:-./inputs}:/inputs:ro
       - ${HGAMEY_CONFIG_DIR:?Set the local configuration directory}:/config:ro
       - ${HGAMEY_PHONEFARM_DIR:?Set the persistent phonefarm state directory}:/work
       - ${ADB_IDENTITY_FILE:?Set your authorized ADB identity file}:/run/adb-identity:ro

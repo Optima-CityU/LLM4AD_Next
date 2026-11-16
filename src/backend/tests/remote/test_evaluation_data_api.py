@@ -3,7 +3,7 @@
 import hashlib
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from llm4ad.config.evaluator import EvalContext
@@ -249,11 +249,12 @@ def test_existing_task_deletion_cleans_all_evaluation_namespaces(platform):
     """The existing delete operation owns evidence, even after evaluator config changes."""
     from sqlmodel import SQLModel
 
-    from app.models import AutoDesignSession, PaperWorkspace, TaskLog, TaskStatus
+    from app.models import AutoDesignSession, LLMProvider, PaperWorkspace, TaskLog, TaskStatus
     from app.services.task_service.crud import delete_task
 
     SQLModel.metadata.create_all(
-        platform.engine, tables=[PaperWorkspace.__table__, AutoDesignSession.__table__, TaskLog.__table__]
+        platform.engine,
+        tables=[LLMProvider.__table__, PaperWorkspace.__table__, AutoDesignSession.__table__, TaskLog.__table__],
     )
     root, record = local_record(platform)
     service.upload_pending(root, str(platform.task.id))
@@ -516,6 +517,60 @@ def test_terminal_gateway_result_retains_files_and_candidate_references(platform
     assert detail["record"]["artifacts"][0]["description"] == "Candidate diagnostic log"
     artifact_id = detail["record"]["artifacts"][0]["id"]
     assert platform.client.get(url(platform) + f"/{job['attempt_id']}/artifacts/{artifact_id}").content == data
+
+
+def test_pool_retry_evidence_defaults_to_latest_success_and_preserves_failure(platform):
+    """Order device attempts chronologically even when their UUID order disagrees."""
+    from test_gateway_api import claim, pool_result, register_pool_member, report, submit_pool
+
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    job = submit_pool(platform)[0]
+    identities = [
+        uuid.UUID("ffffffff-ffff-4fff-bfff-ffffffffffff"),
+        uuid.UUID("00000000-0000-4000-8000-000000000001"),
+    ]
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    starts = [created_at + timedelta(minutes=1), created_at + timedelta(minutes=2)]
+    for index, gateway in enumerate((first, second)):
+        with Session(platform.engine) as db:
+            row = db.get(RemoteEvaluationJob, uuid.UUID(job["id"]))
+            row.attempt_id = identities[index]
+            row.created_at = created_at
+            row.request = {**row.request, "algorithm_id": "retry-node"}
+            db.add(row)
+            db.commit()
+        attempt = claim(platform, gateway)
+        with Session(platform.engine) as db:
+            row = db.get(RemoteEvaluationJob, uuid.UUID(job["id"]))
+            row.request = {**row.request, "attempt_started_at": starts[index].isoformat()}
+            db.add(row)
+            db.commit()
+        live = platform.client.get(url(platform), params={"algorithm_id": "retry-node"}).json()
+        assert live["data"][0]["id"] == str(identities[index])
+        assert live["data"][0]["created_at"] == starts[index].isoformat()
+        response = report(platform, gateway, attempt, "failed" if index == 0 else "completed", 1, {
+            "success": index == 1,
+            "score": 7,
+            "metrics": {"accuracy": 7},
+            "error_message": "Device detached" if index == 0 else None,
+            "metadata": {"failure_category": "infrastructure"} if index == 0 else {},
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == ("queued" if index == 0 else "completed")
+
+    final = pool_result(platform, job)
+    assert final["state"] == "completed" and final["report"]["score"] == 7
+    listed = platform.client.get(url(platform), params={"algorithm_id": "retry-node"}).json()
+    assert listed["count"] == 2
+    assert [item["id"] for item in listed["data"]] == [str(value) for value in reversed(identities)]
+    assert [item["state"] for item in listed["data"]] == ["completed", "failed"]
+    assert [item["score"] for item in listed["data"]] == [7, None]
+    for identity, started_at in zip(identities, starts, strict=True):
+        detail = platform.client.get(url(platform) + f"/{identity}").json()["record"]
+        assert detail["created_at"] == started_at.isoformat()
+    previous = platform.client.get(url(platform) + f"/{identities[0]}").json()["record"]
+    assert previous["result"]["error_message"] == "Device detached"
+    assert len(final["report"]["metadata"]["attempt_history"]) == 2
 
 
 def test_unavailable_remote_result_retains_concise_failure(platform):

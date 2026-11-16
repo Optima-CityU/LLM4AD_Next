@@ -10,12 +10,24 @@ from pathlib import Path
 
 from llm4ad.evaluator.models import EvaluationResult
 
-from .errors import EvaluationError
+from .errors import EvaluationError, failure_category
 from .journal import Reporter
 
 
+def classify_report(report: dict, error: BaseException | None = None, *, returned: bool = False) -> str:
+    """Set routing metadata without confusing a retryable evaluator with infrastructure."""
+    metadata = report.setdefault("metadata", {})
+    category = failure_category(metadata, error, default="candidate" if returned else "evaluator")
+    metadata.update(
+        failure_category=category,
+        infrastructure_failure=category == "infrastructure",
+        candidate_failure=category == "candidate",
+    )
+    return category
+
+
 def prepare_result(job, reporter: Reporter, value, elapsed_ms: float) -> dict:
-    """Normalize an adapter result and spool optional evidence without changing its score."""
+    """Normalize adapter outcomes and spool optional evidence before publication."""
     from llm4ad.evaluator.records import behavior_artifacts, regular_file
 
     result = EvaluationResult.model_validate(value)
@@ -42,13 +54,20 @@ def prepare_result(job, reporter: Reporter, value, elapsed_ms: float) -> dict:
     if errors:
         result.metadata["artifact_errors"] = errors
     result.artifacts = []
-    return reporter.enrich(result.model_dump(mode="json"))
+    report = reporter.enrich(result.model_dump(mode="json"))
+    if job.managed_attempt and not result.success:
+        category = classify_report(report, returned=True)
+        report.pop("score", None)
+        if category != "candidate":
+            report["metrics"] = {}
+    return report
 
 
 def exception_report(job, reporter: Reporter, error: BaseException, elapsed_ms: float) -> dict:
     """Retain the original exception and structured context through the common pipeline."""
     metadata = dict(error.metadata) if isinstance(error, EvaluationError) else {}
     metadata.setdefault("failure_type", type(error).__name__)
+    classify_report({"metadata": metadata}, error)
     feedback = error.evolution_feedback if isinstance(error, EvaluationError) else {}
     artifacts = error.artifacts if isinstance(error, EvaluationError) else []
     message = str(error) or type(error).__name__

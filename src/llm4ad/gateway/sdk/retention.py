@@ -60,12 +60,7 @@ class EvidencePolicy:
 def owned_path(path: Path, root: Path) -> Path:
     """Require a strict descendant of the canonical root without symlink parents."""
     path, root = path.absolute(), root.absolute()
-    if (
-        root.resolve() != root
-        or path == root
-        or not path.is_relative_to(root)
-        or ".." in path.parts
-    ):
+    if root.resolve() != root or path == root or not path.is_relative_to(root) or ".." in path.parts:
         raise ValueError("Evidence cleanup path is outside its owned root")
     current = root
     for component in path.relative_to(root).parts:
@@ -98,11 +93,7 @@ def prune_directory(path: Path, keep: frozenset[str]) -> int:
         if child.is_symlink():
             child.unlink()
         elif child.is_dir():
-            size = sum(
-                item.stat().st_size
-                for item in child.rglob("*")
-                if not item.is_symlink() and item.is_file()
-            )
+            size = sum(item.stat().st_size for item in child.rglob("*") if not item.is_symlink() and item.is_file())
             shutil.rmtree(child)
             removed += size
         else:
@@ -125,13 +116,9 @@ def collect_journal(
     totals = {"cleaned": 0, "removed_bytes": 0, "errors": 0}
     snapshots = [(row, False) for row in journal.rows()]
     with journal.connect() as db:
-        snapshots.extend(
-            (json.loads(row[0]), True) for row in db.execute("SELECT snapshot FROM retired_attempts")
-        )
+        snapshots.extend((json.loads(row[0]), True) for row in db.execute("SELECT snapshot FROM retired_attempts"))
     for snapshot, retired in snapshots:
-        if snapshot["state"] not in policy.terminal_states or (
-            not startup and snapshot["ack"] < snapshot["seq"]
-        ):
+        if snapshot["state"] not in policy.terminal_states or (not startup and snapshot["ack"] < snapshot["seq"]):
             continue
         job = json.loads(snapshot["job"])
         for key in ("id", "attempt_id"):
@@ -139,9 +126,7 @@ def collect_journal(
             if Path(job[key]).name != job[key]:
                 raise ValueError("Invalid SDK attempt path")
         identity = hashlib.sha256(f"{job['id']}|{job['attempt_id']}".encode()).hexdigest()
-        receipt = owned_path(
-            gateway.root / "retention" / Path(journal.path).name / f"{identity}.json", gateway.root
-        )
+        receipt = owned_path(gateway.root / "retention" / Path(journal.path).name / f"{identity}.json", gateway.root)
         try:
             prior = json.loads(receipt.read_text()) if receipt.exists() else {}
             if prior.get("state") == "cleaned":
@@ -170,6 +155,16 @@ def collect_journal(
                 db.execute("BEGIN IMMEDIATE")
                 db.row_factory = sqlite3.Row
                 current = db.execute("SELECT * FROM jobs WHERE id=?", (job["id"],)).fetchone()
+                has_debts = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cleanup_debts'").fetchone()
+                if (
+                    has_debts
+                    and db.execute(
+                        "SELECT 1 FROM cleanup_debts WHERE json_extract(payload,'$.id')=? "
+                        "AND json_extract(payload,'$.attempt_id')=? LIMIT 1",
+                        (job["id"], job["attempt_id"]),
+                    ).fetchone()
+                ):
+                    continue
                 if retired:
                     if current and json.loads(current["job"])["attempt_id"] == job["attempt_id"]:
                         continue
@@ -203,22 +198,41 @@ def collect_journal(
                 for item in artifacts:
                     if not re.fullmatch(r"[a-f0-9]{64}", item["sha256"]):
                         raise ValueError("Invalid evidence outbox identity")
-                    if Path(item["path"]).absolute() != owned_path(
-                        spool / item["sha256"], gateway.root
-                    ):
+                    if Path(item["path"]).absolute() != owned_path(spool / item["sha256"], gateway.root):
                         raise ValueError("Evidence outbox belongs to another attempt")
-                work = owned_path(
-                    gateway.root / "work" / job["id"] / job["attempt_id"], gateway.root
-                )
-                if Path(job["project_root"]).absolute() != work:
-                    if (
-                        not startup
-                        or Path(job["project_root"]).absolute() != gateway.root / "startup-work"
-                    ):
+                work = owned_path(gateway.root / "work" / job["id"] / job["attempt_id"], gateway.root)
+                generations = []
+                if job.get("execution_id"):
+                    uuid.UUID(job["execution_id"])
+                    generations.append(owned_path(work / job["execution_id"], gateway.root))
+                expected_work = generations[0] if generations else work
+                if Path(job["project_root"]).absolute() != expected_work:
+                    if not startup or Path(job["project_root"]).absolute() != gateway.root / "startup-work":
                         raise ValueError("SDK worktree belongs to another attempt")
                     work = None
                 with policy.lock():
                     plan = policy.plan(gateway, job, saved, report.get("metadata", {}))
+                    historical = []
+                    if job.get("execution_id"):
+                        historical = [
+                            json.loads(item[0])
+                            for item in db.execute(
+                                "SELECT snapshot FROM execution_history WHERE job_id=? AND attempt_id=?",
+                                (job["id"], job["attempt_id"]),
+                            )
+                        ]
+                    for previous in historical:
+                        prior_job = previous["job"]
+                        uuid.UUID(prior_job["execution_id"])
+                        if prior_job["id"] != job["id"] or prior_job["attempt_id"] != job["attempt_id"]:
+                            raise ValueError("Execution history belongs to another attempt")
+                        path = owned_path(work / prior_job["execution_id"], gateway.root)
+                        if Path(prior_job["project_root"]).absolute() != path:
+                            raise ValueError("Historical worktree belongs to another execution")
+                        generations.append(path)
+                        earlier = policy.plan(gateway, prior_job, previous["saved"], previous.get("metadata", {}))
+                        plan.targets.extend(earlier.targets)
+                        plan.external_jobs.extend(earlier.external_jobs)
                     acknowledged_at = prior.get("acknowledged_at", now)
                     base = {
                         "job_id": job["id"],
@@ -235,10 +249,7 @@ def collect_journal(
                     logs = LocalLogStore(journal)
                     hook = getattr(gateway, "local_log_sources", None)
                     sources = hook(job, saved) if hook else {}
-                    if (
-                        sources
-                        or (logs.directory(job["id"], job["attempt_id"]) / "manifest.json").exists()
-                    ):
+                    if sources or (logs.directory(job["id"], job["attempt_id"]) / "manifest.json").exists():
                         if retired:
                             db.execute(
                                 "INSERT OR IGNORE INTO local_log_attempts(job_id,attempt_id,snapshot) VALUES(?,?,?)",
@@ -255,7 +266,8 @@ def collect_journal(
                             [work]
                             if policy.clear_worktree
                             else [
-                                owned_path(work / name, gateway.root)
+                                owned_path(directory / name, gateway.root)
+                                for directory in generations or [work]
                                 for name in (".evaluation-artifacts", ".behavior-artifacts")
                             ]
                         )
@@ -263,12 +275,15 @@ def collect_journal(
                             removed += prune_directory(path, frozenset())
                             if path.exists():
                                 path.rmdir()
+                        if job.get("execution_id"):
+                            candidate = owned_path(gateway.root / "candidates" / job["id"] / job["attempt_id"], gateway.root)
+                            removed += prune_directory(candidate, frozenset())
+                            if candidate.exists():
+                                candidate.rmdir()
                     removed += prune_directory(spool, frozenset())
                     if spool.exists():
                         spool.rmdir()
-                    lease = owned_path(
-                        worker_directory(journal, job["id"], job["attempt_id"]), gateway.root
-                    )
+                    lease = owned_path(worker_directory(journal, job["id"], job["attempt_id"]), gateway.root)
                     removed += prune_directory(lease, frozenset())
                     if lease.exists():
                         lease.rmdir()

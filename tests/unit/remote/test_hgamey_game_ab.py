@@ -83,6 +83,125 @@ def test_game_qualification_is_not_candidate_fitness(trial):
     assert "comparison_game_fps" not in report["metrics"]
 
 
+@pytest.mark.parametrize("foreign_property", [None, "vendor.unrelated.setting", "debug.unrelated.setting"])
+def test_original_game_properties_restore_owned_vendor_setting(tmp_path, monkeypatch, foreign_property):
+    """Snapshot and restoration share the vendor property allowlist."""
+    upstream = SimpleNamespace(
+        SR_PROP="debug.knobs.selfsr", UNLIMIT_PROP="debug.knobs.unlimit",
+        FP_PROP="vendor.perf.framepacing.enable", SR_OPTS={}, IP_PROPS=[], IP_TUNE={},
+        PANEL_KEYS=["refresh_rate_mode"], current_mode=lambda *_: "standard", layer_absent=lambda *_: (True, None),
+    )
+    original = {
+        "boot_id": "same-boot", "properties": dict.fromkeys(game.game_property_names(upstream), ""),
+        "settings": {"screen_off_timeout": "30000", "refresh_rate_mode": "null"},
+        "mode": "standard", "game_configs": "unchanged game configuration", "gfrc": "null",
+    }
+    original["properties"][upstream.FP_PROP] = "0"
+    current = original["properties"].copy()
+    current[upstream.FP_PROP] = "1"
+    commands = []
+
+    def shell(command):
+        commands.append(command)
+        if command == "getprop ro.serialno":
+            return "physical-phone"
+        if command == "cat /proc/sys/kernel/random/boot_id":
+            return original["boot_id"]
+        if command.startswith("setprop "):
+            _, key, value = command.split(" ", 2)
+            current[key] = value
+        if command.startswith("settings get system "):
+            return original["settings"][command.rsplit(" ", 1)[1]]
+        if command.startswith("cmd game list-configs "):
+            return original["game_configs"]
+        if command == "settings get global game_gfrc_mode":
+            return "null"
+        return ""
+
+    upstream.Dev = lambda _: SimpleNamespace(shell=shell)
+    monkeypatch.setattr(game, "load_upstream", lambda: upstream)
+    monkeypatch.setattr(game, "captures_confirmed", lambda _: True)
+    monkeypatch.setattr(game, "sessions_confirmed", lambda _: True)
+    monkeypatch.setattr(game, "properties", lambda _: current.copy())
+    if foreign_property:
+        original["properties"][foreign_property] = "1"
+    (tmp_path / "game-original.json").write_text(json.dumps(original))
+    (tmp_path / "input.json").write_text(json.dumps({
+        "device": {"endpoint": "fake:5555", "expected_serial": "physical-phone"}, "submission": {"options": {}},
+    }))
+    if foreign_property:
+        with pytest.raises(ValueError, match="Invalid owned game property"):
+            game.restore_original(tmp_path)
+        assert not any(command.startswith(("setprop ", "am force-stop ")) for command in commands)
+    else:
+        assert game.restore_original(tmp_path) is True
+        assert current[upstream.FP_PROP] == "0"
+        assert f"setprop {upstream.FP_PROP} 0" in commands
+
+
+@pytest.mark.parametrize("count", [0, 3])
+def test_quality_option_is_opt_in_and_propagates_to_command(tmp_path, count):
+    """Preserve legacy commands while explicitly requesting extra real captures."""
+    assert game.validate_options({})["quality_samples"] == 0
+    options = game.validate_options({"quality_samples": count})
+    command = game.command_for(tmp_path, "fixture", options)
+    assert ("--quality-samples" in command) is bool(count)
+    if count:
+        assert command[command.index("--quality-samples") + 1] == "3"
+
+
+@pytest.mark.parametrize("count", [-1, True, 3.0, "3", None])
+def test_quality_option_rejects_invalid_counts(count):
+    """Require an explicit nonnegative integer screenshot count."""
+    with pytest.raises(ValueError, match="quality_samples"):
+        game.validate_options({"quality_samples": count})
+
+
+def test_requested_missing_iq_is_explicit(trial):
+    """Unverified quality finishes with a low score rather than waiting for manual review."""
+    from llm4ad.gateway.examples.hgamey.scoring import normalize_game_scoring, score_game
+
+    path, options, *_ = trial
+    options["quality_samples"] = 3
+    result = game.summarize(path, options, True, 0)
+    assert result["status"] == "PASS"
+    assert result["quality"]["status"] == "not_measured"
+    assert result["quality"]["not_computed"]
+    policy = normalize_game_scoring({"weights": {"fps": 0, "frame_p95": 0, "gpu_per_frame": 0, "quality": 1}})
+    scored = score_game(result, policy)
+    assert scored["score"] == policy["quality_gap_score"]
+    assert scored["quality_assessment"]["penalized"]
+    assert "quality" in " ".join(scored["missing"])
+
+
+def test_missing_iq_keeps_confirmed_candidate_application(candidate_trial):
+    """A quality deficit cannot send an otherwise valid candidate into recovery."""
+    path, options, *_ = candidate_trial
+    options["quality_samples"] = 3
+    result = game.summarize(path, options, True, 0)
+    assert result["status"] == "PASS"
+    assert result["errors"] == []
+    assert result["candidate_applied"] is True
+    assert result["quality"]["status"] == "not_measured"
+
+
+def test_report_declares_screenshots_and_distinct_capture_comparisons(trial):
+    """The native game schema carries checksum-bound game evidence comparisons."""
+    path, options, _, arms, save = trial
+    (path / "shots").mkdir()
+    for arm in arms:
+        source = path / "shots" / f"{arm['arm']}.png"
+        source.write_bytes(PNG_FIXTURE)
+        arm["shot"] = str(source)
+    save()
+    report = game.summarize(path, options, True, 0)
+    assert report["schema"] == "llm4ad/hgamey-game-ab@1"
+    assert [item["name"] for item in report["artifacts"]] == ["shots/A1.png", "shots/B1.png"]
+    assert report["evidence_comparisons"][0]["images"] == [
+        {"role": "baseline", "artifact": "shots/A1.png"}, {"role": "candidate", "artifact": "shots/B1.png"},
+    ]
+
+
 def test_measurement_screenshots_are_retained_with_arm_labels(trial):
     """Declare original fixture PNGs without collecting private reference images."""
     path, options, _, arms, save = trial

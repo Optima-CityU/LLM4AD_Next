@@ -6,7 +6,7 @@ including custom (external module) and executable (built-in) evaluators.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from llm4ad.config.ui import ui
 
@@ -361,7 +361,12 @@ class EvalContext(BaseModel):
 class RemoteEvaluatorConfig(EvaluatorConfig):
     """Use an authorized pool of compatible remote gateways."""
     type: Literal["remote"] = "remote"
-    gateway_ids: list[str] = Field(min_length=1, json_schema_extra=ui(label_zh="评估网关", label_en="Evaluation gateways"))
+    selection_mode: Literal["auto", "selected"] = "auto"
+    gateway_ids: list[str] = Field(
+        default_factory=list, json_schema_extra=ui(label_zh="评估网关", label_en="Evaluation gateways")
+    )
+    max_attempts: int = Field(default=3, gt=0)
+    lease_timeout: float = Field(default=60.0, gt=0, allow_inf_nan=False)
     contract: dict = Field(default_factory=dict)
     parameters: dict = Field(default_factory=dict, json_schema_extra=ui(label_zh="评估器参数", label_en="Evaluator parameters"))
     candidate_paths: list[str] = Field(default_factory=list, json_schema_extra=ui(
@@ -370,3 +375,18 @@ class RemoteEvaluatorConfig(EvaluatorConfig):
         desc_en="Optional relative globs. Empty uses recognized sources and build manifests. Datasets remain on the gateway.",
     ))
     model_config = ConfigDict(json_schema_extra=ui(label_zh="远程评估器", label_en="Remote evaluator"))
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_selection(cls, value):
+        """Keep raw configurations with explicit gateway IDs on their selected pool."""
+        if isinstance(value, dict) and "selection_mode" not in value and value.get("gateway_ids"):
+            return {**value, "selection_mode": "selected"}
+        return value
+
+    @model_validator(mode="after")
+    def validate_selected_pool(self):
+        """Require an explicit pool when automatic device selection is disabled."""
+        if self.selection_mode == "selected" and not self.gateway_ids:
+            raise ValueError("selected remote evaluation requires nonempty gateway_ids")
+        return self

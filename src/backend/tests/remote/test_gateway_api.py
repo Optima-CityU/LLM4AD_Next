@@ -582,6 +582,7 @@ def test_real_gateways_reconnect_and_complete_without_duplicate_execution(platfo
                 json={
                     **second.identity,
                     "name": "two",
+                    "protocol_version": 2,
                     "allowed_user_ids": [str(platform.owner.id)],
                     "capacity": 1,
                     "contract": second.adapter.contract.model_dump(mode="json"),
@@ -727,3 +728,582 @@ def test_accepted_job_survives_sharing_change_and_submit_retry(platform):
     assert platform.client.get(PREFIX).json() == []
     assert submit(platform, [gateway], job["id"])["attempt_id"] == job["attempt_id"]
     assert report(platform, gateway, job, "completed", 1, {"score": 1, "metrics": {"accuracy": 1}}).status_code == 200
+
+
+def register_pool_member(platform, *, users=None, contract=None):
+    """Register a leased SDK member without touching physical devices."""
+    identity = {"id": str(uuid.uuid4()), "secret": uuid.uuid4().hex + uuid.uuid4().hex}
+    response = platform.client.post(PREFIX + "/register", json={
+        **identity, "name": "Pool " + identity["id"][:8], "capacity": 1,
+        "allowed_user_ids": users if users is not None else [str(platform.owner.id)],
+        "contract": contract or CONTRACT, "protocol_version": 2,
+    })
+    assert response.status_code == 200, response.text
+    return identity
+
+
+def submit_pool(platform, *, mode="auto", members=(), max_attempts=3, count=1):
+    """Submit leased candidate jobs through the ordinary authenticated API."""
+    with Session(platform.engine) as db:
+        task = db.get(Task, platform.task.id)
+        task.input_args = {"evaluator": {
+            "type": "remote", "selection_mode": mode, "gateway_ids": [g["id"] for g in members],
+            "contract": CONTRACT, "max_attempts": max_attempts, "lease_timeout": 60,
+        }}
+        db.add(task)
+        db.commit()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("solution.py", "def solve(): return 1\n")
+    jobs = []
+    for _ in range(count):
+        response = platform.client.post(PREFIX + f"/tasks/{platform.task.id}/jobs", headers=runtime_headers(platform), json={
+            "id": str(uuid.uuid4()), "gateway_ids": [g["id"] for g in members], "selection_mode": mode,
+            "dispatch_version": 2, "max_attempts": max_attempts, "lease_timeout": 60,
+            "contract": CONTRACT, "timeout": 5, "bundle": base64.b64encode(archive.getvalue()).decode(),
+        })
+        assert response.status_code == 200, response.text
+        jobs.append(response.json())
+    return jobs
+
+
+def force_elapsed_lease(platform, job):
+    """Advance only an isolated fixture's persisted lease, without real sleeps."""
+    with Session(platform.engine) as db:
+        row = db.get(RemoteEvaluationJob, uuid.UUID(job["id"]))
+        row.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        db.add(row)
+        db.commit()
+
+
+def pool_result(platform, job):
+    """Read the exact logical candidate through its task channel."""
+    response = platform.client.get(
+        PREFIX + f"/tasks/{platform.task.id}/jobs/{job['id']}", headers=runtime_headers(platform),
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_dynamic_pool_accepts_a_late_member_without_editing_the_task(platform):
+    """A newly connected comparable device can claim a concurrently queued candidate."""
+    first = register_pool_member(platform)
+    jobs = submit_pool(platform, count=2)
+    one = claim(platform, first)
+    second = register_pool_member(platform)
+    two = claim(platform, second)
+    assert {one["id"], two["id"]} == {j["id"] for j in jobs}
+    assert one["dispatch_attempt"] == two["dispatch_attempt"] == 1
+    assert one["managed_attempt"] and 0 < one["lease_remaining"] <= 60
+    with Session(platform.engine) as db:
+        assert db.get(Task, platform.task.id).input_args["evaluator"]["gateway_ids"] == []
+
+
+def test_dynamic_pool_excludes_unauthorized_incompatible_and_legacy_devices(platform):
+    """Automatic discovery preserves ACLs, benchmark identity and lease negotiation."""
+    member = register_pool_member(platform)
+    forbidden = register_pool_member(platform, users=[str(platform.other.id)])
+    incompatible = register_pool_member(platform, contract=CONTRACT | {"data_version": "other-data"})
+    legacy = register(platform)
+    submit_pool(platform)
+    for gateway in (forbidden, incompatible, legacy):
+        assert claim(platform, gateway) is None
+    assert claim(platform, member) is not None
+
+
+def test_pool_infrastructure_failure_moves_to_another_device_and_fences_old_output(platform):
+    """One shared budget covers both phones and stale artifacts cannot be published."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    job = submit_pool(platform)[0]
+    original = claim(platform, first)
+    failure = report(platform, first, original, "failed", 1, {
+        "error_message": "Device disconnected", "metadata": {"failure_category": "infrastructure"},
+    })
+    assert failure.json()["state"] == "queued"
+    assert claim(platform, first) is None
+    replacement = claim(platform, second)
+    assert replacement["id"] == job["id"] and replacement["attempt_id"] != original["attempt_id"]
+    assert replacement["dispatch_attempt"] == 2
+    assert report(platform, first, original, "completed", 2, {"metrics": {"accuracy": 100}}).status_code == 409
+    content = b"superseded artifact"
+    digest = hashlib.sha256(content).hexdigest()
+    response = platform.client.put(
+        PREFIX + f"/{first['id']}/jobs/{job['id']}/artifacts/{digest}",
+        content=content, headers=gateway_headers(first) | {"X-Attempt-Id": original["attempt_id"]},
+    )
+    assert response.status_code == 409
+    assert report(platform, second, replacement, "completed", 1, {"score": 7, "metrics": {"accuracy": 7}}).status_code == 200
+    final = pool_result(platform, job)
+    assert final["report"]["score"] == 7
+    history = final["report"]["metadata"]["attempt_history"]
+    assert [item["state"] for item in history] == ["failed", "completed"]
+    assert [item["gateway_id"] for item in history] == [first["id"], second["id"]]
+
+
+def test_pool_attempt_exhaustion_fails_only_the_evaluation_without_a_score(platform):
+    """Three failed dispatches terminate one candidate while its parent keeps running."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    job = submit_pool(platform)[0]
+    for index, member in enumerate((first, second, first), 1):
+        attempt = claim(platform, member)
+        assert attempt["dispatch_attempt"] == index
+        response = report(platform, member, attempt, "failed", 1, {
+            "error_message": "Device unreachable", "metadata": {"failure_category": "infrastructure"},
+        })
+        assert response.json()["state"] == ("queued" if index < 3 else "failed")
+    final = pool_result(platform, job)
+    assert final["state"] == "failed" and final["report"]["metrics"] == {}
+    assert final["report"].get("score") is None
+    metadata = final["report"]["metadata"]
+    assert metadata["attempts_exhausted"] is True
+    assert metadata["failure_category"] == "infrastructure"
+    assert len(metadata["attempt_history"]) == 3
+    assert claim(platform, first) is claim(platform, second) is None
+    with Session(platform.engine) as db:
+        assert db.get(Task, platform.task.id).status == TaskStatus.RUNNING
+
+
+@pytest.mark.parametrize("category", ["candidate", "configuration"])
+def test_non_device_failures_do_not_consume_every_pool_member(platform, category):
+    """Invalid candidate/configuration outcomes fail once without device roulette."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    job = submit_pool(platform)[0]
+    attempt = claim(platform, first)
+    response = report(platform, first, attempt, "failed", 1, {
+        "error_message": "Invalid input", "metadata": {"failure_category": category},
+    })
+    assert response.json()["state"] == "failed"
+    final = pool_result(platform, job)
+    assert final["report"]["metadata"]["attempt_count"] == 1
+    assert final["report"]["metadata"]["attempts_exhausted"] is False
+    assert claim(platform, second) is None
+
+
+@pytest.mark.parametrize("mode", [["auto"], {"selected": True}])
+def test_malformed_task_selection_mode_returns_422(platform, mode):
+    """Reject raw task selection containers before component configuration validation."""
+    member = register_pool_member(platform)
+    configure(platform, [member])
+    with Session(platform.engine) as db:
+        task = db.get(Task, platform.task.id)
+        task.input_args = {"evaluator": {**task.input_args["evaluator"], "selection_mode": mode}}
+        db.add(task)
+        db.commit()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("solution.py", "def solve(): return 1\n")
+    response = platform.client.post(
+        PREFIX + f"/tasks/{platform.task.id}/jobs",
+        headers=runtime_headers(platform),
+        json={
+            "id": str(uuid.uuid4()), "gateway_ids": [member["id"]],
+            "dispatch_version": 2, "selection_mode": "selected",
+            "contract": CONTRACT, "timeout": 5,
+            "bundle": base64.b64encode(archive.getvalue()).decode(),
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Unknown remote evaluation selection mode"
+    with Session(platform.engine) as db:
+        assert db.exec(select(RemoteEvaluationJob)).all() == []
+
+
+@pytest.mark.parametrize("state", ["failed", "completed"])
+@pytest.mark.parametrize("category", [{}, [], {"candidate": True}, ["candidate"], "unknown", 7, False, None])
+def test_malformed_pool_failure_categories_fall_back_to_evaluator(platform, state, category):
+    """Untrusted category values cannot crash reporting or fabricate candidate blame."""
+    member = register_pool_member(platform)
+    job = submit_pool(platform, max_attempts=1)[0]
+    attempt = claim(platform, member)
+    response = report(platform, member, attempt, state, 1, {
+        "success": False,
+        "error_message": "Evaluator returned malformed metadata",
+        "metrics": {},
+        "metadata": {
+            "failure_category": category,
+            "candidate_failure": "true",
+            "infrastructure_failure": {"value": True},
+        },
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "failed"
+    final = pool_result(platform, job)
+    assert final["state"] == "failed"
+    assert final["report"].get("score") is None
+    metadata = final["report"]["metadata"]
+    assert metadata["failure_category"] == "evaluator"
+    assert metadata["candidate_failure"] is False
+    assert metadata["infrastructure_failure"] is False
+    assert metadata["attempts_exhausted"] is True
+    assert metadata["attempt_history"][0]["failure_category"] == "evaluator"
+
+
+def test_expired_pool_lease_transfers_and_late_heartbeat_cannot_resurrect_it(platform):
+    """A disconnected phone loses publication authority independently of cleanup."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    job = submit_pool(platform)[0]
+    original = claim(platform, first)
+    force_elapsed_lease(platform, original)
+    response = platform.client.post(PREFIX + f"/{first['id']}/heartbeat", headers=gateway_headers(first), json={"ready": False})
+    assert response.json()["jobs"] == []
+    replacement = claim(platform, second)
+    assert replacement["attempt_id"] != original["attempt_id"]
+    assert replacement["dispatch_attempt"] == 2
+    assert report(platform, first, original, "running", 1).status_code == 409
+    assert pool_result(platform, job)["attempt_id"] == replacement["attempt_id"]
+
+
+def test_pool_cancellation_prevents_failover_even_when_lease_expires(platform):
+    """Stopping the parent takes precedence over retries and stale device reports."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    job = submit_pool(platform)[0]
+    original = claim(platform, first)
+    with Session(platform.engine) as db:
+        task = db.get(Task, platform.task.id)
+        task.status = TaskStatus.FAILED
+        db.add(task)
+        db.commit()
+        service.cancel_task_jobs(db, task.id)
+    force_elapsed_lease(platform, original)
+    assert claim(platform, second) is None
+    with Session(platform.engine) as db:
+        current = db.get(RemoteEvaluationJob, uuid.UUID(job["id"]))
+        assert current.state == "cancelled"
+        assert current.attempt_count == 1
+
+
+def test_selected_pool_does_not_expand_to_unselected_devices(platform):
+    """Manual opt-in remains available while automatic pools have no fixed IDs."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    submit_pool(platform, mode="selected", members=[first])
+    assert claim(platform, second) is None
+    assert claim(platform, first) is not None
+
+
+def test_lease_expiry_consumes_the_same_total_attempt_budget(platform):
+    """An offline last attempt becomes a terminal infrastructure failure on read."""
+    member = register_pool_member(platform)
+    job = submit_pool(platform, max_attempts=1)[0]
+    original = claim(platform, member)
+    force_elapsed_lease(platform, original)
+    final = pool_result(platform, job)
+    assert final["state"] == "failed"
+    assert final["attempt_id"] != original["attempt_id"]
+    assert final["report"]["metadata"]["attempts_exhausted"] is True
+    assert report(platform, member, original, "completed", 1, {"metrics": {"accuracy": 9}}).status_code == 409
+
+
+def test_pool_without_devices_waits_without_spending_attempts(platform):
+    """No resource acquisition is an idle wait, even before the first gateway joins."""
+    job = submit_pool(platform)[0]
+    for _ in range(3):
+        status = pool_result(platform, job)
+        assert status["state"] == "queued" and status["dispatch_attempt"] == 0
+        assert status["lease_expires_at"] is None
+    views = platform.client.get(PREFIX + f"/tasks/{platform.task.id}").json()
+    assert views[0]["state"] == "waiting_gateway" and views[0]["attempt_count"] == 0
+    member = register_pool_member(platform)
+    assert claim(platform, member)["dispatch_attempt"] == 1
+
+
+def test_uncertain_original_cleanup_does_not_block_an_independent_pool_device(platform):
+    """Fencing permits another phone while the old SDK retains its cleanup debt."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    submit_pool(platform)
+    original = claim(platform, first)
+    response = report(platform, first, original, "recovery_required", 1, {
+        "message": "Owned device cleanup cannot yet be confirmed", "retry_confirmed": False,
+    })
+    assert response.status_code == 200 and response.json()["state"] == "queued"
+    replacement = claim(platform, second)
+    assert replacement["dispatch_attempt"] == 2
+    assert replacement["attempt_id"] != original["attempt_id"]
+
+
+@pytest.mark.parametrize("unavailable", ["busy", "offline", "not_ready"])
+def test_unavailable_pool_waiting_does_not_count_as_a_device_failure(platform, unavailable):
+    """Only a claim consumes budget; unavailable devices cause no lease or failure."""
+    member = register_pool_member(platform)
+    if unavailable == "busy":
+        submit_pool(platform)
+        assert claim(platform, member) is not None
+    job = submit_pool(platform)[0]
+    with Session(platform.engine) as db:
+        gateway = db.get(EvaluationGateway, uuid.UUID(member["id"]))
+        if unavailable == "offline":
+            gateway.last_seen = datetime.now(UTC) - timedelta(days=1)
+        elif unavailable == "not_ready":
+            gateway.ready = False
+        db.add(gateway)
+        db.commit()
+    if unavailable != "offline":
+        assert claim(platform, member) is None
+    status = pool_result(platform, job)
+    assert status["state"] == "queued"
+    assert status["dispatch_attempt"] == 0 and status["lease_expires_at"] is None
+    assert status["report"]["metadata"]["attempt_history"] == []
+
+
+@pytest.mark.parametrize("disconnect", [False, True])
+def test_actual_sdk_pool_hands_a_failed_attempt_to_another_worker(platform, tmp_path, monkeypatch, disconnect):
+    """Exercise two real SDK process pools, HTTP leases and a single runtime call."""
+    import socket
+    import threading
+
+    import aiohttp
+    import uvicorn
+    from llm4ad.config.evaluator import EvalContext, RemoteEvaluatorConfig
+    from llm4ad.gateway.sdk.client import evaluate_remote
+    from llm4ad.gateway.sdk.gateway import Gateway
+
+    monkeypatch.setattr(api, "_NOTIFICATION_INTERVAL", 0.05)
+    host = FastAPI()
+    host.mount("/api/v1/llm4ad", platform.app)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    address = f"http://127.0.0.1:{sock.getsockname()[1]}"
+    server = uvicorn.Server(uvicorn.Config(host, log_level="error"))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+    thread.start()
+    counters = [tmp_path / "first-calls.txt", tmp_path / "second-calls.txt"]
+    specs = []
+    for index in range(2):
+        path = tmp_path / f"adapter_{index}.py"
+        outcome = ("await asyncio.sleep(30)" if disconnect else "raise EvaluationUnavailableError('Device detached')") if index == 0 else "return EvaluationResult(score=7, metrics={'accuracy': 7})"
+        path.write_text(
+            "import asyncio\nfrom pathlib import Path\n"
+            "from llm4ad.gateway.sdk import GatewayEvaluator, EvaluationResult, EvaluationUnavailableError\n"
+            "from llm4ad.gateway.sdk.contracts import EvaluationContract\n"
+            "class Evaluator(GatewayEvaluator):\n"
+            f"    contract = EvaluationContract.model_validate({CONTRACT!r})\n"
+            "    async def evaluate(self, job, reporter):\n"
+            f"        with Path({str(counters[index])!r}).open('a') as stream: stream.write('called\\n')\n"
+            f"        {outcome}\n"
+        )
+        specs.append(f"{path}:Evaluator")
+    first = Gateway(address, "first", [str(platform.owner.id)], specs[0], tmp_path / "gateway-first")
+    second = Gateway(address, "second", [str(platform.owner.id)], specs[1], tmp_path / "gateway-second")
+    original_request = first.request
+    blocked = False
+
+    async def transport(*args, **kwargs):
+        if blocked:
+            raise aiohttp.ClientConnectionError("Fixture network disconnected")
+        return await original_request(*args, **kwargs)
+
+    monkeypatch.setattr(first, "request", transport)
+    monkeypatch.setenv("LLM4AD_REMOTE_URL", address + "/api/v1/llm4ad/evaluation-gateways")
+    monkeypatch.setenv("LLM4AD_REMOTE_TOKEN", service.runtime_token(platform.task.id))
+    monkeypatch.setenv("LLM4AD_REMOTE_TASK_ID", str(platform.task.id))
+    config = RemoteEvaluatorConfig(contract=CONTRACT, lease_timeout=3)
+    with Session(platform.engine) as db:
+        task = db.get(Task, platform.task.id)
+        task.input_args = {"evaluator": config.model_dump(mode="json")}
+        db.add(task)
+        db.commit()
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    (candidate / "solution.py").write_text("def solve(): return 1\n")
+
+    async def until(predicate):
+        async with asyncio.timeout(25):
+            while not predicate():
+                await asyncio.sleep(0.02)
+
+    async def exercise():
+        nonlocal blocked
+        runners, request = [], None
+        try:
+            await until(lambda: server.started)
+            runners.append(asyncio.create_task(first.run()))
+            await until(lambda: len(platform.client.get(PREFIX).json()) == 1)
+            response = platform.client.post(PREFIX + "/register", json={
+                **second.identity, "name": "second", "allowed_user_ids": [str(platform.owner.id)],
+                "capacity": 1, "contract": CONTRACT, "protocol_version": 2,
+            })
+            assert response.status_code == 200
+            request = asyncio.create_task(evaluate_remote(config, EvalContext(project_root=str(candidate), timeout=60)))
+            await until(lambda: counters[0].exists())
+            if disconnect:
+                blocked = True
+            runners.append(asyncio.create_task(second.run()))
+            await until(request.done)
+            result = request.result()
+            assert result.success and result.score == 7
+            assert [path.read_text().splitlines() for path in counters] == [["called"], ["called"]]
+            history = result.metadata["attempt_history"]
+            assert [row["gateway_id"] for row in history] == [first.identity["id"], second.identity["id"]]
+            assert history[0]["failure_category"] == "infrastructure"
+            assert result.metadata["attempt_count"] == 2
+            with Session(platform.engine) as db:
+                jobs = db.exec(select(RemoteEvaluationJob)).all()
+                assert len(jobs) == 1 and jobs[0].state == "completed"
+        finally:
+            if request and not request.done():
+                request.cancel()
+            for runner in runners:
+                runner.cancel()
+            await asyncio.gather(*runners, *([request] if request else []), return_exceptions=True)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        sock.close()
+
+
+def test_pool_migration_preserves_legacy_identity_and_default_ownership(platform):
+    """Upgrade existing rows without silently enabling leased failover for old jobs."""
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    member = register(platform)
+    configure(platform, [member])
+    original = submit(platform, [member])
+    path = Path(api.__file__).resolve().parents[2] / "alembic/versions/c62f8a901de3_dynamic_evaluation_pool.py"
+    spec = importlib.util.spec_from_file_location("pool_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    with platform.engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
+        migration.downgrade()
+        migration.upgrade()
+    with Session(platform.engine) as db:
+        row = db.get(RemoteEvaluationJob, uuid.UUID(original["id"]))
+        gateway = db.get(EvaluationGateway, uuid.UUID(member["id"]))
+        assert str(row.attempt_id) == original["attempt_id"]
+        assert row.selection_mode == "selected" and row.max_attempts == 1
+        assert row.attempt_count == 0 and row.attempt_history == []
+        assert row.lease_expires_at is None
+        assert gateway.protocol_version == 1 and gateway.ready is True
+
+
+@pytest.mark.skipif(not os.environ.get("REMOTE_TEST_DATABASE_URL"), reason="Requires PostgreSQL row locks")
+def test_postgres_dynamic_pool_claims_preserve_unique_attempts_and_device_capacity(platform):
+    """Simultaneous claimers cannot reserve a phone twice or duplicate a candidate."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    submit_pool(platform, count=8)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        responses = list(pool.map(lambda gateway: claim(platform, gateway), [first, second, first, second]))
+    assigned = [row for row in responses if row is not None]
+    assert len(assigned) == len({row["id"] for row in assigned}) == 2
+    with Session(platform.engine) as db:
+        jobs = db.exec(select(RemoteEvaluationJob)).all()
+        for member in (first, second):
+            assert sum(str(job.gateway_id) == member["id"] and job.state == "accepted" for job in jobs) == 1
+        assert sum(job.state == "queued" and job.attempt_count == 0 for job in jobs) == 6
+
+
+@pytest.mark.skipif(not os.environ.get("REMOTE_TEST_DATABASE_URL"), reason="Requires PostgreSQL row locks")
+def test_artifact_streaming_does_not_block_attempt_lease_renewal(platform):
+    """A slow upload cannot hold the job lock and cause an otherwise healthy lease to expire."""
+    from sqlalchemy import text
+
+    member = register_pool_member(platform)
+    submit_pool(platform)
+    job = claim(platform, member)
+    content = b"two-chunk evaluation trace"
+    digest = hashlib.sha256(content).hexdigest()
+    renewals = []
+
+    def renew():
+        with Session(platform.engine) as session:
+            session.execute(text("SET LOCAL lock_timeout = '1000ms'"))
+            renewals.append(api.heartbeat(
+                uuid.UUID(member["id"]), session, body=api.Heartbeat(ready=False),
+                authorization=gateway_headers(member)["Authorization"],
+            ))
+
+    async def stream():
+        yield content[:8]
+        await asyncio.to_thread(renew)
+        yield content[8:]
+
+    with Session(platform.engine) as session:
+        result = asyncio.run(api.upload_artifact(
+            uuid.UUID(member["id"]), uuid.UUID(job["id"]), digest,
+            SimpleNamespace(stream=stream), session,
+            authorization=gateway_headers(member)["Authorization"], x_attempt_id=uuid.UUID(job["attempt_id"]),
+        ))
+    assert result["sha256"] == digest
+    assert len(renewals) == 1 and renewals[0]["jobs"][0]["attempt_id"] == job["attempt_id"]
+    assert platform.objects[result["object_key"]] == content
+
+
+def test_busy_untried_peer_does_not_block_an_available_pool_member(platform):
+    """Prefer another device only when it has a free execution slot."""
+    first, second = register_pool_member(platform), register_pool_member(platform)
+    submit_pool(platform, count=2)
+    original = claim(platform, first)
+    busy = claim(platform, second)
+    assert busy["id"] != original["id"]
+    assert report(platform, first, original, "failed", 1, {
+        "error_message": "Temporary transport failure", "metadata": {"failure_category": "infrastructure"},
+    }).json()["state"] == "queued"
+    retry = claim(platform, first)
+    assert retry["id"] == original["id"] and retry["dispatch_attempt"] == 2
+
+
+@pytest.mark.parametrize("requested_mode", ["auto", "selected"])
+def test_v1_submission_cannot_downgrade_a_frozen_automatic_pool_policy(platform, requested_mode):
+    """A runtime cannot evade the configured lease and shared attempt budget."""
+    member = register_pool_member(platform)
+    submit_pool(platform, members=[member])
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("solution.py", "def solve(): return 1\n")
+    response = platform.client.post(PREFIX + f"/tasks/{platform.task.id}/jobs", headers=runtime_headers(platform), json={
+        "id": str(uuid.uuid4()), "gateway_ids": [member["id"]], "selection_mode": requested_mode,
+        "contract": CONTRACT, "timeout": 5, "bundle": base64.b64encode(archive.getvalue()).decode(),
+    })
+    assert response.status_code == 422
+
+
+@pytest.mark.skipif(not os.environ.get("REMOTE_TEST_DATABASE_URL"), reason="Requires PostgreSQL row locks")
+def test_heartbeat_does_not_invert_the_expired_job_and_gateway_lock_order(platform):
+    """A renewal waiting on an expired job must not hold its gateway hostage."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import text
+
+    member = register_pool_member(platform)
+    submit_pool(platform)
+    original = claim(platform, member)
+    force_elapsed_lease(platform, original)
+    entered = threading.Event()
+    identity = []
+
+    def renew():
+        with Session(platform.engine) as session:
+            identity.append(session.execute(text("SELECT pg_backend_pid()")).scalar_one())
+            entered.set()
+            return api.heartbeat(uuid.UUID(member["id"]), session, authorization=gateway_headers(member)["Authorization"])
+
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with Session(platform.engine) as owner:
+            service.lock_job(owner, uuid.UUID(original["id"]))
+            future = workers.submit(renew)
+            assert entered.wait(3)
+            with Session(platform.engine) as observer:
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    observer.expire_all()
+                    waiting = observer.execute(text(
+                        "SELECT wait_event_type FROM pg_stat_activity WHERE pid=:pid"
+                    ), {"pid": identity[0]}).scalar_one()
+                    observer.commit()
+                    if waiting == "Lock":
+                        break
+                    time.sleep(0.01)
+                assert waiting == "Lock"
+            owner.execute(text("SET LOCAL lock_timeout = '1000ms'"))
+            owner.exec(select(EvaluationGateway).where(EvaluationGateway.id == uuid.UUID(member["id"])).with_for_update()).one()
+            owner.commit()
+        assert future.result(timeout=5)["jobs"] == []

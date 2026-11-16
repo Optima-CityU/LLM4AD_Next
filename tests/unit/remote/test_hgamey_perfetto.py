@@ -1,5 +1,6 @@
 """Verify owned capture recovery and honest window-scoped analysis without a phone."""
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -13,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3] / "src/llm4ad/gateway/examples/hgamey/protocol/upstream/selfsr"
 
 
@@ -20,7 +23,9 @@ def load(name):
     """Load adjacent helpers without requiring a device or Perfetto installation."""
     spec = importlib.util.spec_from_file_location(name, ROOT / (name + ".py"))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.syspath_prepend(str(ROOT))
+        spec.loader.exec_module(module)
     return module
 
 
@@ -36,10 +41,17 @@ class Device:
         """Select a bounded startup or cleanup failure for this fixture."""
         self.commands = []
         self.start_timeout, self.stop_missing, self.reboot = start_timeout, stop_missing, reboot
+        self.trace = b"test-only-trace"
+        self.reads = []
+        self.fail_chunk = None
+        self.removal_missing = False
 
     def su(self, command, timeout=15):
         """Return source content or exact owned recorder receipts."""
         self.commands.append(command)
+        if "stat -c '%s'" in command:
+            remote = shlex.split(command)[-1]
+            return f"fixture-device\nfixture-boot\n{len(self.trace)}\n{hashlib.sha256(self.trace).hexdigest()}  {remote}\n"
         if command.startswith("getprop ro.serialno;"):
             return "fixture-device\nfixture-boot\nfixture-fingerprint\n"
         if command.startswith("perfetto --version"):
@@ -53,7 +65,7 @@ class Device:
         if "LLM4AD_PERFETTO_STOPPED" in command:
             return "" if self.stop_missing else "TRACE_READY\nLLM4AD_PERFETTO_STOPPED\n"
         if "LLM4AD_PERFETTO_REMOVED" in command:
-            return "LLM4AD_PERFETTO_REMOVED\n"
+            return "" if self.removal_missing else "LLM4AD_PERFETTO_REMOVED\n"
         return ""
 
     def shell(self, command):
@@ -65,10 +77,21 @@ class Device:
 
     def adb(self, command, **kwargs):
         """Write only synthetic test evidence to the requested local fixture path."""
-        import shlex
-
         self.commands.append(command)
-        Path(shlex.split(command)[-1]).write_bytes(b"test-only-trace")
+        parts = shlex.split(command)
+        if parts[0] == "pull":
+            Path(parts[-1]).write_bytes(self.trace)
+            return
+        assert parts[:3] == ["exec-out", "su", "-c"] and kwargs["check"] is True
+        read = dict(token.split("=", 1) for token in shlex.split(parts[3]) if "=" in token)
+        size, skip = int(read["bs"]), int(read["skip"])
+        self.reads.append(skip)
+        data = self.trace[skip * size:(skip + 1) * size]
+        target = Path(parts[-1])
+        if skip == self.fail_chunk:
+            target.write_bytes(data[:1])
+            raise subprocess.TimeoutExpired("synthetic trace download", 60)
+        target.write_bytes(data)
 
 
 def test_powerstats_presence_does_not_advertise_empty_channels(tmp_path):
@@ -110,6 +133,175 @@ def test_owned_start_stop_retains_trace_and_receipt(tmp_path):
     stop = next(command for command in dev.commands if "LLM4AD_PERFETTO_STOPPED" in command)
     assert "kill -INT" in stop and "killall" not in stop
     assert recorder.state["remote"] in stop and "cmdline" in stop
+    assert dev.reads == [0]
+    assert not any(command.startswith("pull ") for command in dev.commands)
+
+
+def test_trace_download_failure_retains_confirmed_stop_and_resumes_original(tmp_path, monkeypatch):
+    """A partial download preserves exact bytes and cannot turn a stopped recorder into a live-resource failure."""
+    dev = Device()
+    dev.fail_chunk = 1
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    assert recorder.start()
+    transfer = load("evidence_transfer").download_root_file
+
+    def download(dev, remote, path, **kwargs):
+        return transfer(dev, remote, path, **kwargs, chunk_size=4, retries=1)
+
+    monkeypatch.setattr(capture, "download_root_file", download, raising=False)
+    state = recorder.state = capture.reconcile(dev, recorder.output)
+    assert state["recorder_stopped"] is True and state["recovery_unknown"] is False
+    assert state["cleanup_confirmed"] is False
+    assert state["status"] == "download_failed" and state["download_error"].startswith("TimeoutExpired:")
+    assert state["stop_attempts"] == 1 and not state.get("trace_retrieved")
+    assert not state.get("staging_removed")
+    assert not any("LLM4AD_PERFETTO_REMOVED" in command for command in dev.commands)
+    trace = recorder.output / "trace.pftrace"
+    assert not trace.exists() and trace.with_suffix(".pftrace.part").read_bytes() == dev.trace[:4]
+    persisted = json.loads((recorder.output / "perfetto-cleanup.json").read_text())
+    assert persisted == state
+    assert recorder.analyze() == state and "analysis" not in state
+    dev.fail_chunk = None
+    recovered = capture.reconcile(dev, recorder.output)
+    assert recovered["cleanup_confirmed"] is True and recovered["recovery_unknown"] is False
+    assert recovered["trace_retrieved"] is True and recovered["staging_removed"] is True
+    assert recovered["status"] == "captured" and "download_error" not in recovered
+    assert trace.read_bytes() == dev.trace and recovered["trace_sha256"] == hashlib.sha256(dev.trace).hexdigest()
+    assert dev.reads == [0, 1, 1, 2, 3]
+    assert sum("perfetto -D" in command for command in dev.commands) == 1
+    assert all(not command.startswith("pull ") for command in dev.commands)
+
+
+@pytest.mark.parametrize("receipt", [None, {}, {"complete": False}, {"complete": 1}])
+def test_unverified_trace_download_never_removes_staging(tmp_path, monkeypatch, receipt):
+    """Retain the owned remote trace when the transfer cannot confirm complete verified bytes."""
+    dev = Device()
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    monkeypatch.setattr(capture, "download_root_file", lambda *args, **kwargs: receipt, raising=False)
+    state = recorder.stop()
+    assert state["cleanup_confirmed"] is True and state["recovery_unknown"] is False
+    assert state["status"] == "data_unavailable" and state["download_error"]
+    assert not state.get("trace_retrieved")
+    assert state["trace_discarded"] is True and state["staging_removed"] is True
+    assert state["download_attempts"] == 2
+
+
+@pytest.mark.parametrize("retry_succeeds,removal_missing", [(True, False), (False, False), (False, True)])
+def test_stop_bounds_download_retries_and_requires_staging_cleanup(tmp_path, monkeypatch, retry_succeeds, removal_missing):
+    """Retry original bytes once, then explicitly discard unavailable remote data with strict cleanup receipts."""
+    dev = Device()
+    dev.fail_chunk, dev.removal_missing = 1, removal_missing
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    transfer = load("evidence_transfer").download_root_file
+
+    def download(dev, remote, path, **kwargs):
+        try:
+            return transfer(dev, remote, path, **kwargs, chunk_size=4, retries=1)
+        except subprocess.TimeoutExpired:
+            if retry_succeeds:
+                dev.fail_chunk = None
+            raise
+
+    monkeypatch.setattr(capture, "download_root_file", download)
+    state = recorder.stop()
+    assert state["download_attempts"] == 2 and state["recorder_stopped"] is True
+    assert state["cleanup_confirmed"] is not removal_missing and state["recovery_unknown"] is removal_missing
+    assert bool(state.get("staging_removed")) is not removal_missing
+    assert sum("perfetto -D" in command for command in dev.commands) == 1
+    assert sum("LLM4AD_PERFETTO_REMOVED" in command for command in dev.commands) == 1
+    trace = recorder.output / "trace.pftrace"
+    if retry_succeeds:
+        assert state["status"] == "captured" and state["trace_retrieved"] is True
+        assert trace.read_bytes() == dev.trace and not state.get("trace_discarded")
+        assert dev.reads == [0, 1, 1, 2, 3]
+    else:
+        assert state["status"] == "data_unavailable" and state["trace_discarded"] is True
+        assert state["trace_retrieved"] is False and not trace.exists()
+        assert trace.with_suffix(".pftrace.part").read_bytes() == dev.trace[:4]
+        assert json.loads(trace.with_suffix(".pftrace.transfer.json").read_text())["bytes_complete"] == 4
+        assert dev.reads == [0, 1, 1]
+        assert "analysis" not in recorder.analyze()
+
+
+def test_staging_removal_failure_remains_unresolved(tmp_path):
+    """Verified data cannot substitute for the explicit device staging cleanup receipt."""
+    dev = Device()
+    dev.removal_missing = True
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    state = recorder.stop()
+    assert state["trace_retrieved"] is True
+    assert state["cleanup_confirmed"] is False and state["recovery_unknown"] is True
+    assert not state.get("staging_removed")
+
+
+def test_missing_stop_receipt_never_downloads_or_removes_trace(tmp_path):
+    """An unresolved recorder remains a cleanup obligation even if trace data could be present."""
+    dev = Device(stop_missing=True)
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    state = recorder.stop()
+    assert state["cleanup_confirmed"] is False and state["recovery_unknown"] is True
+    assert dev.reads == []
+    assert not any(command.startswith("pull ") or "LLM4AD_PERFETTO_REMOVED" in command for command in dev.commands)
+
+
+def test_legacy_unverified_pull_file_is_preserved_as_unavailable_data(tmp_path):
+    """A legacy partial file cannot be overwritten, analyzed, or mistaken for an active recorder."""
+    dev = Device()
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    trace = recorder.output / "trace.pftrace"
+    trace.write_bytes(b"synthetic legacy incomplete adb pull")
+    state = recorder.stop()
+    assert state["cleanup_confirmed"] is True and state["recovery_unknown"] is False
+    assert state["status"] == "data_unavailable" and state["download_error"].startswith("FileExistsError:")
+    assert trace.read_bytes() == b"synthetic legacy incomplete adb pull"
+    assert not trace.with_suffix(".pftrace.transfer.json").exists()
+    assert not state.get("trace_retrieved") and state["staging_removed"] is True
+    assert state["trace_discarded"] is True and state["download_attempts"] == 2
+    assert "analysis" not in recorder.analyze()
+    assert not dev.reads and sum("LLM4AD_PERFETTO_REMOVED" in command for command in dev.commands) == 1
+
+
+def test_download_retry_rechecks_original_device_identity(tmp_path, monkeypatch):
+    """A previously confirmed stop cannot authorize later evidence cleanup on another phone."""
+    dev = Device()
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    monkeypatch.setattr(capture, "download_root_file", lambda *args, **kwargs: None)
+    assert capture.reconcile(dev, recorder.output)["recorder_stopped"] is True
+    monkeypatch.setattr(dev, "shell", lambda command: "another-phone")
+    state = capture.reconcile(dev, recorder.output)
+    assert state["cleanup_confirmed"] is False and state["recovery_unknown"] is True
+    assert "Physical phone changed" in state["cleanup_error"]
+    assert not any("LLM4AD_PERFETTO_REMOVED" in command for command in dev.commands)
+
+
+@pytest.mark.parametrize("identity_line", [0, 1])
+def test_transfer_source_must_match_original_capture_identity(tmp_path, monkeypatch, identity_line):
+    """A stable transfer from another device or boot cannot authorize trace publication or cleanup."""
+    dev = Device()
+    recorder = capture.Capture(dev, "fixture.game", 2, tmp_path / "capture", "A1")
+    recorder.start()
+    original = dev.su
+
+    def changed_source(command, **kwargs):
+        raw = original(command, **kwargs)
+        if "stat -c '%s'" in command:
+            lines = raw.splitlines()
+            lines[identity_line] = "different-identity"
+            return "\n".join(lines) + "\n"
+        return raw
+
+    monkeypatch.setattr(dev, "su", changed_source)
+    state = recorder.stop()
+    assert state["cleanup_confirmed"] is False and state["recovery_unknown"] is True
+    assert "Trace transfer identity differs" in state["cleanup_error"]
+    assert not state.get("trace_retrieved")
+    assert not any("LLM4AD_PERFETTO_REMOVED" in command for command in dev.commands)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Requires a POSIX shell and /dev/zero")

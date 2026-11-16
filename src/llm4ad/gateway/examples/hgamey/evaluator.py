@@ -11,18 +11,22 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import aiohttp
+from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, stop_before_delay, wait_exponential
 
 from llm4ad.evaluator.base import EvaluationResult
 from llm4ad.gateway.examples.hgamey.benchmark import Benchmark, canonical, compiler_logs, digest, write_json
-from llm4ad.gateway.sdk.errors import EvaluationError
+from llm4ad.gateway.examples.hgamey.configuration import NATIVE_RESTORATION_TIMEOUT, RESTORATION_HOOK_GRACE
+from llm4ad.gateway.sdk.checkpoints import TaskCheckpoints
+from llm4ad.gateway.sdk.errors import EvaluationPreparationError, EvaluationUnavailableError
 from llm4ad.remote import GatewayEvaluator, RemoteJob
 
 
-class CandidateCompilationError(EvaluationError):
+class CandidateCompilationError(EvaluationPreparationError):
     """Retain actionable candidate compiler feedback before device dispatch."""
 
 
@@ -30,6 +34,8 @@ class HGameyShaderEvaluator(GatewayEvaluator):
     """Bridge whole-candidate SDK jobs to the local serialized phone executor."""
 
     manages_evidence_retention = True
+    cleanup_timeout = NATIVE_RESTORATION_TIMEOUT + RESTORATION_HOOK_GRACE
+    evaluation_mode: str | None = None
 
     @classmethod
     def create_runtime(cls, environment: dict, evaluator: str):
@@ -43,8 +49,37 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         filename = filename or os.environ.get("HGAMEY_GATEWAY_CONFIG")
         if not filename:
             raise ValueError("Set HGAMEY_GATEWAY_CONFIG to your local settings JSON file")
-        self.benchmark = Benchmark(filename)
+        self.benchmark = Benchmark(filename, self.evaluation_mode)
         self.contract = self.benchmark.contract
+
+    def direct_store(self):
+        """Open receipts without creating an executor inside the assigned worker."""
+        if getattr(self.benchmark, "settings", {}).get("execution_backend") != "direct":
+            return None
+        from .execution.jobs import JobStore
+
+        return JobStore(self.benchmark.settings["executor_data"], self.benchmark.settings["executor_config"])
+
+    def require_result(self, result, state):
+        """Expose infrastructure failures to the SDK retry controller.
+
+        Args:
+            result: Converted measurement or an unavailable result.
+            state: Durable native submission identity and retained evidence.
+
+        Returns:
+            A valid measurement, including semantic candidate failures.
+
+        Raises:
+            EvaluationUnavailableError: Measurement or restoration is unavailable.
+        """
+        if result is None or result.metadata.get("infrastructure_failure") is True:
+            message = result.error_message if result is not None else "HGamey measurement or restoration is unavailable"
+            raise EvaluationUnavailableError(message, metadata={
+                "infrastructure_failure": True, "stage": "native_evaluation",
+                "external_job_id": state.get("external_job_id"),
+            })
+        return result
 
     async def rpc(self, session, method: str, path: str, body: dict | None = None, missing: bool = False):
         """Make one local HTTP request, distinguishing absent jobs from outages."""
@@ -56,20 +91,33 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             return await response.json()
 
     async def retry_rpc(self, session, reporter, method: str, path: str, body: dict | None = None, missing: bool = False):
-        """Keep device/transport interruptions out of algorithm failure samples."""
-        disconnected = False
-        while True:
-            try:
-                return await self.rpc(session, method, path, body, missing)
-            except aiohttp.ClientResponseError as error:
-                if error.status < 500 and error.status != 429:
-                    raise
-            except (TimeoutError, aiohttp.ClientError):
-                pass
-            if not disconnected:
-                reporter.progress("Waiting for the local HGamey executor to reconnect")
-                disconnected = True
-            await asyncio.sleep(self.benchmark.poll_interval)
+        """Bound leaf reads while keeping execution retries in the SDK controller."""
+        if method != "GET":
+            return await self.rpc(session, method, path, body, missing)
+        budget = 15.0
+        deadline = time.monotonic() + budget
+
+        def transient(error):
+            if isinstance(error, aiohttp.ClientResponseError):
+                return error.status >= 500 or error.status == 429
+            return isinstance(error, (TimeoutError, aiohttp.ClientError))
+
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3) | stop_before_delay(budget),
+                wait=wait_exponential(multiplier=1, max=2), retry=retry_if_exception(transient), reraise=True,
+                before_sleep=lambda _: reporter.progress("Retrying the local HGamey executor read"),
+            ):
+                with attempt:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("Original HGamey read deadline elapsed")
+                    async with asyncio.timeout(remaining):
+                        return await self.rpc(session, method, path, body, missing)
+        except (TimeoutError, aiohttp.ClientError) as error:
+            raise EvaluationUnavailableError("HGamey executor read retries exhausted", metadata={
+                "infrastructure_failure": True, "stage": "executor_read", "path": path,
+            }) from error
 
     async def check_executor(self, session, reporter, *, game_required: bool | None = None) -> None:
         """Confirm protocol capabilities and the configured physical device."""
@@ -102,6 +150,8 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         folder = self.benchmark.profile / "jobs" / key
         folder.mkdir(parents=True, exist_ok=True)
         owner = {"job_id": job.id, "attempt_id": job.attempt_id, "task_id": job.task_id, "data_version": self.benchmark.version}
+        if getattr(job, "execution_id", None):
+            owner["execution_id"] = job.execution_id
         ownership = folder / "owner.json"
         if ownership.exists() and json.loads(ownership.read_text()) != owner:
             raise RuntimeError("Staging directory belongs to another evaluation attempt")
@@ -113,17 +163,28 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         if game_required:
             self.benchmark.check_game_identity()
         candidate = Path(job.project_root) / "shader.comp"
+        checkpoints = TaskCheckpoints(
+            job, folder, inputs={"candidate.comp": candidate, "baseline.comp": self.benchmark.baseline},
+            context={"data_version": self.benchmark.version},
+        )
         source = folder / "candidate.comp"
-        shutil.copyfile(candidate, source)
         baseline = folder / "baseline.comp"
-        baseline.write_bytes(self.benchmark.baseline.read_bytes())
         if digest(baseline.read_bytes()) != self.benchmark.manifest["baseline_sha256"]:
             raise RuntimeError("The fixed baseline changed after this benchmark was registered")
         try:
-            self.benchmark.compile(baseline, folder / "baseline.spv")
+            checkpoints.run(
+                "baseline_shader", lambda: self.benchmark.compile(baseline, folder / "baseline.spv"),
+                outputs=["baseline.spv", "baseline.tool-0.log", "baseline.tool-1.log"], required=["baseline.spv"],
+            )
         except (ValueError, subprocess.TimeoutExpired) as error:
-            raise RuntimeError(f"The operator-owned baseline could not be compiled: {error}") from error
-        self.benchmark.compile(source, folder / "candidate.spv")
+            raise EvaluationPreparationError(
+                f"The operator-owned baseline could not be compiled: {error}",
+                metadata={"infrastructure_failure": True, "stage": "preparing"},
+            ) from error
+        checkpoints.run(
+            "candidate_shader", lambda: self.benchmark.compile(source, folder / "candidate.spv"),
+            outputs=["candidate.spv", "candidate.tool-0.log", "candidate.tool-1.log"], required=["candidate.spv"],
+        )
         request = self.benchmark.request_for(job.evaluation_profile)
         request["candidate_id"] = key
         request["payload"].update(
@@ -145,6 +206,8 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             "game_required": game_required,
             "remote_job_id": job.id,
             "remote_attempt_id": job.attempt_id,
+            "execution_id": getattr(job, "execution_id", None),
+            "submission_started": False,
             "evidence_directory": str(folder),
             "request": body,
             "request_sha256": digest(canonical(body)),
@@ -154,8 +217,17 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             },
         }
         if game_required:
-            baseline_layer = self.benchmark.build_game_layer(baseline, folder / "baseline-layer", "seed")
-            candidate_layer = self.benchmark.build_game_layer(source, folder / "candidate-layer", "candidate")
+            for name, kind in (("baseline", "seed"), ("candidate", "candidate")):
+                checkpoints.run(
+                    f"{name}_layer",
+                    lambda name=name, kind=kind: self.benchmark.build_game_layer(
+                        folder / f"{name}.comp", folder / f"{name}-layer", kind
+                    ),
+                    outputs=[f"{name}-layer", f"{name}-layer.log"],
+                    required=[f"{name}-layer/libVkLayer_refknobs.so"],
+                )
+            baseline_layer = folder / "baseline-layer/libVkLayer_refknobs.so"
+            candidate_layer = folder / "candidate-layer/libVkLayer_refknobs.so"
             self.benchmark.check_game_identity()
             for name, expected in state["files"].items():
                 if digest((folder / name).read_bytes()) != expected:
@@ -174,6 +246,15 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                     "candidate_id": key,
                     "candidate_source_sha256": state["files"]["candidate.comp"],
                     "baseline_source_sha256": state["files"]["baseline.comp"],
+                    "quality_replay": {
+                        "protocol": "same-input-gpu-replay@1",
+                        **{
+                            name.replace(".", "_") + "_path": self.benchmark.container_path(folder / name)
+                            for name in ("candidate.comp", "baseline.comp", "candidate.spv", "baseline.spv")
+                        },
+                        **{name.replace(".", "_") + "_sha256": state["files"][name]
+                           for name in ("candidate.comp", "baseline.comp", "candidate.spv", "baseline.spv")},
+                    } if self.benchmark.game_check["options"].get("quality_samples", 0) else None,
                 },
             }
             state["game"] = {
@@ -182,11 +263,16 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                 "request_sha256": digest(canonical(game_body)),
                 "submission_started": False,
             }
+        state = self.finalize_preparation(job, state)
         write_json(folder / "submission.json", state)
         return state
 
+    def finalize_preparation(self, job: RemoteJob, state: dict) -> dict:
+        """Freeze an adapter-specific submission before the first external request."""
+        return state
+
     async def before_task(self, job: RemoteJob, reporter: Any, operation: str) -> None:
-        """Freeze and compile fresh work, or validate a recovery without rebuilding.
+        """Prepare fresh work or resume SDK checkpoints before external submission.
 
         Args:
             job: Authoritative SDK attempt and evaluation profile.
@@ -204,10 +290,15 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             reporter.save_state(state)
             return
         if operation != "evaluate":
-            return
+            folder = submission.parent
+            owner = folder / "owner.json"
+            if not owner.is_file():
+                return
         reporter.progress("Compiling Genshin super-resolution Shader and fixed baseline")
         try:
             state = await asyncio.to_thread(self.prepare, job)
+        except EvaluationPreparationError:
+            raise
         except (ValueError, subprocess.TimeoutExpired) as error:
             raise CandidateCompilationError(
                 f"Shader compilation/validation failed: {error}",
@@ -217,6 +308,10 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                     "evidence_directory": str(self.benchmark.profile / "jobs" / self.benchmark.attempt_key(job)),
                 },
                 evolution_feedback={"stage": "compile", "diagnostics": str(error)},
+            ) from error
+        except Exception as error:
+            raise EvaluationPreparationError(
+                str(error), metadata={"infrastructure_failure": True, "stage": "preparing"}
             ) from error
         # Persist intent before any HTTP request that can schedule a phone experiment.
         reporter.save_state(state)
@@ -230,6 +325,8 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             raise RuntimeError("The saved evaluation profile differs from the accepted job")
         if state.get("remote_job_id") != job.id or state.get("remote_attempt_id") != job.attempt_id:
             raise RuntimeError("The saved job belongs to a different accepted attempt")
+        if state.get("execution_id") != getattr(job, "execution_id", None):
+            raise RuntimeError("The saved job belongs to a different local execution")
         folder = self.benchmark.profile / "jobs" / key
         if Path(state["evidence_directory"]) != folder or folder.is_symlink():
             raise RuntimeError("The saved staging directory differs from the accepted attempt")
@@ -240,6 +337,8 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             "task_id": job.task_id,
             "data_version": self.benchmark.version,
         }
+        if getattr(job, "execution_id", None):
+            expected["execution_id"] = job.execution_id
         if owner.is_symlink() or json.loads(owner.read_text()) != expected:
             raise RuntimeError("Staging directory belongs to another evaluation attempt")
         self.validate_frozen(state)
@@ -256,7 +355,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         """Reattach by durable external identity without repeating experiments."""
         state = reporter.saved_state
         if not state:
-            return None
+            raise EvaluationUnavailableError("HGamey recovery has no durable submission state")
         self.validate_prepared(job, state)
         return await self.resume(state, reporter)
 
@@ -272,7 +371,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             raise RuntimeError("Frozen game obligation differs from the accepted evaluation profile")
         if game_required:
             required_files.update({"baseline-layer/libVkLayer_refknobs.so", "candidate-layer/libVkLayer_refknobs.so"})
-            game = state.get("game")
+            game = state if state.get("operation") == "game-ab" else state.get("game")
             if not game or digest(canonical(game["request"])) != game["request_sha256"]:
                 raise RuntimeError("Frozen game submission is missing or changed")
         if not required_files.issubset(state["files"]):
@@ -293,12 +392,19 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         """Recover a lost submit response or follow an existing executor job."""
         self.validate_frozen(state)
         game_required = state.get("game_required", self.benchmark.game_check is not None)
+        if self.direct_store() is not None:
+            report = await self.follow_direct(state, reporter)
+            result = self.require_result(self.convert_report(report, state), state)
+            if game_required and result.success:
+                game_report = await self.follow_direct(state, reporter, game=True)
+                result = self.require_result(self.combine_game_report(result, game_report, state), state)
+            return result
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             await self.check_executor(session, reporter, game_required=game_required)
             report = await self.follow_job(session, reporter, state)
             if report is None:
-                return None
-            result = self.convert_report(report, state)
+                return self.require_result(None, state)
+            result = self.require_result(self.convert_report(report, state), state)
             if (
                 result is not None
                 and result.success
@@ -308,7 +414,57 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             if not game_required or result is None or not result.success:
                 return result
             game_report = await self.follow_job(session, reporter, state, game=True)
-            return self.combine_game_report(result, game_report, state)
+            return self.require_result(self.combine_game_report(result, game_report, state), state)
+
+    async def follow_direct(self, state: dict, reporter: Any, game: bool = False) -> dict:
+        """Execute native work synchronously inside the already assigned SDK worker.
+
+        Args:
+            state: Frozen candidate and native request identity.
+            reporter: SDK-owned durable observations and recovery state.
+            game: Whether this is the second arm of a legacy combined workflow.
+
+        Returns:
+            The original validated native report without invented measurements.
+        """
+        from .evidence import exported_result
+        from .execution.jobs import execute_job
+
+        store = self.direct_store()
+        intent = state["game"] if game else state
+        prefix = "game-" if game else ""
+        try:
+            item = store.get_by_key(intent["idempotency_key"])
+        except KeyError:
+            if intent.get("external_job_id"):
+                raise EvaluationUnavailableError("Previously accepted native operation is missing; refusing replay") from None
+            intent["submission_started"] = True
+            reporter.save_state(state)
+            item = store.prepare(intent["request"], direct=True)
+        if intent.get("external_job_id") not in (None, item["id"]):
+            raise EvaluationUnavailableError("Native operation identity changed; refusing replay")
+        intent["external_job_id"] = item["id"]
+        reporter.save_state(state)
+        folder = store.jobs / item["id"]
+        if item["state"] == "queued":
+            reporter.progress("Running native HGamey workflow directly in the assigned SDK worker")
+            item = execute_job(folder)
+        write_json(Path(state["evidence_directory"]) / f"{prefix}executor-job.json", item)
+        if item["state"] not in {"completed", "failed"} or item.get("cleanup_status") != "completed":
+            raise EvaluationUnavailableError("Native execution needs automatic restoration", metadata={
+                "infrastructure_failure": True, "external_job_id": item["id"], "native_state": item["state"],
+            })
+        try:
+            report = exported_result(folder)
+        except (OSError, ValueError) as error:
+            raise EvaluationUnavailableError("Native execution returned no valid report") from error
+        preparation = report.get("preparation", {})
+        if (item["state"] == "failed" and report.get("external_cleanup_confirmed") is True
+            and preparation.get("job_id") == item["id"] and preparation.get("device_id") == item["device_id"]
+            and preparation.get("device_started") is False):
+            report["preparation_failure_verified"] = True
+        write_json(Path(state["evidence_directory"]) / f"{prefix}report.json", report)
+        return report
 
     async def after_task(self, job: RemoteJob, reporter: Any, operation: str, *, result=None, error=None) -> None:
         """Finalize diagnostics and completed evidence without deleting frozen work.
@@ -364,11 +520,12 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             Diagnostics for optional screenshots that could not be retained.
         """
         errors = []
+        scope = state.get("artifact_scope", "game")
         for item in report.get("artifacts", []):
             optional = (
                 isinstance(item, dict)
                 and isinstance(item.get("name"), str)
-                and re.fullmatch(r"shots/[AB][12]\.png", item["name"]) is not None
+                and (self.evaluation_mode is not None or re.fullmatch(r"shots/[AB][12]\.png", item["name"]) is not None)
                 and item.get("media_type") == "image/png"
             )
             try:
@@ -377,7 +534,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                 if not optional:
                     raise
                 status = f" (HTTP {error.status})" if isinstance(error, aiohttp.ClientResponseError) else ""
-                errors.append(f"game/{item['name']}: {type(error).__name__}{status}")
+                errors.append(f"{scope}/{item['name']}: {type(error).__name__}{status}")
                 reporter.progress(f"Optional screenshot {item['name']} unavailable; measurement result retained")
         return errors
 
@@ -385,7 +542,9 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         """Retrieve one checksum-bound file, with bounded optional screenshot transport."""
         if not isinstance(item, dict):
             raise ValueError("Invalid executor evidence manifest")
-        folder = Path(state["evidence_directory"]) / "game-artifacts"
+        scope = state.get("artifact_scope", "game")
+        intent = state if self.evaluation_mode is not None else state["game"]
+        folder = Path(state["evidence_directory"]) / f"{scope}-artifacts"
         name = item.get("name", "")
         checksum = item.get("sha256", "")
         size = item.get("size")
@@ -401,48 +560,59 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             raise ValueError("Invalid executor evidence manifest")
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / checksum
+        store = self.direct_store()
+        if store is not None and not target.exists():
+            from .evidence import artifact_bytes
+
+            content = artifact_bytes(store.jobs / intent["external_job_id"], item)
+            if len(content) != size or digest(content) != checksum:
+                raise ValueError("Native evidence checksum differs from the declared identity")
+            target.write_bytes(content)
         if not target.exists():
-            while True:
-                temporary = target.with_suffix(".partial")
-                try:
-                    async with session.get(
-                        self.benchmark.url + f"/v1/jobs/{state['game']['external_job_id']}/artifacts/{checksum}",
-                        timeout=aiohttp.ClientTimeout(total=15 if optional else 120),
-                    ) as response:
-                        response.raise_for_status()
-                        written = 0
-                        with temporary.open("wb") as stream:
-                            async for chunk in response.content.iter_chunked(65536):
-                                written += len(chunk)
-                                if written > size:
-                                    raise ValueError("Executor evidence exceeds its declared size")
-                                stream.write(chunk)
-                    if written != size or digest(temporary.read_bytes()) != checksum:
-                        raise ValueError("Executor evidence checksum mismatch")
-                    temporary.replace(target)
-                    break
-                except aiohttp.ClientResponseError as error:
-                    if optional or (error.status < 500 and error.status != 429):
-                        raise
-                    reporter.progress("Waiting to retrieve completed phone trace evidence")
-                    await asyncio.sleep(self.benchmark.poll_interval)
-                except (aiohttp.ClientError, TimeoutError):
-                    if optional:
-                        raise
-                    reporter.progress("Waiting to retrieve completed phone trace evidence")
-                    await asyncio.sleep(self.benchmark.poll_interval)
-                finally:
-                    original_error = sys.exception()
+            budget = 15.0 if optional else 120.0
+            deadline = time.monotonic() + budget
+
+            def retryable(error):
+                if isinstance(error, aiohttp.ClientResponseError):
+                    return error.status >= 500 or error.status == 429
+                return isinstance(error, (aiohttp.ClientError, TimeoutError))
+
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3) | stop_before_delay(budget),
+                wait=wait_exponential(multiplier=0.05, max=0.5), retry=retry_if_exception(retryable), reraise=True,
+            ):
+                with attempt:
+                    temporary = target.with_suffix(".partial")
                     try:
-                        temporary.unlink(missing_ok=True)
-                    except OSError:
-                        # Cleanup must not replace an in-flight cancellation or transport error.
-                        if original_error is None:
-                            raise
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise TimeoutError("Original HGamey evidence read deadline elapsed")
+                        async with session.get(
+                            self.benchmark.url + f"/v1/jobs/{intent['external_job_id']}/artifacts/{checksum}",
+                            timeout=aiohttp.ClientTimeout(total=remaining),
+                        ) as response:
+                            response.raise_for_status()
+                            written = 0
+                            with temporary.open("wb") as stream:
+                                async for chunk in response.content.iter_chunked(65536):
+                                    written += len(chunk)
+                                    if written > size:
+                                        raise ValueError("Executor evidence exceeds its declared size")
+                                    stream.write(chunk)
+                        if written != size or digest(temporary.read_bytes()) != checksum:
+                            raise ValueError("Executor evidence checksum mismatch")
+                        temporary.replace(target)
+                    finally:
+                        original_error = sys.exception()
+                        try:
+                            temporary.unlink(missing_ok=True)
+                        except OSError:
+                            if original_error is None:
+                                raise
         if target.stat().st_size != size or digest(target.read_bytes()) != checksum:
             raise ValueError("Retained executor evidence changed")
         reporter.artifact(
-            "game/" + name, target, item.get("media_type", "application/octet-stream"),
+            scope + "/" + name, target, item.get("media_type", "application/octet-stream"),
             description=item.get("description", ""),
         )
 
@@ -453,24 +623,32 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         folder = Path(state["evidence_directory"])
         item = await self.retry_rpc(session, reporter, "GET", f"/v1/jobs/by-key/{intent['idempotency_key']}", missing=True)
         if (
-            state.get("game_required", self.benchmark.game_check is not None)
+            (self.evaluation_mode is not None or state.get("game_required", self.benchmark.game_check is not None))
             and intent.get("external_job_id")
             and (item is None or item["id"] != intent["external_job_id"])
         ):
             reporter.progress("Previously accepted executor job is missing or changed; refusing to replay it")
             return None
         if item is None:
-            if game:
+            if game or self.evaluation_mode is not None:
                 # Persist the uncertainty boundary before a POST can reach the executor.
                 intent["submission_started"] = True
                 reporter.save_state(state)
             try:
                 item = await self.retry_rpc(session, reporter, "POST", "/v1/jobs", intent["request"])
-            except aiohttp.ClientResponseError as error:
-                if not game:
-                    raise
-                reporter.progress(f"Game validation submission is unsupported or invalid (HTTP {error.status})")
-                return None
+            except (TimeoutError, aiohttp.ClientError) as error:
+                if isinstance(error, aiohttp.ClientResponseError) and error.status < 500 and error.status != 429:
+                    raise EvaluationPreparationError(
+                        f"HGamey executor rejected the frozen submission (HTTP {error.status})",
+                        metadata={"infrastructure_failure": True, "stage": "executor_submit"},
+                    ) from error
+                # A response can be lost after durable acceptance. Read its key
+                # before allowing the SDK to select a new execution identity.
+                item = await self.retry_rpc(
+                    session, reporter, "GET", f"/v1/jobs/by-key/{intent['idempotency_key']}", missing=True
+                )
+                if item is None:
+                    raise EvaluationUnavailableError("HGamey submission acknowledgement is unavailable") from error
         intent["external_job_id"] = item["id"]
         reporter.save_state(state)
         previous = None
@@ -493,6 +671,17 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             if report is None:
                 reporter.progress("No valid phone measurement report; inspect local executor evidence")
                 return None
+            report.pop("preparation_failure_verified", None)
+            preparation = report.get("preparation", {})
+            if (
+                phase == "failed" and item.get("cleanup_status") == "completed"
+                and report.get("status") == "ERROR" and report.get("external_cleanup_confirmed") is True
+                and isinstance(preparation, dict) and preparation.get("schema") == "hgamey/device-preparation@1"
+                and preparation.get("job_id") == item["id"]
+                and preparation.get("device_id") == intent["request"]["device_id"]
+                and preparation.get("device_started") is False
+            ):
+                report["preparation_failure_verified"] = True
             try:
                 write_json(folder / f"{prefix}report.json", report)
             except (TypeError, ValueError):
@@ -545,6 +734,9 @@ class HGameyShaderEvaluator(GatewayEvaluator):
 
     def convert_report(self, report: dict, state: dict) -> EvaluationResult | None:
         """Preserve HGamey validity and provenance while exposing platform metrics."""
+        preparation = self.preparation_failure(report, state)
+        if preparation is not None:
+            return preparation
         if (
             report.get("source") != "phonefarm"
             or report.get("kind") != "shader"
@@ -592,12 +784,47 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         metadata["evaluation_summary"] = summary
         if status in {"CRASH", "SLOW", "POOR_QUALITY"}:
             metadata["candidate_failure"] = True
+            feedback = {"status": status, "verdict": report.get("verdict"), "metrics": metrics}
+            error_message = f"HGamey candidate verdict: {status}"
+            if status == "POOR_QUALITY":
+                metadata["failure_type"] = "CandidateQualityRejected"
+                feedback["guidance"] = (
+                    "Consider preserving the baseline's coordinate and interpolation floating-point operation order. "
+                    "Reassociation (such as hoisting input_size / output_size) may change quantized pixels and is "
+                    "only one possible source of a quality regression."
+                )
+                details = ["quality constraint rejected"]
+                candidate_psnr = metrics.get("psnr_db")
+                if candidate_psnr is not None:
+                    feedback["candidate_psnr_db"] = candidate_psnr
+                    details.append(f"candidate PSNR {candidate_psnr:.8f} dB")
+                baseline_metrics = report.get("baseline_metrics", {})
+                baseline_psnr = baseline_metrics.get("psnr_db") if isinstance(baseline_metrics, dict) else None
+                if (
+                    isinstance(baseline_psnr, (int, float))
+                    and not isinstance(baseline_psnr, bool)
+                    and math.isfinite(baseline_psnr)
+                ):
+                    baseline_psnr = float(baseline_psnr)
+                    feedback["baseline_psnr_db"] = baseline_psnr
+                    feedback["quality_gate"] = {
+                        "min_psnr_db": baseline_psnr,
+                        "source": "same_run_baseline",
+                        "comparison": "candidate_psnr_db >= min_psnr_db",
+                    }
+                    details.append(f"same-run baseline minimum PSNR {baseline_psnr:.8f} dB")
+                    if candidate_psnr is not None:
+                        delta = candidate_psnr - baseline_psnr
+                        if math.isfinite(delta):
+                            feedback["psnr_delta_db"] = delta
+                            details.append(f"PSNR delta {delta:+.8f} dB")
+                error_message += "; " + "; ".join(details)
             return EvaluationResult(
                 success=False,
                 metrics=metrics,
-                error_message=f"HGamey candidate verdict: {status}",
+                error_message=error_message,
                 metadata=metadata,
-                evolution_feedback={"status": status, "verdict": report.get("verdict"), "metrics": metrics},
+                evolution_feedback=feedback,
             )
         if status not in {"PASS", "REJECT"}:
             raise RuntimeError(f"Unknown measurement status: {status}")
@@ -644,16 +871,70 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             },
         )
 
+    def preparation_failure(self, report: dict, state: dict) -> EvaluationResult | None:
+        """Return a known infrastructure failure when no device execution began.
+
+        Args:
+            report: Executor report verified against its terminal job receipt.
+            state: Accepted submission and remote-attempt provenance.
+
+        Returns:
+            An unscored failure for verified read-only preparation failures, or
+            None when ordinary measurement and recovery validation must apply.
+        """
+        if report.get("preparation_failure_verified") is not True:
+            return None
+        return EvaluationResult(
+            success=False, metrics={}, error_message=report.get("error") or "Device connection preparation failed",
+            metadata={
+                "infrastructure_failure": True, "failure_type": "DevicePreparationFailure",
+                "external_execution_started": False, "external_cleanup_confirmed": True,
+                "external_job_id": state.get("external_job_id"),
+                "remote_job_id": state.get("remote_job_id"), "remote_attempt_id": state.get("remote_attempt_id"),
+                "data_version": self.benchmark.version, "report": report,
+            },
+        )
+
     async def cancel(self, job: RemoteJob, saved_state: dict) -> bool:
         """Confirm cancellation only after executor-side execution and cleanup end."""
         if not saved_state:
-            return False
+            return True
+        store = self.direct_store()
+        if store is not None:
+            from .execution.jobs import restore_job
+
+            if saved_state.get("remote_job_id") != job.id or saved_state.get("remote_attempt_id") != job.attempt_id:
+                raise ValueError("Restoration state belongs to another SDK attempt")
+            confirmed = True
+            for intent in [saved_state, *([saved_state["game"]] if "game" in saved_state else [])]:
+                try:
+                    item = store.get_by_key(intent["idempotency_key"])
+                except KeyError:
+                    confirmed &= intent.get("submission_started") is False and not intent.get("external_job_id")
+                    continue
+                request = dict(intent["request"])
+                request.pop("idempotency_key", None)
+                encoded = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+                frozen = json.loads((store.jobs / item["id"] / "input.json").read_text())
+                from .execution.devices import load_devices
+
+                expected = next((device for device in load_devices(store.config) if device["id"] == item["device_id"]), None)
+                if (item.get("idempotency_key") != intent["idempotency_key"]
+                    or item.get("submission_hash") != digest(encoded)
+                    or frozen.get("idempotency_key") != intent["idempotency_key"]
+                    or expected is None or frozen["device"]["expected_serial"] != expected["expected_serial"]):
+                    raise ValueError("Persisted native cleanup identity differs from the owned request or device")
+                confirmed &= await asyncio.to_thread(restore_job, store.jobs / item["id"])
+            return confirmed
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             confirmed = True
             intents = [saved_state]
             if "game" in saved_state:
                 intents.append(saved_state["game"])
-            elif saved_state.get("game_required", self.benchmark.game_check is not None):
+            elif (
+                saved_state.get("game_required", self.benchmark.game_check is not None)
+                and saved_state.get("operation") != "game-ab"
+            ):
                 confirmed = False
             for intent in intents:
                 try:

@@ -12,6 +12,8 @@ import sys
 import uuid
 from pathlib import Path
 
+from evidence_transfer import download_root_file
+
 
 def save(path: Path, value: dict) -> None:
     """Atomically retain capture intent and recovery receipts."""
@@ -200,11 +202,16 @@ cat {remote}/pid
             return False
 
     def stop(self):
-        """Stop only this recorder, retrieve the original trace and retain failures."""
-        self.state = reconcile(self.dev, self.output)
-        if self.state.get("recovery_unknown") and self.state.get("cleanup_error", "").startswith("TimeoutExpired:"):
-            # Reconcile only the same owned recorder; never replay the experiment.
+        """Stop this recorder, retry its download once, then clean up unavailable trace data."""
+        for _ in range(2):
             self.state = reconcile(self.dev, self.output)
+            if self.state.get("status") == "download_failed" and not self.state.get("recovery_unknown"):
+                continue
+            if self.state.get("recovery_unknown") and self.state.get("cleanup_error", "").startswith("TimeoutExpired:"):
+                continue
+            break
+        if self.state.get("status") == "download_failed" and not self.state.get("recovery_unknown"):
+            self.state = reconcile(self.dev, self.output, discard_trace=True)
         return self.state
 
     def analyze(self):
@@ -244,19 +251,26 @@ cat {remote}/pid
         return self.state
 
 
-def reconcile(dev, output: Path) -> dict:
+def reconcile(dev, output: Path, *, discard_trace: bool = False) -> dict:
     """Recover an exact persisted recorder after interruption, without replaying it.
 
     Args:
         dev: Existing leased Dev transport bound to the original phone.
         output: Directory containing the original capture intent.
+        discard_trace: Explicitly remove owned staging after exhausted download
+            attempts, retaining local partial bytes and unavailable diagnostics.
 
     Returns:
-        Updated cleanup receipt; uncertainty remains durable when transport fails.
+        Updated receipt distinguishing stopped device resources from trace download
+        failures. Failed downloads retain their remote staging and checkpoints.
     """
     output = Path(output)
     state = json.loads((output / "perfetto-cleanup.json").read_text())
-    if not state.get("submitted") or state.get("cleanup_confirmed") is True:
+    if not state.get("submitted") or (
+        state.get("cleanup_confirmed") is True
+        and state.get("recovery_unknown") is False
+        and state.get("staging_removed") is True
+    ):
         return state
     remote = state["remote"]
     if not re.fullmatch(r"/data/local/tmp/llm4ad_perfetto_[a-f0-9]{32}", remote):
@@ -306,22 +320,46 @@ echo LLM4AD_PERFETTO_STOPPED
         (output / "stop.txt").write_text(raw)
         if not raw.rstrip().endswith("LLM4AD_PERFETTO_STOPPED"):
             raise ValueError("Owned recorder stop receipt is missing")
-        state.update(cleanup_confirmed=True, recovery_unknown=False)
-        if "TRACE_READY\n" in raw:
+        state.update(cleanup_confirmed=False, recovery_unknown=False, recorder_stopped=True, staging_removed=False)
+        state.pop("cleanup_error", None)
+        save(output / "perfetto-cleanup.json", state)
+        if discard_trace:
+            state.update(status="data_unavailable", trace_retrieved=False, trace_discarded=True)
+            save(output / "perfetto-cleanup.json", state)
+        elif "TRACE_READY\n" in raw:
             local = output / "trace.pftrace"
-            dev.adb("pull " + shlex.quote(remote + "/trace.pftrace") + " " + shlex.quote(str(local)), timeout=40, check=True)
-            if local.is_file() and local.stat().st_size:
+            state["download_attempts"] = state.get("download_attempts", 0) + 1
+            try:
+                receipt = download_root_file(dev, remote + "/trace.pftrace", local, timeout=180)
+                if not isinstance(receipt, dict) or receipt.get("complete") is not True:
+                    raise ValueError("Trace transfer did not confirm complete verified bytes")
+                if not local.is_file() or not local.stat().st_size:
+                    raise ValueError("Verified trace is empty or missing")
+            except (Exception, KeyboardInterrupt) as error:
                 state.update(
-                    trace_retrieved=True,
-                    trace_bytes=local.stat().st_size,
-                    trace_sha256=hashlib.sha256(local.read_bytes()).hexdigest(),
+                    status="download_failed",
+                    trace_retrieved=False,
+                    staging_retained=True,
+                    download_error=f"{type(error).__name__}: {error}",
                 )
+                return state
+            source = receipt.get("source", {})
+            if source.get("serial") != physical or source.get("boot_id") != boot:
+                raise ValueError("Trace transfer identity differs from the original recorder device")
+            state.update(
+                trace_retrieved=True,
+                trace_bytes=local.stat().st_size,
+                trace_sha256=hashlib.sha256(local.read_bytes()).hexdigest(),
+            )
+            state.pop("download_error", None)
         removal = dev.su(f"rm -rf {remote}; [ ! -e {remote} ] && echo LLM4AD_PERFETTO_REMOVED", timeout=15)
         if not removal.rstrip().endswith("LLM4AD_PERFETTO_REMOVED"):
             raise ValueError("Owned staging cleanup could not be confirmed")
         state["staging_removed"] = True
+        state["staging_retained"] = False
+        state.update(cleanup_confirmed=True, recovery_unknown=False)
         state.pop("cleanup_error", None)
-        if state.get("status") == "recording":
+        if state.get("status") in {"recording", "download_failed"}:
             state["status"] = "captured" if state.get("trace_retrieved") else "unavailable"
     except (Exception, KeyboardInterrupt) as error:
         partial = getattr(error, "stdout", None) or getattr(error, "output", "") or ""

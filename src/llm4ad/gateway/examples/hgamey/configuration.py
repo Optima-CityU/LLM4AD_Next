@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -13,6 +14,20 @@ from urllib.parse import urlsplit
 from llm4ad.gateway.configuration import flag, number
 from llm4ad.gateway.sdk.runtime import cleanup_options
 from llm4ad.gateway.sdk.storage import persist as persist
+
+NATIVE_RESTORATION_TIMEOUT = 150.0
+RESTORATION_HOOK_GRACE = 30.0
+
+
+def implementation_identity(directory: Path) -> str:
+    """Version generated profiles when installed adapter code or native inputs change."""
+    identity = hashlib.sha256()
+    paths = [*sorted(directory.rglob("*.py")), directory / "native/source-manifest.json"]
+    for path in paths:
+        if path.is_file():
+            identity.update(path.relative_to(directory).as_posix().encode() + b"\0")
+            identity.update(hashlib.sha256(path.read_bytes()).digest())
+    return identity.hexdigest()
 
 
 def configure(environment: dict, executor, adapter_directory: Path) -> dict:
@@ -103,6 +118,9 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
         raise ValueError("EXECUTOR_PORT must be at most 65535")
     settings = json.loads((adapter_directory / "config/settings.json").read_text(encoding="utf-8"))
     settings.update(
+        execution_backend="direct",
+        executor_data=str(Path(environment.get("EXECUTOR_DATA", "/data")).absolute()),
+        executor_config=str(devices_file.absolute()),
         executor_url=f"http://127.0.0.1:{port}",
         inputs_root=str(root / "staging"),
         executor_inputs_prefix=str(root / "staging"),
@@ -123,29 +141,34 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
             raise ValueError("HGAMEY_GAME_CHECK_CONFIG must contain a game-check object")
         game_check.setdefault("builder_path", str(adapter_directory / "compilation/game_layer.py"))
         settings["game_check"] = game_check
+    default_modes = "static,game" if settings.get("game_check") else "static"
+    modes = list(dict.fromkeys(
+        value.strip() for value in environment.get("HGAMEY_EVALUATOR_MODES", default_modes).split(",") if value.strip()
+    ))
+    if not modes or set(modes) - {"static", "game", "legacy"} or "legacy" in modes and len(modes) != 1:
+        raise ValueError("HGAMEY_EVALUATOR_MODES must select static, game, or a single legacy binding")
+    if "game" in modes and not settings.get("game_check"):
+        raise ValueError("Real-game evaluation requires HGAMEY_GAME_CHECK_CONFIG")
+    if environment.get("HGAMEY_GAME_SCORING_JSON"):
+        settings["game_scoring"] = json.loads(environment["HGAMEY_GAME_SCORING_JSON"])
     request = settings["request"]
     request["package"] = environment.get("HGAMEY_PACKAGE", "com.miHoYo.Yuanshen")
     request["workload"]["seconds"] = number(environment, "HGAMEY_EVAL_SECONDS", 5, integer=True, minimum=1)
     request["protocol"]["rounds"] = number(environment, "HGAMEY_EVAL_ROUNDS", 8, integer=True, minimum=2)
-    settings["evaluation_profiles"] = {
-        "standard": {"seconds": request["workload"]["seconds"], "rounds": request["protocol"]["rounds"]},
-        "elite": {
-            "seconds": number(
-                environment,
-                "HGAMEY_ELITE_EVAL_SECONDS",
-                max(5, request["workload"]["seconds"]),
-                integer=True,
-                minimum=1,
-            ),
-            "rounds": number(
-                environment,
-                "HGAMEY_ELITE_EVAL_ROUNDS",
-                max(16, request["protocol"]["rounds"]),
-                integer=True,
-                minimum=2,
-            ),
-        },
-    }
+    if modes == ["legacy"]:
+        settings["evaluation_profiles"] = {
+            "standard": {"seconds": request["workload"]["seconds"], "rounds": request["protocol"]["rounds"]},
+            "elite": {
+                "seconds": number(
+                    environment, "HGAMEY_ELITE_EVAL_SECONDS", max(5, request["workload"]["seconds"]), integer=True, minimum=1
+                ),
+                "rounds": number(
+                    environment, "HGAMEY_ELITE_EVAL_ROUNDS", max(16, request["protocol"]["rounds"]), integer=True, minimum=2
+                ),
+            },
+        }
+    else:
+        settings.pop("evaluation_profiles", None)
     request["protocol"]["p_threshold"] = number(environment, "HGAMEY_P_THRESHOLD", 0.01, minimum=0.000001)
     request["conditions"].update(
         cool_c=number(environment, "HGAMEY_COOL_C", 50, minimum=1),
@@ -161,30 +184,31 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
         quality_baseline_db=number(environment, "HGAMEY_QUALITY_BASELINE_DB", 30),
     )
     profiles = []
+    implementation = implementation_identity(adapter_directory)
     for device in devices:
-        device_settings = {
-            **settings,
-            "device_id": device["id"],
-            "expected_serial": device["expected_serial"],
-            "device_profile": device_profiles[device["id"]],
-        }
-        fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "settings": device_settings,
-                    "profile_version": environment.get("HGAMEY_PROFILE_VERSION", "genshin-sr-v1"),
-                },
-                sort_keys=True,
-            ).encode()
-        ).hexdigest()
-        profiles.append(
-            {
-                "device": device,
-                "name": name if len(devices) == 1 else f"{name} / {device['label']} ({device['id']})",
-                "settings": device_settings,
-                "settings_path": root / "config" / f"{fingerprint}.json",
-            }
-        )
+        for mode in modes:
+            device_settings = copy.deepcopy(settings)
+            device_settings.update(
+                device_id=device["id"], expected_serial=device["expected_serial"], device_profile=device_profiles[device["id"]]
+            )
+            label = name if len(devices) == 1 else f"{name} / {device['label']} ({device['id']})"
+            if mode != "legacy":
+                device_settings["evaluation_mode"] = mode
+                label += " / " + ("Static images" if mode == "static" else "Genshin game")
+                if mode == "static":
+                    device_settings.pop("game_check", None)
+                    device_settings.pop("game_scoring", None)
+            fingerprint = hashlib.sha256(
+                json.dumps(
+                    {"settings": device_settings, "implementation": implementation,
+                     "profile_version": environment.get("HGAMEY_PROFILE_VERSION", "genshin-sr-v1")},
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
+            profiles.append({
+                "device": device, "mode": mode, "name": label,
+                "settings": device_settings, "settings_path": root / "config" / f"{fingerprint}.json",
+            })
     return {
         "root": root,
         "server": server,

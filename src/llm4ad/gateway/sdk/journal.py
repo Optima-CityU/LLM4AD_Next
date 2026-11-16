@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import shutil
 import sqlite3
@@ -12,11 +13,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 
+def sqlite_contention(error: sqlite3.OperationalError) -> bool:
+    """Recognize primary and extended SQLite busy/locked codes as transient contention."""
+    return getattr(error, "sqlite_errorcode", 0) & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+
+
 @contextmanager
 def gateway_lease(directory: Path):
     """Hold an OS-released SQLite lease for one gateway instance per directory."""
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    connection = sqlite3.connect(directory / "gateway.lock.sqlite3", timeout=0)
+    connection = sqlite3.connect(directory / "gateway.lock.sqlite3", timeout=0, check_same_thread=False)
     try:
         connection.execute("BEGIN EXCLUSIVE")
         yield
@@ -52,23 +58,32 @@ class Journal:
                 "PRIMARY KEY(job_id,attempt_id))"
             )
             db.execute(
+                "CREATE TABLE IF NOT EXISTS attempt_leases (job_id TEXT,attempt_id TEXT,deadline REAL NOT NULL,"
+                "expired INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(job_id,attempt_id))"
+            )
+            db.execute(
                 "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, "
                 "attempt_id TEXT, created_at REAL, level TEXT, kind TEXT, message TEXT, data TEXT NOT NULL)"
             )
-            db.execute(
-                "CREATE INDEX IF NOT EXISTS messages_attempt ON messages(job_id,attempt_id,id)"
-            )
+            db.execute("CREATE INDEX IF NOT EXISTS messages_attempt ON messages(job_id,attempt_id,id)")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS execution_controls (job_id TEXT, attempt_id TEXT, status TEXT NOT NULL, "
-                "stop_requested TEXT NOT NULL DEFAULT '', PRIMARY KEY(job_id,attempt_id))"
+                "stop_requested TEXT NOT NULL DEFAULT '', paused_at REAL, paused_seconds REAL NOT NULL DEFAULT 0, "
+                "PRIMARY KEY(job_id,attempt_id))"
             )
+            control_columns = {row[1] for row in db.execute("PRAGMA table_info(execution_controls)")}
+            for column, definition in (
+                ("paused_at", "REAL"),
+                ("paused_seconds", "REAL NOT NULL DEFAULT 0"),
+                ("controller_seen_at", "REAL"),
+            ):
+                if column not in control_columns:
+                    db.execute(f"ALTER TABLE execution_controls ADD COLUMN {column} {definition}")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS local_log_attempts (job_id TEXT, attempt_id TEXT, snapshot TEXT NOT NULL, "
                 "PRIMARY KEY(job_id,attempt_id))"
             )
-            retired_exists = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retired_attempts'"
-            ).fetchone()
+            retired_exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='retired_attempts'").fetchone()
             db.execute(
                 "CREATE TABLE IF NOT EXISTS retired_attempts (job_id TEXT, attempt_id TEXT, snapshot TEXT NOT NULL, "
                 "PRIMARY KEY(job_id,attempt_id))"
@@ -95,11 +110,11 @@ class Journal:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute("SELECT * FROM jobs WHERE id=?", (job["id"],))
             previous = cursor.fetchone()
-            old = (
-                dict(zip((column[0] for column in cursor.description), previous, strict=True))
-                if previous
-                else None
-            )
+            old = dict(zip((column[0] for column in cursor.description), previous, strict=True)) if previous else None
+            if job.get("managed_attempt") and old and json.loads(old["job"])["attempt_id"] != job["attempt_id"] and db.execute(
+                "SELECT 1 FROM retired_attempts WHERE job_id=? AND attempt_id=?", (job["id"], job["attempt_id"])
+            ).fetchone():
+                return
             if old and (attempt_id := json.loads(old["job"])["attempt_id"]) != job["attempt_id"]:
                 snapshot = json.dumps({**old, "superseded_at": time.time()})
                 db.execute(
@@ -107,13 +122,7 @@ class Journal:
                     (job["id"], attempt_id, snapshot),
                 )
                 identity = hashlib.sha256(f"{job['id']}|{attempt_id}".encode()).hexdigest()
-                catalog = (
-                    Path(self.path).parent
-                    / "local-logs"
-                    / Path(self.path).stem
-                    / identity
-                    / "manifest.json"
-                )
+                catalog = Path(self.path).parent / "local-logs" / Path(self.path).stem / identity / "manifest.json"
                 if catalog.is_file():
                     db.execute(
                         "INSERT OR REPLACE INTO local_log_attempts(job_id,attempt_id,snapshot) VALUES(?,?,?)",
@@ -124,16 +133,95 @@ class Journal:
                 "INSERT OR IGNORE INTO jobs(id,job,state,report,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                 (job["id"], json.dumps(job), "accepted", "{}", (now := time.time()), now),
             )
+            if job.get("managed_attempt"):
+                remaining = self._lease_duration(job)
+                db.execute(
+                    "INSERT OR IGNORE INTO attempt_leases(job_id,attempt_id,deadline,expired) VALUES(?,?,?,?)",
+                    (job["id"], job["attempt_id"], now + remaining, int(remaining <= 0)),
+                )
+
+    @staticmethod
+    def _lease_duration(payload: dict) -> float:
+        """Read a server duration, treating missing or invalid managed leases as expired."""
+        value = payload.get("lease_remaining")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return 0.0
+        return max(0.0, float(value))
+
+    def renew_lease(self, payload: dict, *, received_at: float | None = None) -> None:
+        """Persist a transport lease using the local receipt clock without reviving expiry.
+
+        Args:
+            payload: A heartbeat or claim assignment carrying a remaining duration.
+            received_at: Local time when that transport response was received.
+        """
+        if not payload.get("managed_attempt") or "lease_remaining" not in payload:
+            return
+        now = time.time() if received_at is None else received_at
+        remaining = self._lease_duration(payload)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "UPDATE attempt_leases SET expired=1 WHERE job_id=? AND attempt_id=? AND deadline<=?",
+                (payload["id"], payload["attempt_id"], now),
+            )
+            db.execute(
+                "INSERT INTO attempt_leases(job_id,attempt_id,deadline,expired) VALUES(?,?,?,?) "
+                "ON CONFLICT(job_id,attempt_id) DO UPDATE SET deadline=excluded.deadline,expired=excluded.expired "
+                "WHERE attempt_leases.expired=0 AND attempt_leases.deadline>?",
+                (payload["id"], payload["attempt_id"], now + remaining, int(remaining <= 0), now),
+            )
+
+    def lease_remaining(self, payload: dict) -> float | None:
+        """Return a live local lease, durably fencing expiration including after restart.
+
+        Args:
+            payload: Exact platform attempt; legacy assignments have no lease.
+
+        Returns:
+            Remaining local seconds, zero after expiry, or None for legacy work.
+        """
+        if not payload.get("managed_attempt"):
+            return None
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT deadline,expired FROM attempt_leases WHERE job_id=? AND attempt_id=?",
+                (payload["id"], payload["attempt_id"]),
+            ).fetchone()
+            remaining = max(0.0, row[0] - time.time()) if row and not row[1] else 0.0
+            if remaining <= 0:
+                db.execute(
+                    "INSERT INTO attempt_leases(job_id,attempt_id,deadline,expired) VALUES(?,?,0,1) "
+                    "ON CONFLICT(job_id,attempt_id) DO UPDATE SET expired=1",
+                    (payload["id"], payload["attempt_id"]),
+                )
+            return remaining
+
+    def confirm_cleanup(self, payload: dict) -> None:
+        """Persist verified restoration even when a cleanup failure already ended the job."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT job,report FROM jobs WHERE id=?", (payload["id"],)).fetchone()
+            if not row:
+                return
+            live = json.loads(row[0])
+            if live["attempt_id"] != payload["attempt_id"] or live.get("execution_id") != payload.get("execution_id"):
+                return
+            report = json.loads(row[1])
+            if report.setdefault("metadata", {}).get("external_cleanup_confirmed") is True:
+                return
+            report["metadata"]["external_cleanup_confirmed"] = True
+            db.execute(
+                "UPDATE jobs SET report=?,seq=seq+1,updated_at=? WHERE id=?",
+                (json.dumps(report, allow_nan=False), time.time(), payload["id"]),
+            )
 
     def rows(self, pending_only: bool = False):
         """Read current local state for reconciliation and outbox upload."""
         with self.connect() as db:
             db.row_factory = sqlite3.Row
-            where = (
-                " WHERE state NOT IN ('completed','failed','cancelled') OR seq>ack"
-                if pending_only
-                else ""
-            )
+            where = " WHERE state NOT IN ('completed','failed','cancelled') OR seq>ack" if pending_only else ""
             return [dict(row) for row in db.execute("SELECT * FROM jobs" + where)]
 
     def get(self, job_id: str) -> dict | None:
@@ -151,6 +239,7 @@ class Journal:
         attempt_id: str | None = None,
         *,
         execution_status: str | None = None,
+        execution_id: str | None = None,
     ):
         """Atomically save progress and increment its idempotent sequence."""
         with self.connect() as db:
@@ -166,12 +255,13 @@ class Journal:
                 now,
                 job_id,
             )
+            generation = " AND json_extract(job,'$.execution_id')=?" if execution_id else ""
             changed = db.execute(
                 "UPDATE jobs SET state=?,report=?,seq=seq+1,started="
                 "CASE WHEN ?='running' THEN COALESCE(started,?) ELSE started END,updated_at=?,finished_at="
                 "CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(finished_at,?) ELSE NULL END "
-                "WHERE id=?" + (fence if attempt_id else ""),
-                values + ((attempt_id,) if attempt_id else ()),
+                "WHERE id=?" + (fence if attempt_id else "") + generation,
+                values + ((attempt_id,) if attempt_id else ()) + ((execution_id,) if execution_id else ()),
             )
             if changed.rowcount and execution_status:
                 db.execute(
@@ -215,21 +305,30 @@ class Journal:
                     "data": json.loads(row[5]),
                 }
                 for row in db.execute(
-                    "SELECT id,created_at,level,kind,message,data FROM messages "
-                    "WHERE job_id=? AND attempt_id=? ORDER BY id",
+                    "SELECT id,created_at,level,kind,message,data FROM messages WHERE job_id=? AND attempt_id=? ORDER BY id",
                     (job_id, attempt_id),
                 )
             ]
             return metadata, messages
 
     def _observe(
-        self, db, job_id, attempt_id, *, report=None, metadata=None, message=None, state=None
+        self,
+        db,
+        job_id,
+        attempt_id,
+        *,
+        report=None,
+        metadata=None,
+        message=None,
+        state=None,
+        execution_id=None,
     ):
         """Update an observation inside the caller's authoritative write transaction."""
         row = db.execute("SELECT job,state,report FROM jobs WHERE id=?", (job_id,)).fetchone()
         if (
             row is None
             or json.loads(row[0])["attempt_id"] != attempt_id
+            or (execution_id and json.loads(row[0]).get("execution_id") != execution_id)
             or row[1] in {"completed", "failed", "cancelled"}
         ):
             return False
@@ -291,28 +390,36 @@ class Journal:
 class Reporter:
     """Persist adapter progress, diagnostics, evidence and external recovery handles."""
 
-    def __init__(self, journal: Journal, job_id: str, attempt_id: str | None = None):
+    def __init__(self, journal: Journal, job_id: str, attempt_id: str | None = None, execution_id: str | None = None):
         """Bind progress and recovery operations to one durable job."""
         self.journal, self.job_id = journal, job_id
         row = journal.get(job_id)
         self.attempt_id = attempt_id or (json.loads(row["job"])["attempt_id"] if row else None)
+        self.execution_id = execution_id
+
+    def _current(self, payload: str) -> bool:
+        """Fence optional local generations as well as the platform attempt."""
+        job = json.loads(payload)
+        return job["attempt_id"] == self.attempt_id and (not self.execution_id or job.get("execution_id") == self.execution_id)
 
     @property
     def saved_state(self) -> dict:
         """Return the last durable external execution handle."""
         with self.journal.connect() as db:
             row = db.execute(
-                "SELECT saved FROM jobs WHERE id=? AND json_extract(job,'$.attempt_id')=?",
+                "SELECT saved,job FROM jobs WHERE id=? AND json_extract(job,'$.attempt_id')=?",
                 (self.job_id, self.attempt_id),
             ).fetchone()
-            return json.loads(row[0]) if row else {}
+            return json.loads(row[0]) if row and self._current(row[1]) else {}
 
     def save_state(self, state: dict):
         """Persist external job identifiers before awaiting their completion."""
         with self.journal.connect() as db:
             db.execute(
-                "UPDATE jobs SET saved=? WHERE id=? AND json_extract(job,'$.attempt_id')=?",
-                (json.dumps(state, allow_nan=False), self.job_id, self.attempt_id),
+                "UPDATE jobs SET saved=? WHERE id=? AND json_extract(job,'$.attempt_id')=?"
+                + (" AND json_extract(job,'$.execution_id')=?" if self.execution_id else ""),
+                (json.dumps(state, allow_nan=False), self.job_id, self.attempt_id)
+                + ((self.execution_id,) if self.execution_id else ()),
             )
 
     def progress(
@@ -328,6 +435,7 @@ class Reporter:
             self.job_id,
             self.attempt_id,
             state="running",
+            execution_id=self.execution_id,
             metadata=metadata,
             report={"message": message, "completed": completed, "total": total},
             message={
@@ -349,13 +457,14 @@ class Reporter:
         self.journal.observe(
             self.job_id,
             self.attempt_id,
+            execution_id=self.execution_id,
             report={"message": message, "level": level},
             message={"message": message, "kind": "message", "level": level, "data": data or {}},
         )
 
     def metadata(self, values: dict) -> None:
         """Merge JSON-compatible context independently of the final evaluation result."""
-        self.journal.observe(self.job_id, self.attempt_id, metadata=values)
+        self.journal.observe(self.job_id, self.attempt_id, metadata=values, execution_id=self.execution_id)
 
     def local_log(self, name: str, *, description: str = "") -> Path:
         """Create a private output file without registering an uploaded artifact.
@@ -372,9 +481,9 @@ class Reporter:
         from .local_logs import LocalLogStore
 
         try:
-            return LocalLogStore(self.journal).create(
-                self.job_id, self.attempt_id, name, description
-            )
+            if self.execution_id:
+                name = f"executions/{self.execution_id}/{name}"
+            return LocalLogStore(self.journal).create(self.job_id, self.attempt_id, name, description)
         except (OSError, sqlite3.Error) as error:
             with suppress(Exception):
                 self.metadata({"local_log_error": type(error).__name__})
@@ -386,11 +495,12 @@ class Reporter:
 
         from .local_logs import LocalLogStore
 
+        row = self.journal.get(self.job_id)
+        if row is None or not self._current(row["job"]) or row["state"] in {"completed", "failed", "cancelled"}:
+            return
         values = {"lifecycle": observation}
         with suppress(OSError, ValueError, LookupError, sqlite3.Error):
-            values = LocalLogStore(self.journal).record_phase(
-                self.job_id, self.attempt_id, observation
-            )
+            values = LocalLogStore(self.journal).record_phase(self.job_id, self.attempt_id, observation)
         with suppress(OSError, ValueError, LookupError, sqlite3.Error):
             self.metadata(values)
 
@@ -429,12 +539,7 @@ class Reporter:
 
         from llm4ad.evaluator.models import artifact_media_type
 
-        if (
-            not name
-            or "\\" in name
-            or PurePosixPath(name).is_absolute()
-            or ".." in PurePosixPath(name).parts
-        ):
+        if not name or "\\" in name or PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts:
             raise ValueError("Artifact name must be a relative evidence path")
         source = Path(path)
         if source.is_symlink() or not source.is_file():
@@ -458,11 +563,7 @@ class Reporter:
             with self.journal.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 row = db.execute("SELECT job,state FROM jobs WHERE id=?", (self.job_id,)).fetchone()
-                if (
-                    row is None
-                    or json.loads(row[0])["attempt_id"] != self.attempt_id
-                    or row[1] in {"completed", "failed", "cancelled"}
-                ):
+                if row is None or not self._current(row[0]) or row[1] in {"completed", "failed", "cancelled"}:
                     raise ValueError("Execution attempt no longer accepts artifacts")
                 old = db.execute(
                     "SELECT sha256 FROM artifacts WHERE job_id=? AND attempt_id=? AND name=?",
@@ -487,9 +588,7 @@ class Reporter:
                         db,
                         self.job_id,
                         self.attempt_id,
-                        metadata=(
-                            {"artifact_descriptions": {name: description}} if description else None
-                        ),
+                        metadata=({"artifact_descriptions": {name: description}} if description else None),
                     )
         finally:
             Path(temporary).unlink(missing_ok=True)

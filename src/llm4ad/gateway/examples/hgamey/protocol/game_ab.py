@@ -1,8 +1,7 @@
 """Run the upstream real-game A/B protocol through the serialized executor.
 
-This operation qualifies the device or validates an identified candidate against
-a fixed baseline. It retains real-game evidence without assigning fitness; the
-existing operator benchmark remains the source of the evolutionary score.
+This operation qualifies the device or measures an identified candidate against
+a fixed baseline. It retains real-game evidence for the independent game scorer.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -59,6 +59,8 @@ def validate_options(options):
         "power_profile": "disabled",
         "perfetto": True,
         "cool_max": 0,
+        "quality_samples": 0,
+        "quality_replay": None,
     }
     if not isinstance(options, dict) or options.keys() - defaults.keys():
         raise ValueError("Unsupported game-ab options")
@@ -76,6 +78,8 @@ def validate_options(options):
     for key, low, high in (("rounds", 1, 12), ("window", 1, 120), ("timeout_seconds", 30, 14400)):
         if type(result[key]) is not int or not low <= result[key] <= high:
             raise ValueError(f"{key} must be an integer within {low}..{high}")
+    if type(result["quality_samples"]) is not int or result["quality_samples"] < 0:
+        raise ValueError("quality_samples must be a nonnegative integer")
     for key, high in (("settle", 300), ("cool_max", 60)):
         value = result[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= high:
@@ -114,6 +118,22 @@ def validate_options(options):
         for key in ("candidate_source_sha256", "baseline_source_sha256"):
             if not isinstance(result[key], str) or not re.fullmatch(r"[a-f0-9]{64}", result[key]):
                 raise ValueError(f"Candidate game checks require {key}")
+    replay = result["quality_replay"]
+    if replay is not None:
+        names = ("candidate_comp", "baseline_comp", "candidate_spv", "baseline_spv")
+        fields = {"protocol", *(name + suffix for name in names for suffix in ("_path", "_sha256"))}
+        if not isinstance(replay, dict) or set(replay) != fields or replay["protocol"] != "same-input-gpu-replay@1":
+            raise ValueError("Invalid same-input GPU replay contract")
+        for name in names:
+            path, checksum = replay[name + "_path"], replay[name + "_sha256"]
+            if not isinstance(path, str) or not Path(path).is_absolute() or "\x00" in path:
+                raise ValueError("Replay inputs require absolute local paths")
+            if not isinstance(checksum, str) or not re.fullmatch(r"[a-f0-9]{64}", checksum):
+                raise ValueError("Replay inputs require SHA-256 identities")
+        if replay["candidate_comp_sha256"] != result["candidate_source_sha256"] or (
+            replay["baseline_comp_sha256"] != result["baseline_source_sha256"]
+        ):
+            raise ValueError("Replay shaders differ from the injected game shaders")
     return result
 
 
@@ -125,6 +145,37 @@ def freeze_inputs(folder, frozen):
     for key in ("layer_path", "baseline_layer_path"):
         if options[key] is not None:
             freeze_layer(folder, frozen, key)
+    if options["quality_replay"] is not None:
+        freeze_replay(folder, frozen)
+
+
+def freeze_replay(folder: Path, frozen: dict) -> None:
+    """Snapshot the exact compute programs used for same-input quality replay."""
+    replay = frozen["submission"]["options"]["quality_replay"]
+    directory = folder / "inputs/replay"
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in ("candidate_comp", "baseline_comp", "candidate_spv", "baseline_spv"):
+        source = Path(replay[name + "_path"])
+        target = directory / name.replace("_", ".")
+        with source.open("rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= 16 * 1024 * 1024:
+                raise ValueError("Replay shaders must be bounded regular files")
+            data = stream.read(before.st_size + 1)
+            after = os.fstat(stream.fileno())
+        if len(data) != before.st_size or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ) or hashlib.sha256(data).hexdigest() != replay[name + "_sha256"]:
+            raise ValueError("Replay shader identity changed before acceptance")
+        with target.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o444)
+            os.fsync(stream.fileno())
+        replay[name + "_path"] = str(target)
+        frozen.setdefault("input_files", []).append({
+            "path": str(target.relative_to(folder)), "sha256": replay[name + "_sha256"], "bytes": len(data),
+        })
 
 
 def freeze_layer(folder, frozen, key):
@@ -153,6 +204,14 @@ def freeze_layer(folder, frozen, key):
 def load_upstream():
     """Import the pinned upstream helpers without running their CLI."""
     spec = importlib.util.spec_from_file_location("hgamey_upstream_selfsr", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_quality():
+    """Load local IQ helpers when invoked as an isolated executor script."""
+    spec = importlib.util.spec_from_file_location("hgamey_game_quality", Path(__file__).with_name("game_quality.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -297,6 +356,96 @@ def sessions_confirmed(evidence):
         return False
 
 
+def game_property_names(upstream):
+    """Return the exact properties owned by the upstream game protocol."""
+    return {
+        upstream.SR_PROP, upstream.UNLIMIT_PROP, upstream.FP_PROP,
+        "debug.knobs.selfsr_live", "debug.vulkan.layers",
+        *(f"debug.knobs.selfsr_{key}" for key in upstream.SR_OPTS if key != "unlimit"),
+        *upstream.IP_PROPS,
+        *(f"debug.knobs.interp_{key}" for key in upstream.IP_TUNE
+          if key not in ("panel", "framepacing", "unlimit", "sfovr", "sfwait")),
+    }
+
+
+def restore_original(folder):
+    """Restore original game settings after native owners prove completion.
+
+    Args:
+        folder: Original game operation with its pre-mutation snapshot.
+
+    Returns:
+        Whether fresh property, setting, mode and boot readbacks match.
+    """
+    folder = Path(folder)
+    evidence = folder / "evidence"
+    if not captures_confirmed(evidence) or not sessions_confirmed(evidence):
+        return False
+    for path in [*(evidence.glob("traces/*_mali/mali-cleanup.json")),
+                 *(evidence.glob("traces/*_perfetto/perfetto-cleanup.json"))]:
+        record = read_object(path)
+        if record.get("cleanup_confirmed") is not True or record.get("recovery_unknown") is not False:
+            return False
+    return restore_settings(folder)
+
+
+def restore_settings(folder):
+    """Restore the snapshot after the caller verifies native and collector owners.
+
+    Args:
+        folder: Original game operation under its physical device lease. The
+            caller must have confirmed all workload and collector cleanup.
+
+    Returns:
+        Whether fresh device readbacks match the original settings. Historical
+        failed arm reports are preserved rather than treated as current owners.
+    """
+    folder = Path(folder)
+    frozen = read_object(folder / "input.json")
+    original = read_object(folder / "game-original.json")
+    upstream = load_upstream()
+    dev = upstream.Dev(frozen["device"]["endpoint"])
+    options = validate_options(frozen["submission"].get("options", {}))
+    if (dev.shell("getprop ro.serialno").strip() != frozen["device"]["expected_serial"]
+        or dev.shell("cat /proc/sys/kernel/random/boot_id").strip() != original["boot_id"]):
+        return False
+    layer_absent, _ = upstream.layer_absent(dev, options["package"])
+    if not layer_absent:
+        return False
+    if set(original["properties"]) != game_property_names(upstream):
+        raise ValueError("Invalid owned game property snapshot")
+    for value in original["properties"].values():
+        if not isinstance(value, str):
+            raise ValueError("Invalid owned game property snapshot")
+    allowed_settings = {"screen_off_timeout", *upstream.PANEL_KEYS}
+    if set(original["settings"]) != allowed_settings:
+        raise ValueError("Invalid owned game settings snapshot")
+    dev.shell(f"am force-stop {options['package']}")
+    current = properties(dev)
+    for key, value in original["properties"].items():
+        if current.get(key, "") != value:
+            dev.shell(f"setprop {key} {shlex.quote(value)}")
+    for key, value in original["settings"].items():
+        dev.shell(f"settings delete system {key}" if value == "null" else f"settings put system {key} {shlex.quote(value)}")
+    if (upstream.current_mode(dev, options["package"]) != original["mode"]
+        or dev.shell(f"cmd game list-configs {options['package']}").strip() != original["game_configs"]):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", original["mode"]):
+            raise ValueError("Invalid original game mode")
+        upstream.game_mode(dev, options["package"], None, original["mode"])
+    gfrc = original["gfrc"]
+    dev.shell("settings delete global game_gfrc_mode" if gfrc == "null"
+              else f"settings put global game_gfrc_mode {shlex.quote(gfrc)}")
+    current = properties(dev)
+    return (
+        all(current.get(key, "") == value for key, value in original["properties"].items())
+        and all(dev.shell(f"settings get system {key}").strip() == value for key, value in original["settings"].items())
+        and upstream.current_mode(dev, options["package"]) == original["mode"]
+        and dev.shell(f"cmd game list-configs {options['package']}").strip() == original["game_configs"]
+        and dev.shell("settings get global game_gfrc_mode").strip() == gfrc
+        and dev.shell("cat /proc/sys/kernel/random/boot_id").strip() == original["boot_id"]
+    )
+
+
 def finite_number(value):
     """Exclude booleans and nonfinite values from reported measurements."""
     try:
@@ -357,6 +506,10 @@ def command_for(folder, serial, options):
         command.append("--pan")
     if options["perfetto"]:
         command.append("--perfetto")
+    if options.get("quality_samples", 0):
+        command += ["--quality-samples", str(options["quality_samples"])]
+        if options.get("quality_replay") is not None:
+            command.append("--defer-quality")
     return command
 
 
@@ -490,6 +643,7 @@ def summarize(evidence, options, restored, exit_code, identities=None):
             errors.append(f"{side}: aggregate display FPS differs from its arm measurements")
     if restored is not True:
         errors.append("Device restoration requires confirmation")
+    quality = raw.get("quality")
     result = {
         "schema": SCHEMA,
         "source": "HGamey/experiments",
@@ -517,6 +671,15 @@ def summarize(evidence, options, restored, exit_code, identities=None):
         "perfetto": {str(arm.get("arm")): json_safe(arm["perfetto"]) for arm in arms if isinstance(arm.get("perfetto"), dict)},
         "artifacts": [],
     }
+    helper = load_quality()
+    images, comparisons = helper.screenshot_artifacts(evidence, options, arms)
+    result["artifacts"].extend(images)
+    result["evidence_comparisons"] = comparisons
+    if options.get("quality_samples", 0):
+        result["quality"] = json_safe(quality) if isinstance(quality, dict) else {
+            "status": "not_measured", "metrics": [], "not_computed": ["Upstream official game IQ report missing"],
+        }
+        result["artifacts"].extend(helper.quality_artifacts(evidence))
     for folder in sorted(evidence.glob("traces/*_perfetto")):
         for name in ("trace.pftrace", "analysis.json", "capabilities.json", "perfetto-cleanup.json"):
             path = folder / name
@@ -579,22 +742,7 @@ def run(folder):
         if dev.shell("getprop ro.serialno").strip() != frozen["device"]["expected_serial"]:
             raise ValueError("Physical phone identity differs from the queued job")
         evidence.mkdir(exist_ok=False)
-        props = sorted(
-            {
-                upstream.SR_PROP,
-                upstream.UNLIMIT_PROP,
-                upstream.FP_PROP,
-                "debug.knobs.selfsr_live",
-                "debug.vulkan.layers",
-                *(f"debug.knobs.selfsr_{key}" for key in upstream.SR_OPTS if key != "unlimit"),
-                *upstream.IP_PROPS,
-                *(
-                    f"debug.knobs.interp_{key}"
-                    for key in upstream.IP_TUNE
-                    if key not in ("panel", "framepacing", "unlimit", "sfovr", "sfwait")
-                ),
-            }
-        )
+        props = sorted(game_property_names(upstream))
         prop_values = properties(dev)
         snapshot = {
             "boot_id": dev.shell("cat /proc/sys/kernel/random/boot_id").strip(),
@@ -703,6 +851,37 @@ def run(folder):
             },
         )
     report = summarize(evidence, options, restored, code, identities)
+    if report["status"] == "PASS" and options.get("quality_replay") is not None and not cancelled:
+        from llm4ad.gateway.examples.hgamey.protocol import same_frame_quality
+
+        try:
+            replay = same_frame_quality.measure(
+                folder, frozen, deadline=deadline, phonefarm=shutil.which("phonefarm") or "/opt/phonefarm/phonefarm"
+            )
+        except Exception as error:
+            receipt = {}
+            with contextlib.suppress(OSError, ValueError):
+                receipt = read_object(evidence / "quality/replay/restoration.json")
+            replay = {
+                "quality": {"protocol": "same-input-gpu-replay@1", "status": "error", "metrics": [],
+                            "not_computed": [f"Quality replay failed: {type(error).__name__}: {error}"]},
+                "artifacts": [], "evidence_comparisons": [],
+                "cleanup_confirmed": receipt.get("job_id") == folder.name and receipt.get("restored") is True,
+            }
+        report["quality"] = replay["quality"]
+        report["artifacts"].extend(replay["artifacts"])
+        report["artifacts"].extend(load_quality().quality_artifacts(evidence))
+        report["evidence_comparisons"] = replay["evidence_comparisons"] + report["evidence_comparisons"]
+        report["quality_scope"] = "same-input GPU replay; game screenshots are context only"
+        if replay["cleanup_confirmed"] is not True:
+            restored = False
+            report["conditions_observed"]["restored"] = False
+            report["status"] = "ERROR"
+            report["errors"].append("Quality replay device restoration requires confirmation")
+            restoration = read_object(folder / "game-restoration.json")
+            restoration.update(restored=False, quality_replay_restored=False)
+            write_json(folder / "game-restoration.json", restoration)
+        cancelled |= read_object(folder / "job.json").get("state") == "cancel_requested"
     for side, identity in identities.items():
         try:
             if hashlib.sha256(Path(identity["path"]).read_bytes()).hexdigest() != identity["sha256"]:

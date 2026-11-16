@@ -33,6 +33,23 @@ docker compose up -d --build
 
 Implement evaluation in `evaluator.py` and add dependencies to `requirements.txt`. Compose serves the dashboard for the same gateway and persists state in `./state`. Before a release is published, place a built `llm4ad_next-*.whl` in `wheels/`.
 
+## Task device pools
+
+New tasks choose an evaluation method and benchmark, then use compatible devices authorized for their owner. New devices can claim subsequent candidates without pinning phone IDs. Each A/B pair runs on one device. An empty, busy or offline pool waits without consuming attempts or treating queue time as evaluation failure.
+
+| Evaluator setting | Default | Purpose |
+| --- | --- | --- |
+| `selection_mode` | `auto` | Discover compatible devices; `selected` restricts dispatch to explicit gateways |
+| `contract` | Choose a benchmark | Freeze method, data version and metric semantics |
+| `gateway_ids` | `[]` | Required only in selected mode; legacy nonempty lists retain manual selection |
+| `max_attempts` | `3` | Total device attempts per candidate, without multiplying local retries |
+| `lease_timeout` | `60` seconds | Renewal deadline after a claim, not a queue-wait timeout |
+| `batch_size` | `10` | Concurrent candidate submissions; `1` restricts pool parallelism |
+
+Candidate errors finish that evaluation immediately. Device disconnection, expired leases and evaluator failures prefer another compatible device. Old attempts lose publication authority, while devices with unconfirmed cleanup remain quarantined. Exhaustion fails only that candidate evaluation; evolution continues. Task/node diagnostics retain failure categories and device-attempt history, and infrastructure faults do not trigger code repair.
+
+Automatic dispatch requires protocol v2 on the platform and gateways. After a HGamey upgrade, register the new contract using newly generated device settings and select it for new tasks. Existing tasks do not silently change benchmarks. Device addresses, serial numbers and installation paths remain local execution bindings; substantive capability profiles, data and scoring must still be comparable.
+
 ## Custom configuration
 
 Use CLI flags, an environment-mapping JSON file passed through `--config gateway.json`, or environment variables. Priority is **CLI > explicit JSON > saved dashboard settings > environment > defaults**. Custom JSON environment keys also reach evaluator processes.
@@ -122,9 +139,14 @@ Subclass [GatewayEvaluator](../../../src/llm4ad/gateway/sdk/contracts.py), decla
 | `reporter.local_log(name, description=...)` | Register a local log for the gateway dashboard |
 | `EvaluationResult` | Return `score`, `metrics`, `monitor_metrics`, `metadata`, `evolution_feedback`, `duration_ms`, `artifacts` |
 | `EvaluationError` | Known evaluation failure, with optional feedback, metadata and artifacts |
-| `EvaluationUnavailableError` | Wait for recovery when a resource or external outcome is unavailable |
+| `EvaluationConfigurationError` | Invalid evaluator parameters/configuration; fail without device retries |
+| `EvaluationUnavailableError` | Retry transient infrastructure failures within the original execution budget |
+| `EvaluationPreparationError` | Fail preparation known not to have submitted external execution instead of waiting indefinitely |
+| `TaskCheckpoints(job, directory, inputs=..., context=...)` | SDK-owned frozen inputs and checkpoints for local compilation/preprocessing |
 
 Evaluation runs in an isolated process. Locate local tools/data relative to `__file__` or an absolute path; the working directory is the candidate directory.
+
+Use `EvaluationError(..., metadata={"failure_category": "candidate"})` for invalid candidate code/output, and `EvaluationUnavailableError` for transient device faults. Unclassified evaluator exceptions use category `evaluator` and the shared retry budget rather than blaming candidate code.
 
 The following extensions are optional. Ordinary evaluators need no scheduling, recovery or cancellation implementation:
 
@@ -133,11 +155,24 @@ The following extensions are optional. Ordinary evaluators need no scheduling, r
 | `before_task(job, reporter, operation)` | Compile or prepare resources before an operation |
 | `after_task(job, reporter, operation, *, result=None, error=None)` | Diagnostics and cleanup; forced termination cannot guarantee this hook runs |
 | `reporter.save_state(dict)` / `saved_state` | Persist/read external execution handles |
-| `recover(job, reporter)` | Reconcile external work and return its result, or `None` if uncertain |
+| `recover(job, reporter)` | Compatibility hook; the SDK now owns bounded fresh executions |
 | `cancel(job, saved_state)` | Return `True` only after external execution has stopped |
+| `cleanup_timeout` | Positive finite cleanup deadline in seconds; default `30`, covering hooks and external restoration |
 | `create_runtime()` / `runtime.local_logs(...)` | Persistent device resources, readiness checks and existing external logs |
 
-`operation` is `evaluate`, `recover` or `cancel`. Use `job.id` / `attempt_id` for idempotent external submission and persist execution handles before waiting.
+`operation` is `evaluate` or `cancel`; `recover` remains for compatibility. Use `job.id` / `attempt_id` plus `job.execution_id` for execution-scoped external idempotency, and save external handles before waiting. `cancel` must restore externally modified resources; the SDK terminates its own processes.
+
+Declare expensive local preparation steps and let the SDK persist and verify their checkpoints. Evaluators do not need to manage checkpoint files. Reopening a step reuses completed outputs and retains interrupted outputs before rebuilding. Changed frozen inputs or completed outputs fail explicitly.
+
+```python
+from llm4ad.gateway.sdk import TaskCheckpoints
+
+steps = TaskCheckpoints(job, build_dir, inputs={"source.cpp": source}, context={"version": "1"})
+steps.run("compile", lambda: compile_source(steps.path("source.cpp"), build_dir / "binary"),
+          outputs=["binary", "compiler.log"], required=["binary"])
+```
+
+Checkpoints cover repeatable local preparation. External device jobs still resume using their original idempotent identity and must not be placed inside replayable steps.
 
 ## Logs, artifacts and recovery
 
@@ -155,18 +190,18 @@ Failed uploads retry file transfer only. Gateway evidence cleanup waits for file
 | Situation | Behavior |
 | --- | --- |
 | Network loss | Local evaluation continues and reports retry; SSE reconnects and HTTP heartbeats synchronize state |
-| Gateway restart | Reuse the state directory; unfinished local work can replay from the beginning after confirming old processes stopped and no external handle exists |
-| Execution timeout | Stop the local process tree; reconcile external work separately |
-| Platform stop | Cancel queued work and persist cancellation requests for accepted work |
-| Uncertain external state | Wait for recovery; do not repeat external work or reassign accepted jobs automatically |
+| Gateway restart | Reconcile old process ownership and device cleanup, then automatically retry unfinished work using the same state directory |
+| Transient infrastructure failure | Protocol v2 pools share the platform's `max_attempts` budget and run one local execution per claim. Legacy jobs allow three local executions, persisted across restarts, with 1- and 2-second backoffs within the original active budget |
+| Read failure | Read-only operations may use `retry_read(...)` for up to three calls; invalid candidates are not retried |
+| Interrupted preparation | SDK checkpoints retain local preparation outputs; each fresh execution has an isolated workspace |
+| Execution timeout / platform stop | Stop the assigned pool slot, restore external resources and persist a terminal outcome |
+| Resource cleanup failure | Return a clear infrastructure failure after three cleanup failures; continue automatic readiness probes and keep this resource unavailable until restored. Other resources remain usable |
 
-Confirm old execution has ended before manually resolving uncertain work:
+The controller uses `transitions`, `persist-queue.SQLiteAckQueue` and public `loky.ProcessPoolExecutor` pools. Each resource has at most one submitted future per slot. The journal commits the outcome before acknowledging its queue receipt; report/file transfer retries do not repeat physical evaluation. No separate broker is needed. Legacy recovery records migrate automatically; routine operation does not require manual `resolve`.
 
 ```bash
 llm4ad evaluator-gateway health --state-dir ./.llm4ad-gateway
 llm4ad evaluator-gateway status --state-dir ./.llm4ad-gateway
-llm4ad evaluator-gateway resolve JOB_UUID --action retry --state-dir ./.llm4ad-gateway
-llm4ad evaluator-gateway resolve JOB_UUID --action cancelled --state-dir ./.llm4ad-gateway
 ```
 
 ## HGamey Genshin example
@@ -179,24 +214,25 @@ The [case source](../../../src/llm4ad/gateway/examples/hgamey/) groups compilati
 | Build | Rust 1.99, OpenJDK 17, C++, NDK r27d, Android SDK API 35 / build-tools 35.0.0; supplied by the Dockerfile |
 | Execution tools | phonefarm, ADB 36.0.2, GLSL/SPIR-V tools, FFmpeg, NumPy, Pillow, Perfetto Python 0.59.1 and Trace Processor; included in the image |
 | Phone | Rooted Android 11+ ARM64, authorized wireless ADB, Vulkan 1.1 compute, GPU timestamps and accessible KGSL/GED frequency controls |
-| Inputs | Installed/signed-in Genshin, real reference frames, physical serial and local ADB identity; not distributed with the SDK |
+| Inputs | Static: real reference frames; game: installed/signed-in Genshin and a repeatable scene. Both require a physical serial and local ADB identity; private inputs are not distributed |
 
-The image builds the runner, Vulkan layer and refbench APK from bundled sources. Install the test APK manually when using the refbench carrier. Game validation needs a repeatable in-game scene and device-specific resolution, waits and `enter_script` in `config/game-check.json`. Direct system execution requires equivalent tools.
+The image builds the runner, Vulkan layer and refbench APK from bundled sources. Install the test APK manually when using the refbench carrier. Game evaluation needs a repeatable in-game scene and device-specific resolution, waits and `enter_script` in `config/game-check.json`. Direct system execution requires equivalent tools.
 
 Create `.env` from [env.example](../../../src/llm4ad/gateway/examples/hgamey/deployment/env.example) in the case's `deployment/` directory, configure the following values, then run `docker compose up -d --build`.
 
 | Custom setting | Default / purpose |
 | --- | --- |
 | `HGAMEY_DEVICES_JSON` | Device array with `id`, `host`, `port`, `expected_serial`, `device_profile`; connection port defaults to `5555` |
-| `HGAMEY_REFERENCE_PATH` | `/inputs/genshin`, real reference-frame directory |
+| `HGAMEY_REFERENCE_PATH` | `/inputs/genshin`, reference frames required only by the static evaluator |
 | `HGAMEY_DATA_DIR` / `HGAMEY_PHONEFARM_DIR` | Required host directories for gateway/executor state and device locks |
-| `HGAMEY_INPUTS_DIR` / `HGAMEY_CONFIG_DIR` | Required host reference-frame and game-configuration directories |
+| `HGAMEY_INPUTS_DIR` / `HGAMEY_CONFIG_DIR` | Host input directory (defaults to `./inputs`; may be empty for game-only use) and required configuration directory |
 | `ADB_IDENTITY_FILE` / `ADB_STATE_DIR` | Required authorized ADB private key and pairing state |
 | `ADB_BIN` / `ANDROID_ADB_SERVER_PORT` | `/usr/bin/adb` / `5039`, container ADB path and server port, separate from the phone's connection port |
 | `HGAMEY_STARTUP_CHECK` | `true`, run a readiness check at startup |
-| `HGAMEY_GAME_CHECK_CONFIG` | Optional game-validation JSON; deployment environment example uses `/config/game-check.json` |
-| `HGAMEY_EVAL_SECONDS` / `HGAMEY_EVAL_ROUNDS` | `5` / `8`, standard seconds per arm and rounds |
-| `HGAMEY_ELITE_EVAL_SECONDS` / `HGAMEY_ELITE_EVAL_ROUNDS` | Defaults to at least `5` / `16`, elite measurement budget |
+| `HGAMEY_EVALUATOR_MODES` | `static,game` in the deployment example; select either or both independent evaluators |
+| `HGAMEY_GAME_CHECK_CONFIG` | Required by `game`; device/scene options from `/config/game-check.json` |
+| `HGAMEY_GAME_SCORING_JSON` | Optional JSON policy overriding weights, scales, metric sources or `quality_gap_score` below; frozen in the game contract |
+| `HGAMEY_EVAL_SECONDS` / `HGAMEY_EVAL_ROUNDS` | `5` / `8`, static seconds per arm and A/B rounds; game uses `window` / `rounds` in its JSON |
 | `HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT` | `1`, minimum percentage for confirming improvement, in `[1, 100)`; unconfirmed improvement remains a valid `no_advantage` evaluation with unchanged raw scores |
 | `HGAMEY_COMPILE_TIMEOUT` / `HGAMEY_POLL_INTERVAL` | `60` / `2` seconds, compilation timeout and result polling |
 | `RUST_IMAGE` / `PYTHON_IMAGE` | `rust:1.99-slim-bookworm` / `python:3.13.16-slim-bookworm`, build base images |
@@ -204,9 +240,35 @@ Create `.env` from [env.example](../../../src/llm4ad/gateway/examples/hgamey/dep
 | `APT_MIRROR` / `CARGO_REGISTRY_MIRROR` | Optional system-package and Rust build mirrors |
 | `ANDROID_REPOSITORY_BASE` / `PIP_INDEX_URL` / `TRACE_PROCESSOR_URL` | Optional Android-toolchain, Python-package and Trace Processor download sources |
 
-Each device evaluates serially. The current quality check center-crops the first fixed reference frame, which must be at least 1920×1080. This measures static reconstruction quality; operator latency gains alone do not establish game FPS gains. Power is disabled by default and unavailable metrics remain unmeasured. Keep keys, device configuration and real reference frames local.
+Choose **Fixed-image GPU** or **Genshin game A/B** before selecting compatible gateways. They are independent evaluators, not stages. Each candidate runs the chosen experiment; the example disables elite reevaluation. Bindings share the device queue and phone lease, preventing simultaneous experiments on the same phone. Different phones each have one execution slot and run concurrently. Unconfirmed restoration pauses only the affected phone.
 
-Game validation uploads the existing post-window PNGs from its first two measurement pairs, at most four files under `game/shots/`. Descriptions identify the baseline, candidate (or comparison) and round. Select the corresponding evolution node to enlarge or download its thumbnails in the right-hand **Node information** panel. These show the observed scene, not a same-frame PSNR comparison. The screenshot manifest and original-byte snapshots are frozen for retries; optional retrieval failures are recorded as artifact diagnostics without invalidating measured scores. Missing screenshots are not recaptured or generated; recordings and private reference frames are not uploaded automatically.
+A normal gateway shutdown drains active device experiments through restoration and preserves queued work and identities. Platform tasks wait and continue when the gateway restarts with the same data directory. Queue waiting and graceful shutdown downtime do not consume execution budgets; consumed execution time and cancellation requests remain intact. After a forced termination, experiments with unconfirmed device restoration require reconciliation rather than blind replay.
+
+| Evaluator | Measurements and fitness | Node image evidence |
+| --- | --- | --- |
+| Static (`hgamey-genshin-sr-static`) | Measures native GPU operator latency and PSNR, automatically applies fixed-reference PSNR constraints and scores same-run baseline-relative latency improvement. Uses the first fixed frame's 1920×1080 center crop, without launching Genshin | Actual reference, baseline and candidate images from the GPU quality pass; readback/PNG export occurs outside timed dispatch |
+| Game (`hgamey-genshin-sr-game`) | Measures injected Genshin A/B performance, then replays captured game frames through the exact baseline and candidate compute programs on the phone GPU for official IQ. Unverified or degraded quality receives an automatic low score; no fixed reference-image directory is required | Same-input reference/baseline/candidate GPU outputs, per-frame IQ, original game captures and traces |
+
+Both evaluators run automatically. The game score is a platform adaptation, not an upstream HGamey scalar or a significance test. Its normalized contributions use the fixed weights below. Static quality measurement, automatic fixed-reference PSNR constraints and scoring remain unchanged.
+
+| Component | Default weight | Contribution before weighting |
+| --- | --- | --- |
+| FPS | 0.25 | `100 × (candidate / baseline − 1) / 10` |
+| Presentation P95 | 0.35 | `100 × (1 − candidate / baseline) / 10`; default source `display_frame_p95_upper_ms` is a histogram upper bound |
+| GPU activity per presented frame | 0.20 | `100 × (1 − candidate / baseline) / 10`, where milliseconds per frame = `10 × gpu_uid_active_pct / display_fps`; this is application UID activity, not isolated shader time |
+| Quality | 0.20 | Negative mean excess beyond official `iq-judge` self-noise reference lines, scaled by 1 dB PSNR, 0.001 `1−SSIM`, and 0.15 detail log2; no sharpening bonus |
+
+Nonnegative weights are normalized once, frozen with sources and scales in the contract, and not changed per candidate. `quality_gap_score` is a separate finite, strictly negative policy value, defaulting to `-100.0`; it is not normalized with the weights. Any measured excess beyond an official quality reference line caps the whole score at `min(unpenalized_score, quality_gap_score)`. Missing, incomplete, nonfinite or overflowing quality measurements, a status other than `measured`, or `not_computed` diagnostics produce `unverified` quality and a score of `quality_gap_score` when required performance is available. These low scores are valid completed evaluations, so the automated pipeline continues without manual review or an infrastructure failure.
+
+Missing positive-weight performance measurements still make `score=None`; device performance is never fabricated. Missing quality retains its unavailable contribution, `unpenalized_score=None` and `missing` diagnostics. No input is replaced by zero and weights are never redistributed. An explicit zero quality weight skips IQ assessment and its automatic penalty. `quality_assessment` exposes `status` (`within_reference`, `beyond_reference`, `unverified` or `not_scored`), `penalized`, the frozen `penalty_score`, and `reasons` for result display. When all scored inputs are valid, `unpenalized_score` preserves the original weighted sum. Power is not scored. Selecting another P95 source requires an explicit frozen policy change.
+
+Game mode defaults to `quality_samples=3` and `pan=false`. Each game pair supplies one actual captured baseline frame, center-cropped to 1920×1080 by the existing GPU tool. Three independent baseline and three candidate GPU invocations process that same input. Uploaded PNGs are actual readbacks; identical programs may produce identical hashes. Official IQ runs separately for each input, preserving its original rows and reference lines. The score averages normalized frame penalties; missing required frames retain the existing low-score policy.
+
+Replay runs after game performance collection and restoration. Its timing never enters FPS, P95 or game GPU activity. `same-input-gpu-replay@1` identifies operator quality on replayed game captures; original A/B screenshots provide execution context. This is not an end-to-end capture of the game's actual presented frames. Pan remains an unscored probe. Normal cancellation drains the current replay through verified cleanup before stopping later frames.
+
+Click an evolution node to see image comparisons first in **Node information**, with round selection and enlarged previews. Other uploaded files appear below. Image transfer failures are recorded without discarding otherwise valid measurements. Captures are not fabricated or recaptured on upload retries. Raw traces use the same artifact list when available; recordings are not uploaded automatically. Keep device configuration, ADB keys and input frames local. Static reference/baseline/candidate comparison PNGs are uploaded, so choose non-sensitive test scenes.
+
+Existing frozen composite jobs can use the explicitly selected `legacy` binding; new tasks use `static` and/or `game`.
 
 ## Platform deployment settings
 

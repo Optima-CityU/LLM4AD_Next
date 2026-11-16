@@ -21,6 +21,8 @@ use crate::gpustat::{self, WelchResult};
 use crate::hwcond::{self, PowerRail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 /// 设备侧产物目录。跑完即删, 不留残留。
 const REMOTE_DIR: &str = "/data/local/tmp/phonefarm_gpuop";
@@ -503,15 +505,20 @@ fn completed_runner_command(command: &str) -> String {
     format!("{command}; runner_status=$?; printf '\\nPHONEFARM_VKOP_EXIT=%s\\n' \"$runner_status\"")
 }
 
-fn parse_completed_runner_output(output: &str) -> Result<RunnerReport, String> {
+fn runner_completion(output: &str) -> Result<(&str, u32), String> {
     let (body, receipt) = output.trim_end().rsplit_once('\n')
         .ok_or("runner completion receipt is missing")?;
     let status = receipt.strip_prefix("PHONEFARM_VKOP_EXIT=")
-        .and_then(|value| value.parse::<u32>().ok())
+        .and_then(|value| value.parse::<u32>().ok().filter(|status| *status <= 255))
         .ok_or("runner completion receipt is missing or invalid")?;
     if body.lines().any(|line| line.starts_with("PHONEFARM_VKOP_EXIT=")) {
         return Err("runner completion receipt is duplicated".into());
     }
+    Ok((body, status))
+}
+
+fn parse_completed_runner_output(output: &str) -> Result<RunnerReport, String> {
+    let (body, status) = runner_completion(output)?;
     let report = parse_runner_output(body);
     if status != 0 {
         // A structured negative result remains candidate failure, never fitness.
@@ -521,6 +528,179 @@ fn parse_completed_runner_output(output: &str) -> Result<RunnerReport, String> {
         return Err(format!("runner process failed with exit status {status}; JSON metrics rejected"));
     }
     report
+}
+
+/// Persist the original runner identity before launch so cleanup can reattach.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunnerOwner {
+    schema: String,
+    serial: String,
+    physical_serial: String,
+    boot_id: String,
+    token: String,
+    remote: String,
+}
+
+const RUNNER_PROC_HELPERS: &str = r#"
+identity() {
+    [ -r /proc/$1/stat ] || return 1
+    stat=$(cat /proc/$1/stat) || return 2
+    fields=${stat##*) }
+    [ "$fields" != "$stat" ] || return 2
+    set -- $fields
+    state=$1
+    [ "$#" -ge 20 ] || return 2
+    shift 19
+    printf '%s %s\n' "$state" "$1"
+}
+"#;
+
+impl RunnerOwner {
+    fn load(path: &Path, serial: &str) -> Result<Option<Self>, String> {
+        match std::fs::symlink_metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+            Ok(_) => {}
+        }
+        let owner: Self = serde_json::from_slice(&crate::confirmation_transport::bounded(path, 65536)?)
+            .map_err(|e| format!("invalid runner ownership record: {e}"))?;
+        if owner.schema != "phonefarm/gpu-runner-owner@1" || owner.serial != serial
+            || owner.token.is_empty() || owner.token.len() > 96
+            || !owner.token.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+            || owner.remote != format!("{REMOTE_DIR}/runner-{}", owner.token)
+            || owner.boot_id.is_empty() || !owner.boot_id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+            || owner.physical_serial.is_empty() || owner.physical_serial.len() > 256
+            || !owner.physical_serial.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        {
+            return Err("runner ownership record differs from the original device or private path".into());
+        }
+        Ok(Some(owner))
+    }
+
+    fn prepare(phone: &impl hwcond::Shell, serial: &str, path: &Path) -> Result<Self, String> {
+        if Self::load(path, serial)?.is_some() {
+            return Err("original runner termination is unconfirmed; use gpu-op --unlock to reconcile its owner".into());
+        }
+        let identity = phone.shell("getprop ro.serialno; cat /proc/sys/kernel/random/boot_id", 10_000);
+        let fields: Vec<_> = identity.split_whitespace().collect();
+        if fields.len() != 2 {
+            return Err("original runner physical/boot identity is unavailable; runner not launched".into());
+        }
+        let token = format!("{:x}-{:x}", std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos());
+        let owner = Self { schema:"phonefarm/gpu-runner-owner@1".into(), serial:serial.into(),
+            physical_serial:fields[0].into(), boot_id:fields[1].into(),
+            remote:format!("{REMOTE_DIR}/runner-{token}"), token };
+        let parent = path.parent().ok_or("runner ownership record has no parent")?;
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        crate::confirmation_transport::new_file(path, &serde_json::to_vec(&owner).map_err(|e| e.to_string())?)?;
+        // Validate persisted fields before any device-side ownership command.
+        Self::load(path, serial)?.ok_or("runner ownership record disappeared".into())
+    }
+
+    fn command(&self, command: &str) -> String {
+        let remote = &self.remote;
+        let child = format!("{RUNNER_PROC_HELPERS}\nset -- $(identity $$)\n[ \"$#\" = 2 ] || exit 125\nprintf '%s %s\\n' \"$$\" \"$2\" > {remote}/child.tmp\nmv {remote}/child.tmp {remote}/child\nexec sh -c {}", crate::confirmation_transport::quote(command));
+        format!(r#"{RUNNER_PROC_HELPERS}
+[ "$(getprop ro.serialno)" = '{physical}' ] && [ "$(cat /proc/sys/kernel/random/boot_id)" = '{boot}' ] || exit 125
+umask 077
+mkdir {remote} || exit 125
+printf '%s\n' '{token}' > {remote}/token
+set -- $(identity $$)
+[ "$#" = 2 ] || exit 125
+printf '%s %s\n' "$$" "$2" > {remote}/launcher.tmp
+mv {remote}/launcher.tmp {remote}/launcher
+sh -c {child} &
+runner_pid=$!
+wait "$runner_pid"
+runner_status=$?
+printf '%s %s\n' '{token}' "$runner_status" > {remote}/completed.tmp
+mv {remote}/completed.tmp {remote}/completed
+printf '\nPHONEFARM_VKOP_EXIT=%s\n' "$runner_status"
+"#, physical=self.physical_serial, boot=self.boot_id, token=self.token,
+            child=crate::confirmation_transport::quote(&child))
+    }
+
+    fn clear(path: &Path) -> Result<(), String> {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+        std::fs::File::open(path.parent().ok_or("runner ownership record has no parent")?)
+            .and_then(|directory| directory.sync_all()).map_err(|e| e.to_string())
+    }
+
+    fn recovery_script(&self) -> String {
+        format!(r#"{RUNNER_PROC_HELPERS}
+set -eu
+[ "$(getprop ro.serialno)" = '{physical}' ]
+[ "$(cat /proc/sys/kernel/random/boot_id)" = '{boot}' ]
+[ -d {remote} ] && [ ! -L {remote} ]
+[ -f {remote}/token ] && [ ! -L {remote}/token ]
+[ "$(cat {remote}/token)" = '{token}' ]
+read_owner() {{
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    set -- $(cat "$1")
+    [ "$#" = 2 ] || return 1
+    case "$1:$2" in *[!0-9:]*|:*|*:) return 1;; esac
+    [ "$1" -gt 1 ] && [ "$1" -le 2147483647 ] && [ "$2" -gt 0 ] || return 1
+    printf '%s %s\n' "$1" "$2"
+}}
+live() {{
+    observed=$(identity "$1") || {{ [ ! -e /proc/$1 ] && return 1; return 2; }}
+    set -- "$2" $observed
+    [ "$#" = 3 ] || return 2
+    [ "$1" = "$3" ] && [ "$2" != Z ] && [ "$2" != X ]
+}}
+stop_owned() {{
+    pid=$1
+    start=$2
+    for sig in TERM KILL; do
+        status=0
+        live "$pid" "$start" || status=$?
+        [ "$status" -ne 2 ] || return 1
+        [ "$status" = 0 ] || return 0
+        kill -"$sig" "$pid" || return 1
+        i=0
+        while [ "$i" -lt 20 ]; do
+            status=0
+            live "$pid" "$start" || status=$?
+            [ "$status" -ne 2 ] || return 1
+            [ "$status" = 0 ] || return 0
+            sleep 0.1
+            i=$((i+1))
+        done
+    done
+    return 1
+}}
+launcher=$(read_owner {remote}/launcher)
+child=$(read_owner {remote}/child)
+[ "$launcher" != "$child" ]
+stop_owned $child
+stop_owned $launcher
+[ "$(getprop ro.serialno)" = '{physical}' ]
+[ "$(cat /proc/sys/kernel/random/boot_id)" = '{boot}' ]
+echo PHONEFARM_VKOP_STOPPED={token}
+"#, physical=self.physical_serial, boot=self.boot_id, remote=self.remote, token=self.token)
+    }
+}
+
+fn run_owned_runner(phone: &impl hwcond::Shell, serial: &str, path: &Path, command: &str, timeout: u64) -> Result<String, String> {
+    let owner = RunnerOwner::prepare(phone, serial, path)?;
+    let output = phone.shell(&owner.command(command), timeout);
+    runner_completion(&output)?;
+    RunnerOwner::clear(path)?;
+    Ok(output)
+}
+
+fn recover_owned_runner(phone: &impl hwcond::Shell, serial: &str, path: &Path) -> Result<Option<Value>, String> {
+    let Some(owner) = RunnerOwner::load(path, serial)? else { return Ok(None); };
+    let output = phone.shell(&owner.recovery_script(), 15_000);
+    if output.lines().last() != Some(format!("PHONEFARM_VKOP_STOPPED={}", owner.token).as_str()) {
+        return Err(format!("original runner termination remains unconfirmed; ownership retained at {}", path.display()));
+    }
+    RunnerOwner::clear(path)?;
+    Ok(Some(serde_json::json!({"termination_confirmed":true,"serial":serial,
+        "physical_serial":owner.physical_serial,"boot_id":owner.boot_id,"token":owner.token,
+        "remote":owner.remote,"method":"original_pid_and_start_time_verified_stop"})))
 }
 
 /// Parse a raw runner JSON payload; execution callers must also verify completion.
@@ -962,6 +1142,23 @@ fn battery_evidence(b: &hwcond::BatteryState) -> Value {
 }
 
 pub fn run_gpu_op(args: &[String]) -> i32 {
+    run_gpu_op_with_report(args, &mut |output| {
+        println!("{}", serde_json::to_string_pretty(output).unwrap_or_default());
+    })
+}
+
+/// Run GPU evaluation with an invocation-local structured report sink.
+///
+/// Args:
+///     args: GPU operation command-line arguments.
+///     emit_report: Receives each structured result independently of its exit code.
+///
+/// Returns:
+///     The original operation exit code, including 2 for reported conditions failures.
+pub(crate) fn run_gpu_op_with_report(
+    args: &[String],
+    emit_report: &mut dyn FnMut(&Value),
+) -> i32 {
     let mut a = match parse_args(args) {
         Ok(v) => v,
         Err(e) => {
@@ -987,7 +1184,7 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
         let root = hwcond::root_ok(&phone);
         let snapshot = if root { hwcond::read_snapshot(&phone) } else { hwcond::Snapshot::default() };
         let backend = hwcond::gpu_control_backend(&snapshot);
-        println!("{}", serde_json::json!({
+        emit_report(&serde_json::json!({
             "scope":"read_only_hardware_inspection","serial":lease.serial,"root_verified":root,
             "gpu_control_backend":backend,"gpu_model":snapshot.gpu_model,
             "gpu_frequency_hz":snapshot.gpuclk_hz,"mtk_stack_frequency_hz":snapshot.mtk_stackclk_hz,
@@ -1007,20 +1204,30 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             Ok(v) => v, Err(e) => { eprintln!("{e}"); return 2; }
         };
         let phone = crate::device::Device::new(a.serial.clone(), out_dir.clone());
-        return match hwcond::recover_stale_lock("gpu-op", &phone, &state_path) {
-            Ok(Some(true)) => {
-                progress("遗留锁频态已回滚");
-                0
+        let result = (|| -> Result<Value, String> {
+            let runner_path = hwcond::lock_state_path("gpuop-runner", &a.serial)?;
+            let runner = recover_owned_runner(&phone, &_lease.serial, &runner_path)?;
+            let frequency = hwcond::recover_stale_lock("gpu-op", &phone, &state_path)?;
+            let charge_path = hwcond::lock_state_path("charge", &a.serial)?;
+            let charging = hwcond::recover_stale_charge_ctl(&phone, &charge_path)?;
+            let evaluation_lock = crate::eval::GpuLevelLock::recover_record(&_lease.serial, Path::new(&out_dir))?;
+            let restored = frequency != Some(false) && charging != Some(false)
+                && evaluation_lock.as_ref().is_none_or(|v| v["restored"] == true);
+            Ok(serde_json::json!({"scope":"gpu_op_owned_frequency_charging","serial":_lease.serial,
+                "restored":restored,"frequency_restored":frequency,"charging_restored":charging,
+                "evaluation_gpu_lock":evaluation_lock,"runner":runner}))
+        })();
+        return match result {
+            Ok(proof) => {
+                let complete = proof["restored"] == true;
+                if a.as_json { emit_report(&proof); }
+                if complete { 0 } else { 2 }
             }
-            Ok(Some(false)) => {
-                eprintln!("回滚失败, 设备可能仍处于锁频态");
+            Err(error) => {
+                eprintln!("{error}");
+                if a.as_json { emit_report(&serde_json::json!({"restored":false,"error":error})); }
                 2
             }
-            Ok(None) => {
-                progress("没有遗留的锁频态");
-                0
-            }
-            Err(e) => { eprintln!("{e}"); 2 }
         };
     }
 
@@ -1098,6 +1305,17 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
         Ok(v) => v, Err(e) => { eprintln!("{e}"); return 2; }
     };
     let phone = crate::device::Device::new(a.serial.clone(), out_dir.clone());
+    let runner_state = match hwcond::lock_state_path("gpuop-runner", &a.serial) {
+        Ok(path) => path, Err(e) => { eprintln!("{e}"); return 2; }
+    };
+    match RunnerOwner::load(&runner_state, &_lease.serial) {
+        Ok(None) => {},
+        Ok(Some(_)) => {
+            eprintln!("Original GPU runner termination is unconfirmed; reconcile gpu-op --unlock before another evaluation");
+            return 2;
+        },
+        Err(e) => { eprintln!("{e}"); return 2; }
+    }
 
     // ---- root 与 runner ----
     if !hwcond::root_ok(&phone) {
@@ -1253,6 +1471,10 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
         .reference
         .clone()
         .or_else(|| req.quality_reference.clone());
+    let mut image_evidence = (req.track == "sr"
+        && ref_source.is_some()
+        && (a.carrier == Carrier::Headless || quality_pass))
+        .then(|| ImageEvidence::new(Path::new(&out_dir)));
     let mut remote_references: Vec<String> = Vec::new();
     let mut quality_reference = QualityReference::procedural();
     if let Some(src) = ref_source.as_ref() {
@@ -1285,9 +1507,12 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             frames.truncate(wanted);
         }
         let mut names = Vec::new();
+        if !frames.is_empty() {
+            phone.shell(&format!("mkdir -p {REMOTE_DIR}"), 10_000);
+        }
         for (i, frame) in frames.iter().enumerate() {
             let raw = std::path::Path::new(&out_dir).join(format!("reference_{i:02}.rgba"));
-            let (w, h) = match prepare_reference(&frame.to_string_lossy(), 1920, 1080, &raw) {
+            let (w, h, source_sha256) = match prepare_reference(&frame.to_string_lossy(), 1920, 1080, &raw) {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("参考帧不可用: {e}");
@@ -1314,6 +1539,9 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
                     .unwrap_or_else(|| frame.display().to_string()),
             );
             remote_references.push(remote);
+            if let Some(evidence) = image_evidence.as_mut() {
+                evidence.reference(i, frame, &raw, w, h, &source_sha256);
+            }
         }
         quality_reference = QualityReference {
             kind: "real_frames".into(),
@@ -1352,6 +1580,7 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
     let mut observations: Vec<Value> = Vec::new();
     let mut crashed = false;
     let mut fatal: Option<String> = None;
+    let mut frequency_restored = None;
 
     for (i, arm) in schedule.iter().enumerate() {
         progress(&format!(
@@ -1380,6 +1609,8 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             .gpu_level
             .or(snap.gpu_max_level)
             .unwrap_or(0);
+        // A new apply attempt cannot inherit a previous arm's restoration receipt.
+        frequency_restored = None;
         let lock = match hwcond::Lock::apply(&phone, &state_path, snap.clone(), level) {
             Ok(l) => l,
             Err(e) => {
@@ -1389,10 +1620,6 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
         };
 
         let locked = hwcond::read_snapshot(&phone);
-        if req.v2_context.is_some() && !hwcond::gpu_locked_at(&locked, level) {
-            let restored = lock.restore(&phone);
-            fatal = Some(format!("frequency control actual readback unavailable/mismatch; restored={restored}")); break;
-        }
         observations.push(serde_json::json!({"arm":arm.as_str(),"index":i,
             "start_temp_c":start_c,"thermal_zone":zone,"waited_s":waited_s,
             "battery_before":battery_evidence(&battery_before),"battery_after":null,
@@ -1401,11 +1628,18 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
                 "backend":hwcond::gpu_control_backend(&locked),"ged_user_limits":locked.mtk_ged,
                 "mtk_stackclk_hz":locked.mtk_stackclk_hz},
             "restored":null,"frames_submitted":null,"postfx_active":null}));
+        if req.v2_context.is_some() && !hwcond::gpu_locked_at(&locked, level) {
+            let restored = lock.restore(&phone);
+            frequency_restored = Some(restored);
+            observations.last_mut().unwrap()["restored"] = serde_json::json!(restored);
+            fatal = Some(format!("frequency control actual readback unavailable/mismatch; restored={restored}")); break;
+        }
 
         // ── refbench 载体 ──
         if a.carrier == Carrier::Refbench {
             let (res, power) = run_refbench_arm(&phone, *arm, &a, a.power_rail, locked.mtk_ged.is_some(), i, power_unavailable.is_none());
             let restored = lock.restore(&phone);
+            frequency_restored = Some(restored);
             let battery_after = hwcond::read_battery_state(&phone);
             let last = observations.last_mut().unwrap();
             last["restored"] = serde_json::json!(restored);
@@ -1482,12 +1716,30 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             continue;
         }
 
-        let (out, power) = run_one(&phone, *arm, &req, a.power_rail, inline_reference.as_deref(), power_unavailable.is_none());
-        let restored = lock.restore(&phone);
+        let round = schedule[..i].iter().filter(|prior| **prior == *arm).count();
+        // Each measured invocation owns a fresh readback path, including repeated rounds.
+        let output_rgba = image_evidence
+            .as_ref()
+            .and_then(|e| e.remote_output(0, round, *arm));
+        let (out, power) = run_one(
+            &phone, *arm, &req, a.power_rail, inline_reference.as_deref(),
+            power_unavailable.is_none(), output_rgba.as_deref(), &runner_state, &_lease.serial,
+        );
+        let runner_stopped = matches!(RunnerOwner::load(&runner_state, &_lease.serial), Ok(None));
+        let restored = runner_stopped && lock.restore(&phone);
+        frequency_restored = if runner_stopped { Some(restored) } else { None };
         let battery_after = hwcond::read_battery_state(&phone);
         let last = observations.last_mut().unwrap();
         last["restored"] = serde_json::json!(restored);
         last["battery_after"] = battery_evidence(&battery_after);
+        last["runner_started"] = serde_json::json!(true);
+        last["runner_exit_status"] = serde_json::json!(out.as_ref().ok()
+            .and_then(|value| runner_completion(value).ok()).map(|(_, status)| status));
+        if !runner_stopped {
+            fatal = Some(format!("Runner termination unconfirmed; original ownership and remote files retained: {}",
+                out.as_ref().err().map(String::as_str).unwrap_or("missing completion receipt")));
+            break;
+        }
         if a.require_discharging && !battery_after.on_battery() {
             fatal = Some("required discharge not verified after arm".into()); break;
         }
@@ -1496,7 +1748,7 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             break;
         }
 
-        match parse_completed_runner_output(&out) {
+        match out.and_then(|value| parse_completed_runner_output(&value)) {
             Ok(r) if r.ok => {
                 let Some(ms) = r.median_ms() else {
                     fatal = Some("runner 未给出时延".into());
@@ -1507,6 +1759,9 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
                 // Keep the per-arm measurements, not only rounded progress text.
                 last["operator_latency_ms"] = serde_json::json!(ms);
                 last["psnr_db"] = serde_json::json!(r.psnr_db);
+                if let Some(evidence) = image_evidence.as_mut() {
+                    evidence.measured(0, round, *arm, output_rgba, r.psnr_db);
+                }
                 let w = if power_unavailable.is_none() { hwcond::power_stats(&power).map(|(mean, _, _, _)| mean) } else { None };
                 match arm {
                     Arm::Baseline => {
@@ -1537,6 +1792,9 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             }
             Ok(r) => {
                 // 候选把 GPU 跑崩了是一个结论, 不是一个错误。
+                if let Some(evidence) = image_evidence.as_mut() {
+                    evidence.errors.push(format!("frame-00 {} round {round}: runner failed: {:?}", image_role(*arm), r.error));
+                }
                 progress(&format!("  [{}] runner 失败: {:?}", arm.as_str(), r.error));
                 if *arm == Arm::Candidate {
                     crashed = true;
@@ -1557,7 +1815,7 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
     // 放在 A/B 之后、cleanup 之前: 主测期间设备要么在等冷要么在锁频跑分,
     // 插进去会把热状态搅乱; 跑完了再补则完全不影响已经落袋的帧时与瓦数。
     if quality_pass && fatal.is_none() {
-        match run_quality_pass(&phone, &runner, &req, &remote_references) {
+        match run_quality_pass(&phone, &runner, &req, &remote_references, image_evidence.as_mut(), &runner_state, &_lease.serial) {
             Ok((qb, qc)) => {
                 if let Some(v) = qb.psnr_db { psnr_a.push(v); }
                 if let Some(v) = qb.hud_ghost_db { ghost_a.push(v); }
@@ -1576,15 +1834,48 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
             }
             // 补测失败不作废主测: 帧时与瓦数是真跑出来的, 不该被画质这一步连坐。
             // 但画质就如实留空 —— 绝不拿基线值或默认值顶上。
-            Err(e) => progress(&format!("画质补测失败, 该项如实留空: {e}")),
+            Err(e) => {
+                if let Some(evidence) = image_evidence.as_mut() {
+                    evidence.errors.push(format!("quality pass unavailable: {e}"));
+                }
+                progress(&format!("画质补测失败, 该项如实留空: {e}"));
+            }
         }
     }
 
-    cleanup(&phone);
+    let runner_stopped = matches!(RunnerOwner::load(&runner_state, &_lease.serial), Ok(None));
+    if !runner_stopped {
+        fatal.get_or_insert_with(|| "Quality runner termination is unconfirmed; original ownership retained".into());
+        if let Some(last) = observations.last_mut() {
+            last["quality_runner_pending"] = serde_json::json!(true);
+        }
+    }
+    // Transport and PNG encoding run after measurement, while owned remote files exist.
+    if fatal.is_none() {
+        if let Some(evidence) = image_evidence.as_mut() {
+            evidence.finish(&phone);
+        }
+    }
+    if runner_stopped {
+        cleanup(&phone);
+    }
 
     if let Some(e) = fatal {
         eprintln!("{e}");
-        bail!(2);
+        let charging_restored = suspend.take().filter(|_| runner_stopped).map(|mut g| {
+            let restored = g.restore(&phone);
+            if !restored {
+                eprintln!("Exit charging restoration was not confirmed ({}); recovery state retained", g.node());
+            }
+            restored
+        });
+        if a.as_json {
+            if let Some((output, exit_code)) = aborted_measurement_report(&req, &a, &e, &observations, frequency_restored, charging_restored) {
+                emit_report(&output);
+                return exit_code;
+            }
+        }
+        return 2;
     }
 
     // ---- 统计裁决 ----
@@ -1717,6 +2008,9 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
         output["baseline_metrics"] = serde_json::json!(base);
         output["power_unavailable"] = serde_json::json!(power_unavailable);
         output["allow_missing_power"] = serde_json::json!(a.allow_missing_power);
+        if let Some(evidence) = image_evidence.as_ref() {
+            evidence.append_report(&mut output);
+        }
         if let Some(context) = &req.v2_context {
             output["version"] = serde_json::json!(2);
             output["kind"] = serde_json::json!("shader");
@@ -1752,7 +2046,7 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
                         } else {"kgsl_gpu_busy_ab_delta"},
                     "is_isolated_operator":a.carrier==Carrier::Headless}});
         }
-        println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+        emit_report(&output);
     } else {
         println!("{}", render_text(&report, base.as_ref(), welch.as_ref()));
     }
@@ -1761,6 +2055,56 @@ pub fn run_gpu_op(args: &[String]) -> i32 {
         Status::Pass => 0,
         _ => 1,
     }
+}
+
+/// Preserve confirmed owned-state restoration without accepting an aborted measurement.
+///
+/// Args:
+///     req: Validated request carrying the original v2 context.
+///     args: Effective execution arguments, including the pinned device serial.
+///     reason: Measurement failure retained in the ABORT verdict.
+///     observations: Actual arm observations, including any restore readback.
+///     frequency_restored: Latest owned lock's restore result; None remains unknown.
+///     charging_restored: Owned charging restore result, or None when not suspended.
+///
+/// Returns:
+///     A v2 ABORT report and exit code 2, or None for legacy requests.
+fn aborted_measurement_report(
+    req: &EvalRequest,
+    args: &GpuOpArgs,
+    reason: &str,
+    observations: &[Value],
+    frequency_restored: Option<bool>,
+    charging_restored: Option<bool>,
+) -> Option<(Value, i32)> {
+    let context = req.v2_context.as_ref()?;
+    let envelope = serde_json::json!({"candidate_id":req.candidate_id,
+        "conditions":context["conditions_requested"],"workload":context["workload_requested"],
+        "payload":{"inject":context["injection_requested"]}});
+    let mut resolved = context["resolved_config"].clone();
+    resolved["serial"] = serde_json::json!(args.serial.as_ref().or(req.serial.as_ref()));
+    resolved["carrier"] = serde_json::json!(args.carrier.as_str());
+    resolved["seconds"] = if args.carrier == Carrier::Headless {
+        serde_json::json!(req.protocol.replay_seconds)
+    } else {
+        Value::Null
+    };
+    resolved["frames"] = if args.carrier == Carrier::Refbench { serde_json::json!(args.frames) } else { Value::Null };
+    resolved["intensity"] = if args.carrier == Carrier::Refbench { serde_json::json!(args.intensity) } else { Value::Null };
+    let mut output = crate::shaderplan::abort(&envelope, reason, Some(&resolved));
+    let runner_stopped = observations.iter().all(|arm|
+        (arm["runner_started"] != true || arm["runner_exit_status"].as_u64().is_some_and(|code| code <= 255))
+        && arm["quality_runner_pending"] != true);
+    let restored = match (frequency_restored, charging_restored) {
+        _ if !runner_stopped => Some(false),
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        (Some(true), _) => Some(true),
+        _ => None,
+    };
+    output["conditions_observed"] = serde_json::json!({"root_verified":true,"fan":null,
+        "arms":observations,"restored":restored,"frequency_restored":frequency_restored,
+        "charging_restored":charging_restored,"runner_termination_confirmed":runner_stopped,"power_window_verified":false});
+    Some((output, 2))
 }
 
 fn optional_power_result(result: Result<(), String>, allow_missing: bool) -> Result<Option<String>, String> {
@@ -1778,6 +2122,301 @@ fn optional_power_result(result: Result<(), String>, allow_missing: bool) -> Res
 /// 画质是确定性量, 十几张不同内容的真实帧已经足够把"这个算子在真实高频细节上
 /// 表现如何"这件事量稳, 再多是线性烧真机时间。
 const MAX_REFERENCE_FRAMES: usize = 32;
+
+const EVIDENCE_WIDTH: u32 = 1920;
+const EVIDENCE_HEIGHT: u32 = 1080;
+const EVIDENCE_RGBA_SIZE: usize = EVIDENCE_WIDTH as usize * EVIDENCE_HEIGHT as usize * 4;
+
+fn image_role(arm: Arm) -> &'static str {
+    match arm {
+        Arm::Baseline => "baseline",
+        Arm::Candidate => "candidate",
+    }
+}
+
+fn bytes_sha256(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+struct ReferenceImage {
+    rgba_sha256: String,
+    source: PathBuf,
+    source_sha256: String,
+    source_width: u32,
+    source_height: u32,
+}
+
+struct GpuReadback {
+    frame: usize,
+    round: usize,
+    arm: Arm,
+    remote: String,
+    psnr_db: f64,
+}
+
+/// Retain measured SR pixels without replaying a shader or changing its score.
+struct ImageEvidence {
+    directory: PathBuf,
+    prefix: Option<String>,
+    references: std::collections::BTreeMap<usize, ReferenceImage>,
+    readbacks: Vec<GpuReadback>,
+    artifacts: Vec<Value>,
+    comparisons: Vec<Value>,
+    provenance: Vec<Value>,
+    errors: Vec<String>,
+}
+
+impl ImageEvidence {
+    /// Reserve a new evidence namespace; filesystem failures remain optional.
+    fn new(directory: &Path) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let mut evidence = Self {
+            directory: directory.to_path_buf(),
+            prefix: None,
+            references: Default::default(),
+            readbacks: Vec::new(),
+            artifacts: Vec::new(),
+            comparisons: Vec::new(),
+            provenance: Vec::new(),
+            errors: Vec::new(),
+        };
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        for _ in 0..16 {
+            let count = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let prefix = format!("evidence-{}-{stamp:x}-{count:x}", std::process::id());
+            match std::fs::create_dir(directory.join(&prefix)) {
+                Ok(()) => {
+                    evidence.prefix = Some(prefix);
+                    return evidence;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => {
+                    evidence.errors.push(format!("cannot reserve image evidence directory: {e}"));
+                    return evidence;
+                }
+            }
+        }
+        evidence.errors.push("cannot reserve a unique image evidence directory".into());
+        evidence
+    }
+
+    fn image_name(&self, frame: usize, round: usize, role: &str) -> Option<String> {
+        let prefix = self.prefix.as_ref()?;
+        let sample = if round == 0 || role == "reference" {
+            String::new()
+        } else {
+            format!("round-{round:02}/")
+        };
+        Some(format!("{prefix}/images/frame-{frame:02}/{sample}{role}.png"))
+    }
+
+    fn remote_output(&self, frame: usize, round: usize, arm: Arm) -> Option<String> {
+        self.references.get(&frame)?;
+        let prefix = self.prefix.as_ref()?;
+        Some(format!("{REMOTE_DIR}/{prefix}-frame-{frame:02}-round-{round:02}-{}.rgba", image_role(arm)))
+    }
+
+    fn reference(
+        &mut self, frame: usize, source: &Path, raw: &Path,
+        w: u32, h: u32, source_sha256: &str,
+    ) {
+        let Some(name) = self.image_name(frame, 0, "reference") else { return; };
+        let result = (|| {
+            let rgba = std::fs::read(raw).map_err(|e| format!("cannot read prepared reference: {e}"))?;
+            if rgba.len() != EVIDENCE_RGBA_SIZE {
+                return Err("invalid prepared reference RGBA size".into());
+            }
+            let rgba_sha256 = bytes_sha256(&rgba);
+            self.references.insert(frame, ReferenceImage {
+                rgba_sha256: rgba_sha256.clone(), source: source.to_path_buf(),
+                source_sha256: source_sha256.into(),
+                source_width: w, source_height: h,
+            });
+            let artifact = write_evidence_png(&self.directory, &name, &rgba, EVIDENCE_WIDTH, EVIDENCE_HEIGHT,
+                &format!("Reference frame {frame:02}: exact center-cropped pixels supplied to PSNR"))?;
+            self.artifacts.push(artifact);
+            self.provenance.push(serde_json::json!({"artifact":name,"role":"reference",
+                "frame_id":format!("frame-{frame:02}"),"source":{"kind":"prepared_reference",
+                    "path":source,"sha256":source_sha256,"width":w,"height":h,"transform":"center_crop_without_resampling",
+                    "crop_x":(w-EVIDENCE_WIDTH)/2,"crop_y":(h-EVIDENCE_HEIGHT)/2},
+                "rgba_sha256":rgba_sha256,"width":EVIDENCE_WIDTH,"height":EVIDENCE_HEIGHT}));
+            Ok::<_, String>(())
+        })();
+        if let Err(e) = result {
+            self.errors.push(format!("{name}: {e}"));
+        }
+    }
+
+    fn measured(
+        &mut self, frame: usize, round: usize, arm: Arm,
+        remote: Option<String>, psnr: Option<f64>,
+    ) {
+        if let (Some(remote), Some(psnr_db)) = (remote, psnr.filter(|v| v.is_finite())) {
+            self.readbacks.push(GpuReadback { frame, round, arm, remote, psnr_db });
+        } else if self.prefix.is_some() {
+            self.errors.push(format!("frame-{frame:02} {} round {round}: no completed PSNR readback available", image_role(arm)));
+        }
+    }
+
+    fn finish(&mut self, phone: &crate::device::Device) {
+        self.finish_with(|remote, local| {
+            // These paths are generated internally in the leased GPU-op directory.
+            let command = format!("if [ -f {remote} ] && [ ! -L {remote} ]; then sha256sum {remote} && wc -c < {remote}; fi");
+            let receipt = parse_rgba_receipt(&phone.shell(&command, 10_000), remote)?;
+            if !phone.pull(remote, &local.to_string_lossy()) {
+                return Err("GPU readback download failed".into());
+            }
+            Ok(receipt)
+        });
+    }
+
+    /// Download each owned readback after measurement and publish only verified PNGs.
+    ///
+    /// Args:
+    ///     download: Existing transport returning the remote SHA-256 and byte count.
+    fn finish_with(
+        &mut self,
+        mut download: impl FnMut(&str, &Path) -> Result<(String, u64), String>,
+    ) {
+        for readback in &self.readbacks {
+            let name = self.image_name(readback.frame, readback.round, image_role(readback.arm)).unwrap();
+            let raw = self.directory.join(self.prefix.as_ref().unwrap())
+                .join(format!("frame-{:02}-round-{:02}-{}.rgba", readback.frame, readback.round, image_role(readback.arm)));
+            let mut owns_raw = false;
+            let result = (|| {
+                match std::fs::symlink_metadata(&raw) {
+                    Ok(_) => return Err("download destination already exists".into()),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.to_string()),
+                }
+                owns_raw = true;
+                let (expected_sha256, size) = download(&readback.remote, &raw)?;
+                let rgba = verified_rgba(&raw, &expected_sha256, size)?;
+                let artifact = write_evidence_png(&self.directory, &name, &rgba, EVIDENCE_WIDTH, EVIDENCE_HEIGHT,
+                    &format!("{} GPU output for reference frame {:02}, round {:02}; exact PSNR readback", image_role(readback.arm), readback.frame, readback.round))?;
+                let reference = &self.references[&readback.frame];
+                self.artifacts.push(artifact);
+                self.provenance.push(serde_json::json!({"artifact":name,"role":image_role(readback.arm),
+                    "frame_id":format!("frame-{:02}",readback.frame),"round":readback.round,
+                    "source":{"kind":"vulkan_gpu_readback","remote_path":readback.remote,
+                        "sha256":expected_sha256,"size":size,"runner_exit_status":0,
+                        "shader":format!("{REMOTE_DIR}/{}.spv",image_role(readback.arm)),
+                        "buffer":"produced (same bytes used by runner PSNR)","outside_gpu_timing":true},
+                    "reference_rgba_sha256":reference.rgba_sha256,
+                    "reference_source":reference.source,"reference_source_width":reference.source_width,
+                    "reference_source_sha256":reference.source_sha256,
+                    "reference_source_height":reference.source_height,"psnr_db":readback.psnr_db,
+                    "rgba_sha256":bytes_sha256(&rgba),"width":EVIDENCE_WIDTH,"height":EVIDENCE_HEIGHT}));
+                Ok::<_, String>(())
+            })();
+            if owns_raw {
+                let _ = std::fs::remove_file(&raw);
+            }
+            if let Err(e) = result {
+                self.errors.push(format!("{name}: {e}"));
+            }
+        }
+        let groups: std::collections::BTreeSet<_> = self.readbacks.iter().map(|r| (r.frame, r.round)).collect();
+        for (frame, round) in groups {
+            let images: Vec<Value> = ["reference", "baseline", "candidate"].iter().map(|role| {
+                serde_json::json!({"role":role,"artifact":self.image_name(frame,round,role).unwrap()})
+            }).collect();
+            if images.iter().all(|image| self.artifacts.iter().any(|a| a["name"] == image["artifact"])) {
+                let suffix = if round == 0 { String::new() } else { format!("-round-{round:02}") };
+                self.comparisons.push(serde_json::json!({"id":format!("frame-{frame:02}{suffix}"),
+                    "label":if round == 0 { format!("Reference frame {frame:02}") }
+                        else { format!("Reference frame {frame:02}, round {round:02}") },
+                    "kind":"static","images":images}));
+            } else {
+                self.errors.push(format!("frame-{frame:02} round {round}: incomplete image evidence comparison"));
+            }
+        }
+        for error in &self.errors {
+            progress(&format!("Optional image evidence unavailable: {error}"));
+        }
+    }
+
+    fn append_report(&self, output: &mut Value) {
+        // Preserve legacy interpolation diagnostics if a runner supplied any.
+        if let Some(diagnostics) = output.get("artifacts").filter(|v| v.is_object()).cloned() {
+            output["quality_artifacts"] = diagnostics;
+        }
+        output["evidence_directory"] = serde_json::json!(self.directory);
+        output["artifacts"] = serde_json::json!(self.artifacts);
+        output["evidence_comparisons"] = serde_json::json!(self.comparisons);
+        output["evidence_provenance"] = serde_json::json!(self.provenance);
+        output["artifact_errors"] = serde_json::json!(self.errors);
+    }
+}
+
+fn parse_rgba_receipt(output: &str, remote: &str) -> Result<(String, u64), String> {
+    let mut lines = output.lines();
+    let mut hash_line = lines.next().unwrap_or_default().split_whitespace();
+    let hash = hash_line.next().unwrap_or_default();
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit())
+        || hash_line.next() != Some(remote) || hash_line.next().is_some()
+    {
+        return Err("GPU readback checksum receipt missing or invalid".into());
+    }
+    let size = lines.next().unwrap_or_default().trim().parse::<u64>()
+        .map_err(|_| "GPU readback size receipt missing or invalid")?;
+    if size != EVIDENCE_RGBA_SIZE as u64 || lines.next().is_some() {
+        return Err("GPU readback receipt has an unexpected size or trailing data".into());
+    }
+    Ok((hash.to_ascii_lowercase(), size))
+}
+
+fn verified_rgba(path: &Path, expected_hash: &str, expected_size: u64) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| format!("missing GPU readback: {e}"))?;
+    if !metadata.file_type().is_file() || metadata.len() != EVIDENCE_RGBA_SIZE as u64
+        || metadata.len() != expected_size
+    {
+        return Err("GPU readback is not a regular file of the expected RGBA size".into());
+    }
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    if bytes.len() != EVIDENCE_RGBA_SIZE || bytes_sha256(&bytes) != expected_hash {
+        return Err("GPU readback checksum mismatch".into());
+    }
+    Ok(bytes)
+}
+
+/// Encode source pixels losslessly and verify the published bytes before declaring them.
+///
+/// Returns:
+///     An artifact whose name is relative to the report evidence directory.
+fn write_evidence_png(
+    directory: &Path, name: &str, rgba: &[u8],
+    width: u32, height: u32, description: &str,
+) -> Result<Value, String> {
+    use image::ImageEncoder;
+    let path = directory.join(name);
+    std::fs::create_dir_all(path.parent().ok_or("image evidence has no parent")?).map_err(|e| e.to_string())?;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|e| format!("cannot create image evidence: {e}"))?;
+    let result = (|| {
+        image::codecs::png::PngEncoder::new(&mut file)
+            .write_image(rgba, width, height, image::ExtendedColorType::Rgba8).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).map_err(|e| e.to_string())?.to_rgba8();
+        if decoded.width() != width || decoded.height() != height || decoded.as_raw().as_slice() != rgba {
+            return Err("PNG verification changed source pixels".into());
+        }
+        let mut permissions = file.metadata().map_err(|e| e.to_string())?.permissions();
+        permissions.set_readonly(true);
+        file.set_permissions(permissions).map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({"name":name,"sha256":bytes_sha256(&bytes),"size":bytes.len(),
+            "media_type":"image/png","description":description}))
+    })();
+    drop(file);
+    if result.is_err() {
+        let _ = std::fs::remove_file(&path);
+    }
+    result
+}
 
 /// 解析 `--reference` / `quality_reference` 指向的东西, 得到一组参考帧。
 ///
@@ -1868,8 +2507,10 @@ fn prepare_reference(
     out_w: u32,
     out_h: u32,
     dst: &std::path::Path,
-) -> Result<(u32, u32), String> {
-    let img = image::open(local_png).map_err(|e| format!("解不开参考帧 {local_png}: {e}"))?;
+) -> Result<(u32, u32, String), String> {
+    // Hash and decode one snapshot so provenance binds the actual source pixels.
+    let source = std::fs::read(local_png).map_err(|e| format!("读不了参考帧 {local_png}: {e}"))?;
+    let img = image::load_from_memory(&source).map_err(|e| format!("解不开参考帧 {local_png}: {e}"))?;
     let (w, h) = (img.width(), img.height());
     if w < out_w || h < out_h {
         return Err(format!(
@@ -1882,7 +2523,7 @@ fn prepare_reference(
         .to_image()
         .into_raw();
     std::fs::write(dst, &rgba).map_err(|e| format!("写入 {} 失败: {e}", dst.display()))?;
-    Ok((w, h))
+    Ok((w, h, bytes_sha256(&source)))
 }
 
 /// 把 runner 与两份 SPIR-V 推到设备。
@@ -1981,29 +2622,45 @@ fn run_quality_pass(
     runner_local: &str,
     req: &EvalRequest,
     references: &[String],
+    mut evidence: Option<&mut ImageEvidence>,
+    runner_state: &Path,
+    serial: &str,
 ) -> Result<(QualitySample, QualitySample), String> {
     deploy(phone, runner_local, req)?;
     // refbench 主测会把 REMOTE_SPV 下的候选换掉, 但 deploy 推的是 REMOTE_DIR
     // 下另一份, 两者互不影响。
-    let one = |spv: &str, reference: Option<&String>| -> Result<QualitySample, String> {
-        let ref_arg = reference
-            .map(|r| format!(" --reference {r}"))
-            .unwrap_or_default();
-        let cmd = format!(
-            "cd {REMOTE_DIR} && ./vkop_runner --shader {spv} --track {} --iterations {QUALITY_ITERS}{ref_arg} --json 2>&1",
-            req.track
-        );
-        let out = phone.shell(&completed_runner_command(&cmd), 120_000);
-        let r = parse_completed_runner_output(&out)?;
-        if !r.ok {
-            return Err(format!("{spv} 跑失败: {:?}", r.error));
+    let mut one = |spv: &str, arm: Arm, frame: usize, reference: Option<&String>| -> Result<QualitySample, String> {
+        let result = (|| {
+            let ref_arg = reference
+                .map(|r| format!(" --reference {r}"))
+                .unwrap_or_default();
+            let output_rgba = evidence.as_deref().and_then(|e| e.remote_output(frame, 0, arm));
+            let output_arg = output_rgba.as_ref().map(|r| format!(" --output-rgba {r}")).unwrap_or_default();
+            let cmd = format!(
+                "cd {REMOTE_DIR} && exec ./vkop_runner --shader {spv} --track {} --iterations {QUALITY_ITERS}{ref_arg}{output_arg} --json 2>&1",
+                req.track
+            );
+            let out = run_owned_runner(phone, serial, runner_state, &cmd, 120_000)?;
+            let r = parse_completed_runner_output(&out)?;
+            if !r.ok {
+                return Err(format!("{spv} 跑失败: {:?}", r.error));
+            }
+            if let Some(e) = evidence.as_deref_mut() {
+                e.measured(frame, 0, arm, output_rgba, r.psnr_db);
+            }
+            Ok(QualitySample {
+                psnr_db: r.psnr_db,
+                hud_ghost_db: r.hud_ghost_db,
+                stretch_pct: r.stretch_pct,
+                psnr_per_frame: r.psnr_db.into_iter().collect(),
+            })
+        })();
+        if let Err(error) = &result {
+            if let Some(e) = evidence.as_deref_mut() {
+                e.errors.push(format!("frame-{frame:02} {}: {error}", image_role(arm)));
+            }
         }
-        Ok(QualitySample {
-            psnr_db: r.psnr_db,
-            hud_ghost_db: r.hud_ghost_db,
-            stretch_pct: r.stretch_pct,
-            psnr_per_frame: r.psnr_db.into_iter().collect(),
-        })
+        result
     };
 
     // 没有真实帧时 `references` 为空, 这里退化成"跑一次, 不带 --reference"。
@@ -2016,13 +2673,16 @@ fn run_quality_pass(
     // 一张跑挂不作废整臂: 16 张里第 9 张碰上一次 adb 抖动, 不该把另外 15 张
     // 真跑出来的 dB 一起扔掉 —— 那跟"补测失败不作废主测"是同一条道理。
     // 挂掉的那张留 NaN 占位 (下标仍与 frame_files 对齐), 全挂才算这臂失败。
-    let arm = |spv: &str| -> Result<QualitySample, String> {
+    let mut arm = |spv: &str, which: Arm| -> Result<QualitySample, String> {
         let mut per_frame = Vec::with_capacity(slots.len());
         let mut failures: Vec<String> = Vec::new();
         for (i, r) in slots.iter().enumerate() {
-            match one(spv, *r) {
+            match one(spv, which, i, *r) {
                 Ok(s) => per_frame.push(s),
                 Err(e) => {
+                    if RunnerOwner::load(runner_state, serial)?.is_some() {
+                        return Err(format!("Original quality runner termination is unconfirmed: {e}"));
+                    }
                     // 报错带上帧序号: 一组帧里坏了哪一张, 日志里要看得出来。
                     failures.push(format!("第 {} 张: {e}", i + 1));
                     per_frame.push(QualitySample::default());
@@ -2044,8 +2704,8 @@ fn run_quality_pass(
     };
 
     // 基线先跑: 它跑不起来说明工装坏了, 候选的数字也就没有参照。
-    let base = arm("baseline.spv").map_err(|e| format!("基线臂 {e}"))?;
-    let cand = arm("candidate.spv").map_err(|e| format!("候选臂 {e}"))?;
+    let base = arm("baseline.spv", Arm::Baseline).map_err(|e| format!("基线臂 {e}"))?;
+    let cand = arm("candidate.spv", Arm::Candidate).map_err(|e| format!("候选臂 {e}"))?;
     Ok(align_arms(base, cand))
 }
 
@@ -2326,7 +2986,10 @@ fn run_one(
     rail: PowerRail,
     reference: Option<&str>,
     sample_power: bool,
-) -> (String, Vec<hwcond::PowerSample>) {
+    output_rgba: Option<&str>,
+    runner_state: &Path,
+    serial: &str,
+) -> (Result<String, String>, Vec<hwcond::PowerSample>) {
     let spv = match arm {
         Arm::Baseline => "baseline.spv",
         Arm::Candidate => "candidate.spv",
@@ -2347,11 +3010,12 @@ fn run_one(
     let ref_arg = reference
         .map(|r| format!(" --reference {r}"))
         .unwrap_or_default();
+    let output_arg = output_rgba.map(|r| format!(" --output-rgba {r}")).unwrap_or_default();
     let cmd = format!(
-        "cd {REMOTE_DIR} && ./vkop_runner --shader {spv} --track {} --seconds {}{ref_arg} --json 2>&1",
+        "cd {REMOTE_DIR} && exec ./vkop_runner --shader {spv} --track {} --seconds {}{ref_arg}{output_arg} --json 2>&1",
         req.track, req.protocol.replay_seconds
     );
-    let out = phone.shell(&completed_runner_command(&cmd), (req.protocol.replay_seconds as u64 + 60) * 1000);
+    let out = run_owned_runner(phone, serial, runner_state, &cmd, (req.protocol.replay_seconds as u64 + 60) * 1000);
 
     let mut power = Vec::new();
     if let Some(mut child) = sampler {
@@ -2410,6 +3074,286 @@ fn render_text(
 mod tests {
     use super::*;
 
+    fn abort_request() -> EvalRequest {
+        let mut request = a_request();
+        request.v2_context = Some(serde_json::json!({
+            "conditions_requested":{"cool_c":42},
+            "workload_requested":{"carrier":"headless"},
+            "injection_requested":false,
+            "resolved_config":{"carrier":"headless","gpu_level":0},
+        }));
+        request
+    }
+
+    fn abort_args() -> GpuOpArgs {
+        parse_args(&[
+            "--request".into(), "synthetic.json".into(), "--json".into(),
+            "--serial".into(), "pinned-synthetic-device".into(),
+        ]).unwrap()
+    }
+
+    #[test]
+    fn frequency_readback_abort_preserves_true_and_false_restoration_receipts() {
+        let request = abort_request();
+        for restored in [true, false] {
+            let reason = format!("frequency control actual readback unavailable/mismatch; restored={restored}");
+            let observations = vec![serde_json::json!({"arm":"baseline","index":0,
+                "frequency_control_readback":{"gpu_max_level":35,"gpu_min_level":0,
+                    "backend":"mediatek_ged","ged_user_limits":[0,0]},
+                "restored":restored,"frames_submitted":null})];
+            let (output, exit_code) = aborted_measurement_report(&request, &abort_args(), &reason, &observations, Some(restored), None).unwrap();
+            assert_eq!(exit_code, 2, "a conditions failure must retain its exit code even when reported");
+            let decoded: Value = serde_json::from_str(&serde_json::to_string(&output).unwrap()).unwrap();
+            assert_eq!(decoded["status"], "ABORT");
+            assert_eq!(decoded["candidate_id"], request.candidate_id);
+            assert_eq!(decoded["verdict"]["reason"], reason);
+            assert_eq!(decoded["verdict"]["is_pareto_improvement"], false);
+            assert!(decoded["metrics"].as_object().unwrap().values().all(Value::is_null));
+            assert_eq!(decoded["conditions_observed"]["restored"], restored);
+            assert_eq!(decoded["conditions_observed"]["frequency_restored"], restored);
+            assert_eq!(decoded["conditions_observed"]["arms"], serde_json::json!(observations));
+            assert_eq!(decoded["conditions_observed"]["arms"][0]["frames_submitted"], Value::Null);
+            assert_eq!(decoded["conditions_requested"], request.v2_context.as_ref().unwrap()["conditions_requested"]);
+            assert_eq!(decoded["resolved_config"]["gpu_level"], 0);
+            assert_eq!(decoded["qualification"]["eligible"], false);
+        }
+    }
+
+    #[test]
+    fn abort_restoration_requires_current_lock_and_charging_confirmation() {
+        let request = abort_request();
+        // A prior arm's receipt cannot establish restoration for an unknown apply failure.
+        let prior = vec![serde_json::json!({"arm":"baseline","restored":true})];
+        for (frequency, charging, expected) in [
+            (None, None, None), (None, Some(true), None),
+            (Some(true), None, Some(true)), (Some(true), Some(true), Some(true)),
+            (Some(false), Some(true), Some(false)), (Some(true), Some(false), Some(false)),
+            (None, Some(false), Some(false)),
+        ] {
+            let (output, exit_code) = aborted_measurement_report(&request, &abort_args(), "synthetic owned-state failure", &prior, frequency, charging).unwrap();
+            assert_eq!(exit_code, 2);
+            assert_eq!(output["conditions_observed"]["restored"], serde_json::json!(expected));
+            assert_eq!(output["conditions_observed"]["charging_restored"], serde_json::json!(charging));
+        }
+    }
+
+    #[test]
+    fn abort_without_runner_exit_cannot_certify_restoration() {
+        let observations = vec![serde_json::json!({
+            "arm":"baseline", "index":0, "runner_started":true,
+            "restored":true, "operator_latency_ms":0.5, "psnr_db":99.0,
+        })];
+        let (output, code) = aborted_measurement_report(
+            &abort_request(), &abort_args(), "runner completion receipt is missing",
+            &observations, Some(true), Some(true),
+        ).unwrap();
+        assert_eq!(code, 2);
+        assert_ne!(output["conditions_observed"]["restored"], true);
+        assert_eq!(output["conditions_observed"]["frequency_restored"], true);
+        assert!(output["metrics"].as_object().unwrap().values().all(Value::is_null));
+    }
+
+    #[cfg(target_os = "linux")]
+    struct LocalRunner {
+        directory: PathBuf,
+        child: std::cell::RefCell<Option<std::process::Child>>,
+        omit_trailer: bool,
+        changed_boot: std::cell::Cell<bool>,
+        launches: std::cell::Cell<usize>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl LocalRunner {
+        fn new(omit_trailer: bool) -> Self {
+            let directory = scratch("owned_runner");
+            std::fs::create_dir(directory.join("remote")).unwrap();
+            Self { directory, child:Default::default(), omit_trailer,
+                changed_boot:false.into(), launches:0.into() }
+        }
+
+        fn record(&self) -> PathBuf { self.directory.join("runner.json") }
+
+        fn remote(&self, owner: &RunnerOwner) -> PathBuf {
+            self.directory.join("remote").join(format!("runner-{}", owner.token))
+        }
+
+        fn child_pid(&self, owner: &RunnerOwner) -> u32 {
+            std::fs::read_to_string(self.remote(owner).join("child")).unwrap()
+                .split_whitespace().next().unwrap().parse().unwrap()
+        }
+
+        fn active(pid: u32) -> bool {
+            std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
+                .and_then(|stat| stat.rsplit_once(") ").map(|(_, fields)| fields.starts_with("Z ") || fields.starts_with("X ")))
+                == Some(false)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl hwcond::Shell for LocalRunner {
+        fn shell(&self, command: &str, _: u64) -> String {
+            use std::os::unix::process::CommandExt;
+            if command == "getprop ro.serialno; cat /proc/sys/kernel/random/boot_id" {
+                return "fixture-physical\naaaa-bbbb\n".into();
+            }
+            assert!(!command.contains("pkill") && !command.contains("killall"));
+            let script = command.replace(REMOTE_DIR, self.directory.join("remote").to_str().unwrap())
+                .replace("getprop ro.serialno", "printf fixture-physical")
+                .replace("cat /proc/sys/kernel/random/boot_id",
+                    if self.changed_boot.get() { "printf cccc-dddd" } else { "printf aaaa-bbbb" });
+            if command.contains("PHONEFARM_VKOP_STOPPED=") {
+                let output = std::process::Command::new("sh").args(["-c", &script]).output().unwrap();
+                return String::from_utf8(output.stdout).unwrap();
+            }
+            self.launches.set(self.launches.get() + 1);
+            let output_path = self.directory.join("runner.stdout");
+            let output = std::fs::File::create(&output_path).unwrap();
+            let mut child = std::process::Command::new("sh").args(["-c", &script])
+                .process_group(0).stdout(output).stderr(std::process::Stdio::null()).spawn().unwrap();
+            let owner = RunnerOwner::load(&self.record(), "fixture-device").unwrap().unwrap();
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !self.remote(&owner).join("child").exists() {
+                assert!(std::time::Instant::now() < until, "Synthetic runner failed to publish its identity");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            if command.contains("exec true") || !self.omit_trailer {
+                assert!(child.wait().unwrap().success());
+            }
+            *self.child.borrow_mut() = Some(child);
+            if self.omit_trailer { String::new() } else { std::fs::read_to_string(output_path).unwrap() }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for LocalRunner {
+        fn drop(&mut self) {
+            if let Some(child) = self.child.get_mut() {
+                unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL); }
+                let _ = child.wait();
+            }
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_runner_completion_clears_only_its_original_obligation() {
+        let phone = LocalRunner::new(false);
+        let output = run_owned_runner(&phone, "fixture-device", &phone.record(), "exec true", 1000).unwrap();
+        assert_eq!(runner_completion(&output).unwrap().1, 0);
+        assert!(!phone.record().exists());
+        assert_eq!(phone.launches.get(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_runner_late_completion_recovers_without_replaying_the_measurement() {
+        let phone = LocalRunner::new(true);
+        assert!(run_owned_runner(&phone, "fixture-device", &phone.record(), "exec true", 1000).is_err());
+        let owner = RunnerOwner::load(&phone.record(), "fixture-device").unwrap().unwrap();
+        assert!(phone.remote(&owner).join("completed").is_file());
+        assert!(run_owned_runner(&phone, "fixture-device", &phone.record(), "exec true", 1000).is_err());
+        let proof = recover_owned_runner(&phone, "fixture-device", &phone.record()).unwrap().unwrap();
+        assert_eq!(proof["termination_confirmed"], true);
+        assert_eq!(phone.launches.get(), 1);
+        assert!(!phone.record().exists());
+        assert!(recover_owned_runner(&phone, "fixture-device", &phone.record()).unwrap().is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_runner_stop_refuses_changed_boot_then_terminates_only_the_original_process() {
+        let phone = LocalRunner::new(true);
+        assert!(run_owned_runner(&phone, "fixture-device", &phone.record(), "exec sleep 60", 1000).is_err());
+        let owner = RunnerOwner::load(&phone.record(), "fixture-device").unwrap().unwrap();
+        let pid = phone.child_pid(&owner);
+        assert!(LocalRunner::active(pid));
+        phone.changed_boot.set(true);
+        assert!(recover_owned_runner(&phone, "fixture-device", &phone.record()).is_err());
+        assert!(LocalRunner::active(pid) && phone.record().is_file() && phone.remote(&owner).is_dir());
+        phone.changed_boot.set(false);
+        assert!(recover_owned_runner(&phone, "fixture-device", &phone.record()).unwrap().is_some());
+        assert!(!LocalRunner::active(pid));
+        assert!(!phone.record().exists());
+        assert_eq!(phone.launches.get(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_runner_recovery_never_signals_a_reused_pid() {
+        let phone = LocalRunner::new(true);
+        assert!(run_owned_runner(&phone, "fixture-device", &phone.record(), "exec true", 1000).is_err());
+        let owner = RunnerOwner::load(&phone.record(), "fixture-device").unwrap().unwrap();
+        let mut unrelated = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let outcome = (|| {
+            let stat = std::fs::read_to_string(format!("/proc/{}/stat", unrelated.id())).unwrap();
+            let start: u64 = stat.rsplit_once(") ").unwrap().1.split_whitespace().nth(19).unwrap().parse().unwrap();
+            std::fs::write(phone.remote(&owner).join("child"), format!("{} {}\n", unrelated.id(), start + 1)).unwrap();
+            let proof = recover_owned_runner(&phone, "fixture-device", &phone.record());
+            let untouched = unrelated.try_wait().unwrap().is_none();
+            (proof, untouched)
+        })();
+        let _ = unrelated.kill();
+        let _ = unrelated.wait();
+        assert!(outcome.0.unwrap().is_some() && outcome.1);
+    }
+
+    #[test]
+    fn pre_lock_abort_without_observations_keeps_restoration_unknown() {
+        let request = abort_request();
+        for charging_restored in [None, Some(true)] {
+            let (output, exit_code) = aborted_measurement_report(
+                &request, &abort_args(), "initial cooldown sensor read failed", &[],
+                None, charging_restored,
+            ).unwrap();
+            assert_eq!(exit_code, 2);
+            assert_eq!(output["conditions_observed"]["arms"], serde_json::json!([]));
+            assert_eq!(output["conditions_observed"]["frequency_restored"], Value::Null);
+            assert_eq!(output["conditions_observed"]["restored"], Value::Null);
+        }
+    }
+
+    #[test]
+    fn cooling_abort_keeps_completed_arm_restoration_and_effective_execution_origin() {
+        let mut request = abort_request();
+        request.serial = Some("requested-synthetic-device".into());
+        request.v2_context.as_mut().unwrap()["resolved_config"] = serde_json::json!({
+            "serial":"stale-synthetic-device", "carrier":"stale-carrier", "seconds":999,
+        });
+        let observations = vec![serde_json::json!({"arm":"baseline","index":0,
+            "restored":true,"runner_exit_status":0,"operator_latency_ms":0.5})];
+        let reason = "candidate cooldown sensor read failed after completed baseline";
+        for carrier in [Carrier::Headless, Carrier::Refbench] {
+            let mut args = abort_args();
+            args.carrier = carrier;
+            args.frames = 370;
+            args.intensity = 3;
+            let (output, exit_code) = aborted_measurement_report(
+                &request, &args, reason, &observations, Some(true), None,
+            ).unwrap();
+            assert_eq!(exit_code, 2);
+            assert_eq!(output["conditions_observed"]["restored"], true);
+            assert_eq!(output["conditions_observed"]["arms"], serde_json::json!(observations));
+            assert_eq!(output["verdict"]["reason"], reason);
+            assert_eq!(output["resolved_config"]["serial"], "pinned-synthetic-device");
+            assert_eq!(output["resolved_config"]["carrier"], carrier.as_str());
+            if carrier == Carrier::Headless {
+                assert_eq!(output["resolved_config"]["seconds"], request.protocol.replay_seconds);
+                assert_eq!(output["resolved_config"]["frames"], Value::Null);
+                assert_eq!(output["resolved_config"]["intensity"], Value::Null);
+            } else {
+                assert_eq!(output["resolved_config"]["seconds"], Value::Null);
+                assert_eq!(output["resolved_config"]["frames"], 370);
+                assert_eq!(output["resolved_config"]["intensity"], 3);
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_abort_does_not_fabricate_a_v2_restoration_report() {
+        assert!(aborted_measurement_report(&a_request(), &abort_args(), "synthetic failure", &[], Some(true), None).is_none());
+    }
+
     #[test]
     fn missing_power_requires_opt_in_and_preserves_the_unavailable_reason() {
         assert!(optional_power_result(Err("battery current unknown".into()), false).is_err());
@@ -2459,6 +3403,189 @@ mod tests {
         .unwrap();
     }
 
+    #[test]
+    fn image_evidence_png_preserves_every_channel_and_is_create_only() {
+        let dir = scratch("evidence_png");
+        let pixels = [1, 23, 250, 0, 89, 45, 7, 128, 255, 0, 18, 255, 9, 10, 11, 12];
+        let artifact = write_evidence_png(&dir, "images/frame-00/reference.png", &pixels, 2, 2, "Synthetic pixel fixture").unwrap();
+        let path = dir.join(artifact["name"].as_str().unwrap());
+        let encoded = std::fs::read(&path).unwrap();
+        assert_eq!(artifact["sha256"], bytes_sha256(&encoded));
+        assert_eq!(artifact["size"], encoded.len());
+        assert_eq!(artifact["media_type"], "image/png");
+        assert_eq!(image::open(&path).unwrap().to_rgba8().as_raw().as_slice(), pixels.as_slice());
+        assert!(path.metadata().unwrap().permissions().readonly());
+        assert!(write_evidence_png(&dir, artifact["name"].as_str().unwrap(), &[0; 16], 2, 2, "Replacement").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), encoded);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn image_evidence_namespaces_never_reuse_existing_evidence() {
+        let dir = scratch("evidence_unique");
+        let first = ImageEvidence::new(&dir);
+        let second = ImageEvidence::new(&dir);
+        let first_name = first.image_name(0, 0, "reference").unwrap();
+        let second_name = second.image_name(0, 0, "reference").unwrap();
+        assert_ne!(first_name, second_name);
+        assert!(!Path::new(&first_name).is_absolute());
+        assert!(Path::new(&first_name).components().all(|c| matches!(c, std::path::Component::Normal(_))));
+        let invalid = ImageEvidence::new(&dir.join("missing_parent").join("out"));
+        let mut report = serde_json::json!({"metrics":{"psnr_db":31.25},"status":"PASS"});
+        invalid.append_report(&mut report);
+        assert_eq!(report["artifacts"], serde_json::json!([]));
+        assert_eq!(report["evidence_comparisons"], serde_json::json!([]));
+        assert_eq!(report["artifact_errors"].as_array().unwrap().len(), 1);
+        assert_eq!(report["metrics"]["psnr_db"], 31.25);
+        assert_eq!(report["status"], "PASS");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Build synthetic transport fixtures; these bytes are never real GPU evidence.
+    fn synthetic_image_evidence(dir: &Path, frames: usize, rounds: usize) -> ImageEvidence {
+        let mut evidence = ImageEvidence::new(dir);
+        for frame in 0..frames {
+            let rgba = vec![frame as u8; EVIDENCE_RGBA_SIZE];
+            let raw = dir.join(format!("reference-{frame}.rgba"));
+            std::fs::write(&raw, &rgba).unwrap();
+            evidence.reference(frame, &dir.join("synthetic-source.png"), &raw, EVIDENCE_WIDTH, EVIDENCE_HEIGHT,
+                &bytes_sha256(b"synthetic fixture source"));
+            // The PNG is an immutable snapshot, independent of this staging path.
+            std::fs::write(&raw, b"subsequent reference staging contents").unwrap();
+            for round in 0..rounds {
+                for arm in [Arm::Baseline, Arm::Candidate] {
+                    let output = evidence.remote_output(frame, round, arm);
+                    evidence.measured(frame, round, arm, output, Some(30.0 + frame as f64 + round as f64));
+                }
+            }
+        }
+        evidence
+    }
+
+    #[test]
+    fn image_evidence_exports_all_frames_rounds_and_exact_downloaded_pixels() {
+        let dir = scratch("evidence_frames");
+        let mut evidence = synthetic_image_evidence(&dir, 2, 2);
+        let mut paths = std::collections::BTreeSet::new();
+        let mut downloads = 0;
+        evidence.finish_with(|remote, local| {
+            assert!(paths.insert(remote.to_string()), "readbacks must have unique owned paths");
+            assert!(!local.exists());
+            let rgba = vec![if remote.ends_with("baseline.rgba") { 17 } else { 29 }; EVIDENCE_RGBA_SIZE];
+            std::fs::write(local, &rgba).unwrap();
+            downloads += 1;
+            Ok((bytes_sha256(&rgba), rgba.len() as u64))
+        });
+        assert_eq!(downloads, 8);
+        assert!(evidence.errors.is_empty(), "{:?}", evidence.errors);
+        let mut report = serde_json::json!({"metrics":{"psnr_db":31.25},"verdict":{"p_value":0.005}});
+        evidence.append_report(&mut report);
+        assert_eq!(report["artifacts"].as_array().unwrap().len(), 10);
+        assert_eq!(report["evidence_comparisons"].as_array().unwrap().len(), 4);
+        assert_eq!(report["evidence_comparisons"][0]["id"], "frame-00");
+        assert_eq!(report["evidence_comparisons"][1]["id"], "frame-00-round-01");
+        for comparison in report["evidence_comparisons"].as_array().unwrap() {
+            assert_eq!(comparison["kind"], "static");
+            for (index, role) in ["reference", "baseline", "candidate"].iter().enumerate() {
+                let image = &comparison["images"][index];
+                assert_eq!(image["role"], *role);
+                assert!(report["artifacts"].as_array().unwrap().iter().any(|a| a["name"] == image["artifact"]));
+            }
+        }
+        for artifact in report["artifacts"].as_array().unwrap() {
+            let path = dir.join(artifact["name"].as_str().unwrap());
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(artifact["sha256"], bytes_sha256(&bytes));
+            assert_eq!(artifact["size"], bytes.len());
+            let decoded = image::open(&path).unwrap().to_rgba8();
+            let name = artifact["name"].as_str().unwrap();
+            let expected = if name.ends_with("baseline.png") { 17 } else if name.ends_with("candidate.png") { 29 }
+                else if name.contains("frame-01/") { 1 } else { 0 };
+            assert!(decoded.as_raw().iter().all(|byte| *byte == expected));
+        }
+        let gpu_provenance = report["evidence_provenance"].as_array().unwrap().iter()
+            .find(|p| p["role"] == "candidate").unwrap();
+        assert_eq!(gpu_provenance["source"]["kind"], "vulkan_gpu_readback");
+        assert_eq!(gpu_provenance["source"]["sha256"], gpu_provenance["rgba_sha256"]);
+        assert_eq!(gpu_provenance["psnr_db"], 30.0);
+        assert_eq!(report["metrics"]["psnr_db"], 31.25);
+        assert_eq!(report["verdict"]["p_value"], 0.005);
+        for entry in std::fs::read_dir(dir.join(evidence.prefix.as_ref().unwrap())).unwrap() {
+            assert_ne!(entry.unwrap().path().extension().and_then(|e| e.to_str()), Some("rgba"));
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn image_evidence_transport_and_checksum_failures_preserve_valid_measurements() {
+        for corrupt in [false, true] {
+            let dir = scratch(if corrupt { "evidence_corrupt" } else { "evidence_transport" });
+            let mut evidence = synthetic_image_evidence(&dir, 1, 1);
+            evidence.finish_with(|remote, local| {
+                let rgba = vec![17; EVIDENCE_RGBA_SIZE];
+                if remote.ends_with("candidate.rgba") {
+                    if corrupt {
+                        std::fs::write(local, vec![18; EVIDENCE_RGBA_SIZE]).unwrap();
+                    } else {
+                        std::fs::write(local, b"partial download").unwrap();
+                        return Err("synthetic transport failure".into());
+                    }
+                } else { std::fs::write(local, &rgba).unwrap(); }
+                Ok((bytes_sha256(&rgba), rgba.len() as u64))
+            });
+            let mut report = serde_json::json!({"metrics":{"operator_latency_ms":0.5,"psnr_db":30.0},
+                "status":"PASS","verdict":{"p_value":0.001}});
+            let original = report.clone();
+            evidence.append_report(&mut report);
+            for field in ["metrics", "status", "verdict"] { assert_eq!(report[field], original[field]); }
+            assert_eq!(report["artifacts"].as_array().unwrap().len(), 2);
+            assert!(report["evidence_comparisons"].as_array().unwrap().is_empty());
+            assert!(report["artifact_errors"].as_array().unwrap().iter().any(|v|
+                v.as_str().unwrap().contains(if corrupt { "checksum mismatch" } else { "transport failure" })));
+            let candidate = evidence.image_name(0, 0, "candidate").unwrap();
+            assert!(!dir.join(candidate).exists());
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn image_evidence_rejects_incomplete_receipts_and_truncated_readbacks() {
+        let remote = format!("{REMOTE_DIR}/owned-evidence.rgba");
+        let hash = "a".repeat(64);
+        let valid = format!("{hash}  {remote}\n{EVIDENCE_RGBA_SIZE}\n");
+        assert_eq!(parse_rgba_receipt(&valid, &remote).unwrap(), (hash, EVIDENCE_RGBA_SIZE as u64));
+        for invalid in [String::new(), valid.replace("owned-evidence", "wrong-file"),
+            valid.replace(&EVIDENCE_RGBA_SIZE.to_string(), "16"), format!("{valid}unexpected\n"),
+            format!("{}  {remote}\n{EVIDENCE_RGBA_SIZE}\n", "z".repeat(64))] {
+            assert!(parse_rgba_receipt(&invalid, &remote).is_err());
+        }
+        let dir = scratch("evidence_truncated");
+        let raw = dir.join("partial.rgba");
+        std::fs::write(&raw, b"partial").unwrap();
+        assert!(verified_rgba(&raw, &bytes_sha256(b"partial"), 7).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn image_evidence_rejects_symlinks_and_never_removes_preexisting_downloads() {
+        let dir = scratch("evidence_symlink");
+        let target = dir.join("target");
+        std::fs::write(&target, b"preserve target").unwrap();
+        std::fs::create_dir(dir.join("images")).unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("images/reference.png")).unwrap();
+        assert!(write_evidence_png(&dir, "images/reference.png", &[0; 4], 1, 1, "Synthetic").is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"preserve target");
+        assert!(verified_rgba(&dir.join("images/reference.png"), "", EVIDENCE_RGBA_SIZE as u64).is_err());
+        let mut evidence = synthetic_image_evidence(&dir, 1, 1);
+        let raw = dir.join(evidence.prefix.as_ref().unwrap()).join("frame-00-round-00-baseline.rgba");
+        std::fs::write(&raw, b"preexisting").unwrap();
+        evidence.finish_with(|_, _| Err("synthetic unavailable transport".into()));
+        assert_eq!(std::fs::read(&raw).unwrap(), b"preexisting");
+        assert!(evidence.errors.iter().any(|e| e.contains("already exists")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// 中心裁剪而不是缩放: 缩放会把缩放器的特性混进 PSNR,
     /// 量到的就不只是算子画质了。参考帧必须是原生像素。
     #[test]
@@ -2468,8 +3595,9 @@ mod tests {
         write_png(&png, 2688, 1216); // NX809J 横屏真机截帧尺寸
         let raw = dir.join("out.rgba");
 
-        let (w, h) = prepare_reference(&png.to_string_lossy(), 1920, 1080, &raw).unwrap();
+        let (w, h, source_sha256) = prepare_reference(&png.to_string_lossy(), 1920, 1080, &raw).unwrap();
         assert_eq!((w, h), (2688, 1216));
+        assert_eq!(source_sha256, bytes_sha256(&std::fs::read(&png).unwrap()));
 
         let bytes = std::fs::read(&raw).unwrap();
         assert_eq!(bytes.len(), 1920 * 1080 * 4, "必须是裸 RGBA8");

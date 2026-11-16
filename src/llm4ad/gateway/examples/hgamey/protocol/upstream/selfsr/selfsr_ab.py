@@ -34,6 +34,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.environ.get("PF_ROOT") or os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "gfrc"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from game_quality import measure_quality  # noqa: E402
 from mali_capture import collect as collect_mali  # noqa: E402
 from perfetto_capture import Capture as PerfettoCapture, marker_script  # noqa: E402
 from evidence_transfer import download_root_file  # noqa: E402
@@ -339,6 +341,62 @@ def sf_atrace(dev, name, out, secs=3):
     return r
 
 
+def capture_quality_samples(dev, a, name, out):
+    """Acquire the post-window screenshot burst before transferring any sample.
+
+    Args:
+        dev: Existing leased device transport.
+        a: Frozen options with the requested extra screenshot count.
+        name: Current arm label, including any attempt suffix.
+        out: Owned experiment evidence directory.
+
+    Returns:
+        Capture paths and explicit acquisition or transfer errors. Failed remote
+        files and checkpoints remain available; no screenshot is copied to
+        manufacture additional samples or reacquired after transfer failure.
+    """
+    count = getattr(a, "quality_samples", 0)
+    result = {"requested": count, "captures": []}
+    acquired = []
+    for index in range(1, count + 1):
+        path = Path(out) / "shots" / f"{name}_quality_{index}.png"
+        intent = path.with_suffix(".png.capture.json")
+        try:
+            if intent.exists():
+                state = json.loads(intent.read_text())
+                if not state.get("acquired"):
+                    raise RuntimeError("Screenshot acquisition unconfirmed; refusing to replace evidence")
+            else:
+                state = {"remote": f"/data/local/tmp/selfsr_iq_{uuid.uuid4().hex}.png", "acquired": False}
+                with intent.open("x") as stream:
+                    json.dump(state, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                command = f"screencap -p {shlex.quote(state['remote'])}"
+                dev.adb(f"shell su -c {shlex.quote(shlex.quote(command))}", timeout=45, check=True)
+                state["acquired"] = True
+                intent.write_text(json.dumps(state))
+            acquired.append((index, path, intent, state))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            result["error"] = f"{name} quality sample {index}: {exc}"
+            return result
+
+    for index, path, intent, state in acquired:
+        try:
+            if not state.get("complete"):
+                receipt = download_root_file(dev, state["remote"], path, timeout=120)
+                if not isinstance(receipt, dict) or receipt.get("complete") is not True:
+                    raise RuntimeError("Screenshot transfer unconfirmed; original evidence retained")
+                state["complete"] = True
+                intent.write_text(json.dumps(state))
+                dev.su(f"rm -f {shlex.quote(state['remote'])}", timeout=10)
+            result["captures"].append(str(path))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            result["error"] = f"{name} quality sample {index}: {exc}"
+            break
+    return result
+
+
 def measure(dev, a, name, out):
     dev_trace = f"/data/local/tmp/selfsr_trace_{name}.txt"
     ts_cmd = ("dumpsys SurfaceFlinger --timestats -disable -clear >/dev/null; "
@@ -425,6 +483,7 @@ def measure(dev, a, name, out):
     open(os.path.join(out, "traces", f"{name}_sf.txt"), "w").write("\n".join(keep) + "\n")
     shot = os.path.join(out, "shots", f"{name}.png")
     dev.adb(f"exec-out screencap -p > {shlex.quote(shot)}")
+    quality = {"quality_samples": capture_quality_samples(dev, a, name, out)} if getattr(a, "quality_samples", 0) else {}
     if getattr(a, "video", 0) > 0:   # 窗口后录屏: 实况素材 (画质/视频对比), 游戏仍在跑; 不进任何指标
         remote = "/data/local/tmp/selfsr_arm_video.mp4"
         try:
@@ -453,7 +512,8 @@ def measure(dev, a, name, out):
                         or (round(ts["layer_frames"] / span, 2) if ts.get("layer_frames") else None),
             "game_fps": game.get("fps_mean"), "game_frame_p95_ms": game.get("frame_p95"),
             "gpu_active_ms": game.get("gpu_active_mean"),
-            "out_res": src, "sharp_full": sharpness(shot), "sharp_hud": sharpness(shot, HUD_BOX), "shot": shot, **power, **pan}
+            "out_res": src, "sharp_full": sharpness(shot), "sharp_hud": sharpness(shot, HUD_BOX), "shot": shot,
+            **power, **pan, **quality}
 
 
 def uptime_ns(dev):
@@ -1216,6 +1276,8 @@ def make_locked(a, out, orig_mode):
                "--settle", str(a.settle), "--window", str(a.window), "--phonefarm", a.phonefarm,
                "--vlm-calls", str(a.vlm_calls)]
         cmd += ["--power-profile", getattr(a, "power_profile", "disabled")]
+        if getattr(a, "quality_samples", 0):
+            cmd += ["--quality-samples", str(a.quality_samples)]
         if a.verify_game_world:
             cmd += ["--verify-game-world"]
         if getattr(a, "hold", 0) > 0:   # hold 探测: 无层臂的 arm_plain 在 _locked 子进程里跑, 要把 --hold 带过去
@@ -1387,6 +1449,10 @@ def main():
     ap.add_argument("--a", type=parse_kind, default=parse_kind("native"))
     ap.add_argument("--b", type=parse_kind, default=parse_kind("layer"))
     ap.add_argument("--rounds", type=int, default=6)
+    ap.add_argument("--quality-samples", type=int, default=0,
+                    help="Extra real screenshots per arm after timing and before pan (default: disabled)")
+    ap.add_argument("--defer-quality", action="store_true",
+                    help="Retain captures for the executor's same-input GPU replay after game restoration")
     ap.add_argument("--so", default=None, help="层 .so (挂层臂); 缺省用 gray-layer session 自己的")
     ap.add_argument("--so-a", default=None, help="Layer library for A; falls back to --so")
     ap.add_argument("--so-b", default=None, help="Layer library for B; falls back to --so")
@@ -1423,6 +1489,8 @@ def main():
     a = ap.parse_args()
     if a.vlm_calls < 0:
         ap.error("--vlm-calls must be nonnegative")
+    if a.quality_samples < 0:
+        ap.error("--quality-samples must be nonnegative")
     if not lock_fds():
         # Own one scope from the first read through the final restoration.
         os.execvp(a.phonefarm, [a.phonefarm, "lease", "--serial", a.serial,
@@ -1671,6 +1739,12 @@ def main():
               "dropped_arms": [r["arm"] for r in arms if r not in good],
               "out_res": {side: sorted({tuple(r["out_res"]) for r in good if r["side"] == side and r.get("out_res")}) for side in "AB"},
               "metrics": res, "min_p_possible": 2 / 2 ** len(pairs) if pairs else None}
+    if a.quality_samples and not getattr(a, "defer_quality", False):
+        report["quality"] = measure_quality(Path(out), {"rounds": a.rounds, "quality_samples": a.quality_samples},
+                                            arms, a.phonefarm)
+    elif a.quality_samples:
+        report["quality"] = {"status": "not_measured", "metrics": [],
+                             "not_computed": ["Same-input GPU replay pending after performance collection"]}
     json.dump(report, open(os.path.join(out, "report.json"), "w"), ensure_ascii=False, indent=1)
     names = {"seen_fps": "实际上屏帧率 (看到的画面: 有子图层取子图层)", "display_fps": "游戏图层上屏帧率", "display_fps_sc": "子图层上屏帧率 (插帧 sc 后端)", "sc_added_delay_p50_ms": "插帧给真实帧加的排队延迟 p50 (ms)", "sc_interval_p95_ms": "子图层上屏间隔 p95 (ms)", "game_fps": "游戏渲染帧率 (GPU 提交)", "game_frame_p95_ms": "游戏渲染 p95 帧时 (ms)",
              "gpu_active_ms": "每帧 GPU 忙碌 (ms, 均值)",
@@ -1701,6 +1775,11 @@ def main():
             md.append(f"| {names[m]} | - | - | - | - | - | 未测成 |")
             continue
         md.append(f"| {names[m]} | {r['a_mean']} | {r['b_mean']} | {r['diff_mean']:+} | {r['diff_pct']}% | {r['ci95']} | {r['p']:.4f} |")
+    if a.quality_samples:
+        md += ["", "## Official game image quality", "", f"Status: {report['quality']['status']}",
+               "Distinct post-window game captures; baseline self-noise references, not same-frame truth.",
+               "See quality/iq-judge.json and quality/iq-judge.md.",
+               *report["quality"]["not_computed"]]
     open(os.path.join(out, "report.md"), "w").write("\n".join(md) + "\n")
     print("\n".join(md))
     return 0

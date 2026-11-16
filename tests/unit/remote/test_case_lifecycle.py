@@ -21,9 +21,11 @@ from llm4ad.gateway.examples.hgamey import runtime as runtime_module
 from llm4ad.gateway.examples.hgamey.compilation.shader import compile_shader
 from llm4ad.gateway.examples.hgamey.runtime import HGameyRuntime
 from llm4ad.gateway.sdk.contracts import RemoteJob
-from llm4ad.gateway.sdk.errors import EvaluationError
+from llm4ad.gateway.sdk.errors import EvaluationError, EvaluationPreparationError, EvaluationUnavailableError
 from llm4ad.gateway.sdk.journal import Journal, Reporter
 from llm4ad.gateway.sdk.lifecycle import run_operation
+
+pytestmark = pytest.mark.unit
 
 local = hgamey_fixture
 
@@ -123,7 +125,10 @@ async def test_optional_screenshot_failure_preserves_measurement(attempt, local,
         assert result.metadata["evaluation_summary"]["game_validation"] == "passed"
         assert result.metadata["artifact_errors"][0].startswith("game/shots/A1.png:")
         assert reporter.journal.artifacts(local.job.id, local.job.attempt_id) == []
-    assert timeouts == [15]
+    expected = 3 if failure in {429, 503, "timeout", "connection"} else 1
+    assert len(timeouts) == expected
+    assert all(0 < value <= 15 for value in timeouts)
+    assert all(right < left for left, right in zip(timeouts, timeouts[1:], strict=False))
 
 
 async def test_screenshot_cleanup_cannot_swallow_task_cancellation(attempt, local, monkeypatch):
@@ -173,7 +178,8 @@ async def test_unprepared_evaluate_cannot_silently_compile(attempt, local, monke
     monkeypatch.setattr(adapter, "prepare", prepare)
     with pytest.raises(RuntimeError, match="before_task"):
         await adapter.evaluate(local.job, reporter)
-    assert await invoke(adapter, "recover", local.job, reporter) is None
+    with pytest.raises(EvaluationUnavailableError):
+        await invoke(adapter, "recover", local.job, reporter)
     prepare.assert_not_called()
     assert executor.posts == []
 
@@ -235,7 +241,9 @@ async def test_baseline_error_is_not_candidate_feedback(attempt, local, monkeypa
     with pytest.raises(RuntimeError, match="operator-owned baseline") as caught:
         await invoke(adapter, "evaluate", local.job, reporter)
     assert caught.value.__cause__ is failure
-    assert not isinstance(caught.value, EvaluationError)
+    assert isinstance(caught.value, EvaluationPreparationError)
+    assert caught.value.metadata["infrastructure_failure"] is True
+    assert not caught.value.metadata.get("candidate_failure")
     assert executor.posts == []
 
 
@@ -314,6 +322,12 @@ async def test_cancel_never_compiles_or_removes_frozen_files(attempt, local, mon
 
 async def test_startup_uses_fresh_and_recovery_hooks_with_short_frozen_budget(local, monkeypatch, tmp_path):
     """Startup keeps separate provenance, wraps both operations and never replays accepted jobs."""
+    import importlib
+
+    from test_hgamey_service import LocalPool
+
+    from llm4ad.gateway.sdk.scheduling import DurableExecutor
+
     adapter = local.adapter()
     runtime = HGameyRuntime.__new__(HGameyRuntime)
     runtime.options = {"startup_check": True, "startup_timeout": 60, "startup_seconds": 1, "startup_rounds": 2}
@@ -341,6 +355,11 @@ async def test_startup_uses_fresh_and_recovery_hooks_with_short_frozen_budget(lo
     monkeypatch.setattr(runtime_module, "Reporter", reporter_factory)
     monkeypatch.setattr(adapter, "before_task", observe_before)
     monkeypatch.setattr(adapter, "after_task", observe_after)
+    monkeypatch.setattr("llm4ad.gateway.sdk.scheduling.ProcessPoolExecutor", LocalPool)
+    importlib.import_module("llm4ad.gateway.examples.hgamey.evaluators")
+    monkeypatch.setattr("llm4ad.gateway.examples.hgamey.evaluator.HGameyShaderEvaluator", lambda filename: adapter)
+    delivery = DurableExecutor(tmp_path / "startup-deliveries", concurrency=1)
+    runtime.engine = SimpleNamespace(executors={adapter.benchmark.settings["device_id"]: delivery})
     await runtime.startup_check(adapter, directory)
     assert observed == ["before:evaluate", "after:evaluate"]
     journal = Journal(directory / "startup.sqlite3")
@@ -360,6 +379,7 @@ async def test_startup_uses_fresh_and_recovery_hooks_with_short_frozen_budget(lo
     assert len(executors[0].posts) == 2
     assert json.loads(journal.rows()[0]["saved"])["request"] == state["request"]
     assert Journal(directory / "jobs.sqlite3").rows() == []
+    await asyncio.to_thread(delivery.close)
 
 
 @pytest.fixture

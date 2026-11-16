@@ -11,8 +11,11 @@ from llm4ad.orchestrator.island_ga import (
     DiverseIslandGAOrchestrator,
     IslandGAOrchestrator,
     is_repairable_evaluation_error,
+    is_repairable_evaluation_result,
 )
 from llm4ad.planner.base import Algorithm, InsightType
+
+pytestmark = pytest.mark.unit
 
 
 def _algorithm() -> Algorithm:
@@ -110,6 +113,37 @@ def test_candidate_errors_are_repairable(error: str) -> None:
 def test_infrastructure_errors_are_not_repairable(error: str) -> None:
     """Infrastructure failures must not spend tokens rewriting valid code."""
     assert is_repairable_evaluation_error(error) is False
+
+
+@pytest.mark.parametrize("category", [{}, [], None, 1])
+def test_malformed_failure_categories_preserve_legacy_error_classification(category) -> None:
+    """Arbitrary evaluator metadata cannot interrupt candidate error handling."""
+    result = DispatcherEvaluationResult(
+        success=False, metrics={}, error_message="SyntaxError: invalid syntax",
+        metadata={"failure_category": category},
+    )
+    assert is_repairable_evaluation_result(result) is True
+    result.metadata["infrastructure_failure"] = True
+    assert is_repairable_evaluation_result(result) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", ["infrastructure", "evaluator", "configuration"])
+async def test_structured_pool_failures_do_not_rewrite_candidate_code(category) -> None:
+    """A compiler/tool installation failure cannot be repaired by changing valid code."""
+    result = DispatcherEvaluationResult(
+        success=False, metrics={}, error_message="ModuleNotFoundError: compiler runtime is unavailable",
+        metadata={"failure_category": category, "attempts_exhausted": category != "configuration",
+                  "attempt_count": 3, "max_attempts": 3, "attempt_history": [{"failure_category": category}]},
+    )
+    orchestrator = _orchestrator(result)
+    algorithm = await orchestrator._evaluate_algorithm(_algorithm())
+    assert algorithm.evaluation is None
+    assert orchestrator.dispatcher.dispatch_batch.await_count == 1
+    orchestrator.planner.implement.assert_not_awaited()
+    metadata = algorithm.custom_metadata["evaluation_profiles"]["standard"]
+    assert metadata["failure_category"] == category
+    assert metadata["attempt_count"] == 3
 
 
 @pytest.mark.asyncio

@@ -1,14 +1,49 @@
 """Run one explicit offline check through the real isolated gateway worker."""
 
+import asyncio
 import json
-import multiprocessing
 import uuid
 from pathlib import Path
 
 from llm4ad.gateway.sdk.bundles import extract_candidate, pack_candidate
-from llm4ad.gateway.sdk.contracts import EvaluationContract, RemoteJob, load_evaluator_class, normalize_spec
-from llm4ad.gateway.sdk.gateway import execute, stop_process
-from llm4ad.gateway.sdk.journal import Journal, Reporter, gateway_lease
+from llm4ad.gateway.sdk.contracts import (
+    EvaluationContract,
+    GatewayEvaluator,
+    RemoteJob,
+    load_evaluator,
+    load_evaluator_class,
+    normalize_spec,
+)
+from llm4ad.gateway.sdk.gateway import Gateway
+from llm4ad.gateway.sdk.journal import Reporter, gateway_lease
+from llm4ad.gateway.sdk.lifecycle import invoke
+
+
+class _OfflineAdapter(GatewayEvaluator):
+    """Load user constructors in the check worker and only reattach external cleanup."""
+
+    def __init__(self, spec, contract):
+        """Keep source and contract inspection free of evaluator construction."""
+        self.spec, self.contract, self.adapter = spec, contract, None
+        self.cleanup_timeout = getattr(load_evaluator_class(spec), "cleanup_timeout", 30.0)
+
+    async def before_task(self, job, reporter, operation):
+        """Load cleanup hooks only when evaluation published external state."""
+        if reporter.saved_state:
+            self.adapter = load_evaluator(self.spec)
+            await invoke(self.adapter.before_task(job, reporter, operation))
+
+    async def cancel(self, job, saved_state):
+        """Confirm SDK-local cleanup or delegate a declared external handle."""
+        if not saved_state:
+            return True
+        self.adapter = self.adapter or load_evaluator(self.spec)
+        return await invoke(self.adapter.cancel(job, saved_state))
+
+    async def after_task(self, job, reporter, operation, *, result=None, error=None):
+        """Finalize optional externally attached cleanup hooks."""
+        if self.adapter:
+            await invoke(self.adapter.after_task(job, reporter, operation, result=result, error=error))
 
 
 def check_evaluator(spec: str, candidate: Path, state_dir: Path, timeout: float) -> dict:
@@ -34,27 +69,27 @@ def check_evaluator(spec: str, candidate: Path, state_dir: Path, timeout: float)
         job = RemoteJob(
             id=identity, attempt_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()), project_root=str(work), timeout=timeout
         )
-        journal = Journal(root / "jobs.sqlite3")
-        journal.accept(job.model_dump(mode="json"))
-        process = multiprocessing.get_context("spawn").Process(
-            target=execute, args=(journal.path, spec, job.model_dump(mode="json"))
+        adapter = _OfflineAdapter(spec, contract)
+        gateway = Gateway(
+            "http://offline.invalid", "Offline check", [str(uuid.uuid4())], spec, root, adapter=adapter, persist_identity=False
         )
-        process.start()
-        try:
-            process.join(timeout)
-            if process.is_alive():
-                stop_process(process)
-                journal.update(
-                    identity,
-                    "recovery_required",
-                    {"message": "Local check timed out; reconcile any external work before retrying"},
-                )
-            else:
-                row = journal.get(identity)
-                if row["state"] not in {"completed", "failed", "recovery_required"}:
-                    journal.update(identity, "recovery_required", {"message": "Worker exited without a final result"})
-        finally:
-            stop_process(process)
+        journal = gateway.journal
+        payload = job.model_dump(mode="json")
+        journal.accept(payload)
+
+        async def run_check():
+            try:
+                while True:
+                    gateway.enforce_deadlines()
+                    await gateway.probe_cleanup()
+                    await gateway.reconcile(None, payload)
+                    if journal.get(identity)["state"] in {"completed", "failed", "cancelled"}:
+                        return
+                    await asyncio.sleep(0.05)
+            finally:
+                await asyncio.to_thread(gateway.stop_workers)
+
+        asyncio.run(run_check())
         row = journal.get(identity)
         result = Reporter(journal, identity, job.attempt_id).enrich(json.loads(row["report"]))
         descriptions = result.get("metadata", {}).get("artifact_descriptions", {})

@@ -119,6 +119,17 @@ async def test_container_network_mode_publishes_no_port(captured_run, monkeypatc
     assert captured_run.kwargs["network"] == settings.arl_network_name
 
 
+@pytest.mark.parametrize("role", list(ARLRole))
+def test_paseo_hostnames_allows_backend_and_peer_dns_names(role) -> None:
+    """Allow both Docker DNS names using Paseo's comma-separated host allowlist."""
+    env = runtime._build_container_env(
+        _session("abc123"), role, _daemon_config(), "daemon-password"
+    )
+
+    allowed_hostnames = set(env["PASEO_HOSTNAMES"].split(","))
+    assert allowed_hostnames == {"llm4ad-arl-w-abc123", "llm4ad-arl-v-abc123"}
+
+
 @pytest.mark.asyncio
 async def test_host_mode_publishes_adjacent_ports(captured_run, monkeypatch) -> None:
     """宿主机模式下 worker/validator 占相邻端口，同会话内不自撞。"""
@@ -333,6 +344,18 @@ def test_fingerprint_is_stable_for_equivalent_config() -> None:
         _daemon_config(base_url="https://gateway.example.com/")
     )
     assert first == second
+
+
+def test_fingerprint_tracks_effective_hostname_format(monkeypatch) -> None:
+    """An allowlist hostname change invalidates otherwise identical container settings."""
+    config = _daemon_config()
+    previous = runtime._config_fingerprint(config)
+    original = runtime.container_name
+    monkeypatch.setattr(runtime, "container_name", lambda session_id, role: f"{original(session_id, role)}-new")
+
+    assert runtime._config_fingerprint(config) != previous
+    env = runtime._build_container_env(_session(), ARLRole.WORKER, config, "daemon-password")
+    assert env["PASEO_HOSTNAMES"] == "llm4ad-arl-w-abc123-new,llm4ad-arl-v-abc123-new"
 
 
 def test_fingerprint_does_not_leak_credentials() -> None:

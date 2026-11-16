@@ -7,6 +7,7 @@ import sys
 
 from .adb import adb, assert_identity, foreground_component
 from .process import command, inherited_fds
+from .retry import retry_read
 from .storage import read_json, write_json
 
 
@@ -42,13 +43,32 @@ def execute_on_device(folder):
     frozen = read_json(folder / "input.json")
     device, body = frozen["device"], frozen["submission"]
     endpoint = device["endpoint"]
+    preparation = {
+        "schema": "hgamey/device-preparation@1", "job_id": folder.name,
+        "device_id": device["id"], "device_started": False,
+    }
+    write_json(folder / "device-preparation.json", preparation)
     connected = adb("connect", endpoint, timeout=20)
     (folder / "adb-connect.txt").write_text(connected)
-    if adb("-s", endpoint, "get-state").strip() != "device":
-        raise RuntimeError("wireless ADB is not authorized/online")
-    observed = adb("-s", endpoint, "shell", "getprop", "ro.serialno")
+    # A successful TCP connection can precede the authorized device transport.
+    retry_read(lambda remaining: adb("-s", endpoint, "wait-for-device", timeout=remaining), 30)
+
+    def online(remaining):
+        state = adb("-s", endpoint, "get-state", timeout=remaining).strip()
+        if state != "device":
+            raise RuntimeError("ADB device not ready: " + state)
+        return state
+
+    retry_read(online, 15)
+    observed = retry_read(lambda remaining: adb("-s", endpoint, "shell", "getprop", "ro.serialno", timeout=remaining), 15)
     assert_identity(device, observed)
-    connection = {"endpoint": endpoint, "physical_serial": observed.strip(), "transport": "wireless_adb", "usb_fallback": False}
+    boot = retry_read(
+        lambda remaining: adb("-s", endpoint, "shell", "cat", "/proc/sys/kernel/random/boot_id", timeout=remaining), 15
+    ).strip()
+    if not boot or any(c not in "0123456789abcdefABCDEF-" for c in boot):
+        raise RuntimeError("Original boot identity is unavailable")
+    connection = {"endpoint": endpoint, "physical_serial": observed.strip(), "boot_id": boot,
+                  "transport": "wireless_adb", "usb_fallback": False}
     write_json(folder / "connection.json", connection)
     if body["operation"] == "probe":
         facts = adb("-s", endpoint, "shell", "getprop ro.product.model; getprop ro.build.version.release; su -c id")
@@ -78,12 +98,28 @@ def execute_on_device(folder):
         target = body["options"]["package"]
     # Pause only the explicitly requested foreground workload, and restore its activity.
     paused = False
+    job_path = folder / "job.json"
+    if job_path.is_file() and read_json(job_path).get("state") == "cancel_requested":
+        raise RuntimeError("Device preparation cancelled before execution")
+    request = body.get("request", {})
+    headless = request.get("kind") == "shader" and request.get("workload", {}).get("carrier") == "headless"
+    if previous is None and (not headless or body.get("pause_foreground")):
+        raise RuntimeError("Original foreground activity is unavailable before device execution")
+    required = previous.split("/")[0] != target if previous else None
+    will_pause = bool(body.get("pause_foreground") and previous and previous.split("/")[0] != target
+                      and not previous.startswith(("com.android.", "com.oplus.", "android")))
+    if headless and not will_pause:
+        required = False
+    write_json(folder / "foreground.json", {"previous": previous, "paused": will_pause, "headless": headless,
+               "restore_required": required, "restored": None, "source": foreground_source, "boot_id": boot})
+    preparation["device_started"] = True
+    write_json(folder / "device-preparation.json", preparation)
     try:
         if body.get("pause_foreground") and previous:
             pkg = previous.split("/")[0]
             if pkg != target and not pkg.startswith(("com.android.", "com.oplus.", "android")):
-                adb("-s", endpoint, "shell", "am", "force-stop", pkg)
                 paused = True
+                adb("-s", endpoint, "shell", "am", "force-stop", pkg)
         if body["operation"] == "eval":
             argv = [
                 "phonefarm",
@@ -153,6 +189,7 @@ def execute_on_device(folder):
                 capture_output=True,
                 text=True,
                 timeout=30,
+                unmarked=True,
             )
             (folder / "foreground-restore.txt").write_text(restored.stdout + restored.stderr)
             receipt.update(
@@ -172,6 +209,18 @@ def cleanup_completed(folder, operation):
     Returns:
         Whether all applicable restoration receipts confirm completion.
     """
+    proof_path = folder / "sdk-restoration.json"
+    if proof_path.is_file():
+        try:
+            proof = read_json(proof_path)
+            frozen = read_json(folder / "input.json")
+            if (proof.get("schema") == "hgamey/sdk-restoration@1" and proof.get("job_id") == folder.name
+                and proof.get("device_id") == frozen["device"]["id"] and proof.get("restored") is True):
+                return True
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    if preparation_not_started(folder):
+        return True
     if (folder / "worker-error.json").exists():
         return False
     if operation == "probe":
@@ -209,4 +258,30 @@ def cleanup_completed(folder, operation):
             )
         return confirmed and foreground_ok
     except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
+def preparation_not_started(folder):
+    """Confirm a durable same-job receipt precedes every possible device mutation.
+
+    Args:
+        folder: Owned executor job directory retaining its frozen submission.
+
+    Returns:
+        Whether only connection and read-only preparation could have run. Missing
+        or inconsistent receipts keep the original conservative cleanup rules.
+    """
+    try:
+        receipt = read_json(folder / "device-preparation.json")
+        frozen = read_json(folder / "input.json")
+        return (
+            receipt.get("schema") == "hgamey/device-preparation@1"
+            and receipt.get("job_id") == folder.name
+            and receipt.get("device_id") == frozen["device"]["id"]
+            and receipt.get("device_started") is False
+            and not any((folder / name).exists() for name in (
+                "backend-command.json", "backend.stdout", "foreground.json", "worker-error.json",
+            ))
+        )
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return False

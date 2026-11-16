@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -670,6 +671,252 @@ def test_incomplete_mali_receipt_keeps_recovery_pending(runner, tmp_path, receip
     if receipt is not None:
         (folder / "mali-cleanup.json").write_text(receipt)
     assert runner.capture_recovery_pending(tmp_path)
+
+
+@pytest.mark.parametrize("count", [0, 3])
+def test_quality_count_reaches_leased_plain_child(runner, args, tmp_path, count):
+    """Only opted-in plain arms inherit the extra capture count."""
+    args.quality_samples = count
+    runner.subprocess.run.side_effect = None
+    runner.subprocess.run.return_value = subprocess.CompletedProcess([], 0, 'ARM_JSON {}\n', "")
+    runner.make_locked(args, str(tmp_path), "standard")("plain", "A1", "native")
+    command = runner.subprocess.run.call_args.args[0]
+    assert ("--quality-samples" in command) is bool(count)
+    if count:
+        assert command[command.index("--quality-samples") + 1] == "3"
+
+
+def test_quality_captures_use_unique_remote_acquisitions_and_verified_transfer(runner, args, tmp_path, monkeypatch):
+    """Acquire each sample independently, removing only successfully transferred files."""
+    args.quality_samples = 3
+    (tmp_path / "shots").mkdir()
+    dev = Mock()
+    transfer = Mock(return_value={"complete": True})
+    calls = Mock()
+    calls.attach_mock(dev.adb, "capture")
+    calls.attach_mock(transfer, "download")
+    calls.attach_mock(dev.su, "cleanup")
+    monkeypatch.setattr(runner, "download_root_file", transfer)
+    result = runner.capture_quality_samples(dev, args, "A1", str(tmp_path))
+    assert result["requested"] == 3 and len(result["captures"]) == 3
+    assert [Path(path).name for path in result["captures"]] == [f"A1_quality_{index}.png" for index in range(1, 4)]
+    assert dev.adb.call_count == transfer.call_count == dev.su.call_count == 3
+    remotes = [call.args[1] for call in transfer.call_args_list]
+    assert len(set(remotes)) == 3
+    assert [call[0] for call in calls.mock_calls] == ["capture"] * 3 + ["download", "cleanup"] * 3
+    assert all(remote in call.args[0] and "screencap -p" in call.args[0]
+               for remote, call in zip(remotes, dev.adb.call_args_list, strict=True))
+    assert all(call.kwargs == {"timeout": 45, "check": True} for call in dev.adb.call_args_list)
+    assert all(call.kwargs == {"timeout": 120} for call in transfer.call_args_list)
+
+
+@pytest.mark.parametrize("failed_sample", [1, 2, 3])
+def test_quality_transfer_failure_resumes_original_without_recapture(runner, args, tmp_path, monkeypatch, failed_sample):
+    """Resume real checkpointed reads of distinct synthetic originals after a partial transfer."""
+    args.quality_samples = 3
+    (tmp_path / "shots").mkdir()
+    dev = Mock()
+    originals, remote_files, events = [], {}, []
+    interrupted = True
+
+    def adb(command, **kwargs):
+        assert kwargs["check"] is True
+        parts = shlex.split(command)
+        if parts[:3] == ["shell", "su", "-c"]:
+            capture = shlex.split(shlex.split(parts[3])[0])
+            assert capture[:2] == ["screencap", "-p"]
+            remote = capture[2]
+            assert remote not in originals
+            intent = tmp_path / "shots" / f"B1_quality_{len(originals) + 1}.png.capture.json"
+            assert json.loads(intent.read_text()) == {"remote": remote, "acquired": False}
+            originals.append(remote)
+            remote_files[remote] = f"synthetic-frame-{len(originals)}".encode()
+            events.append(("capture", remote))
+            return ""
+        assert parts[:3] == ["exec-out", "su", "-c"]
+        read = dict(token.split("=", 1) for token in shlex.split(parts[3]) if "=" in token)
+        remote, chunk_size, skip = read["if"], int(read["bs"]), int(read["skip"])
+        events.append(("download", remote, skip))
+        data = remote_files[remote][skip * chunk_size:(skip + 1) * chunk_size]
+        target = Path(parts[-1])
+        if interrupted and originals.index(remote) + 1 == failed_sample and skip == 1:
+            target.write_bytes(data[:1])
+            raise subprocess.TimeoutExpired("synthetic download interruption", 60)
+        target.write_bytes(data)
+        return ""
+
+    def su(command, **kwargs):
+        remote = shlex.split(command)[-1]
+        if command.startswith("rm -f "):
+            path = tmp_path / "shots" / f"B1_quality_{originals.index(remote) + 1}.png"
+            assert path.read_bytes() == remote_files[remote]
+            assert json.loads(path.with_suffix(".png.transfer.json").read_text())["complete"] is True
+            events.append(("cleanup", remote))
+            del remote_files[remote]
+            return ""
+        data = remote_files[remote]
+        return f"synthetic-device\nsynthetic-boot\n{len(data)}\n{hashlib.sha256(data).hexdigest()}  {remote}\n"
+
+    dev.adb.side_effect, dev.su.side_effect = adb, su
+    download = runner.download_root_file
+
+    def transfer(dev, remote, path, **kwargs):
+        return download(dev, remote, path, **kwargs, chunk_size=4, retries=1)
+
+    monkeypatch.setattr(runner, "download_root_file", transfer)
+    result = runner.capture_quality_samples(dev, args, "B1", str(tmp_path))
+    assert result["error"].startswith(f"B1 quality sample {failed_sample}:")
+    assert len(result["captures"]) == failed_sample - 1
+    assert [event[0] for event in events[:4]] == ["capture"] * 3 + ["download"]
+    assert len(originals) == len(set(originals)) == 3
+    assert set(remote_files) == set(originals[failed_sample - 1:])
+    failed = tmp_path / "shots" / f"B1_quality_{failed_sample}.png"
+    checkpoint = json.loads(failed.with_suffix(".png.transfer.json").read_text())
+    assert checkpoint["bytes_complete"] == 4 and checkpoint["complete"] is False
+    assert not failed.exists()
+    interrupted = False
+    before_retry = len(events)
+    result = runner.capture_quality_samples(dev, args, "B1", str(tmp_path))
+    assert "error" not in result and len(result["captures"]) == 3
+    assert events[before_retry] == ("download", originals[failed_sample - 1], 1)
+    assert sum(event[0] == "capture" for event in events) == 3
+    assert not remote_files
+    assert [Path(path).read_bytes() for path in result["captures"]] == [f"synthetic-frame-{index}".encode() for index in range(1, 4)]
+    completed = len(events)
+    assert runner.capture_quality_samples(dev, args, "B1", str(tmp_path)) == result
+    assert len(events) == completed
+
+
+@pytest.mark.parametrize("failed_sample", [1, 2, 3])
+@pytest.mark.parametrize("error", [subprocess.TimeoutExpired("synthetic screencap", 45),
+                                  subprocess.CalledProcessError(1, "synthetic screencap")])
+def test_quality_uncertain_acquisition_is_never_repeated(runner, args, tmp_path, monkeypatch, failed_sample, error):
+    """Retain intents after an uncertain screencap and refuse any reacquisition on retry."""
+    args.quality_samples = 3
+    (tmp_path / "shots").mkdir()
+    dev = Mock()
+    dev.adb.side_effect = [""] * (failed_sample - 1) + [error]
+    transfer = Mock()
+    monkeypatch.setattr(runner, "download_root_file", transfer)
+    result = runner.capture_quality_samples(dev, args, "A1", str(tmp_path))
+    assert result["error"].startswith(f"A1 quality sample {failed_sample}:")
+    assert not result["captures"]
+    intents = sorted((tmp_path / "shots").glob("*.capture.json"))
+    states = [json.loads(path.read_text()) for path in intents]
+    assert [state["acquired"] for state in states] == [True] * (failed_sample - 1) + [False]
+    assert "unconfirmed" in runner.capture_quality_samples(dev, args, "A1", str(tmp_path))["error"]
+    assert [json.loads(path.read_text()) for path in intents] == states
+    assert dev.adb.call_count == failed_sample
+    transfer.assert_not_called()
+    dev.su.assert_not_called()
+
+
+def test_quality_intent_persistence_failure_prevents_capture(runner, args, tmp_path, monkeypatch):
+    """Do not acquire evidence unless its intent was persisted before the device command."""
+    args.quality_samples = 1
+    (tmp_path / "shots").mkdir()
+    dev = Mock()
+    transfer = Mock()
+    monkeypatch.setattr(runner, "download_root_file", transfer)
+    sync = Mock(side_effect=OSError("synthetic intent sync failure"))
+    monkeypatch.setattr(runner.os, "fsync", sync)
+    result = runner.capture_quality_samples(dev, args, "A1", str(tmp_path))
+    assert result["error"] == "A1 quality sample 1: synthetic intent sync failure"
+    sync.assert_called_once()
+    sync.side_effect = None
+    assert "unconfirmed" in runner.capture_quality_samples(dev, args, "A1", str(tmp_path))["error"]
+    assert not dev.mock_calls
+    transfer.assert_not_called()
+
+
+@pytest.mark.parametrize("receipt", [None, {}, {"complete": False}, {"complete": 1}])
+def test_quality_unknown_transfer_receipt_retains_remote(runner, args, tmp_path, monkeypatch, receipt):
+    """An unconfirmed transfer cannot publish a sample or authorize remote cleanup."""
+    args.quality_samples = 1
+    (tmp_path / "shots").mkdir()
+    dev = Mock()
+    transfer = Mock(return_value=receipt)
+    monkeypatch.setattr(runner, "download_root_file", transfer)
+    result = runner.capture_quality_samples(dev, args, "A1", str(tmp_path))
+    assert result["error"].startswith("A1 quality sample 1:")
+    assert not result["captures"]
+    state = json.loads((tmp_path / "shots/A1_quality_1.png.capture.json").read_text())
+    assert state["acquired"] is True and not state.get("complete")
+    dev.su.assert_not_called()
+    transfer.return_value = {"complete": True}
+    assert len(runner.capture_quality_samples(dev, args, "A1", str(tmp_path))["captures"]) == 1
+    dev.adb.assert_called_once()
+    assert transfer.call_args.args[1] == state["remote"]
+
+
+@pytest.mark.parametrize("count", [None, 0])
+def test_quality_capture_disabled_has_no_side_effects(runner, args, tmp_path, monkeypatch, count):
+    """An absent or zero quality budget retains legacy behavior without filesystem or device access."""
+    if count is not None:
+        args.quality_samples = count
+    dev = Mock()
+    transfer = Mock()
+    monkeypatch.setattr(runner, "download_root_file", transfer)
+    assert runner.capture_quality_samples(dev, args, "A1", str(tmp_path)) == {"requested": 0, "captures": []}
+    assert not list(tmp_path.iterdir())
+    assert not dev.mock_calls
+    transfer.assert_not_called()
+
+
+@pytest.mark.parametrize("count", [0, 3])
+def test_extra_quality_capture_occurs_after_timing_before_pan(runner, args, tmp_path, monkeypatch, count):
+    """Extra screenshots cannot enter the measured window or follow camera input."""
+    args.quality_samples, args.pan, args.sf_atrace = count, True, False
+    (tmp_path / "traces").mkdir()
+    events = []
+
+    def collect(*positional, **keywords):
+        events.append("timing-ended")
+        return {"metrics": {}, "cleanup_confirmed": True, "timestats": ""}
+
+    def capture(*positional, **keywords):
+        events.append("quality")
+        return {"requested": count, "captures": []}
+
+    def pan(*positional, **keywords):
+        events.append("pan")
+        return {}
+
+    monkeypatch.setattr(runner, "collect_mali", collect)
+    monkeypatch.setattr(runner, "capture_quality_samples", capture)
+    monkeypatch.setattr(runner, "pan_probe", pan)
+    monkeypatch.setattr(runner, "sc_layer_fps", lambda *args, **kwargs: {})
+    monkeypatch.setattr(runner, "sharpness", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(runner, "layer_src", lambda *args: [100, 100])
+    dev = Mock()
+    dev.shell.return_value = args.pkg
+    result = runner.measure(dev, args, "A1", str(tmp_path))
+    assert events == (["timing-ended", "quality", "pan"] if count else ["timing-ended", "pan"])
+    assert ("quality_samples" in result) is bool(count)
+
+
+@pytest.mark.parametrize("count", [0, 3, -1])
+def test_quality_cli_validation_precedes_device_access(runner, monkeypatch, count):
+    """Parse the opt-in count and reject negative budgets before taking a lease."""
+    monkeypatch.setattr(sys, "argv", ["selfsr_ab.py", "run", "--serial", "fixture", "--out", "unused",
+                                     "--quality-samples", str(count)])
+    monkeypatch.setattr(runner, "lock_fds", Mock(side_effect=InterruptedError("before lease")))
+    with pytest.raises(SystemExit if count < 0 else InterruptedError):
+        runner.main()
+    runner.Dev.assert_not_called()
+
+
+def test_main_appends_official_quality_report_only_when_requested(runner, main_without_device, monkeypatch):
+    """The game report retains official rows and provenance for the independent scorer."""
+    main_without_device.argv += ["--a", "native", "--b", "native", "--quality-samples", "3"]
+    result = {"status": "not_measured", "metrics": [], "not_computed": ["synthetic missing captures"],
+              "provenance": {"tool": "phonefarm iq-judge"}}
+    iq = Mock(return_value=result)
+    monkeypatch.setattr(runner, "measure_quality", iq)
+    runner.main()
+    iq.assert_called_once()
+    assert iq.call_args.args[1] == {"rounds": 2, "quality_samples": 3}
+    assert json.loads((main_without_device.out / "report.json").read_text())["quality"] == result
 
 
 def test_lost_mali_arm_json_stops_next_arm_and_outer_restore(runner, main_without_device):
