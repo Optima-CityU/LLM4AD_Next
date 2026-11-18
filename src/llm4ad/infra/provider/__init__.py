@@ -14,6 +14,7 @@ from llm4ad.infra.provider.base import (
     ToolCall,
     ToolDefinition,
 )
+from llm4ad.infra.provider.codex_cli import CodexCLIProvider
 from llm4ad.infra.provider.mock import MockProvider
 from llm4ad.infra.provider.openai_compatible import OpenAICompatibleProvider
 
@@ -29,4 +30,5 @@ __all__ = [
     "OpenAICompatibleProvider",
     "AnthropicProvider",
     "MockProvider",
+    "CodexCLIProvider",
 ]

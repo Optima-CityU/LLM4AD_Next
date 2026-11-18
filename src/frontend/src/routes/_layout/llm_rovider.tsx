@@ -11,6 +11,7 @@ import AddProvider from "@/components/LlmProvider/AddProvider"
 import { columns } from "@/components/LlmProvider/columns"
 import DefaultModelSettings from "@/components/LlmProvider/DefaultModelSettings"
 import EmbeddingProviderSettings from "@/components/LlmProvider/EmbeddingProviderSettings"
+import LocalCodexCard from "@/components/LlmProvider/LocalCodexCard"
 import {
   Select,
   SelectContent,
@@ -67,6 +68,7 @@ function LlmProvider() {
 
       {/* Scrollable content area */}
       <div className="flex-1 min-h-0 overflow-y-auto pr-1 pt-2">
+        <LocalCodexCard />
         {/* Loading skeleton */}
         {isLoading && (
           <div className="rounded-md border">

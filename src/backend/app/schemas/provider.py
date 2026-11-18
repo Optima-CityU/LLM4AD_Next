@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from app.models import LLMProviderBase, ProviderType
 
@@ -98,10 +98,14 @@ class ProviderResponse(BaseModel):
     is_builtin: bool = False
     visible_to_all: bool = False
     user_id: uuid.UUID | None = None
+    is_local_codex: bool = False
 
     @model_serializer(mode="wrap")
     def _mask_secrets(self, handler):
         data = handler(self)
+        from app.services.local_codex_service import is_local_codex_provider
+
+        data["is_local_codex"] = is_local_codex_provider(self)
         # 凭据：已设置→占位符，未设置→空串（保留"是否已配置"信息）
         data["api_key"] = _MASKED_SECRET if data.get("api_key") else ""
         data["auth_token"] = _MASKED_SECRET if data.get("auth_token") else ""
@@ -128,3 +132,35 @@ class ProviderTestResponse(BaseModel):
     success: bool
     message: str
     data: Any = None
+
+
+class LocalCodexBindRequest(BaseModel):
+    """Local bridge binding preferences; account credentials stay on the host."""
+
+    name: str = Field(default="本机 Codex CLI", max_length=255)
+    model: str = Field(default="", max_length=255, pattern=r"^[^;\r\n]*$")
+    set_defaults: bool = True
+
+
+class LocalCodexModel(BaseModel):
+    """A displayable model ID reported by the local CLI."""
+
+    id: str
+    name: str
+
+
+class LocalCodexStatus(BaseModel):
+    """Connection and binding state safe to display in the browser."""
+
+    enabled: bool
+    connected: bool
+    installed: bool
+    authenticated: bool
+    version: str
+    model: str
+    provider_id: str | None
+    default_for_experiments: bool
+    reason: str
+    models: list[LocalCodexModel] = Field(default_factory=list)
+    default_model: str = ""
+    models_available: bool = False

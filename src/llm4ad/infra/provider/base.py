@@ -17,6 +17,7 @@ class ProviderType(Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENAI_COMPATIBLE = "openai_compatible"
+    CODEX_CLI = "codex_cli"
 
 
 class ToolDefinition(BaseModel):
@@ -171,7 +172,7 @@ class BaseProvider(Registrable, ABC, registry_name="provider"):
         pass
 
     @abstractmethod
-    async def generate_stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
+    def generate_stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
         """Generate text with streaming from a simple prompt.
 
         Args:

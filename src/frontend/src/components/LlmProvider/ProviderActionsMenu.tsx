@@ -26,7 +26,7 @@ export const ProviderActionsMenu = ({ provider }: ProviderActionsMenuProps) => {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <EditProvider provider={provider} onSuccess={() => setOpen(false)} />
+        {!provider.is_local_codex && <EditProvider provider={provider} onSuccess={() => setOpen(false)} />}
         {!provider.is_builtin && (
           <DeleteProvider id={provider.id} onSuccess={() => setOpen(false)} />
         )}

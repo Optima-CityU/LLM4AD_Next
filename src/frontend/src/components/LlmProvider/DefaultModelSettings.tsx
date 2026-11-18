@@ -49,6 +49,7 @@ import {
   useUserDefaultModels,
 } from "@/hooks/useProviders"
 import { handleError } from "@/utils"
+import { formatProviderModel } from "@/lib/providerModel"
 
 type RoleKey = "planner" | "coder" | "report" | "other"
 type ModelSlotKey = RoleKey
@@ -248,7 +249,7 @@ function RoleRow({
             </SelectLabel>
             {availableModels.map((model) => (
               <SelectItem key={model} value={model}>
-                {model}
+                {formatProviderModel(model)}
               </SelectItem>
             ))}
           </SelectGroup>

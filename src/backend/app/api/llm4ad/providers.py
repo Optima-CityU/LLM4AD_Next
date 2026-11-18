@@ -17,6 +17,22 @@ from app.services import provider_service
 router = APIRouter(prefix="/providers", tags=["llm4ad.providers"])
 
 
+@router.get("/local-codex/status", response_model=schemas.LocalCodexStatus)
+async def local_codex_status(db: SessionDep, current_user: CurrentUser):
+    """Inspect the host CLI login and current local binding."""
+    from app.services.local_codex_service import get_status
+
+    return await get_status(db, current_user)
+
+
+@router.post("/local-codex/bind", response_model=schemas.ProviderResponse)
+async def bind_local_codex(request: schemas.LocalCodexBindRequest, db: SessionDep, current_user: CurrentUser):
+    """Bind the host Codex account without receiving any account credentials."""
+    from app.services.local_codex_service import bind
+
+    return await bind(db, current_user, request.name, request.model, request.set_defaults)
+
+
 @router.post(
     "/test",
     response_model=schemas.ProviderTestResponse,

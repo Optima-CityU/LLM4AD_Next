@@ -65,6 +65,7 @@ class CodingAgentType(Enum):
 
     CLAUDE_CODE = "claude_code"  # Anthropic Claude Code
     OPENCODE = "opencode"  # OpenCode
+    CODEX_CLI = "codex_cli"  # Codex CLI with local ChatGPT login
     CLAUDE_CLI = "claude_cli"  # Claude CLI (anthropic)
     CUSTOM = "custom"  # Custom agent
 
