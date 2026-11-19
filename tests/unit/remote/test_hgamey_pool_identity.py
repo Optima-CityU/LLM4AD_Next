@@ -84,7 +84,7 @@ def pool(local, tmp_path, monkeypatch):
             references=references,
             native=tools / "phonefarm/knobs/gray/layer/selfsr.cpp",
             builder=tools / local.builder.name,
-            executable=tools / "phonefarm/phonefarm",
+            executable=tools / "phonefarm" / local.executable.name,
             cxx=cxx,
             clang=clang,
             linker=linker,

@@ -63,8 +63,8 @@ def local(tmp_path, monkeypatch):
     for path in (native, cxx, glslc, ndk / "source.properties"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"synthetic-only {path.name}")
-    executable = phonefarm / "phonefarm"
-    executable.write_text("#!/bin/sh\nexit 99\n")
+    executable = phonefarm / ("phonefarm.exe" if os.name == "nt" else "phonefarm")
+    executable.write_bytes(b"synthetic phonefarm fixture\n")
     executable.chmod(0o755)
     monkeypatch.setenv("PATH", str(phonefarm) + os.pathsep + os.environ["PATH"])
     builder = tools / "build_present_candidate.py"
@@ -652,11 +652,9 @@ def test_game_wrapper_accepts_frozen_request_and_checks_synthetic_source_markers
     wrapper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wrapper)
     adapter = local.adapter()
+    adapter.benchmark.prefix = adapter.benchmark.inputs
     state = adapter.prepare(local.job)
     options = wrapper.validate_options(state["game"]["request"]["options"])
-    folder = Path(state["evidence_directory"])
-    for key, name in (("baseline_layer_path", "baseline"), ("layer_path", "candidate")):
-        options[key] = str(folder / f"{name}-layer/libVkLayer_refknobs.so")
     frozen = {"submission": {"options": options}}
     wrapper.freeze_inputs(tmp_path / "synthetic-executor", frozen)
     options = frozen["submission"]["options"]

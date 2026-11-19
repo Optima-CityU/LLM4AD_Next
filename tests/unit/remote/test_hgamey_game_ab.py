@@ -26,9 +26,29 @@ PNG_FIXTURE = base64.b64decode(
 
 
 @pytest.fixture
-def trial(tmp_path):
+def layer_path(tmp_path):
+    """Provide an absolute path to a synthetic game layer on the test host."""
+    library = tmp_path / "layer.so"
+    library.write_bytes(b"\x7fELFsynthetic-layer")
+    return library
+
+
+def create_symlink(path, target, *, target_is_directory=False):
+    """Create a real symlink when the test account has permission."""
+    try:
+        path.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Creating symlinks requires Windows Developer Mode or symlink privileges")
+        raise
+
+
+@pytest.fixture
+def trial(tmp_path, layer_path):
     """Provide explicitly synthetic control measurements with no device access."""
-    options = game.validate_options({"rounds": 1, "a": "native", "b": "layer", "pan": False})
+    options = game.validate_options(
+        {"rounds": 1, "a": "native", "b": "layer", "pan": False, "layer_path": str(layer_path)}
+    )
     raw = {
         "pkg": options["package"],
         "a": "native",
@@ -38,9 +58,6 @@ def trial(tmp_path):
         "dropped_arms": [],
         "metrics": {"display_fps": {"a_mean": 30, "b_mean": 29, "n_pairs": 1}, "game_fps": {"status": "not_measured"}},
     }
-    library = tmp_path / "layer.so"
-    library.write_bytes(b"\x7fELFsynthetic-layer")
-    options["layer_path"] = str(library)
     arms = [
         {"arm": "A1", "side": "A", "pair": 1, "seq": 1, "kind": "native", "in_game": True},
         {
@@ -60,7 +77,7 @@ def trial(tmp_path):
     for arm, fps in zip(arms, (30, 29), strict=True):
         arm["display_fps"] = fps
         make_capture(tmp_path, name=arm["arm"])
-    arms[1].update(layer_path=str(library), layer_sha256=hashlib.sha256(library.read_bytes()).hexdigest())
+    arms[1].update(layer_path=str(layer_path), layer_sha256=hashlib.sha256(layer_path.read_bytes()).hexdigest())
     make_session(tmp_path, "B1")
 
     def save():
@@ -84,7 +101,7 @@ def test_game_qualification_is_not_candidate_fitness(trial):
 
 
 @pytest.mark.parametrize("foreign_property", [None, "vendor.unrelated.setting", "debug.unrelated.setting"])
-def test_original_game_properties_restore_owned_vendor_setting(tmp_path, monkeypatch, foreign_property):
+def test_original_game_properties_restore_owned_vendor_setting(tmp_path, layer_path, monkeypatch, foreign_property):
     """Snapshot and restoration share the vendor property allowlist."""
     upstream = SimpleNamespace(
         SR_PROP="debug.knobs.selfsr", UNLIMIT_PROP="debug.knobs.unlimit",
@@ -127,7 +144,8 @@ def test_original_game_properties_restore_owned_vendor_setting(tmp_path, monkeyp
         original["properties"][foreign_property] = "1"
     (tmp_path / "game-original.json").write_text(json.dumps(original))
     (tmp_path / "input.json").write_text(json.dumps({
-        "device": {"endpoint": "fake:5555", "expected_serial": "physical-phone"}, "submission": {"options": {}},
+        "device": {"endpoint": "fake:5555", "expected_serial": "physical-phone"},
+        "submission": {"options": {"layer_path": str(layer_path)}},
     }))
     if foreign_property:
         with pytest.raises(ValueError, match="Invalid owned game property"):
@@ -140,10 +158,10 @@ def test_original_game_properties_restore_owned_vendor_setting(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("count", [0, 3])
-def test_quality_option_is_opt_in_and_propagates_to_command(tmp_path, count):
+def test_quality_option_is_opt_in_and_propagates_to_command(tmp_path, layer_path, count):
     """Preserve legacy commands while explicitly requesting extra real captures."""
-    assert game.validate_options({})["quality_samples"] == 0
-    options = game.validate_options({"quality_samples": count})
+    assert game.validate_options({"layer_path": str(layer_path)})["quality_samples"] == 0
+    options = game.validate_options({"layer_path": str(layer_path), "quality_samples": count})
     command = game.command_for(tmp_path, "fixture", options)
     assert ("--quality-samples" in command) is bool(count)
     if count:
@@ -273,17 +291,15 @@ def test_optional_screenshots_skip_unowned_or_unusable_files(trial, failure):
         with source.open("wb") as stream:
             stream.truncate(64 * 1024 * 1024 + 1)
     else:
-        if os.name != "posix":
-            pytest.skip("Requires filesystem symlinks")
         if failure == "symlink":
             source.unlink()
             private = path / "private-reference.png"
             private.write_bytes(PNG_FIXTURE)
-            source.symlink_to(private)
+            create_symlink(source, private)
         else:
             private = path / "private-shots"
             shots.rename(private)
-            shots.symlink_to(private, target_is_directory=True)
+            create_symlink(shots, private, target_is_directory=True)
     save()
 
     report = game.summarize(path, options, True, 0)
@@ -294,7 +310,6 @@ def test_optional_screenshots_skip_unowned_or_unusable_files(trial, failure):
     assert {item["name"] for item in measurement_screenshots(path, options, arms)} == expected
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Requires filesystem symlinks")
 @pytest.mark.parametrize("component", ["evidence", "job", "jobs"])
 def test_measurement_screenshots_reject_symlinked_ancestors(tmp_path, component):
     """A matching recorded path does not authorize files through directory aliases."""
@@ -308,7 +323,7 @@ def test_measurement_screenshots_reject_symlinked_ancestors(tmp_path, component)
     path = paths[component]
     private = path.with_name(path.name + "-private")
     path.rename(private)
-    path.symlink_to(private, target_is_directory=True)
+    create_symlink(path, private, target_is_directory=True)
 
     assert measurement_screenshots(evidence, {"rounds": 1}, arms) == []
 
@@ -368,9 +383,10 @@ def test_incomplete_pair_is_rejected(trial):
     assert game.summarize(path, options, True, 0)["status"] == "ERROR"
 
 
-def test_default_command_disables_vlm_and_verifies_world(tmp_path):
+def test_default_command_disables_vlm_and_verifies_world(tmp_path, layer_path):
     """Game entry never requires model configuration in this executor path."""
-    command = game.command_for(tmp_path, "example:5555", game.validate_options({}))
+    options = game.validate_options({"layer_path": str(layer_path)})
+    command = game.command_for(tmp_path, "example:5555", options)
     assert command[command.index("--vlm-calls") + 1] == "0"
     assert "--verify-game-world" in command
 
@@ -621,9 +637,19 @@ def test_orphaned_capture_artifacts_are_not_confirmed(tmp_path):
 
 
 @pytest.fixture
-def lifecycle(tmp_path, monkeypatch):
+def lifecycle(tmp_path, layer_path, monkeypatch):
     """Exercise wrapper lifecycle using host-only files and fake processes."""
-    options = game.validate_options({"a": "native", "b": "native", "rounds": 1, "pan": False})
+    options = game.validate_options(
+        {"a": "native", "b": "native", "rounds": 1, "pan": False, "layer_path": str(layer_path)}
+    )
+    if os.name == "nt":
+        validate_options = game.validate_options
+
+        def validate_fixture_options(options):
+            """Supply a Windows path when the wrapper validates its Linux defaults."""
+            return validate_options({"layer_path": str(layer_path), **options})
+
+        monkeypatch.setattr(game, "validate_options", validate_fixture_options)
     frozen = {"submission": {"options": options}, "device": {"endpoint": "fixture:5555", "expected_serial": "fixture-serial"}}
     (tmp_path / "input.json").write_text(json.dumps(frozen))
     (tmp_path / "job.json").write_text(json.dumps({"state": "running"}))
@@ -660,9 +686,7 @@ def lifecycle(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(game, "load_upstream", lambda: upstream)
 
-    monkeypatch.setenv("PF_LOCK_FDS", "17")
-    monkeypatch.setenv("PF_ROOT", "/fixture/phonefarm")
-    monkeypatch.setattr(game.os, "fstat", Mock())
+    monkeypatch.setenv("PF_ROOT", str(tmp_path / "phonefarm"))
     monkeypatch.setattr(game.time, "sleep", Mock())
     child = Mock(returncode=0)
     child.poll.return_value = 0
@@ -706,7 +730,9 @@ def lifecycle(tmp_path, monkeypatch):
         return child
 
     monkeypatch.setattr(game.subprocess, "Popen", launch)
-    return SimpleNamespace(folder=tmp_path, child=child, dev=dev, values=values, upstream=upstream)
+    with (tmp_path / "device.lock").open("wb") as lease:
+        monkeypatch.setenv("PF_LOCK_FDS", str(lease.fileno()))
+        yield SimpleNamespace(folder=tmp_path, child=child, dev=dev, values=values, upstream=upstream)
 
 
 def test_cancelled_running_child_never_returns_pass(lifecycle, monkeypatch):

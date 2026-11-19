@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import sys
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,12 +10,12 @@ from types import SimpleNamespace
 import pytest
 
 from llm4ad.gateway.examples.hgamey.evaluators import HGameyStaticEvaluator
+from llm4ad.gateway.examples.hgamey.execution import storage
 from llm4ad.gateway.examples.hgamey.execution.static_measurement import (
     execute_static,
     recovery_directory,
     score_static_dataset,
 )
-from llm4ad.gateway.examples.hgamey.execution.storage import freeze_shader_inputs
 from llm4ad.gateway.examples.hgamey.static_dataset import DATASETS, matching_pairs, prepare_dataset
 
 pytestmark = pytest.mark.unit
@@ -23,13 +24,21 @@ pytestmark = pytest.mark.unit
 def image_bytes(size):
     """Produce fixture bytes without a platform image upload."""
     image = pytest.importorskip("PIL.Image")
-    storage = BytesIO()
-    image.new("RGB", size, "blue").save(storage, format="PNG")
-    return storage.getvalue()
+    buffer = BytesIO()
+    image.new("RGB", size, "blue").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
-def test_importer_freezes_aligned_crop_and_rejects_changed_input(tmp_path):
-    """Prepare stable pairs and reject modified bytes at the executor boundary."""
+@pytest.fixture
+def portable_directory_sync(monkeypatch):
+    """Keep atomic file writes in tests that do not cover directory durability."""
+    if sys.platform == "win32":
+        monkeypatch.setattr(storage, "sync_directory", lambda path: None)
+
+
+@pytest.fixture
+def dataset_sources(tmp_path):
+    """Create complete synthetic datasets with the expected source layout."""
     qrisp, gameir = tmp_path / "QRISP", tmp_path / "GameIR-SR"
     dimensions = {
         "540p/Native": (960, 540),
@@ -44,6 +53,13 @@ def test_importer_freezes_aligned_crop_and_rejects_changed_input(tmp_path):
             base.mkdir(parents=True)
             filename = "0000.png" if "/" in mode else "00000000.rgb.png"
             (base / filename).write_bytes(image)
+    return qrisp, gameir
+
+
+@pytest.mark.usefixtures("portable_directory_sync")
+def test_importer_prepares_stable_aligned_crops(tmp_path, dataset_sources):
+    """Check that repeated imports produce the same aligned sample manifest."""
+    qrisp, gameir = dataset_sources
     first = prepare_dataset(tmp_path / "first", qrisp, gameir, ("qrisp-v1", "gameir-v1"), "train")
     second = prepare_dataset(tmp_path / "second", qrisp, gameir, ("qrisp-v1", "gameir-v1"), "train")
     assert first.read_bytes() == second.read_bytes()
@@ -53,16 +69,25 @@ def test_importer_freezes_aligned_crop_and_rejects_changed_input(tmp_path):
     assert samples[8]["lr"]["crop_xy"] == [0, 90]
     assert samples[8]["hr"]["crop_xy"] == [0, 180]
     assert samples[0]["hr"]["crop_xy"] == [0, 0]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Freezing shader inputs requires POSIX file descriptors")
+def test_freezing_static_pairs_rejects_changed_input(tmp_path, dataset_sources):
+    """Reject bytes that changed between dataset import and executor submission."""
+    qrisp, gameir = dataset_sources
+    manifest = prepare_dataset(tmp_path / "prepared", qrisp, gameir, ("qrisp-v1", "gameir-v1"), "train")
+    samples = json.loads(manifest.read_text())["samples"]
     for sample in samples:
         for role in ("lr", "hr"):
-            sample[role]["path"] = str(first.parent / sample[role]["path"])
+            sample[role]["path"] = str(manifest.parent / sample[role]["path"])
     Path(samples[0]["lr"]["path"]).write_bytes(b"changed")
     with pytest.raises(ValueError, match="Static lr image changed"):
-        freeze_shader_inputs(
+        storage.freeze_shader_inputs(
             tmp_path / "job", {"submission": {"request": {"kind": "shader", "payload": {"static_pairs": samples}}}}
         )
 
 
+@pytest.mark.usefixtures("portable_directory_sync")
 @pytest.mark.parametrize("failure", [None, "one-collage", "arm", "dataset-quality"])
 def test_static_job_requires_all_frames_and_publishes_two_collages(tmp_path, failure):
     """Drive the executor through all 16 pairs and verify artifact and score behavior."""

@@ -82,7 +82,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         """Prepare isolated runtime state and a fake, non-routable phone identity."""
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.references = self.root / "reference"
         self.references.mkdir()
         (self.references / "frame.png").write_bytes(b"readiness-fixture-not-a-phone-frame")
@@ -174,6 +174,9 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
 
     def launch(self, gateway_factory=GatewayFixture):
         """Run the real lifecycle around a deterministic executor backend."""
+        if os.name == "nt":
+            self.skipTest("HGameyRuntime rejects Windows and the executor uses POSIX file locks")
+
         def engine(data, config, **kwargs):
             instance = executor.Engine(data, config, **kwargs)
             if gateway_factory is GatewayFixture:
@@ -612,6 +615,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.02)
         self.assertEqual(len(self.calls), 2)
 
+    @unittest.skipIf(os.name == "nt", "The HGamey executor requires POSIX locking and directory fsync")
     async def test_spawned_sdk_workers_keep_device_bindings_without_environment_switches(self):
         """Real SDK controllers commit direct native outcomes without HTTP or shader tools."""
         from llm4ad.gateway.sdk.contracts import RemoteJob

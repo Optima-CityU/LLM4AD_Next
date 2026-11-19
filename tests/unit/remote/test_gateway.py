@@ -64,7 +64,10 @@ def test_archive_rejects_unsafe_paths(tmp_path, filename):
     """Cross-platform extraction refuses paths outside the assigned worktree."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as archive:
-        archive.writestr(filename, "pass")
+        entry = zipfile.ZipInfo(filename)
+        # Preserve the name on disk even when ZipInfo normalizes it on Windows.
+        entry.filename = filename
+        archive.writestr(entry, "pass")
     with pytest.raises(ValueError):
         extract_candidate(buf.getvalue(), tmp_path)
 

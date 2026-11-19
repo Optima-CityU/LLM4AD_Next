@@ -421,7 +421,7 @@ def test_example_requires_a_gateway_selection_without_physical_device_identity(l
     """Select a real benchmark without requiring physical IDs in the task template."""
     import yaml
 
-    data = yaml.safe_load((TEMPLATE / "config.yaml").read_text())
+    data = yaml.safe_load((TEMPLATE / "config.yaml").read_text(encoding="utf-8"))
     assert data["evaluator"]["gateway_id"] is None
     assert (TEMPLATE / data["version_control"]["local_path"] / "shader.comp").is_file()
     draft = AppConfig.model_validate(data)

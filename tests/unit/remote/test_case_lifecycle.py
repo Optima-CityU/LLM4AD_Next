@@ -459,7 +459,12 @@ def test_runtime_local_logs_rejects_unowned_or_symlink_paths(external_logs, loca
         other = tmp_path / "outside.log"
         other.write_text("unrelated file")
         target.unlink()
-        target.symlink_to(other)
+        try:
+            target.symlink_to(other)
+        except OSError as error:
+            if getattr(error, "winerror", None) == 1314:
+                pytest.skip("Creating symbolic links requires additional Windows privileges")
+            raise
     with pytest.raises(ValueError):
         runtime.local_logs(local.job, state)
 

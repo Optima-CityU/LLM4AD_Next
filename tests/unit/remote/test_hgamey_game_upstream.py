@@ -410,6 +410,14 @@ def test_worker_artifact_alone_cannot_prove_success(runner, args, tmp_path, fail
 @pytest.fixture
 def main_without_device(runner, monkeypatch, tmp_path):
     """Run the actual arm loop against mocked entry and device transport."""
+
+    def open_utf8(filename, mode="r", **kwargs):
+        """Default the runner's text files to UTF-8 for the in-process tests."""
+        if "b" not in mode:
+            kwargs.setdefault("encoding", "utf-8")
+        return open(filename, mode, **kwargs)
+
+    monkeypatch.setattr(runner, "open", open_utf8, raising=False)
     dev = Mock()
     dev.shell.side_effect = lambda command, **kwargs: "no intervention" if "list-configs" in command else ""
     dev.prop.return_value = ""
@@ -461,11 +469,15 @@ def test_recovery_unknown_stops_next_arm_and_defers_cleanup(runner, main_without
     if not layered:
         main_without_device.locked.side_effect = [failed, {}]
     runner.main()
-    records = [json.loads(line) for line in (main_without_device.out / "arms.jsonl").read_text().splitlines()]
+    records = [
+        json.loads(line)
+        for line in (main_without_device.out / "arms.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     assert len(records) == 1 and records[0]["arm"] == "A1" and records[0]["recovery_unknown"]
     assert layer.call_count == (1 if layered else 0)
     assert all(call.args[0] != "restore" for call in main_without_device.locked.call_args_list)
-    assert json.loads((main_without_device.out / "restore.json").read_text())["restoration_deferred"] is True
+    restore = json.loads((main_without_device.out / "restore.json").read_text(encoding="utf-8"))
+    assert restore["restoration_deferred"] is True
 
 
 def test_plain_arm_preserves_unknown_recovery(runner, args, monkeypatch, tmp_path):
@@ -565,7 +577,8 @@ def test_pending_capture_blocks_finally_after_lost_arm_record(runner, main_witho
         runner.main()
     assert all(call.args[0] != "restore" for call in main_without_device.locked.call_args_list)
     assert len(runner.Dev.return_value.mock_calls) == mutation_count[0]
-    assert json.loads((main_without_device.out / "restore.json").read_text())["restoration_deferred"] is True
+    restore = json.loads((main_without_device.out / "restore.json").read_text(encoding="utf-8"))
+    assert restore["restoration_deferred"] is True
 
 
 def test_layer_finally_does_not_stop_owner_after_capture_exception(runner, args, monkeypatch, tmp_path):
@@ -916,7 +929,7 @@ def test_main_appends_official_quality_report_only_when_requested(runner, main_w
     runner.main()
     iq.assert_called_once()
     assert iq.call_args.args[1] == {"rounds": 2, "quality_samples": 3}
-    assert json.loads((main_without_device.out / "report.json").read_text())["quality"] == result
+    assert json.loads((main_without_device.out / "report.json").read_text(encoding="utf-8"))["quality"] == result
 
 
 def test_lost_mali_arm_json_stops_next_arm_and_outer_restore(runner, main_without_device):
@@ -935,6 +948,7 @@ def test_lost_mali_arm_json_stops_next_arm_and_outer_restore(runner, main_withou
     runner.main()
     main_without_device.locked.assert_called_once_with("plain", "A1", "native")
     assert len(runner.Dev.return_value.mock_calls) == calls_after_loss[0]
-    records = (main_without_device.out / "arms.jsonl").read_text().splitlines()
+    records = (main_without_device.out / "arms.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(records) == 1
-    assert json.loads((main_without_device.out / "restore.json").read_text())["restoration_deferred"] is True
+    restore = json.loads((main_without_device.out / "restore.json").read_text(encoding="utf-8"))
+    assert restore["restoration_deferred"] is True

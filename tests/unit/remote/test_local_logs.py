@@ -158,7 +158,7 @@ def test_external_logs_are_archived_before_worktree_evidence_cleanup(local, desc
     journal, job, logs = local
     source = Path(job["project_root"]) / ".evaluation-artifacts" / "build.log"
     source.parent.mkdir()
-    source.write_text("compiler diagnostic\n")
+    source.write_text("compiler diagnostic\n", encoding="utf-8", newline="\n")
     journal.update(job["id"], "completed", {"success": True, "score": 1})
     journal.acknowledge(job["id"], journal.get(job["id"])["seq"])
     declared = {"path": source, "description": "Compiler output"} if described else source

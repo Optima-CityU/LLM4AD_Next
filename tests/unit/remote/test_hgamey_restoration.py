@@ -6,9 +6,13 @@ from types import SimpleNamespace
 import pytest
 
 from llm4ad.gateway.examples.hgamey.execution import recovery
-from llm4ad.gateway.examples.hgamey.execution.storage import write_json
 
 pytestmark = pytest.mark.unit
+
+
+def write_json(path, value):
+    """Write a synthetic receipt to the test directory."""
+    path.write_text(json.dumps(value), encoding="utf-8")
 
 
 @pytest.fixture

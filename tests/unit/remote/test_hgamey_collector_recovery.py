@@ -133,7 +133,7 @@ def mali(folder, *, complete=True):
         f"{tag}:identity_before\nuid=123\nboot_id={BOOT}\npid=77 uid=123 start=100\n"
         f"{tag}:cleanup\n" + "\n".join(f"{k}={v}" for k, v in receipt.items()) + f"\n{tag}:done\n"
     )
-    (directory / "mali-capture.txt").write_text(raw)
+    (directory / "mali-capture.txt").write_text(raw, encoding="utf-8", newline="\n")
     return directory
 
 
@@ -264,19 +264,21 @@ def test_mali_unknown_ownership_never_writes_or_kills(job, failure):
     if failure == "missing_raw":
         path.unlink()
     elif failure == "missing_done":
-        path.write_text(raw.replace("LLM4AD_MALI_" + TOKEN + ":done", ""))
+        path.write_text(raw.replace("LLM4AD_MALI_" + TOKEN + ":done", ""), encoding="utf-8", newline="\n")
     elif failure == "wrong_tag":
-        path.write_text(raw.replace(TOKEN, "b" * 32))
+        path.write_text(raw.replace(TOKEN, "b" * 32), encoding="utf-8", newline="\n")
     elif failure == "sampler":
-        path.write_text(raw.replace("sampler_stopped=1", "sampler_stopped=0"))
+        path.write_text(raw.replace("sampler_stopped=1", "sampler_stopped=0"), encoding="utf-8", newline="\n")
     elif failure == "sf":
-        path.write_text(raw.replace("sf_disabled=1", "sf_disabled=0"))
+        path.write_text(raw.replace("sf_disabled=1", "sf_disabled=0"), encoding="utf-8", newline="\n")
     elif failure == "instance":
-        path.write_text(raw.replace("instance=/sys/kernel/tracing/instances/", "instance=/wrong/"))
+        path.write_text(
+            raw.replace("instance=/sys/kernel/tracing/instances/", "instance=/wrong/"), encoding="utf-8", newline="\n"
+        )
     elif failure == "present":
         dev.mali_absent = False
     else:
-        path.write_text(raw.replace(BOOT, "wrong-boot"))
+        path.write_text(raw.replace(BOOT, "wrong-boot"), encoding="utf-8", newline="\n")
     with pytest.raises(RuntimeError, match="Mali|boot"):
         collectors.restore_collectors(folder, ENDPOINT)
     assert not any(
@@ -326,7 +328,12 @@ def test_collector_symlinks_are_rejected(job, tmp_path, part):
     target = directory if part == "directory" else directory / "perfetto-cleanup.json"
     destination = tmp_path / "outside"
     target.rename(destination)
-    target.symlink_to(destination, target_is_directory=part == "directory")
+    try:
+        target.symlink_to(destination, target_is_directory=part == "directory")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Creating symlinks requires Windows Developer Mode or symlink privileges")
+        raise
     with pytest.raises(RuntimeError, match="symlink"):
         collectors.restore_collectors(folder, ENDPOINT)
     assert not dev.commands

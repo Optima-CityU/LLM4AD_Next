@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import sys
 import time
 
 import pytest
@@ -117,17 +118,27 @@ def test_cancellation_drains_current_frame_and_prevents_later_dispatch(game, mon
     assert result["frames"][1]["not_computed"]
 
 
-def test_replay_shader_contract_is_frozen_and_bound_to_injected_sources(tmp_path):
-    """Reject changed input bytes before accepting an external GPU replay."""
+@pytest.fixture
+def replay_options(tmp_path):
+    """Build a replay contract from synthetic shader files."""
     replay = {"protocol": "same-input-gpu-replay@1"}
     for name in ("candidate_comp", "baseline_comp", "candidate_spv", "baseline_spv"):
         path = tmp_path / name
         path.write_bytes(name.encode())
         replay[name + "_path"] = str(path)
         replay[name + "_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-    options = game_ab.validate_options({"quality_replay": replay,
+    return {
+        "layer_path": str(tmp_path / "layer.so"),
+        "quality_replay": replay,
         "candidate_source_sha256": replay["candidate_comp_sha256"],
-        "baseline_source_sha256": replay["baseline_comp_sha256"]})
+        "baseline_source_sha256": replay["baseline_comp_sha256"],
+    }
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Freezing replay inputs requires POSIX file descriptors")
+def test_replay_shader_contract_is_frozen(tmp_path, replay_options):
+    """Verify all programs are copied into the job's replay input manifest."""
+    options = game_ab.validate_options(replay_options)
     frozen = {"submission": {"options": options}}
     folder = tmp_path / "job"
     folder.mkdir()
@@ -136,8 +147,11 @@ def test_replay_shader_contract_is_frozen_and_bound_to_injected_sources(tmp_path
     assert {path.name for path in (folder / "inputs/replay").iterdir()} == {
         "candidate.comp", "baseline.comp", "candidate.spv", "baseline.spv"}
     assert all((folder / item["path"]).read_bytes() for item in frozen["input_files"])
-    replay["candidate_comp_sha256"] = "0" * 64
+
+
+def test_replay_shader_contract_is_bound_to_injected_sources(replay_options):
+    """Reject a replay whose candidate program differs from the injected shader."""
+    game_ab.validate_options(replay_options)
+    replay_options["quality_replay"]["candidate_comp_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="injected game shaders"):
-        game_ab.validate_options({"quality_replay": replay,
-            "candidate_source_sha256": options["candidate_source_sha256"],
-            "baseline_source_sha256": options["baseline_source_sha256"]})
+        game_ab.validate_options(replay_options)

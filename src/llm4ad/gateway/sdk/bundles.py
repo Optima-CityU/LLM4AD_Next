@@ -81,16 +81,19 @@ def extract_candidate(payload: bytes, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         for entry in archive.infolist():
-            path = PurePosixPath(entry.filename)
+            # ZipInfo normalizes backslashes on Windows before exposing filename.
+            name = entry.orig_filename
+            path = PurePosixPath(name)
             if (
                 path.is_absolute()
                 or ".." in path.parts
-                or "\\" in entry.filename
-                or ":" in entry.filename
+                or "\\" in name
+                or ":" in name
+                or "\x00" in name
                 or stat.S_ISLNK(entry.external_attr >> 16)
             ):
                 raise ValueError("Unsafe candidate archive path")
-            target = (destination / entry.filename).resolve()
+            target = (destination / name).resolve()
             target.relative_to(destination.resolve())
             if entry.is_dir():
                 target.mkdir(parents=True, exist_ok=True)

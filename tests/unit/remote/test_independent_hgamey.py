@@ -1,15 +1,17 @@
 """Independent evaluator dispatch with synthetic native files and no device access."""
 
 import json
+import sys
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_hgamey_game_adapter import Reporter, connect
 from test_hgamey_game_adapter import local as hgamey_fixture
 
+from llm4ad.gateway.examples.hgamey import runtime as runtime_module
 from llm4ad.gateway.examples.hgamey.evaluators import HGameyGameEvaluator, HGameyStaticEvaluator
-from llm4ad.gateway.examples.hgamey.runtime import HGameyRuntime
 from llm4ad.gateway.sdk.lifecycle import run_operation
 
 pytestmark = pytest.mark.unit
@@ -77,7 +79,7 @@ async def test_game_dispatches_only_game_and_scores_game_observations(local, mon
     assert result.metadata["measurement_scope"] == "game_candidate_evaluation"
 
 
-def test_capabilities_have_separate_state_and_contracts(local, tmp_path):
+def test_capabilities_have_separate_state_and_contracts(local, tmp_path, monkeypatch):
     """One physical device advertises two independently selectable evaluator bindings."""
     local.adapter()
     game_config = tmp_path / "game.json"
@@ -89,7 +91,15 @@ def test_capabilities_have_separate_state_and_contracts(local, tmp_path):
         "HGAMEY_DEVICE_PROFILE": "fixture-driver", "HGAMEY_REFERENCE_PATH": str(local.filename.parent / "inputs/genshin"),
         "HGAMEY_GAME_CHECK_CONFIG": str(game_config), "HGAMEY_EVALUATOR_MODES": "static,game",
     }
-    runtime = HGameyRuntime(environment, "llm4ad.gateway.examples.hgamey.evaluator:HGameyShaderEvaluator")
+    if sys.platform == "win32":
+        # Binding registration can run without the Linux device backend.
+        monkeypatch.setattr(runtime_module, "os", SimpleNamespace(name="posix"))
+    runtime = runtime_module.HGameyRuntime(
+        environment, "llm4ad.gateway.examples.hgamey.evaluator:HGameyShaderEvaluator"
+    )
+    if sys.platform == "win32":
+        for profile in runtime.options["profiles"]:
+            profile["settings"]["executor_inputs_prefix"] = "/inputs"
     bindings = runtime.bindings()
     assert len(bindings) == 2
     assert {binding.metadata["evaluation_mode"] for binding in bindings} == {"static", "game"}
@@ -243,6 +253,7 @@ def serial_native_fixture(folder):
     return 0
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="The native executor queue requires POSIX file locks")
 async def test_static_and_game_share_one_serial_device_queue(local, tmp_path):
     """Concurrent capability submissions use one existing executor without device overlap."""
     import asyncio
