@@ -59,18 +59,20 @@ def project(tmp_path: Path) -> Path:
     return destination
 
 
-def run_pack(project: Path) -> tuple[subprocess.CompletedProcess, Path]:
+def run_pack(project: Path, *options: str) -> tuple[subprocess.CompletedProcess, Path]:
     """Run the delivered CLI against an isolated task.
 
     Args:
         project: Source task directory.
+        *options: Additional packaging command options.
 
     Returns:
         Completed validation command and requested archive path.
     """
     archive = project.parent / "delivery.zip"
     result = subprocess.run(
-        [sys.executable, str(SKILL / "scripts" / "validate_and_pack.py"), str(project), "--output", str(archive)],
+        [sys.executable, str(SKILL / "scripts" / "validate_and_pack.py"), str(project), "--output", str(archive), *options],
+        cwd=project.parent,
         capture_output=True,
         text=True,
         timeout=30,
@@ -101,6 +103,75 @@ def test_valid_package_contains_verified_snapshot_and_matching_report(project: P
         assert all(name.startswith("knapsack/") for name in package.namelist())
         assert not any(".env" in name or ".venv" in name or "/runs/" in name for name in package.namelist())
     assert not (project / "validation.json").exists()
+
+
+@pytest.mark.parametrize("capacity", [2, 0])
+def test_remote_package_passes_candidate_paths_and_parameters_to_real_worker(project: Path, capacity: int):
+    """Export only after a real offline evaluation of the archive's candidate succeeds."""
+    gateway = project.parent / "local gateway"
+    gateway.mkdir()
+    shutil.move(project / "data", gateway / "data")
+    (project / "knapsack_evaluator.py").unlink()
+    (project / "test_evaluator.py").unlink()
+    (project / "algorithm" / "command.txt").write_text("solver.py", encoding="utf-8")
+    (gateway / "evaluator.py").write_text(
+        '''import json
+import subprocess
+import sys
+from pathlib import Path
+
+from llm4ad.gateway.sdk import EvaluationContract, EvaluationResult, GatewayEvaluator, Metric, MetricType
+
+
+class Evaluator(GatewayEvaluator):
+    contract = EvaluationContract(
+        evaluator_id="knapsack-smoke", version="1", data_version="1",
+        metrics=[Metric(name="value", type=MetricType.MAXIMIZE)],
+    )
+
+    async def evaluate(self, job, reporter):
+        root = Path(job.project_root)
+        command = root / (root / "command.txt").read_text(encoding="utf-8")
+        value = job.parameters["capacity"]
+        if value <= 0:
+            raise ValueError("Smoke input needs positive capacity")
+        instance = {"capacity": value, "items": [{"value": 17, "weight": 2}]}
+        output = subprocess.check_output([sys.executable, str(command), json.dumps(instance)])
+        score = sum(instance["items"][index]["value"] for index in json.loads(output)["selected"])
+        return EvaluationResult(score=score, metrics={"value": score}, metadata={"local_only": str(__file__)})
+''',
+        encoding="utf-8",
+    )
+    config_path = project / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["evaluator"] = {
+        "type": "remote",
+        "gateway_id": None,
+        "timeout": 15,
+        "parameters": {"capacity": capacity},
+        "candidate_paths": ["*.py", "command.txt"],
+    }
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    result, archive = run_pack(project, "--gateway-evaluator", "local gateway/evaluator.py:Evaluator")
+    report_path = archive.with_suffix(".validation.json")
+    if not capacity:
+        assert result.returncode != 0
+        assert "Smoke input needs positive capacity" in result.stderr
+        assert not archive.exists() and not report_path.exists()
+        return
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["verification_scope"] == "offline_gateway_smoke_test"
+    assert report["samples"] == [{"path": ".", "score": 17, "metrics": {"value": 17}}]
+    assert report["gateway_evaluator"]["evaluator_id"] == "knapsack-smoke"
+    assert str(gateway) not in report_path.read_text(encoding="utf-8")
+    with zipfile.ZipFile(archive) as package:
+        assert yaml.safe_load(package.read("knapsack/config.yaml"))["evaluator"] == config["evaluator"]
+        assert set(package.namelist()) == {f"knapsack/{path}" for path in (*report["files_sha256"], "validation.json")}
+        assert not any("gateway" in name or "/data/" in name for name in package.namelist())
+        for relative, digest in report["files_sha256"].items():
+            assert hashlib.sha256(package.read(f"knapsack/{relative}")).hexdigest() == digest
 
 
 def test_web_verification_runs_without_creating_or_opening_a_zip(package_helper, project: Path, monkeypatch):

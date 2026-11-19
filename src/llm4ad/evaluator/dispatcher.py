@@ -372,7 +372,7 @@ class EvaluationDispatcher:
 
         evaluation_id = str(uuid.uuid4())
         root = self._records_dir / evaluation_id if self._records_dir else None
-        fingerprint = alg.code_fingerprint() if hasattr(alg, "code_fingerprint") else ""
+        fingerprint = (alg.code_fingerprint() or "") if hasattr(alg, "code_fingerprint") else ""
         cfg = EvalContext(
             **{
                 **options,

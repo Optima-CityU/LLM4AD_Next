@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
+from typing import Any
 
 from llm4ad.gateway.sdk.bundles import extract_candidate, pack_candidate
 from llm4ad.gateway.sdk.contracts import (
@@ -46,7 +47,15 @@ class _OfflineAdapter(GatewayEvaluator):
             await invoke(self.adapter.after_task(job, reporter, operation, result=result, error=error))
 
 
-def check_evaluator(spec: str, candidate: Path, state_dir: Path, timeout: float) -> dict:
+def check_evaluator(
+    spec: str,
+    candidate: Path,
+    state_dir: Path,
+    timeout: float,
+    *,
+    candidate_paths: list[str] | None = None,
+    parameters: dict[str, Any] | None = None,
+) -> dict:
     """Evaluate an isolated copy and retain local progress, diagnostics and files.
 
     Args:
@@ -54,20 +63,28 @@ def check_evaluator(spec: str, candidate: Path, state_dir: Path, timeout: float)
         candidate: Candidate source directory; it is never used as the workspace.
         state_dir: Owned check state, separate from a running gateway identity.
         timeout: Actual execution deadline in seconds.
+        candidate_paths: Optional worktree-relative globs used by remote dispatch.
+        parameters: Evaluator parameters to forward with the candidate.
 
     Returns:
         JSON-compatible check outcome and retained evidence directory.
     """
     spec = normalize_spec(spec)
     contract = EvaluationContract.model_validate(load_evaluator_class(spec).contract)
-    bundle = pack_candidate(str(candidate.expanduser().resolve()))
+    bundle = pack_candidate(str(candidate.expanduser().resolve()), candidate_paths)
     root = state_dir.expanduser().resolve()
     with gateway_lease(root):
         identity = str(uuid.uuid4())
-        work = root / "work" / identity
-        extract_candidate(bundle, work)
+        attempt_id = str(uuid.uuid4())
+        candidate_root = root / "candidates" / identity / attempt_id
+        extract_candidate(bundle, candidate_root)
         job = RemoteJob(
-            id=identity, attempt_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()), project_root=str(work), timeout=timeout
+            id=identity,
+            attempt_id=attempt_id,
+            task_id=str(uuid.uuid4()),
+            project_root=str(candidate_root),
+            timeout=timeout,
+            parameters=parameters or {},
         )
         adapter = _OfflineAdapter(spec, contract)
         gateway = Gateway(

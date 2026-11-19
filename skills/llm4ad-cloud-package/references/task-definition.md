@@ -15,7 +15,7 @@ Before creating the candidate, evaluator or dataset, establish:
 | Candidate boundary | Function/CLI input and output, language, permitted changes, and code/data that must stay fixed. |
 | Data | Real source, representative files and schema, scale, preprocessing, and any license/access requirement. |
 | Evaluation | Feasibility checks, objective and units, maximize/minimize direction, aggregation, and baseline/reference result. |
-| Runtime | Local and cloud OS/CPU, Python/compiler/solver/dependencies, available CPU/GPU, and realistic per-instance cost. |
+| Runtime | Platform container or user's gateway. For a standalone gateway package, confirm native or Docker startup, local resources and realistic evaluation cost. |
 | Search setup | Requested supported method, or a reasoned recommendation; model capacity, concurrency and run size. |
 | Acceptance | What the local check must actually demonstrate before the user imports the task. |
 
@@ -51,7 +51,7 @@ Record the resulting task/evaluation brief in the package README.
 
 ## Completion requires execution evidence
 
-Run syntax/build checks, the task's `test_evaluator.py`, and
+For a platform-container task, run syntax/build checks, the task's `test_evaluator.py`, and
 `scripts/validate_and_pack.py` on the final project. The helper evaluates every
 configured dataset entry using a copied candidate directory; it also rejects an
 empty candidate and verifies returned metrics. Read failures, fix their causes,
@@ -63,6 +63,12 @@ representative invalid outputs, and candidate dependence. A finite but constant
 score can pass generic shape checks, so use known better/worse solutions where
 the domain permits. Enforce and test timeouts for processes that can hang.
 Use the bundled test as an example, not as the test for an unrelated domain.
+
+For a standalone gateway task, run the packaged baseline using the real SDK
+worker in the intended native or Docker environment. Exercise actual candidate
+execution with available smoke inputs and the configured evaluator parameters.
+See [remote-evaluation.md](remote-evaluation.md) for offline verification and
+binding after import.
 
 If data, dependencies, compiler/solver access or the target environment prevents
 execution, report the specific missing evidence. Do not deliver an unverified ZIP

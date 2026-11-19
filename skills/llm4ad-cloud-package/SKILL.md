@@ -11,9 +11,21 @@ for direct directory verification and task setup. The standalone delivery workfl
 below does not apply in that runtime. The platform already provides execution,
 dependencies and task creation.
 
-For a **standalone local delivery request**, follow
-[references/local-delivery.md](references/local-delivery.md). Its delivery and
-import procedure applies only outside the web runtime.
+For a **standalone local delivery request**, resolve the evaluator location
+first. A ZIP import request works with both evaluator locations. Use the mode
+the user explicitly chose. When the request leaves it open, ask in the next
+reply and wait for the answer before setting up dependencies or creating files:
+
+> Where should evaluations run, in the platform's task container or on your
+> machine through a gateway? For a gateway, would you use native or Docker startup?
+
+When the user has already chosen a gateway, ask only about the startup mode if
+it is still open.
+
+Follow [references/local-delivery.md](references/local-delivery.md) for the ZIP
+workflow and [references/remote-evaluation.md](references/remote-evaluation.md)
+for gateway setup. Run the selected evaluator on the packaged baseline before
+delivering the ZIP.
 
 ## Read the relevant contracts
 
@@ -25,8 +37,8 @@ import procedure applies only outside the web runtime.
 - Read [references/platforms.md](references/platforms.md) for native Windows
   PowerShell, macOS and Linux commands, portable paths/dependencies, and how local
   validation differs from verification in the deployment's task container.
-- Before implementing an evaluator, read
-  [references/evaluator-contract.md](references/evaluator-contract.md).
+- For a platform task-container evaluator, read
+  [references/evaluator-contract.md](references/evaluator-contract.md) before implementation.
 - Before selecting or creating inputs, read
   [references/dataset-contract.md](references/dataset-contract.md) for data schemas,
   path discovery, provenance, scoring aggregation and real verification inputs.
