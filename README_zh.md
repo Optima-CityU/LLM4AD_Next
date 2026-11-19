@@ -43,6 +43,8 @@
 
 ## 🔥 最新动态
 
+- 🔬 [2026.11] **AutoResearch 自动科研**新增交互式 ARL 双代理流程，分别负责研究实现与验证，支持使用引导和恢复会话。[在线体验](https://llm4ad-next.cn/autoresearch)
+- 📝 [2026.11] **AutoProposal 与 AutoRebuttal**各自在一个会话中推进。作者可确认申报书后生成 Typst/PDF，也可对照原始评审意见逐段修改回复。[AutoProposal](https://llm4ad-next.cn/autoproposal) · [AutoRebuttal](https://llm4ad-next.cn/autorebuttal)
 - 🔬 [2026.09][自动科研]：**[LLM4AD_Next 接入 AutoResearchClaw](https://github.com/Optima-CityU/LLM4AD_Next/wiki/News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en)**，在 23 阶段科研流程的第 13 阶段、实验代码定稿前演化核心算法。候选版本沿用原评测程序验证，只有表现更好才替换原版；未改进时保留原代码。[在线体验](https://llm4ad-next.cn/autoresearch)时请选择 `llm4ad` 实验类型。
 - 🧮 [2026.09][新数据集]：新增 **[AlphaEvolve 数学基准套件](examples/applications/alphaevolve_math_benchmark/README.md)**，包含 11 个可独立运行的数学优化案例、案例级评估器、演化实现与可复用经验。
 - 🏝️ [2026.09][新搜索方法]：新增**多样岛屿遗传算法（Diverse Island GA）**，支持任意岛屿数量下连续分配利用、纠错与独立探索行为，并协同控制迁移和记忆使用。

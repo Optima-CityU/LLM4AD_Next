@@ -17,7 +17,7 @@ on:
         type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -36,20 +36,26 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       version_no_v: ${{ steps.version.outputs.version_no_v }}
+      source_sha: ${{ steps.version.outputs.source_sha }}
 
     steps:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Prepare release version
         id: version
         env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${GITHUB_REF}" != "refs/heads/${DEFAULT_BRANCH}" ]]; then
+              echo "Run manual releases from the default branch (${DEFAULT_BRANCH})." >&2
+              exit 1
+            fi
             version="${INPUT_VERSION}"
           else
             version="${GITHUB_REF_NAME}"
@@ -70,6 +76,7 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "version_no_v=${version#v}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Validate Python package version
         env:
@@ -147,7 +154,7 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          ref: ${{ needs.prepare.outputs.source_sha }}
           submodules: recursive
 
       - name: Validate Docker Hub configuration
@@ -287,7 +294,7 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          ref: ${{ needs.prepare.outputs.source_sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -317,19 +324,20 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.ref }}
+          ref: ${{ needs.prepare.outputs.source_sha }}
           fetch-depth: 0
 
       - name: Create GitHub release
         uses: actions/github-script@v7
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
           RELEASE_NOTES_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || '' }}
         with:
           script: |
             const {owner, repo} = context.repo;
             const version = process.env.RELEASE_VERSION;
-            const targetCommitish = context.sha;
+            const targetCommitish = process.env.RELEASE_SOURCE_SHA;
             const generated = await github.rest.repos.generateReleaseNotes({
               owner,
               repo,
