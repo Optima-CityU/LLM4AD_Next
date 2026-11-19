@@ -12,7 +12,7 @@ celery_app = Celery(
     "fastapi_celery",
     broker=settings.CELERY_BROKER,
     backend=settings.CELERY_BACKEND,
-    include=["app.tasks.evolution", "app.tasks.research_runner", "app.tasks.knowledge_parser"],
+    include=["app.tasks.evolution", "app.tasks.research_runner", "app.tasks.knowledge_parser", "app.tasks.evaluation_data"],
 )
 
 # Celery 运行时配置
@@ -31,6 +31,7 @@ celery_app.conf.update(
 
 # 队列路由：把不同类型任务拆到独立队列，配合多 worker 实现槽位硬隔离。
 celery_app.conf.task_routes = {
+    "app.tasks.evolution.run_remote_evolution": {"queue": "remote_evaluation"},
     "app.tasks.evolution.*": {"queue": "evolution"},
     "research.run_turn": {"queue": "research"},
     "research.run_collab_turn": {"queue": "research"},

@@ -19,6 +19,10 @@ import {
   type PaperWorkspaceDetail,
   type PaperWorkspaceUpdate,
 } from "@/client"
+import {
+  type PaperSourceUpload,
+  paperSourceUploadFormData,
+} from "@/lib/paperSourceUpload"
 
 export const paperWorkspaceKeys = {
   all: ["paper-workspaces"] as const,
@@ -55,6 +59,7 @@ export function usePaperRuntimeSession(
   workflowStage: PaperRuntimeSessionCreate["workflow_stage"],
   enabled: boolean,
   profileKey: string,
+  autoWorkflow = false,
 ) {
   const browserLanguage =
     typeof navigator === "undefined"
@@ -67,11 +72,15 @@ export function usePaperRuntimeSession(
       workspaceId,
       workflowStage,
       runtimeProfileKey,
+      autoWorkflow,
     ],
     queryFn: async () => ({
       ...(await Llm4AdPapersService.createRuntimeSession({
         workspaceId,
-        requestBody: { workflow_stage: workflowStage },
+        requestBody: {
+          workflow_stage: workflowStage,
+          auto_workflow: autoWorkflow,
+        },
       })),
       runtimeProfileKey,
     }),
@@ -171,23 +180,11 @@ export function useDeletePaperWorkspace() {
 export function useUploadPaperSource(workspaceId: string | null) {
   const refresh = useRefreshPapers(workspaceId)
   return useMutation({
-    mutationFn: (items: Array<File | { file: File; relativePath: string }>) => {
-      const uploads = items.map((item) =>
-        item instanceof File
-          ? {
-              file: item,
-              relativePath: item.webkitRelativePath || item.name,
-            }
-          : item,
-      )
-      return Llm4AdPapersService.uploadSource({
+    mutationFn: (selection: PaperSourceUpload) =>
+      Llm4AdPapersService.uploadSource({
         workspaceId: workspaceId!,
-        formData: {
-          files: uploads.map((item) => item.file),
-          relative_paths: uploads.map((item) => item.relativePath),
-        },
-      })
-    },
+        formData: paperSourceUploadFormData(selection),
+      }),
     onSuccess: refresh,
   })
 }

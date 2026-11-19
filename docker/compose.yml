@@ -11,6 +11,19 @@ x-shared-env: &shared-env
   REDIS_HOST: ${REDIS_HOST:-redis}
   REDIS_PORT: ${REDIS_PORT:-6379}
   REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+  # Research search settings are passed into workspace MCP profiles by the API.
+  PAPER_SEARCH_ENABLED: ${PAPER_SEARCH_ENABLED:-true}
+  PAPER_SEARCH_SEARXNG_URL: ${PAPER_SEARCH_SEARXNG_URL:-http://searxng:8080}
+  PAPER_SEARCH_ENGINES: ${PAPER_SEARCH_ENGINES:-bing,baidu,sogou,360search}
+  PAPER_SEARCH_DEFAULT_ENGINES: ${PAPER_SEARCH_DEFAULT_ENGINES:-bing}
+  PAPER_SEARCH_MAX_CONCURRENCY: ${PAPER_SEARCH_MAX_CONCURRENCY:-2}
+  PAPER_SEARCH_MIN_INTERVAL_SECONDS: ${PAPER_SEARCH_MIN_INTERVAL_SECONDS:-1}
+  PAPER_SEARCH_WAIT_TIMEOUT_SECONDS: ${PAPER_SEARCH_WAIT_TIMEOUT_SECONDS:-10}
+  PAPER_SEARCH_REQUEST_TIMEOUT_SECONDS: ${PAPER_SEARCH_REQUEST_TIMEOUT_SECONDS:-20}
+  PAPER_SEARCH_MAX_RETRIES: ${PAPER_SEARCH_MAX_RETRIES:-1}
+  PAPER_SEARCH_MAX_RESULTS: ${PAPER_SEARCH_MAX_RESULTS:-10}
+  PAPER_SEARCH_READ_MAX_BYTES: ${PAPER_SEARCH_READ_MAX_BYTES:-524288}
+  PAPER_SEARCH_READ_MAX_CHARS: ${PAPER_SEARCH_READ_MAX_CHARS:-16000}
   # rustfs
   RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?RUSTFS_ACCESS_KEY must be set in .env}
   RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?RUSTFS_SECRET_KEY must be set in .env}
@@ -34,6 +47,9 @@ x-backend-common: &backend-common
       DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
       UV_INDEX_URL: ${UV_INDEX_URL:-}
       GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-}
+      APT_MIRROR: ${APT_MIRROR:-}
+      PANDOC_VERSION: ${PANDOC_VERSION:-3.10.2}
+      PANDOC_SHA256: ${PANDOC_SHA256:-}
   env_file:
     - .env
   environment:
@@ -73,6 +89,27 @@ services:
     command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - ./app-data/redis/data:/data
+
+  # Internal only: workspace MCP processes access this service on the default network.
+  searxng:
+    image: "${SEARXNG_IMAGE:-searxng/searxng:latest}"
+    restart: unless-stopped
+    entrypoint:
+      - /usr/local/searxng/.venv/bin/python
+      - /opt/llm4ad/searxng_config.py
+    environment:
+      SEARXNG_ENGINES: ${PAPER_SEARCH_ENGINES:-bing,baidu,sogou,360search}
+      GRANIAN_HOST: "0.0.0.0"
+      GRANIAN_PORT: "8080"
+    volumes:
+      - ./paper-agent/searxng_config.py:/opt/llm4ad/searxng_config.py:ro
+    healthcheck:
+      # This checks local serving, not reachability of upstream engines.
+      test: ["CMD", "/usr/local/searxng/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   rustfs-permission-init:
     image: "${DOCKERHUB_REGISTRY:-}rustfs/rustfs:latest"
@@ -194,6 +231,18 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
 
+  remote-evaluation-worker:
+    <<: *backend-common
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    # Remote tasks may wait for disconnected gateways without a wall-clock limit.
+    command: celery -A app.core.celery worker -Q remote_evaluation -n remote-eval@%h --loglevel=info --concurrency=${REMOTE_EVALUATION_CONCURRENCY:-10} --time-limit=0 --soft-time-limit=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOST_PROJECT_HOME}:${DOCKER_PROJECT_HOME}
+
   research-worker:
     <<: *backend-common
     restart: always
@@ -227,6 +276,8 @@ services:
         APT_MIRROR: ${APT_MIRROR:-}
         UV_INDEX_URL: ${UV_INDEX_URL:-}
         GITHUB_PROXY_URL: ${GITHUB_PROXY_URL:-}
+        PANDOC_VERSION: ${PANDOC_VERSION:-3.10.2}
+        PANDOC_SHA256: ${PANDOC_SHA256:-}
         CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://github.com/SaladDay/cc-switch-cli/releases/download}
         OPENCODE_RELEASE_BASE: ${OPENCODE_RELEASE_BASE:-https://github.com/anomalyco/opencode/releases/download}
     restart: "no"
@@ -242,6 +293,8 @@ services:
       network: host
       args:
         DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+        APT_MIRROR: ${APT_MIRROR:-}
+        CC_SWITCH_RELEASE_BASE: ${CC_SWITCH_RELEASE_BASE:-https://github.com/SaladDay/cc-switch-cli/releases/download}
     restart: "no"
     entrypoint: ["true"]
 
@@ -254,6 +307,7 @@ services:
       network: host
       args:
         DOCKERHUB_REGISTRY: ${DOCKERHUB_REGISTRY:-}
+        APT_MIRROR: ${APT_MIRROR:-}
     restart: "no"
     entrypoint: ["true"]
 

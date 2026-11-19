@@ -266,6 +266,7 @@ class LLM4AD:
             behavior_storage=self.config.multimodal.behavior_storage,
             config_dir=self._config_dir,
             provider_config=eval_provider_config,
+            records_dir=self.get_run_directory() / "evaluations",
         )
 
         # Initialize version control if enabled

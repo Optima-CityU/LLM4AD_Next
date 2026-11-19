@@ -60,7 +60,7 @@ function errorMessage(error: unknown, fallback: string) {
   return candidate.body?.detail || candidate.message || fallback
 }
 
-function buildPaperFileTree(paths: string[]): FileTreeNode[] {
+export function buildPaperFileTree(paths: string[]): FileTreeNode[] {
   const root: FileTreeNode[] = []
   for (const sourcePath of paths) {
     const parts = sourcePath.split("/").filter(Boolean)

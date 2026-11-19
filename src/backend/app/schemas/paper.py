@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PaperSourceKind = Literal["markdown", "latex_zip", "source_bundle"]
 PaperRunKind = Literal[
+    "research_workflow",
     "autodesign",
     "proposal_formatting",
     "proposal_literature",
@@ -150,7 +151,7 @@ class RebuttalEntry(BaseModel):
     label: Literal["W", "Q", "M"]
     title: str = Field(min_length=1, max_length=500)
     response: str = Field(min_length=1, max_length=100_000)
-    concern_ids: list[str] = Field(min_length=1, max_length=100)
+    concern_ids: list[str] = Field(max_length=100)
     evidence_status: Literal["source_grounded", "verified", "placeholder", "needs_author"]
     source_refs: list[str] = Field(default_factory=list, max_length=200)
 
@@ -655,10 +656,21 @@ class PaperRevisionApplyResponse(BaseModel):
     source_version: PaperSourceVersionResponse
 
 
+class PaperProposalChapter(BaseModel):
+    """Display one author-owned chapter without imposing workflow prerequisites."""
+
+    id: str
+    title: str
+    path: str
+    status: str | None = None
+    has_content: bool = False
+
+
 class PaperWorkspaceDetail(PaperWorkspaceSummary):
     """Paper workspace with source, review, metric, and proposal summaries."""
 
     source_versions: list[PaperSourceVersionResponse] = Field(default_factory=list)
+    proposal_chapters: list[PaperProposalChapter] = Field(default_factory=list)
     reviews: list[PaperReviewResponse] = Field(default_factory=list)
     boundary: PaperBoundaryResponse | None = None
     targets: list[PaperOptimizationTargetResponse] = Field(default_factory=list)
@@ -676,6 +688,7 @@ class PaperRuntimeSessionResponse(BaseModel):
 
     runtime_url: str
     session_id: str
+    run_id: uuid.UUID | None = None
 
 
 class PaperStageArtifactResponse(BaseModel):
@@ -730,9 +743,10 @@ class PaperLinkedTaskChangeResponse(BaseModel):
 
 
 class PaperRuntimeSessionCreate(BaseModel):
-    """Select the backend-owned stage profile for a native session."""
+    """Select a native stage or the automatic research coordinator."""
 
     workflow_stage: ResearchWorkflowStage
+    auto_workflow: bool = False
 
 
 class PaperStageInvalidateRequest(BaseModel):

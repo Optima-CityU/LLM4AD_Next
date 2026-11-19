@@ -1,0 +1,22 @@
+
+-------------------------------[ability]-------------------------------
+
+
+----------------------------------RenderService----------------------------------
+
+
+-- RenderServiceHWCThread
+
+-- LayerInfo
+
+ surface [RosenWeb] NodeId[78782585110699] LayerId[2]:
+ zOrder = 0, visibleNum = 1, transformType = 0 <no rotation>, compositionType = 1 <device composition>, blendType = 3 <SRC_OVER blending>, layerAlpha = [enGlobalAlpha(1), enPixelAlpha(0), alpha0(0), alpha1(0), gAlpha(255)].
+ layerRect = [54, 335, 1092, 1585], cropRect = [0, 0, 1092, 1585],visibleRegions[0] = [54, 335, 1092, 1585], dirtyRegions[0] = [0, 0, 0, 0], layerColor = [R:0, G:0, B:0, A:0],
+BufferQueue:
+      default-size = [1092x1585], FIFO = 5, name = RosenWeb, uniqueId = 3642132267038, usedBufferListLen = 5, freeBufferListLen = 4, dirtyBufferListLen = 0, totalBuffersMemSize = 23511.75(KiB), hdrWhitePointBrightness = 0.000000, sdrWhitePointBrightness = 0.000000, lockLastFlushedBuffer seq = 4294967295
+      bufferQueueCache:
+        sequence = 55575098, bufferId = 238690780250636858, state = 0, listenerClientPid = 0, timestamp = 0, damagesRect = [0] = [0, 0, 1092, 1585], config = [1092x1585, 8, 12, 18014398509483528, 3000, 4, 0],0,  [staticMetadata:  ],[dynamicMetadata:  ],[metadataType: 0], scalingMode = 1, HDR = 0,  bufferWith = 1092, bufferHeight = 1585, bufferMemSize = 6839.62(KiB).
+        sequence = 55575099, bufferId = 238690780250636859, state = 3, listenerClientPid = 0, timestamp = 0, damagesRect = [0] = [0, 0, 1092, 1585], config = [1092x1585, 8, 12, 18014398509483528, 3000, 4, 0],0,  [staticMetadata:  ],[dynamicMetadata:  ],[metadataType: 0], scalingMode = 1, HDR = 0,  bufferWith = 1092, bufferHeight = 1585, bufferMemSize = 6839.62(KiB).
+        sequence = 55575106, bufferId = 238690780250636866, state = 0, listenerClientPid = 0, timestamp = 0, damagesRect = [0] = [0, 0, 1092, 760], config = [1092x760, 8, 12, 18014398509483528, 3000, 4, 0],0,  [staticMetadata:  ],[dynamicMetadata:  ],[metadataType: 0], scalingMode = 1, HDR = 0,  bufferWith = 1092, bufferHeight = 760, bufferMemSize = 3277.50(KiB).
+        sequence = 55575107, bufferId = 238690780250636867, state = 0, listenerClientPid = 0, timestamp = 0, damagesRect = [0] = [0, 0, 1092, 760], config = [1092x760, 8, 12, 18014398509483528, 3000, 4, 0],0,  [staticMetadata:  ],[dynamicMetadata:  ],[metadataType: 0], scalingMode = 1, HDR = 0,  bufferWith = 1092, bufferHeight = 760, bufferMemSize = 3277.50(KiB).
+        sequence = 55575108, bufferId = 238690780250636868, state = 0, listenerClientPid = 0, timestamp = 0, damagesRect = [0] = [0, 

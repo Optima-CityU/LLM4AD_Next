@@ -92,7 +92,7 @@ export default function InitializedView({ task }: InitializedViewProps) {
   }, [activeTab, ideState, loadCodeToken, task.id])
 
   useEffect(() => {
-    if (activeTab === "memory") {
+    if (["remote-evaluation", "evaluations", "memory"].includes(activeTab)) {
       setActiveTab("overview")
     }
   }, [activeTab, setActiveTab])
@@ -132,15 +132,18 @@ export default function InitializedView({ task }: InitializedViewProps) {
       const a = document.createElement("a")
       a.href = url
       a.download =
-        filenameFromContentDisposition(response.headers.get("Content-Disposition")) ??
-        "LLM4AD-workspace.zip"
+        filenameFromContentDisposition(
+          response.headers.get("Content-Disposition"),
+        ) ?? "LLM4AD-workspace.zip"
       document.body.appendChild(a)
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : t("evolution.ideDownload.failed"),
+        error instanceof Error
+          ? error.message
+          : t("evolution.ideDownload.failed"),
       )
     } finally {
       setIsDownloadingWorkspace(false)

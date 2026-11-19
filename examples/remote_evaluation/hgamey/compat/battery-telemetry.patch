@@ -1,0 +1,79 @@
+--- a/vendor/hgamey/phonefarm/src/hwcond.rs
++++ b/vendor/hgamey/phonefarm/src/hwcond.rs
+@@ -879,17 +879,19 @@
+     )
+ }
+
+-/// 解析 `BAT <status> <current_ua|NA> <capacity|NA>`。
++/// Parse a battery record while preserving statuses containing whitespace.
+ pub fn parse_battery_state(text: &str) -> Option<BatteryState> {
+     text.lines().find_map(|l| {
+         let c: Vec<&str> = l.split_whitespace().collect();
+-        if c.first().copied() != Some("BAT") || c.len() < 2 {
++        if c.first().copied() != Some("BAT") || c.len() < 4 {
+             return None;
+         }
++        // The command always emits two trailing numeric fields or NA placeholders.
++        let numeric = c.len() - 2;
+         Some(BatteryState {
+-            status: c[1].to_string(),
+-            current_ua: c.get(2).and_then(|v| v.parse().ok()),
+-            capacity_pct: c.get(3).and_then(|v| v.parse().ok()),
++            status: c[1..numeric].join(" "),
++            current_ua: c[numeric].parse().ok(),
++            capacity_pct: c[numeric + 1].parse().ok().filter(|value| (0..=100).contains(value)),
+         })
+     })
+ }
+@@ -1727,6 +1729,51 @@
+         assert_eq!((s.current_ua, s.capacity_pct), (None, None));
+         assert!(!s.on_battery(), "电流读不到就判不出放电态");
+         assert_eq!(parse_battery_state("没有这一行"), None);
++    }
++
++    #[test]
++    fn battery_state_preserves_multiword_status_and_numeric_columns() {
++        for (raw, current, capacity) in [
++            ("BAT Not charging 16 48", Some(16), Some(48)),
++            ("BAT Not charging -120000 48", Some(-120000), Some(48)),
++            ("BAT Not charging NA 48", None, Some(48)),
++            ("BAT Not charging 173 NA", Some(173), None),
++            ("noise\n  BAT\tNot\tcharging\t-16\t48\r\n", Some(-16), Some(48)),
++        ] {
++            let state = parse_battery_state(raw).expect("complete battery sample");
++            assert_eq!(state.status, "Not charging", "{raw}");
++            assert_eq!(state.current_ua, current, "{raw}");
++            assert_eq!(state.capacity_pct, capacity, "{raw}");
++        }
++    }
++
++    #[test]
++    fn battery_state_rejects_truncation_and_keeps_unavailable_values_unknown() {
++        for raw in ["BAT", "BAT Charging", "BAT Charging -100", "BATTERY Charging -100 48"] {
++            assert_eq!(parse_battery_state(raw), None, "{raw}");
++        }
++        for raw in ["BAT Not charging NA NA", "BAT Full invalid invalid"] {
++            let state = parse_battery_state(raw).unwrap();
++            assert_eq!(state.current_ua, None);
++            assert_eq!(state.capacity_pct, None);
++        }
++        for raw in ["BAT Not charging 16 173", "BAT Discharging -100 -1"] {
++            assert_eq!(parse_battery_state(raw).unwrap().capacity_pct, None, "{raw}");
++        }
++    }
++
++    #[test]
++    fn battery_state_parsed_supply_requires_both_status_and_current() {
++        for (raw, on_battery) in [
++            ("BAT Not charging -120000 48", true),
++            ("BAT Not charging 16 48", false),
++            ("BAT Not charging 0 48", false),
++            ("BAT Not charging NA 48", false),
++            ("BAT Charging -120000 48", false),
++            ("BAT Unknown -120000 48", false),
++        ] {
++            assert_eq!(parse_battery_state(raw).unwrap().on_battery(), on_battery, "{raw}");
++        }
+     }
+
+     #[test]

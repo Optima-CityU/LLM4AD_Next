@@ -53,8 +53,11 @@ interface StripEntry {
   /** Extra line for the tooltip and the sheet header. */
   subtitle: string | null
   status: ARLSubagentStatus
-  /** Peer not loaded in the daemon (`closed`): viewing it would resume it. */
-  unavailable: boolean
+  /**
+   * Peer not loaded in the daemon (`closed`, e.g. after a container restart).
+   * Still openable: the backend resumes it on demand, which takes a moment.
+   */
+  closed: boolean
   createdAt: string
   updatedAt: string
 }
@@ -88,7 +91,7 @@ function subagentEntry(subagent: ARLSubagent, fallback: string): StripEntry {
     label: subagent.description ?? subagent.title ?? fallback,
     subtitle: subagent.subtitle,
     status: subagent.status,
-    unavailable: false,
+    closed: false,
     createdAt: subagent.createdAt,
     updatedAt: subagent.updatedAt,
   }
@@ -102,7 +105,7 @@ function peerEntry(peer: ARLPeerAgent, fallback: string): StripEntry {
     label: peer.title ?? peer.submission ?? fallback,
     subtitle: [peer.peerRole, peer.submission].filter(Boolean).join(" · "),
     status: peerDisplayStatus(peer),
-    unavailable: peer.status === "closed",
+    closed: peer.status === "closed",
     createdAt: peer.createdAt,
     updatedAt: peer.updatedAt,
   }
@@ -117,8 +120,9 @@ function peerEntry(peer: ARLPeerAgent, fallback: string): StripEntry {
  *
  * Peers are top-level agents the validation flow spawned (`paseo run`), not
  * children of the main agent; a small badge tells them apart. A `closed` peer
- * is greyed out and cannot be opened, because fetching its timeline would
- * make the daemon resume its provider process.
+ * (not loaded after a container restart) is dimmed but still opens: the
+ * backend resumes it only then, since reading its timeline requires the
+ * daemon to bring its provider process back.
  *
  * Renders nothing while there is neither.
  */
@@ -151,7 +155,7 @@ export default function ARLSubagentStrip({
   })
   const visible = expanded ? ordered : ordered.slice(0, MAX_VISIBLE_CHIPS)
   const hidden = ordered.length - visible.length
-  const open = entries.find((e) => e.key === openKey && !e.unavailable) ?? null
+  const open = entries.find((e) => e.key === openKey) ?? null
 
   return (
     <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
@@ -165,7 +169,7 @@ export default function ARLSubagentStrip({
           : t("autoResearch.arl.subagentsTotal", { total: entries.length })}
       </span>
       {visible.map((entry) => {
-        const tooltip = entry.unavailable
+        const tooltip = entry.closed
           ? `${entry.label}\n${t("autoResearch.arl.peerClosed")}`
           : entry.subtitle
             ? `${entry.label}\n${entry.subtitle}`
@@ -175,13 +179,14 @@ export default function ARLSubagentStrip({
             key={entry.key}
             type="button"
             onClick={() => setOpenKey(entry.key)}
-            disabled={entry.unavailable}
             title={tooltip}
             className={cn(
-              "inline-flex h-6 max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border px-2 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              "inline-flex h-6 max-w-[14rem] min-w-0 items-center gap-1.5 rounded-full border px-2 text-[11.5px] transition-colors",
               entry.status === "running"
                 ? "border-(--arl-accent)/35 bg-(--arl-accent)/8 text-foreground hover:border-(--arl-accent)/60"
-                : "border-border/60 bg-background/60 text-muted-foreground enabled:hover:text-foreground",
+                : "border-border/60 bg-background/60 text-muted-foreground hover:text-foreground",
+              // Not loaded: dimmed and dashed, but still clickable
+              entry.closed && "border-dashed opacity-70 hover:opacity-100",
             )}
           >
             <SubagentStatusIcon status={entry.status} />
@@ -248,14 +253,21 @@ function SubagentTranscript({
     setError(null)
     onFetchTimeline(role, entry.id).then(
       (rows) => alive && setItems(rows),
-      (err: Error) => {
-        if (alive && err.message !== "Superseded") setError(err.message)
+      (err: Error & { code?: string }) => {
+        if (!alive || err.message === "Superseded") return
+        setError(
+          err.code
+            ? t(`autoResearch.arl.peerLoadError.${err.code}`, {
+                defaultValue: err.message,
+              })
+            : err.message,
+        )
       },
     )
     return () => {
       alive = false
     }
-  }, [role, entry.id, entry.status, entry.updatedAt, onFetchTimeline])
+  }, [role, entry.id, entry.status, entry.updatedAt, onFetchTimeline, t])
 
   return (
     <>
@@ -266,7 +278,9 @@ function SubagentTranscript({
         </SheetTitle>
         <SheetDescription className="truncate text-[11.5px]">
           {[
-            t(`autoResearch.arl.subagentStatus.${entry.status}`),
+            entry.closed
+              ? t("autoResearch.arl.peerClosedStatus")
+              : t(`autoResearch.arl.subagentStatus.${entry.status}`),
             entry.kind === "peer" ? t("autoResearch.arl.peerBadge") : null,
             entry.subtitle,
           ]
@@ -282,7 +296,9 @@ function SubagentTranscript({
         ) : items === null ? (
           <p className="flex items-center justify-center gap-2 py-6 text-[12px] text-muted-foreground">
             <Loader2 className="size-3.5 animate-spin" />
-            {t("autoResearch.arl.loadingHistory")}
+            {entry.closed
+              ? t("autoResearch.arl.peerResuming")
+              : t("autoResearch.arl.loadingHistory")}
           </p>
         ) : items.length === 0 ? (
           <p className="py-6 text-center text-[12px] text-muted-foreground">

@@ -1,0 +1,12 @@
+**/.env
+**/.git
+**/adbkey*
+**/adb-state
+**/__pycache__
+**/target
+**/out
+**/toolchain
+**/artifacts
+**/data
+**/inputs
+**/phonefarm-state

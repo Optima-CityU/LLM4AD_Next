@@ -1,0 +1,43 @@
+{
+  "snapshot_created_at": 1793931181.9621482,
+  "files": [
+    {
+      "path": "executor.py",
+      "sha256": "db36c1ccd673cd7fc62c64aac7f5a39a72a4f588d21bd65b4bc833956919b05b",
+      "bytes": 22444
+    },
+    {
+      "path": "tests/test_executor.py",
+      "sha256": "c8ea3ba419d0a832e1abe839de90e33535c3599673909587c3dd6384c909aa14",
+      "bytes": 6582
+    },
+    {
+      "path": "README.md",
+      "sha256": "bd984b725f58c6dd04adc3b7586b09245c422e7f1d21a9b90db3b165c46728f0",
+      "bytes": 19375
+    }
+  ],
+  "new_files": [
+    "tests/test_executor_compat.py"
+  ],
+  "external_repository_name": "hgamey-evaluator",
+  "patched_files": [
+    {
+      "path": "executor.py",
+      "sha256": "80463542be841d2f2984bbc7bedd3945e2964ee1c65725927421c40f597e83bc"
+    },
+    {
+      "path": "README.md",
+      "sha256": "9e482e0b74f900e75ff4382ea25f0d0ea4a4c7a9790c17f6bbbd5f30e141cbc0"
+    },
+    {
+      "path": "tests/test_executor_compat.py",
+      "sha256": "11e68c95b564d0dbfd5841ca3f58f471e4923889e7c59ae61949d6cf46eb93ae"
+    }
+  ],
+  "patch": {
+    "path": "executor-compat.patch",
+    "sha256": "8621b3f9f575d50540359b8b65cb9651ba71917bbb54e4f68872b21937d9442f",
+    "comparison": "exact original byte snapshots, not repository HEAD"
+  }
+}

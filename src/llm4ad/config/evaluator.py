@@ -6,7 +6,7 @@ including custom (external module) and executable (built-in) evaluators.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from llm4ad.config.ui import ui
 
@@ -110,12 +110,12 @@ class EvaluatorConfig(BaseModel):
     the correct concrete config subclass based on the ``type`` field.
     """
 
-    type: Literal["executable", "custom", "solver"] = Field(
+    type: Literal["executable", "custom", "solver", "remote"] = Field(
         default="custom", description="Evaluator type",
         json_schema_extra=ui(
             label_zh="评估器类型", label_en="Evaluator Type",
-            desc_zh="评估器类型：custom、executable 或 solver",
-            desc_en="Evaluator type: custom, executable, or solver-backed",
+            desc_zh="评估器类型：custom、executable、solver 或远程评估器",
+            desc_en="Evaluator type: custom, executable, solver-backed, or remote",
         ),
     )
     dataset: DatasetConfig = Field(
@@ -334,6 +334,13 @@ class ExecutableEvaluatorConfig(EvaluatorConfig):
 class EvalContext(BaseModel):
     """Runtime context passed to an evaluator for a single evaluation."""
 
+    artifact_dir: str = Field(default="", description="Directory for explicitly declared evaluation files")
+    evaluation_id: str = ""
+    algorithm_id: str = ""
+    algorithm_name: str = ""
+    source_fingerprint: str = ""
+    execution_id: str = ""
+    instance_id: str = ""
     data_path: str = Field(default="", description="Data path")
     project_root: str = Field(description="Project root path, e.g. worktree path")
     timeout: float = Field(
@@ -349,3 +356,35 @@ class EvalContext(BaseModel):
         default="standard",
         description="Evaluation fidelity requested by the orchestrator.",
     )
+
+
+class RemoteEvaluatorConfig(EvaluatorConfig):
+    """Send evaluations to one registered gateway evaluator."""
+    type: Literal["remote"] = "remote"
+    gateway_id: str | None = Field(
+        default=None, json_schema_extra=ui(label_zh="评估网关", label_en="Evaluation gateway")
+    )
+    contract: dict = Field(default_factory=dict)
+    parameters: dict = Field(default_factory=dict, json_schema_extra=ui(label_zh="评估器参数", label_en="Evaluator parameters"))
+    candidate_paths: list[str] = Field(default_factory=list, json_schema_extra=ui(
+        label_zh="候选文件范围", label_en="Candidate file patterns",
+        desc_zh="可选的相对 glob；留空时传输识别到的源代码和构建清单。数据集保留在网关本地。",
+        desc_en="Optional relative globs. Empty uses recognized sources and build manifests. Datasets remain on the gateway.",
+    ))
+    model_config = ConfigDict(json_schema_extra=ui(label_zh="远程评估器", label_en="Remote evaluator"))
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_target(cls, value):
+        """Read a legacy configuration that unambiguously selected one gateway."""
+        if not isinstance(value, dict):
+            return value
+        target = value.get("gateway_id")
+        previous = value.get("gateway_ids") or []
+        if value.get("selection_mode", "selected") != "selected" or (
+            previous and (not isinstance(previous, list) or len(previous) != 1 or target and previous[0] != target)
+        ):
+            return {**value, "gateway_id": None}
+        if not target and previous:
+            return {**value, "gateway_id": previous[0]}
+        return value

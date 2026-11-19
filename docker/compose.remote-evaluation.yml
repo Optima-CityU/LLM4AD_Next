@@ -1,0 +1,7 @@
+# Production override: set LLM4AD_COMPOSE_BASE=compose-cloud.yml when using that base.
+services:
+  remote-evaluation-worker:
+    extends:
+      file: ${LLM4AD_COMPOSE_BASE:-compose.yml}
+      service: worker
+    command: celery -A app.core.celery worker -Q remote_evaluation -n remote-eval@%h --loglevel=info --concurrency=${REMOTE_EVALUATION_CONCURRENCY:-10} --time-limit=0 --soft-time-limit=0

@@ -1,0 +1,15 @@
+[
+  { "action": "gamepad_press", "button": "a", "duration_ms": 150 },
+  { "action": "sleep", "ms": 500 },
+  { "action": "gamepad_wander", "duration_ms": 5000 },
+  { "action": "gamepad_press", "button": "x", "duration_ms": 120 },
+  { "action": "sleep", "ms": 400 },
+  { "action": "gamepad_press", "button": "b", "duration_ms": 120 },
+  { "action": "sleep", "ms": 400 },
+  { "action": "gamepad_stick", "stick": "left", "val_x": 0.0, "val_y": -1.0, "duration_ms": 2000 },
+  { "action": "gamepad_stick", "stick": "right", "val_x": 0.8, "val_y": 0.0, "duration_ms": 1500 },
+  { "action": "gamepad_trigger", "trigger": "rt", "val_x": 1.0, "duration_ms": 200 },
+  { "action": "sleep", "ms": 500 },
+  { "action": "gamepad_wander", "duration_ms": 6000 },
+  { "action": "gamepad_reset" }
+]

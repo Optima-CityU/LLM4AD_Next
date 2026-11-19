@@ -357,14 +357,10 @@ export function mergeSchemaDefaults(
     typeof current === "object" &&
     !Array.isArray(current)
   ) {
-    const currentObject = current as Record<string, unknown>
-    const merged: Record<string, unknown> = { ...currentObject }
+    const source = current as Record<string, unknown>
+    const merged: Record<string, unknown> = { ...source }
     for (const [key, propertySchema] of Object.entries(resolved.properties)) {
-      const value = mergeSchemaDefaults(
-        propertySchema,
-        root,
-        currentObject[key],
-      )
+      const value = mergeSchemaDefaults(propertySchema, root, source[key])
       if (value !== undefined) merged[key] = value
     }
     return merged

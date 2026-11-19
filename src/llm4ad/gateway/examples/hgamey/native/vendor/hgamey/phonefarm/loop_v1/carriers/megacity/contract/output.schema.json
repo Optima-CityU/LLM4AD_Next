@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "megacity carrier output json (megacity_out.json)",
+  "description": "只记事实, 不记时序统计。帧时、离散度、归因全部由 loop_v1 从 raw ftrace 算, 载体侧不许有任何测量或判定逻辑 —— 与 refbench 同一条边界。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "carrier",
+    "app_version",
+    "run_id",
+    "scene",
+    "params",
+    "route",
+    "graphics",
+    "streaming",
+    "frames_rendered",
+    "clean_exit"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "carrier": {
+      "const": "megacity"
+    },
+    "app_version": {
+      "type": "string",
+      "description": "Application.version, 上游 bundleVersion (当前 1.5.0)"
+    },
+    "harness_version": {
+      "type": "string",
+      "description": "本仓库这套胶水的版本, 与上游版本分开记"
+    },
+    "upstream_commit": {
+      "type": "string",
+      "description": "构建时 megacity-metro 的 git commit, 由构建脚本注入"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "scene": {
+      "enum": [
+        "city_flythrough",
+        "city_static"
+      ]
+    },
+    "params": {
+      "type": "object",
+      "required": [
+        "frames",
+        "warmup",
+        "settle",
+        "resscale",
+        "vsync"
+      ],
+      "properties": {
+        "frames": {
+          "type": "integer"
+        },
+        "warmup": {
+          "type": "integer"
+        },
+        "resscale": {
+          "type": "number"
+        },
+        "vsync": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "settle": {
+          "type": "integer"
+        },
+        "msaa": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "store_opt": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "feat_off": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "fog_event": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "ssao_src": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "ssao_after_opaque": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "shadowres": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "depth_priming": {
+          "type": "string",
+          "description": "白盒旋钮原样回写 (没给为空串), 见 launch.json"
+        },
+        "pace": {
+          "enum": [
+            "time",
+            "frame"
+          ],
+          "description": "路线推进方式, 见 launch.json"
+        },
+        "route_seconds": {
+          "type": "number",
+          "description": "pace=time 时的被测窗口长度 (秒)"
+        },
+        "fps_cap": {
+          "type": "integer",
+          "description": "vsync=off 时要求的 targetFrameRate"
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "description": "相机路线的身份。两臂 sha256 不一致 = 走的不是同一条路线 = 这次对照无效。",
+      "required": [
+        "name",
+        "sha256",
+        "waypoints"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "waypoints": {
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "graphics": {
+      "type": "object",
+      "required": [
+        "api",
+        "device_name",
+        "width",
+        "height",
+        "vsync_count",
+        "target_frame_rate"
+      ],
+      "properties": {
+        "api": {
+          "type": "string",
+          "description": "SystemInfo.graphicsDeviceType。必须是 Vulkan —— 落成 OpenGLES3 说明构建设置没生效, 该轮作废。"
+        },
+        "device_name": {
+          "type": "string"
+        },
+        "device_version": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "render_scale": {
+          "type": "number"
+        },
+        "vsync_count": {
+          "type": "integer"
+        },
+        "target_frame_rate": {
+          "type": "integer"
+        },
+        "quality_level": {
+          "type": "string"
+        },
+        "srp_asset": {
+          "type": "string"
+        },
+        "msaa": {
+          "type": "string",
+          "description": "URP asset msaaSampleCount 的实际值 (回读)"
+        },
+        "store_opt": {
+          "type": "string",
+          "description": "URP asset storeActionsOptimization 的实际值 (回读)"
+        },
+        "shadowres": {
+          "type": "string",
+          "description": "URP asset mainLightShadowmapResolution 的实际值 (回读)"
+        },
+        "renderer_features": {
+          "type": "array",
+          "description": "所有渲染器特性与实际开关",
+          "items": {
+            "type": "object",
+            "properties": {
+              "renderer": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "active": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "render_thread_comm": {
+      "type": "string",
+      "description": "实测到的图形提交线程 comm 名 (harness 扫 /proc/self/task/*/comm 得到)。给 phonefarm parse-trace --comm 用, 不靠猜。"
+    },
+    "frame_pacing": {
+      "type": "object",
+      "description": "帧率上限的事实 (审计 #8)。observed_fps = 帧数/真实时间, 只用来核对实际上限 (例: 仍是 30 就说明没解锁), 不进判定; 帧时仍由 loop_v1 从 raw ftrace 算。",
+      "properties": {
+        "pace": {
+          "enum": [
+            "time",
+            "frame"
+          ]
+        },
+        "route_seconds": {
+          "type": "number"
+        },
+        "requested_target_frame_rate": {
+          "type": "integer"
+        },
+        "target_frame_rate": {
+          "type": "integer",
+          "description": "Application.targetFrameRate 回读"
+        },
+        "vsync_count": {
+          "type": "integer"
+        },
+        "display_refresh_hz": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Screen.currentResolution.refreshRateRatio"
+        },
+        "warmup_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "warmup_observed_fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "window_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "window_observed_fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "frames_rendered": {
+      "type": "integer",
+      "description": "被测窗口内实际渲染帧数。pace=frame 时 < params.frames 说明中途被打断; pace=time 时随帧率变化, 不核对。"
+    },
+    "warmup_frames_rendered": {
+      "type": "integer"
+    },
+    "clean_exit": {
+      "type": "boolean",
+      "description": "true = 预热完成、被测窗口跑满 frames 帧、路线全程有效。false = 任一环节失败, 该轮无效 (证据仍保留)。"
+    },
+    "abort_reason": {
+      "type": "string",
+      "description": "clean_exit=false 时必须给出原因: route_missing / route_invalid / streaming_timeout / focus_lost / exception"
+    },
+    "streaming": {
+      "type": "object",
+      "description": "静置阶段的事实。ready != \"yes\" 的轮不能当基线用 —— 城市没装完就开测, 量到的不是这座城。",
+      "required": [
+        "ready",
+        "settle_frames",
+        "entities"
+      ],
+      "properties": {
+        "ready": {
+          "enum": [
+            "yes",
+            "timeout",
+            "unknown",
+            "not_reached"
+          ],
+          "description": "yes=实体数连续 120 帧不再增长, 认定装完; timeout=到 settle 上界仍在增长; unknown=拿不到实体数(反射失败), 走满了 settle; not_reached=没走到静置阶段"
+        },
+        "settle_frames": {
+          "type": "integer",
+          "description": "静置实际用掉的帧数"
+        },
+        "entities": {
+          "type": "integer",
+          "description": "静置结束时的实体总数, -1 表示取不到"
+        },
+        "ui_disabled": {
+          "type": "integer",
+          "description": "关掉的 Canvas / UIDocument 次数(HUD 与 UGS 弹窗)"
+        },
+        "mode_set": {
+          "type": "string",
+          "description": "单机模式是否设上: settings / none / failed:<异常>"
+        }
+      }
+    },
+    "knobs": {
+      "type": "object",
+      "description": "白盒旋钮逐条生效记录: 键为旋钮名(可带 :特性名 / @渲染器名), 值 {want, how, actual}。how 不是 prop/field/SetActive 的那一臂不能当对照",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "want": {
+            "type": "string"
+          },
+          "how": {
+            "type": "string"
+          },
+          "actual": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "contract_version": 1,
+  "package": "io.github.hgamey.refbench",
+  "activity": "android.app.NativeActivity",
+  "launch_template": "am start -W -n io.github.hgamey.refbench/android.app.NativeActivity --es scene {scene} --es run_id {run_id} --es frames {frames} --es intensity {intensity} --es knob.loadop {loadop} [--es knob.postfx {postfx} --es postfx.shader {postfx_shader}]",
+  "extras_are_all_string": true,
+  "extras": {
+    "scene": {
+      "required": true,
+      "enum": [
+        "bw_pingpong",
+        "frag_alu",
+        "idle_cap",
+        "sr_pipeline"
+      ]
+    },
+    "run_id": {
+      "required": false,
+      "default": "unset",
+      "note": "echoed verbatim into output json for evidence chain"
+    },
+    "frames": {
+      "required": false,
+      "default": "3600",
+      "parsed_as": "int",
+      "range": [
+        60,
+        100000
+      ]
+    },
+    "intensity": {
+      "required": false,
+      "default": "8",
+      "parsed_as": "int",
+      "range": [
+        1,
+        64
+      ],
+      "semantics": {
+        "bw_pingpong": "number of pingpong passes",
+        "frag_alu": "ALU loop = intensity*64 iterations",
+        "idle_cap": "ignored",
+        "sr_pipeline": "低分辨率场景 pass 的 ALU loop = intensity*64 iterations"
+      }
+    },
+    "knob.loadop": {
+      "required": false,
+      "default": "off",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "applies_to": [
+        "bw_pingpong"
+      ],
+      "route": "MOBILE_GPU_OPT_ROUTES.md A-2 LoadOp/StoreOp DONT_CARE vs LOAD"
+    },
+    "knob.postfx": {
+      "required": false,
+      "default": "off",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "applies_to": [
+        "sr_pipeline"
+      ],
+      "note": "off = present blit 直接采样低分辨率 RT (驱动双线性放大), 作 A 臂对照; on = 在管线尾部插入外部 compute 算子, 低分辨率 RT -> 送显分辨率 RT"
+    },
+    "postfx.shader": {
+      "required": false,
+      "default": "",
+      "applies_to": [
+        "sr_pipeline"
+      ],
+      "note": "设备侧 candidate.spv 绝对路径。binding 0 = readonly 低分辨率图, binding 1 = writeonly 送显分辨率图, 工作组 16x16, 与 game_opt_loop 赛道契约一致",
+      "failure": "knob.postfx=on 时装载失败 (文件缺失 / 非 SPIR-V / 建管线失败 / 未给路径) 一律退出码 2 且 clean_exit=false。**绝不静默退回 off** —— 那会让 A/B 两臂变成 A 和 A, 而上层还以为在对照算子"
+    },
+    "capture.native_pairs": {
+      "required": false,
+      "default": "off",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "applies_to": [
+        "sr_pipeline"
+      ],
+      "note": "on: independent native LR/HR readback; candidate output separately when postfx is active. quality_only; never use this run for performance/power evidence."
+    },
+    "capture.start": {
+      "required": false,
+      "default": "0",
+      "parsed_as": "strict_nonnegative_decimal",
+      "note": "capture native_pairs=on only; start + (count-1)*stride must be less than effective frames; invalid schedules abort, no clamp."
+    },
+    "capture.count": {
+      "required": false,
+      "default": "4",
+      "parsed_as": "strict_nonnegative_decimal",
+      "range": [
+        1,
+        16
+      ]
+    },
+    "capture.stride": {
+      "required": false,
+      "default": "1",
+      "parsed_as": "strict_nonnegative_decimal",
+      "range": [
+        1,
+        16
+      ],
+      "note": "Stride >1 is retained in frame IDs; sequence-quality may reject nonconsecutive temporal coverage. Do not reindex to hide gaps."
+    },
+    "capture.rules_path": {
+      "required": false,
+      "default": "",
+      "note": "Required when capture is on. App-readable device path to already frozen phonefarm sequence-quality rules; actual file bytes hashed before capture."
+    },
+    "capture.rules_sha256": {
+      "required": false,
+      "default": "",
+      "note": "Required when capture is on, lowercase SHA256. Actual realtime capture start must be later than rules.frozen_at_unix_ms; host importer validates the full rules contract."
+    },
+    "capture.gpu_timestamps": {
+      "required": false,
+      "default": "off",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "note": "Opt-in raw Vulkan query sidecar for non-KGSL GPUs. Mutually exclusive with capture.native_pairs=on. Rendering content remains deterministic; no rates/statistics in refbench_out.json."
+    },
+    "capture.bw_hash": {
+      "required": false,
+      "default": "off",
+      "enum": ["on", "off"],
+      "applies_to": ["bw_pingpong"],
+      "note": "Quality-only final offscreen RGBA16F GPU readback and SHA256 after device idle. Mutually exclusive with native_pairs and gpu_timestamps; never use the capture run for performance evidence."
+    }
+  },
+  "process": {
+    "self_terminates": true,
+    "liveness_probe": "adb shell pidof io.github.hgamey.refbench",
+    "exit_codes": {
+      "0": "clean: all frames submitted, json written",
+      "2": "aborted: window lost or vulkan error, json may still be written with clean_exit=false"
+    }
+  },
+  "output": {
+    "device_path": "/storage/emulated/0/Android/data/io.github.hgamey.refbench/files/refbench_out.json",
+    "written": "fsync'd before process exit",
+    "schema": "output.schema.json"
+  },
+  "started_marker": {
+    "device_path": "/storage/emulated/0/Android/data/io.github.hgamey.refbench/files/refbench_started",
+    "written": "right before entering the render loop; content = '<scene> <run_id>'",
+    "note": "harness polls this file for run-start; logcat is deliberately NOT part of the contract (observed to go completely silent on the bench device)"
+  },
+  "render_thread_name": "RefbenchRender",
+  "driver_submit_thread_name": "RefbenchDrv",
+  "trace_comm_filter": "RefbenchDrv",
+  "trace_comm_note": "Adreno Vulkan driver submits kgsl cmdbatches from its own in-process threads (Thread-N), not the caller. refbench renames them via /proc/self/task/<tid>/comm so parse_trace.py --comm RefbenchDrv is stable.",
+  "submits_per_frame": 1,
+  "scenes": {
+    "bw_pingpong": {
+      "declared_bottleneck": "bandwidth",
+      "present_mode_preference": [
+        "MAILBOX",
+        "IMMEDIATE",
+        "FIFO"
+      ]
+    },
+    "frag_alu": {
+      "declared_bottleneck": "fragment",
+      "present_mode_preference": [
+        "MAILBOX",
+        "IMMEDIATE",
+        "FIFO"
+      ]
+    },
+    "idle_cap": {
+      "declared_bottleneck": "none",
+      "present_mode_preference": [
+        "FIFO"
+      ]
+    },
+    "sr_pipeline": {
+      "declared_bottleneck": "fragment+compute",
+      "present_mode_preference": [
+        "MAILBOX",
+        "IMMEDIATE",
+        "FIFO"
+      ],
+      "note": "游戏以 1280x720 渲染 -> 管线尾部 compute 算子重构到 1920x1080 -> 呈现。算子与场景 pass 抢同一份带宽与功耗预算, 因此这里量到的 fps_p95 与整机瓦数才是算子在真实渲染上下文里的代价"
+    }
+  },
+  "capture_output": {
+    "device_directory": "/storage/emulated/0/Android/data/io.github.hgamey.refbench/files/capture_{run_id}",
+    "manifest": "manifest.json",
+    "schema": "refbench/native_paired_capture@1",
+    "complete": "Only all requested frames persisted AND clean run AND no capture failure; a timeout/write/run error remains incomplete. Directory and raw files never overwritten.",
+    "source": "native_rendered_controlled_whitebox / procedural_alu, not real game",
+    "performance_eligible": false,
+    "host_bridge": "python3 tools/native_pairs.py import; preserves raw SHA and original capture clock/rules; consumer source unknown for controlled whitebox",
+    "verification_status": "host syntax and synthetic file/PNG/consumer tests only; APK build / native GPU output not verified",
+    "completion": "completion.json: refbench/native_capture_completion@1, mandatory for new validation/import; last create-only marker binds exact manifest/run-scoped output hashes and count. Older captures without marker remain archival/UNKNOWN.",
+    "run_output": "refbench_out.json inside capture_{run_id}; quality mode no longer overwrites shared app-wide output"
+  },
+  "gpu_timestamp_output": {
+    "device_path": "/storage/emulated/0/Android/data/io.github.hgamey.refbench/files/refbench_gpu_timestamps.json",
+    "schema": "gpu-timestamps.schema.json",
+    "source": "Vulkan timestamp query pool; GPU queue clock, not display/present timestamps",
+    "completion": "complete=true only after all configured frame queries were read following fence completion; phonefarm verifies run_id and frame count, handles counter wrap and removes warmup frames.",
+    "verification_status": "Docker native build, host contract tests and opt-in Mali device execution verified; this does not qualify display FPS or whole-device power."
+  },
+  "bw_hash_output": {
+    "device_path": "/storage/emulated/0/Android/data/io.github.hgamey.refbench/files/refbench_bw_hash.json",
+    "schema": "refbench/bw-output-hash@1",
+    "format": "R16G16B16A16_SFLOAT",
+    "extent": [2048, 2048],
+    "bytes": 33554432,
+    "completion": "complete=true requires clean exit, all configured frames and full final ping-pong image copy to host-visible memory; hash binds the entire copied image, run_id and frame count.",
+    "performance_eligible": false
+  }
+}

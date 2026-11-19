@@ -1,6 +1,6 @@
 # Objectives, Research Content, and Key Problems Method
 
-This stage converts the established gap into a coherent objective hierarchy and a bounded set of research problems.
+This method converts the established gap into a coherent objective hierarchy and a bounded set of research problems.
 
 ## 1. Define the objective hierarchy
 
@@ -38,7 +38,7 @@ A key problem is the hard question inside a work package, not a renamed task. De
 4. **Core mechanism or contradiction:** the relationship that must be explained, controlled, or optimized.
 5. **Research question:** a precise "how", "under what conditions", or "through what mechanism" question.
 
-Include constraints in the question. Do not presuppose the method-stage answer.
+Include relevant constraints in the question. Do not presuppose the answer that the proposed method is meant to investigate.
 
 ## 4. Enforce correspondence
 
@@ -46,13 +46,13 @@ Maintain an internal one-to-one-or-explicit-many mapping:
 
 `literature limitation -> sub-objective -> work package -> key problem -> expected evidence`
 
-If one item has no counterpart, repair the objective structure within this stage. Do not edit the literature or rationale files; report any upstream inconsistency in the result summary so the author can return to that stage.
+If an item has no counterpart, repair the requested objective structure and explain the inconsistency. The main agent may integrate related literature or rationale corrections within author scope while preserving existing author text and evidence.
 
 ## 5. Keep content distinct from methods
 
-This stage may identify the class of method or evidence needed, but it must not write detailed algorithms, equations, experiment protocols, or implementation steps. Those belong to the methods stage.
+Keep research goals/problems distinguishable from detailed algorithms, equations, experiment protocols and implementation steps. This is an argument-organization distinction, not a prohibition on the main agent revising related method passages when the author requests it.
 
-## 6. Quality gate
+## 6. Review prompts
 
 Confirm that:
 

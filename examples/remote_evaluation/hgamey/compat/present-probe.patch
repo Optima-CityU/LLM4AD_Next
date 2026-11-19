@@ -1,0 +1,1853 @@
+diff --git a/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp b/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp
+--- a/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp
++++ b/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp
+@@ -31,6 +31,14 @@
+ static const unsigned int kSelfsrRcasSpvLen = 0;
+ #endif
+ 
++#if __has_include("selfsr_candidate_metadata.h")
++#include "selfsr_candidate_metadata.h"
++#else
++static const char kSelfsrCandidateSourceSha256[] = "";
++static const char kSelfsrCandidateSpirvSha256[] = "";
++static const char kSelfsrCandidateKind[] = "unspecified";
++#endif
++
+ #define SR_LOG(...) __android_log_print(ANDROID_LOG_INFO, "refknobs", "selfsr: " __VA_ARGS__)
+ 
+ namespace {
+@@ -48,6 +56,8 @@
+     uint32_t out_w = 0, out_h = 0;   // 实际 swapchain 尺寸
+     VkFormat fmt = VK_FORMAT_UNDEFINED;
+     bool active = false;             // 尺寸不同且资源齐全: 每帧做超分
++    bool destroy_pending = false;
++    bool custom_destroy_allocator = false;
+     std::vector<VkImage> imgs;
+     std::vector<VkSemaphore> sems;   // 一张图一个: 层提交 → 这张图的 present
+     VkImage T = VK_NULL_HANDLE, O = VK_NULL_HANDLE, P = VK_NULL_HANDLE;   // P: 锐化后 (开 RCAS 时)
+@@ -69,6 +79,9 @@
+     VkPhysicalDevice phys = VK_NULL_HANDLE;
+     PFN_rkSetDeviceLoaderData sdld = nullptr;
+     uint32_t family = UINT32_MAX;
++    VkQueue queue = VK_NULL_HANDLE;
++    VkResult terminal = VK_SUCCESS;
++    bool submission_uncertain = false;
+ #define SR_FN(n) PFN_vk##n n = nullptr;
+     SR_FN(GetSwapchainImagesKHR) SR_FN(CreateCommandPool) SR_FN(DestroyCommandPool) SR_FN(AllocateCommandBuffers)
+     SR_FN(ResetCommandBuffer) SR_FN(BeginCommandBuffer) SR_FN(EndCommandBuffer) SR_FN(CmdPipelineBarrier)
+@@ -83,6 +96,7 @@
+     SR_FN(CreateComputePipelines) SR_FN(DestroyPipeline) SR_FN(DeviceWaitIdle) SR_FN(DestroySwapchainKHR)
+     SR_FN(GetPhysicalDeviceMemoryProperties) SR_FN(GetPhysicalDeviceSurfaceCapabilitiesKHR)
+     SR_FN(GetPhysicalDeviceFormatProperties)
++    SR_FN(GetPhysicalDeviceQueueFamilyProperties)
+ #undef SR_FN
+     bool complete = false;
+     VkCommandPool pool = VK_NULL_HANDLE;
+@@ -100,19 +114,46 @@
+ 
+ std::mutex g_m;
+ bool g_on = false;
++bool g_native = false, g_live = false;
+ uint32_t g_want_w = 0, g_want_h = 0;
+ float g_sharp = 0.f;                        // RCAS 强度, 0 = 不锐化
+ std::map<void*, Dev*> g_devs;
+ std::string g_reason;                       // 最近一次没能启用的原因
+ uint64_t g_up = 0, g_passthrough = 0, g_same_size = 0;
++uint64_t g_dispatches = 0, g_completed = 0, g_presents = 0;
++VkResult g_last_result = VK_SUCCESS;
+ std::map<std::string, uint64_t> g_fb;
+ uint32_t g_last_in_w = 0, g_last_in_h = 0, g_last_out_w = 0, g_last_out_h = 0;
+ std::vector<uint64_t> g_cpu_us;             // 录制+提交的 CPU 耗时 (最近 1024 个)
+ 
+ Dev* dev_of_key(void* k) {
+     auto it = g_devs.find(k);
+-    if (it == g_devs.end() && g_devs.size() == 1) it = g_devs.begin();
++    if (!g_native && it == g_devs.end() && g_devs.size() == 1) it = g_devs.begin();
+     return it == g_devs.end() ? nullptr : it->second;
++}
++
++void failure(const char* reason, VkResult result) {
++    g_reason = reason;
++    g_last_result = result;
++    ++g_fb[reason];
++    SR_LOG("%s: VkResult=%d", reason, static_cast<int>(result));
++}
++
++bool live_enabled() {
++    if (!g_native) return true;
++    char value[PROP_VALUE_MAX]{};
++    __system_property_get("debug.knobs.selfsr_live", value);
++    return strcmp(value, "1") == 0;
++}
++
++VkResult complete_slot(Dev* D, Slot& slot, uint64_t timeout) {
++    if (!slot.busy) return VK_SUCCESS;
++    VkResult result = D->WaitForFences(D->dev, 1, &slot.fence, VK_TRUE, timeout);
++    if (result == VK_SUCCESS) {
++        slot.busy = false;
++        ++g_completed;
++    }
++    return result;
+ }
+ 
+ uint32_t pick_device_local(Dev* D, uint32_t bits) {
+@@ -156,7 +197,9 @@
+         VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, nullptr, D->pool,
+                                         VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1};
+         if (D->AllocateCommandBuffers(D->dev, &cai, &s.cb) != VK_SUCCESS) { g_reason = "command_buffer"; return false; }
+-        if (D->sdld) D->sdld(D->dev, s.cb);
++        if (D->sdld) {
++            if (D->sdld(D->dev, s.cb) != VK_SUCCESS) { g_reason = "loader_data"; return false; }
++        }
+         else *reinterpret_cast<void**>(s.cb) = *reinterpret_cast<void**>(D->dev);
+         VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+         if (D->CreateFence(D->dev, &fci, nullptr, &s.fence) != VK_SUCCESS) { g_reason = "fence"; return false; }
+@@ -200,8 +243,18 @@
+     return true;
+ }
+ 
+-void release_swap_locked(Dev* D, Swap& S) {
+-    for (auto& s : D->slots) if (s.busy && s.fence) { D->WaitForFences(D->dev, 1, &s.fence, VK_TRUE, 1000000000ull); s.busy = false; }
++bool release_swap_locked(Dev* D, Swap& S) {
++    if (D->submission_uncertain) {
++        failure("cleanup_submission_uncertain", D->terminal);
++        return false;
++    }
++    for (auto& s : D->slots) {
++        VkResult result = complete_slot(D, s, 1000000000ull);
++        if (result != VK_SUCCESS) {
++            failure("cleanup_incomplete", result);
++            return false;
++        }
++    }
+     if (S.set) D->FreeDescriptorSets(D->dev, D->dpool, 1, &S.set);
+     if (S.set2) D->FreeDescriptorSets(D->dev, D->dpool, 1, &S.set2);
+     for (VkImageView v : {S.T_view, S.O_view, S.P_view}) if (v) D->DestroyImageView(D->dev, v, nullptr);
+@@ -209,6 +262,7 @@
+     for (VkDeviceMemory m : {S.T_mem, S.O_mem, S.P_mem}) if (m) D->FreeMemory(D->dev, m, nullptr);
+     for (auto s : S.sems) if (s) D->retired_sems.push_back(s);
+     S = Swap{};
++    return true;
+ }
+ 
+ void barrier(Dev* D, VkCommandBuffer cb, VkImage img, VkImageLayout from, VkImageLayout to, VkAccessFlags sa,
+@@ -227,7 +281,15 @@
+         D = dev_of_key(fkey(dev));
+         if (D) {
+             auto it = D->swaps.find(sc);
+-            if (it != D->swaps.end()) { release_swap_locked(D, it->second); D->swaps.erase(it); }
++            if (it != D->swaps.end()) {
++                if (!release_swap_locked(D, it->second)) {
++                    it->second.active = false;
++                    it->second.destroy_pending = true;
++                    it->second.custom_destroy_allocator = a != nullptr;
++                    return;
++                }
++                D->swaps.erase(it);
++            }
+         }
+     }
+     // interp 同时开着时它也要收这条 swapchain 的对象: 往下转给它的钩子 (它再转 framedump / 下层)
+@@ -246,6 +308,13 @@
+ bool sr_init_from_props() {
+     char v[PROP_VALUE_MAX] = {0};
+     __system_property_get("debug.knobs.selfsr", v);
++    if (strcmp(v, "native") == 0) {
++        g_on = g_native = true;
++        g_live = live_enabled();
++        g_sharp = 0.f;
++        SR_LOG("native experimental postprocessing enabled; live=%d", static_cast<int>(g_live));
++        return true;
++    }
+     unsigned w = 0, h = 0;
+     float sharp = 0.f;
+     int n = sscanf(v, "%ux%u:%f", &w, &h, &sharp);
+@@ -260,10 +329,12 @@
+ bool sr_on() { return g_on; }
+ 
+ void sr_on_device(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, PFN_vkGetInstanceProcAddr gipa,
+-                  PFN_vkGetDeviceProcAddr gdpa, PFN_rkSetDeviceLoaderData sdld, uint32_t sole_family) {
++                  PFN_vkGetDeviceProcAddr gdpa, PFN_rkSetDeviceLoaderData sdld, uint32_t sole_family,
++                  VkQueue sole_queue) {
+     if (!g_on) return;
+     Dev* D = new Dev();
+     D->dev = dev; D->phys = phys; D->sdld = sdld; D->family = sole_family;
++    D->queue = sole_queue;
+ #define SR_GD(n) D->n = (PFN_vk##n)gdpa(dev, "vk" #n);
+     SR_GD(GetSwapchainImagesKHR) SR_GD(CreateCommandPool) SR_GD(DestroyCommandPool) SR_GD(AllocateCommandBuffers)
+     SR_GD(ResetCommandBuffer) SR_GD(BeginCommandBuffer) SR_GD(EndCommandBuffer) SR_GD(CmdPipelineBarrier)
+@@ -281,6 +352,7 @@
+         D->GetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)gipa(inst, "vkGetPhysicalDeviceMemoryProperties");
+         D->GetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)gipa(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+         D->GetPhysicalDeviceFormatProperties = (PFN_vkGetPhysicalDeviceFormatProperties)gipa(inst, "vkGetPhysicalDeviceFormatProperties");
++        D->GetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)gipa(inst, "vkGetPhysicalDeviceQueueFamilyProperties");
+     }
+     D->complete = D->GetSwapchainImagesKHR && D->CreateCommandPool && D->AllocateCommandBuffers && D->ResetCommandBuffer &&
+                   D->BeginCommandBuffer && D->EndCommandBuffer && D->CmdPipelineBarrier && D->CmdCopyImage &&
+@@ -291,6 +363,25 @@
+                   D->AllocateDescriptorSets && D->UpdateDescriptorSets && D->CreatePipelineLayout &&
+                   D->CreateShaderModule && D->CreateComputePipelines && D->GetPhysicalDeviceMemoryProperties &&
+                   D->GetPhysicalDeviceFormatProperties;
++    // Native mode accepts only the exact queue attested by the parent device hook.
++    if (g_native) {
++        bool compute = false;
++        if (sole_queue && sole_family != UINT32_MAX && D->GetPhysicalDeviceQueueFamilyProperties) {
++            uint32_t count = 0;
++            D->GetPhysicalDeviceQueueFamilyProperties(phys, &count, nullptr);
++            if (count && count <= 256 && sole_family < count) {
++                std::vector<VkQueueFamilyProperties> families(count);
++                D->GetPhysicalDeviceQueueFamilyProperties(phys, &count, families.data());
++                compute = sole_family < count && (families[sole_family].queueFlags & VK_QUEUE_COMPUTE_BIT);
++            }
++        }
++        if (!compute) D->family = UINT32_MAX;
++        D->complete = D->complete && D->sdld && D->GetPhysicalDeviceSurfaceCapabilitiesKHR &&
++                      D->DestroyCommandPool && D->DestroyFence && D->DestroySemaphore &&
++                      D->DestroyImage && D->FreeMemory && D->DestroyImageView && D->DestroySampler &&
++                      D->DestroyDescriptorSetLayout && D->DestroyDescriptorPool && D->FreeDescriptorSets &&
++                      D->DestroyPipelineLayout && D->DestroyShaderModule && D->DestroyPipeline && D->DestroySwapchainKHR;
++    }
+     std::lock_guard<std::mutex> lk(g_m);
+     if (!D->complete) g_reason = "missing_device_functions";
+     if (D->family == UINT32_MAX) g_reason = "queue_family_ambiguous";
+@@ -298,12 +389,21 @@
+     SR_LOG("device 已登记: complete=%d family=%u", (int)D->complete, D->family);
+ }
+ 
+-void sr_on_destroy_device(VkDevice dev) {
+-    if (!g_on) return;
++bool sr_on_destroy_device(VkDevice dev) {
++    if (!g_on) return true;
+     std::lock_guard<std::mutex> lk(g_m);
+     Dev* D = dev_of_key(fkey(dev));
+-    if (!D) return;
+-    for (auto& kv : D->swaps) release_swap_locked(D, kv.second);
++    if (!D) return true;
++    for (auto& kv : D->swaps) {
++        // An allocator's user data cannot be assumed alive after a deferred destroy.
++        if (kv.second.destroy_pending && kv.second.custom_destroy_allocator) {
++            failure("deferred_allocator_lifetime_unknown", VK_NOT_READY);
++            return false;
++        }
++        bool pending = kv.second.destroy_pending;
++        if (!release_swap_locked(D, kv.second)) return false;
++        if (pending) D->DestroySwapchainKHR(dev, kv.first, nullptr);
++    }
+     D->swaps.clear();
+     for (auto& s : D->slots) if (s.fence) D->DestroyFence(D->dev, s.fence, nullptr);
+     if (D->pool) D->DestroyCommandPool(D->dev, D->pool, nullptr);
+@@ -316,6 +416,7 @@
+     for (auto s : D->retired_sems) if (s) D->DestroySemaphore(D->dev, s, nullptr);
+     g_devs.erase(fkey(dev));
+     delete D;
++    return true;
+ }
+ 
+ bool sr_patch_swapchain_ci(VkDevice dev, VkSwapchainCreateInfoKHR* ci) {
+@@ -323,22 +424,45 @@
+     std::lock_guard<std::mutex> lk(g_m);
+     Dev* D = dev_of_key(fkey(dev));
+     if (!D || !D->complete || D->family == UINT32_MAX) return false;
+-    if (ci->imageExtent.width == g_want_w && ci->imageExtent.height == g_want_h) return false;   // 游戏本来就要这个尺寸
++    if (g_native) {
++        if (!D->queue || ci->flags || ci->pNext || ci->imageSharingMode != VK_SHARING_MODE_EXCLUSIVE ||
++            ci->imageArrayLayers != 1 || ci->imageFormat != VK_FORMAT_R8G8B8A8_UNORM ||
++            ci->presentMode == VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR ||
++            ci->presentMode == VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR) {
++            g_reason = "native_swapchain_unsupported";
++            return false;
++        }
++        for (const auto& entry : D->swaps) {
++            if (entry.second.active || entry.second.destroy_pending) {
++                g_reason = "native_multiple_swapchains";
++                return false;
++            }
++        }
++        VkFormatProperties fp{};
++        D->GetPhysicalDeviceFormatProperties(D->phys, VK_FORMAT_R8G8B8A8_UNORM, &fp);
++        const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
++                                          VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
++        if ((fp.optimalTilingFeatures & need) != need) { g_reason = "native_format_features"; return false; }
++    } else if (ci->imageExtent.width == g_want_w && ci->imageExtent.height == g_want_h) return false;
+     if (ci->imageFormat != VK_FORMAT_R8G8B8A8_UNORM && ci->imageFormat != VK_FORMAT_R8G8B8A8_SRGB) {
+         g_reason = "format_" + std::to_string((int)ci->imageFormat); return false;
+     }
+     if (ci->imageArrayLayers != 1) { g_reason = "array_layers"; return false; }
+     VkSurfaceCapabilitiesKHR caps{};
+-    if (D->GetPhysicalDeviceSurfaceCapabilitiesKHR &&
+-        D->GetPhysicalDeviceSurfaceCapabilitiesKHR(D->phys, ci->surface, &caps) == VK_SUCCESS) {
++    VkResult capability = D->GetPhysicalDeviceSurfaceCapabilitiesKHR
++        ? D->GetPhysicalDeviceSurfaceCapabilitiesKHR(D->phys, ci->surface, &caps) : VK_ERROR_FEATURE_NOT_PRESENT;
++    if (g_native && capability != VK_SUCCESS) { failure("surface_capabilities", capability); return false; }
++    if (capability == VK_SUCCESS) {
+         const VkImageUsageFlags need = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+         if ((caps.supportedUsageFlags & need) != need) { g_reason = "usage_unsupported"; return false; }
+-        if (g_want_w > caps.maxImageExtent.width || g_want_h > caps.maxImageExtent.height ||
+-            g_want_w < caps.minImageExtent.width || g_want_h < caps.minImageExtent.height) {
++        uint32_t width = g_native ? ci->imageExtent.width : g_want_w;
++        uint32_t height = g_native ? ci->imageExtent.height : g_want_h;
++        if (!width || !height || width > caps.maxImageExtent.width || height > caps.maxImageExtent.height ||
++            width < caps.minImageExtent.width || height < caps.minImageExtent.height) {
+             g_reason = "extent_out_of_range"; return false;
+         }
+     }
+-    ci->imageExtent = {g_want_w, g_want_h};
++    if (!g_native) ci->imageExtent = {g_want_w, g_want_h};
+     ci->imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+     return true;
+ }
+@@ -350,12 +474,23 @@
+     Dev* D = dev_of_key(fkey(dev));
+     if (!D) return;
+     auto old = D->swaps.find(sc);
+-    if (old != D->swaps.end()) { release_swap_locked(D, old->second); D->swaps.erase(old); }
++    if (old != D->swaps.end()) {
++        if (!release_swap_locked(D, old->second)) return;
++        D->swaps.erase(old);
++    }
+     Swap S;
+     S.in_w = orig->imageExtent.width; S.in_h = orig->imageExtent.height;
+     S.out_w = used->imageExtent.width; S.out_h = used->imageExtent.height;
+     S.fmt = used->imageFormat;
+     g_last_in_w = S.in_w; g_last_in_h = S.in_h; g_last_out_w = S.out_w; g_last_out_h = S.out_h;
++    const VkImageUsageFlags transfer = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++    if (g_native && (used->imageExtent.width != orig->imageExtent.width || used->imageExtent.height != orig->imageExtent.height ||
++                     (used->imageUsage & transfer) != transfer || used->imageFormat != VK_FORMAT_R8G8B8A8_UNORM ||
++                     used->imageSharingMode != VK_SHARING_MODE_EXCLUSIVE || used->flags || used->pNext ||
++                     used->imageArrayLayers != 1 || !D->queue || D->family == UINT32_MAX || !D->complete)) {
++        g_reason = "native_actual_swapchain_unsupported";
++        patched = false;
++    }
+     if (!patched) {
+         SR_LOG("swapchain %ux%u 未改 (原因: %s)", S.in_w, S.in_h, g_reason.empty() ? "same_size" : g_reason.c_str());
+         D->swaps[sc] = S;
+@@ -363,11 +498,17 @@
+     }
+     bool ok = ensure_pipeline(D);
+     uint32_t n = 0;
+-    D->GetSwapchainImagesKHR(dev, sc, &n, nullptr);
+-    S.imgs.resize(n);
+-    if (n) D->GetSwapchainImagesKHR(dev, sc, &n, S.imgs.data());
++    VkResult images_result = D->GetSwapchainImagesKHR(dev, sc, &n, nullptr);
++    if (images_result != VK_SUCCESS || !n || n > 64) { ok = false; g_reason = "swapchain_image_count"; }
++    if (ok) {
++        S.imgs.resize(n);
++        images_result = D->GetSwapchainImagesKHR(dev, sc, &n, S.imgs.data());
++        if (images_result != VK_SUCCESS || !n || n > S.imgs.size()) { ok = false; g_reason = "swapchain_images"; }
++        else S.imgs.resize(n);
++    }
++    if (!ok) n = 0;
+     S.sems.assign(n, VK_NULL_HANDLE);
+-    for (uint32_t i = 0; ok && i < n; i++) {
++    for (uint32_t i = 0; !g_native && ok && i < n; i++) {
+         VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+         if (D->CreateSemaphore(dev, &sci, nullptr, &S.sems[i]) != VK_SUCCESS) { ok = false; g_reason = "semaphore"; }
+     }
+@@ -407,7 +548,21 @@
+     auto bail = [&](const char* why) { g_passthrough++; g_fb[why]++; lk.unlock(); return next(q, pi); };
+     Dev* D = dev_of_key(fkey(q));
+     if (!D) return bail("device_unknown");
++    if (g_native && q != D->queue) return bail("unverified_present_queue");
++    if (D->terminal != VK_SUCCESS) return D->terminal;
++    // Poll while disabled too, so a live toggle never hides completion evidence.
++    for (auto& slot : D->slots) {
++        VkResult result = complete_slot(D, slot, 0);
++        if (result != VK_SUCCESS && result != VK_TIMEOUT) {
++            failure("fence_status", result);
++            D->terminal = result;
++            return result;
++        }
++    }
++    g_live = live_enabled();
++    if (!g_live) return bail("live_off");
+     if (pi->swapchainCount != 1 || !pi->pSwapchains || !pi->pImageIndices) return bail("multi_swapchain");
++    if (g_native && pi->pNext) return bail("native_present_extensions");
+     VkSwapchainKHR sc = pi->pSwapchains[0];
+     auto si = D->swaps.find(sc);
+     if (si == D->swaps.end()) return bail("swapchain_unknown");
+@@ -417,17 +572,23 @@
+         return bail("swapchain_inactive");
+     }
+     uint32_t idx = pi->pImageIndices[0];
+-    if (idx >= S.imgs.size() || !S.sems[idx]) return bail("image_index");
++    if (idx >= S.imgs.size() || (!g_native && !S.sems[idx])) return bail("image_index");
+     Slot& sl = D->slots[D->next_slot % 3];
+-    if (sl.busy) {
+-        if (D->WaitForFences(D->dev, 1, &sl.fence, VK_TRUE, 2000000ull) != VK_SUCCESS) return bail("slot_busy");
+-        sl.busy = false;
+-    }
++    if (complete_slot(D, sl, 2000000ull) != VK_SUCCESS) return bail("slot_busy");
++    auto before_submit_failure = [&](const char* why, VkResult result) {
++        failure(why, result);
++        if (result == VK_ERROR_DEVICE_LOST) { D->terminal = result; return result; }
++        ++g_passthrough;
++        lk.unlock();
++        return next(q, pi);
++    };
+     VkImage N = S.imgs[idx];
+     VkCommandBuffer cb = sl.cb;
+-    D->ResetCommandBuffer(cb, 0);
++    VkResult result = D->ResetCommandBuffer(cb, 0);
++    if (result != VK_SUCCESS) return before_submit_failure("reset_command_buffer", result);
+     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr};
+-    D->BeginCommandBuffer(cb, &bi);
++    result = D->BeginCommandBuffer(cb, &bi);
++    if (result != VK_SUCCESS) return before_submit_failure("begin_command_buffer", result);
+     const VkPipelineStageFlags TR = VK_PIPELINE_STAGE_TRANSFER_BIT, CS = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+     // 之前提交里对 T/O 的读写 (上一帧的超分) 全部完成, 才动它们
+     VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
+@@ -465,30 +626,56 @@
+     full.extent = {S.out_w, S.out_h, 1};
+     D->CmdCopyImage(cb, R, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, N, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &full);
+     barrier(D, cb, N, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0, TR, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+-    D->EndCommandBuffer(cb);
++    result = D->EndCommandBuffer(cb);
++    if (result != VK_SUCCESS) return before_submit_failure("end_command_buffer", result);
+     std::vector<VkPipelineStageFlags> stages(pi->waitSemaphoreCount, TR);
+     VkSubmitInfo sub{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+     sub.waitSemaphoreCount = pi->waitSemaphoreCount; sub.pWaitSemaphores = pi->pWaitSemaphores; sub.pWaitDstStageMask = stages.data();
+     sub.commandBufferCount = 1; sub.pCommandBuffers = &cb;
+-    sub.signalSemaphoreCount = 1; sub.pSignalSemaphores = &S.sems[idx];
+-    D->ResetFences(D->dev, 1, &sl.fence);
+-    if (D->QueueSubmit(q, 1, &sub, sl.fence) != VK_SUCCESS) {
+-        // 游戏的信号量可能已被消耗也可能没有: 不能再让 present 等它们, 也不能等我们没发的信号量。
+-        // 这一帧照原参数送显 (与不开层同); 记下原因, 连续失败时画面仍是游戏原样的左上角小图。
+-        return bail("submit_fail");
++    sub.signalSemaphoreCount = g_native ? 0 : 1;
++    sub.pSignalSemaphores = g_native ? nullptr : &S.sems[idx];
++    result = D->ResetFences(D->dev, 1, &sl.fence);
++    if (result != VK_SUCCESS) return before_submit_failure("reset_fence", result);
++    result = D->QueueSubmit(q, 1, &sub, sl.fence);
++    if (result != VK_SUCCESS) {
++        // Never retry presentation with waits belonging to a failed submission.
++        failure("submit_failed", result);
++        D->terminal = result;
++        D->submission_uncertain = result != VK_ERROR_OUT_OF_HOST_MEMORY && result != VK_ERROR_OUT_OF_DEVICE_MEMORY;
++        return result;
+     }
+     sl.busy = true;
+     D->next_slot++;
+     S.frames++;
+     g_up++;
++    g_dispatches += S.set2 ? 2 : 1;
++    if (g_native) {
++        // This experimental path deliberately stalls the host, avoiding present
++        // semaphore lifetime assumptions. It is not a performance benchmark.
++        result = complete_slot(D, sl, 1000000000ull);
++        if (result != VK_SUCCESS) {
++            failure("submission_completion_failed", result);
++            // A timeout is not device loss. Ask the application to recreate its
++            // swapchain; keep the old image and all layer resources until done.
++            D->terminal = result == VK_TIMEOUT ? VK_ERROR_OUT_OF_DATE_KHR : result;
++            return D->terminal;
++        }
++    }
+     if (g_cpu_us.size() < 1024) g_cpu_us.push_back((now_ns() - t) / 1000);
+     else g_cpu_us[g_up % 1024] = (now_ns() - t) / 1000;
+-    VkSemaphore sem = S.sems[idx];
++    VkSemaphore sem = g_native ? VK_NULL_HANDLE : S.sems[idx];
+     lk.unlock();
+     VkPresentInfoKHR pn = *pi;
+-    pn.waitSemaphoreCount = 1; pn.pWaitSemaphores = &sem;
++    pn.waitSemaphoreCount = g_native ? 0 : 1;
++    pn.pWaitSemaphores = g_native ? nullptr : &sem;
+     (void)frame;
+-    return next(q, &pn);
++    result = next(q, &pn);
++    lk.lock();
++    VkResult per_swap = pn.pResults ? pn.pResults[0] : result;
++    if ((result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) &&
++        (per_swap == VK_SUCCESS || per_swap == VK_SUBOPTIMAL_KHR)) ++g_presents;
++    else failure("present_failed", result != VK_SUCCESS ? result : per_swap);
++    return result;
+ }
+ 
+ std::string sr_json() {
+@@ -504,5 +691,19 @@
+              "\"passthrough\":%llu,\"reason\":\"%s\",\"cpu_us_p50\":%llu,\"cpu_us_p95\":%llu,\"fallbacks\":{",
+              g_want_w, g_want_h, g_sharp, g_last_in_w, g_last_in_h, g_last_out_w, g_last_out_h, (unsigned long long)g_up,
+              (unsigned long long)g_same_size, (unsigned long long)g_passthrough, g_reason.c_str(), pct(0.5), pct(0.95));
+-    return std::string(b) + fb + "}}";
+-}
++    std::string json = std::string(b) + fb + "}";
++    json += std::string(",\"mode\":\"") + (g_native ? "native" : "resize") + "\"";
++    json += std::string(",\"live\":") + (g_live ? "true" : "false");
++    json += ",\"scope\":\"experimental_present_postprocessing\",\"display_completion_proven\":false";
++    json += ",\"dispatches_accepted\":" + std::to_string(g_dispatches);
++    json += ",\"submissions_accepted\":" + std::to_string(g_up);
++    json += ",\"submissions_completed\":" + std::to_string(g_completed);
++    json += ",\"presents_succeeded\":" + std::to_string(g_presents);
++    json += ",\"last_result\":" + std::to_string(static_cast<int>(g_last_result));
++    if (g_native) {
++        json += std::string(",\"candidate_source_sha256\":\"") + kSelfsrCandidateSourceSha256 + "\"";
++        json += std::string(",\"candidate_spirv_sha256\":\"") + kSelfsrCandidateSpirvSha256 + "\"";
++        json += std::string(",\"candidate_kind\":\"") + kSelfsrCandidateKind + "\"";
++    }
++    return json + "}";
++}
+diff --git a/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.h b/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.h
+--- a/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.h
++++ b/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.h
+@@ -20,9 +20,13 @@
+ 
+ bool sr_init_from_props();
+ bool sr_on();
++// Native mode keeps the canvas extent and dispatches only with selfsr_live=1.
++// The parent must supply an actual sole, unprotected, compute-capable queue.
+ void sr_on_device(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, PFN_vkGetInstanceProcAddr gipa,
+-                  PFN_vkGetDeviceProcAddr gdpa, PFN_rkSetDeviceLoaderData sdld, uint32_t sole_family);
+-void sr_on_destroy_device(VkDevice dev);
++                  PFN_vkGetDeviceProcAddr gdpa, PFN_rkSetDeviceLoaderData sdld, uint32_t sole_family,
++                  VkQueue sole_queue = VK_NULL_HANDLE);
++// False means layer work is not known complete; do not forward DestroyDevice.
++bool sr_on_destroy_device(VkDevice dev);
+ // 建 swapchain 前: 放大 imageExtent 并加用途位。返回是否改了。
+ bool sr_patch_swapchain_ci(VkDevice dev, VkSwapchainCreateInfoKHR* ci);
+ // 建好后: orig = 游戏原本要的参数, used = 实际用的参数
+diff --git a/vendor/hgamey/phonefarm/knobs/gray/layer/vk_layer_refknobs.cpp b/vendor/hgamey/phonefarm/knobs/gray/layer/vk_layer_refknobs.cpp
+--- a/vendor/hgamey/phonefarm/knobs/gray/layer/vk_layer_refknobs.cpp
++++ b/vendor/hgamey/phonefarm/knobs/gray/layer/vk_layer_refknobs.cpp
+@@ -1154,22 +1154,41 @@
+     if (fd_on()) fd_on_device(inst, phys, *pDev, gipa, gdpa, sdld, sole_family);
+     if (ip_on()) ip_on_device(inst, phys, *pDev, gipa, gdpa, sdld, sole_family, ip_ext_enabled);
+     if (sr_on()) {
+-        // 多个队列族时取第一个 (游戏的图形队列一般排第一); 日志里记下, 送显队列不在这个族上会提交失败并退回原样
+-        uint32_t fam = sole_family != UINT32_MAX ? sole_family
+-                     : (ci->queueCreateInfoCount && ci->pQueueCreateInfos ? ci->pQueueCreateInfos[0].queueFamilyIndex : UINT32_MAX);
+-        if (sole_family == UINT32_MAX) RK_LOG("selfsr: %u 个队列族, 取第一个 %u", ci->queueCreateInfoCount, fam);
+-        sr_on_device(inst, phys, *pDev, gipa, gdpa, sdld, fam);
++        // Shared intermediate images require one known, compute-capable queue.
++        uint32_t fam = UINT32_MAX;
++        VkQueue queue = VK_NULL_HANDLE;
++        auto families = inst ? reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
++            gipa(inst, "vkGetPhysicalDeviceQueueFamilyProperties")) : nullptr;
++        auto get_queue = reinterpret_cast<PFN_vkGetDeviceQueue>(gdpa(*pDev, "vkGetDeviceQueue"));
++        if (sole_family != UINT32_MAX && ci->pQueueCreateInfos[0].queueCount == 1 &&
++            ci->pQueueCreateInfos[0].flags == 0 && families && get_queue) {
++            uint32_t count = 0;
++            families(phys, &count, nullptr);
++            std::vector<VkQueueFamilyProperties> properties(count);
++            if (count) families(phys, &count, properties.data());
++            if (sole_family < count && (properties[sole_family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
++                get_queue(*pDev, sole_family, 0, &queue);
++                if (queue) fam = sole_family;
++            }
++        }
++        if (!queue) RK_LOG("selfsr: no unambiguous single compute-capable queue; processing disabled");
++        sr_on_device(inst, phys, *pDev, gipa, gdpa, sdld, fam, queue);
+     }
+     return r;
+ }
+ 
+ static void npuop_destroy(VkDevice dev, const DevDisp& d);   // npuop 一节
+ static VKAPI_ATTR void VKAPI_CALL rk_DestroyDevice(VkDevice dev, const VkAllocationCallbacks* a) {
++    // An uncertain in-flight probe retains its dispatch table and device.
++    if (!sr_on_destroy_device(dev)) {
++        RK_LOG("selfsr: device teardown deferred while GPU completion is uncertain");
++        write_marker();
++        return;
++    }
+     DevDisp d;
+     { std::lock_guard<std::mutex> lk(g_mtx); auto it = g_dev.find(key(dev)); if (it == g_dev.end()) return; d = it->second; g_dev.erase(it); }
+     fd_on_destroy_device(dev);   // 先写完在途帧、收掉 framedump 自建对象 (没开时空操作)
+     ip_on_destroy_device(dev);   // 收掉 interp 自建对象 (没开时空操作)
+-    sr_on_destroy_device(dev);   // 收掉 selfsr 自建对象 (没开时空操作)
+     write_marker();  // 收尾再落一次最终计数
+     {
+         std::lock_guard<std::mutex> lk(g_mtx);
+diff --git a/vendor/hgamey/phonefarm/knobs/gray/tests/selfsr_test.cpp b/vendor/hgamey/phonefarm/knobs/gray/tests/selfsr_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/vendor/hgamey/phonefarm/knobs/gray/tests/selfsr_test.cpp
+@@ -0,0 +1,248 @@
++// These tests execute production hooks; the driver records calls without a GPU.
++#include "selfsr.cpp"
++#include <cassert>
++#include <set>
++
++namespace mock {
++static std::string mode = "native", live;
++static void* word = reinterpret_cast<void*>(0x1234);
++static void* queue_word = word;
++static void* other_queue_word = word;
++static VkDevice device = reinterpret_cast<VkDevice>(&word);
++static VkQueue queue = reinterpret_cast<VkQueue>(&queue_word);
++static VkQueue other_queue = reinterpret_cast<VkQueue>(&other_queue_word);
++template<class T> T handle(uintptr_t value) { return reinterpret_cast<T>(value); }
++static uintptr_t serial = 100;
++static std::set<uintptr_t> objects;
++template<class T> VkResult create(T* out) {
++    *out = handle<T>(++serial);
++    objects.insert(serial);
++    return VK_SUCCESS;
++}
++template<class T> void destroy(T object) {
++    assert(objects.erase(reinterpret_cast<uintptr_t>(object)) == 1);
++}
++static VkResult reset_result = VK_SUCCESS, begin_result = VK_SUCCESS, end_result = VK_SUCCESS;
++static VkResult fence_reset_result = VK_SUCCESS, submit_result = VK_SUCCESS, wait_result = VK_SUCCESS;
++static VkResult present_result = VK_SUCCESS, caps_result = VK_SUCCESS;
++static VkQueueFlags queue_flags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
++static VkFormatFeatureFlags format_flags = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
++    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
++static VkImageUsageFlags surface_usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++static uint32_t submits = 0, presents = 0, dispatches = 0, destroys = 0, copies = 0;
++static uint32_t signal_count = 99, present_waits = 99;
++static VkSemaphore game_wait = handle<VkSemaphore>(7);
++static bool fence_pending = false;
++static VkResult VKAPI_CALL loader(VkDevice, void*) { return VK_SUCCESS; }
++static void VKAPI_CALL families(VkPhysicalDevice, uint32_t* n, VkQueueFamilyProperties* p) {
++    if (p) { p[0] = {}; p[0].queueFlags = queue_flags; p[0].queueCount = 1; }
++    *n = 1;
++}
++static void VKAPI_CALL formats(VkPhysicalDevice, VkFormat, VkFormatProperties* p) {
++    *p = {}; p->optimalTilingFeatures = format_flags;
++}
++static VkResult VKAPI_CALL caps(VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR* p) {
++    *p = {}; p->supportedUsageFlags = surface_usage;
++    p->minImageExtent = {1, 1}; p->maxImageExtent = {4096, 4096};
++    return caps_result;
++}
++static void VKAPI_CALL memory_props(VkPhysicalDevice, VkPhysicalDeviceMemoryProperties* p) {
++    *p = {}; p->memoryTypeCount = 1; p->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
++}
++#define FACTORY(name, Info, Type) \
++static VkResult VKAPI_CALL name(VkDevice, const Info*, const VkAllocationCallbacks*, Type* out) { return create(out); }
++#define DESTROY(name, Type) \
++static void VKAPI_CALL name(VkDevice, Type object, const VkAllocationCallbacks*) { assert(!fence_pending); destroy(object); }
++FACTORY(create_pool, VkCommandPoolCreateInfo, VkCommandPool)
++FACTORY(create_fence, VkFenceCreateInfo, VkFence)
++FACTORY(create_sem, VkSemaphoreCreateInfo, VkSemaphore)
++FACTORY(create_sampler, VkSamplerCreateInfo, VkSampler)
++FACTORY(create_dsl, VkDescriptorSetLayoutCreateInfo, VkDescriptorSetLayout)
++FACTORY(create_dpool, VkDescriptorPoolCreateInfo, VkDescriptorPool)
++FACTORY(create_pl, VkPipelineLayoutCreateInfo, VkPipelineLayout)
++FACTORY(create_shader, VkShaderModuleCreateInfo, VkShaderModule)
++FACTORY(create_image, VkImageCreateInfo, VkImage)
++FACTORY(create_view, VkImageViewCreateInfo, VkImageView)
++FACTORY(allocate_memory, VkMemoryAllocateInfo, VkDeviceMemory)
++DESTROY(destroy_pool, VkCommandPool)
++DESTROY(destroy_fence, VkFence)
++DESTROY(destroy_sem, VkSemaphore)
++DESTROY(destroy_sampler, VkSampler)
++DESTROY(destroy_dsl, VkDescriptorSetLayout)
++DESTROY(destroy_dpool, VkDescriptorPool)
++DESTROY(destroy_pl, VkPipelineLayout)
++DESTROY(destroy_shader, VkShaderModule)
++DESTROY(destroy_pipeline, VkPipeline)
++DESTROY(destroy_image, VkImage)
++DESTROY(destroy_view, VkImageView)
++DESTROY(free_memory, VkDeviceMemory)
++#undef FACTORY
++#undef DESTROY
++static VkResult VKAPI_CALL allocate_cbs(VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer* p) {
++    *p = handle<VkCommandBuffer>(++serial); return VK_SUCCESS;
++}
++static VkResult VKAPI_CALL allocate_sets(VkDevice, const VkDescriptorSetAllocateInfo*, VkDescriptorSet* p) { return create(p); }
++static VkResult VKAPI_CALL free_sets(VkDevice, VkDescriptorPool, uint32_t n, const VkDescriptorSet* p) {
++    assert(!fence_pending); for (uint32_t i = 0; i < n; ++i) destroy(p[i]); return VK_SUCCESS;
++}
++static VkResult VKAPI_CALL pipeline(VkDevice, VkPipelineCache, uint32_t, const VkComputePipelineCreateInfo*,
++                                   const VkAllocationCallbacks*, VkPipeline* p) { return create(p); }
++static void VKAPI_CALL requirements(VkDevice, VkImage, VkMemoryRequirements* p) { *p = {4096, 16, 1}; }
++static VkResult VKAPI_CALL bind_memory(VkDevice, VkImage, VkDeviceMemory, VkDeviceSize) { return VK_SUCCESS; }
++static void VKAPI_CALL update(VkDevice, uint32_t n, const VkWriteDescriptorSet* w, uint32_t, const VkCopyDescriptorSet*) {
++    assert(n == 2 && w[0].descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
++    assert(w[0].pImageInfo->imageLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++    assert(w[1].descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE && w[1].pImageInfo->imageLayout == VK_IMAGE_LAYOUT_GENERAL);
++}
++static VkResult VKAPI_CALL images(VkDevice, VkSwapchainKHR, uint32_t* n, VkImage* p) {
++    if (p) { p[0] = handle<VkImage>(10); p[1] = handle<VkImage>(11); } *n = 2; return VK_SUCCESS;
++}
++static void VKAPI_CALL destroy_swap(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks*) {
++    assert(!fence_pending); ++destroys;
++}
++static VkResult VKAPI_CALL reset(VkCommandBuffer, VkCommandBufferResetFlags) { return reset_result; }
++static VkResult VKAPI_CALL begin(VkCommandBuffer, const VkCommandBufferBeginInfo*) { return begin_result; }
++static VkResult VKAPI_CALL end(VkCommandBuffer) { return end_result; }
++static VkResult VKAPI_CALL reset_fences(VkDevice, uint32_t, const VkFence*) { assert(!fence_pending); return fence_reset_result; }
++static VkResult VKAPI_CALL wait(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t) {
++    if (wait_result == VK_SUCCESS) fence_pending = false;
++    return wait_result;
++}
++static VkResult VKAPI_CALL submit(VkQueue q, uint32_t, const VkSubmitInfo* p, VkFence) {
++    assert(q == queue && p->waitSemaphoreCount == 1 && p->pWaitSemaphores[0] == game_wait);
++    ++submits; signal_count = p->signalSemaphoreCount;
++    if (submit_result == VK_SUCCESS) fence_pending = true;
++    return submit_result;
++}
++static VkResult VKAPI_CALL present(VkQueue, const VkPresentInfoKHR* p) {
++    ++presents; present_waits = p->waitSemaphoreCount;
++    if (mode == "native" && present_waits == 0) assert(!fence_pending);
++    return present_result;
++}
++static void VKAPI_CALL barrier(VkCommandBuffer, VkPipelineStageFlags, VkPipelineStageFlags, VkDependencyFlags,
++    uint32_t, const VkMemoryBarrier*, uint32_t, const VkBufferMemoryBarrier*, uint32_t, const VkImageMemoryBarrier*) {}
++static void VKAPI_CALL copy(VkCommandBuffer, VkImage, VkImageLayout, VkImage, VkImageLayout, uint32_t, const VkImageCopy* p) {
++    assert(p->extent.width && p->extent.height); ++copies;
++}
++static void VKAPI_CALL bind_pipeline(VkCommandBuffer, VkPipelineBindPoint, VkPipeline) {}
++static void VKAPI_CALL bind_sets(VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout, uint32_t, uint32_t,
++                                const VkDescriptorSet*, uint32_t, const uint32_t*) {}
++static void VKAPI_CALL push(VkCommandBuffer, VkPipelineLayout, VkShaderStageFlags, uint32_t, uint32_t, const void*) {}
++static void VKAPI_CALL dispatch(VkCommandBuffer, uint32_t x, uint32_t y, uint32_t z) {
++    assert(x == (mode == "native" ? 134u : 175u) && y == (mode == "native" ? 61u : 80u) && z == 1); ++dispatches;
++}
++static PFN_vkVoidFunction VKAPI_CALL gipa(VkInstance, const char* name) {
++#define FN(api, fn) if (!strcmp(name, "vk" #api)) return reinterpret_cast<PFN_vkVoidFunction>(fn)
++    FN(GetPhysicalDeviceQueueFamilyProperties, families); FN(GetPhysicalDeviceFormatProperties, formats);
++    FN(GetPhysicalDeviceSurfaceCapabilitiesKHR, caps); FN(GetPhysicalDeviceMemoryProperties, memory_props);
++    return nullptr;
++}
++static PFN_vkVoidFunction VKAPI_CALL gdpa(VkDevice, const char* name) {
++    FN(CreateCommandPool, create_pool); FN(DestroyCommandPool, destroy_pool); FN(AllocateCommandBuffers, allocate_cbs);
++    FN(CreateFence, create_fence); FN(DestroyFence, destroy_fence); FN(CreateSemaphore, create_sem); FN(DestroySemaphore, destroy_sem);
++    FN(CreateSampler, create_sampler); FN(DestroySampler, destroy_sampler); FN(CreateDescriptorSetLayout, create_dsl);
++    FN(DestroyDescriptorSetLayout, destroy_dsl); FN(CreateDescriptorPool, create_dpool); FN(DestroyDescriptorPool, destroy_dpool);
++    FN(CreatePipelineLayout, create_pl); FN(DestroyPipelineLayout, destroy_pl); FN(CreateShaderModule, create_shader);
++    FN(DestroyShaderModule, destroy_shader); FN(CreateComputePipelines, pipeline); FN(DestroyPipeline, destroy_pipeline);
++    FN(CreateImage, create_image); FN(DestroyImage, destroy_image); FN(CreateImageView, create_view); FN(DestroyImageView, destroy_view);
++    FN(AllocateMemory, allocate_memory); FN(FreeMemory, free_memory); FN(GetImageMemoryRequirements, requirements);
++    FN(BindImageMemory, bind_memory); FN(AllocateDescriptorSets, allocate_sets); FN(FreeDescriptorSets, free_sets);
++    FN(UpdateDescriptorSets, update); FN(GetSwapchainImagesKHR, images); FN(DestroySwapchainKHR, destroy_swap);
++    FN(ResetCommandBuffer, reset); FN(BeginCommandBuffer, begin); FN(EndCommandBuffer, end); FN(ResetFences, reset_fences);
++    FN(WaitForFences, wait); FN(QueueSubmit, submit); FN(CmdPipelineBarrier, barrier); FN(CmdCopyImage, copy);
++    FN(CmdBindPipeline, bind_pipeline); FN(CmdBindDescriptorSets, bind_sets); FN(CmdPushConstants, push); FN(CmdDispatch, dispatch);
++    return nullptr;
++#undef FN
++}
++}
++
++int __system_property_get(const char* name, char* value) {
++    const std::string& text = !strcmp(name, "debug.knobs.selfsr") ? mock::mode : mock::live;
++    strcpy(value, text.c_str()); return static_cast<int>(text.size());
++}
++PFN_vkVoidFunction ip_hook(const char*) { return nullptr; }
++
++int main(int argc, char** argv) {
++    assert(argc == 2);
++    using namespace mock;
++    std::string test = argv[1];
++    assert(g_dispatches == 0 && g_presents == 0);
++    if (test == "legacy") mode = "2800x1272";
++    assert(sr_init_from_props());
++    if (test == "family") queue_flags = VK_QUEUE_GRAPHICS_BIT;
++    sr_on_device(handle<VkInstance>(1), handle<VkPhysicalDevice>(2), device, gipa, gdpa, loader,
++                 test == "queue" ? UINT32_MAX : 0, test == "queue" ? VK_NULL_HANDLE : queue);
++    VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
++    ci.imageExtent = {2136, 971}; ci.imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
++    ci.imageArrayLayers = 1; ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
++    ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; ci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
++    if (test == "format") ci.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
++    if (test == "protected") ci.flags = VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR;
++    if (test == "shared") ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
++    if (test == "usage") surface_usage = 0;
++    if (test == "caps") caps_result = VK_ERROR_SURFACE_LOST_KHR;
++    auto original = ci;
++    bool patched = sr_patch_swapchain_ci(device, &ci);
++    if (test == "queue" || test == "family" || test == "format" || test == "protected" ||
++        test == "shared" || test == "usage" || test == "caps") {
++        assert(!patched && ci.imageExtent.width == 2136 && ci.imageUsage == original.imageUsage);
++        assert(sr_on_destroy_device(device)); return 0;
++    }
++    assert(patched && ci.imageExtent.width == (mode == "native" ? 2136u : 2800u));
++    auto sc = handle<VkSwapchainKHR>(20);
++    sr_on_swapchain(device, sc, &original, &ci, patched);
++    assert(g_devs.at(word)->swaps.at(sc).active);
++    uint32_t index = 0;
++    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
++    pi.swapchainCount = 1; pi.pSwapchains = &sc; pi.pImageIndices = &index;
++    pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &game_wait;
++    if (test == "multi") {
++        live = "1"; pi.swapchainCount = 2;
++        assert(sr_on_present(queue, &pi, present, 1) == VK_SUCCESS && submits == 0);
++    } else if (test == "live") {
++        assert(sr_on_present(queue, &pi, present, 1) == VK_SUCCESS && submits == 0 && present_waits == 1);
++        live = "1";
++        assert(sr_on_present(other_queue, &pi, present, 2) == VK_SUCCESS && submits == 0);
++        assert(sr_on_present(queue, &pi, present, 3) == VK_SUCCESS && submits == 1 && present_waits == 0);
++        live = "0";
++        assert(sr_on_present(queue, &pi, present, 4) == VK_SUCCESS && submits == 1 && present_waits == 1);
++    } else {
++        live = "1";
++        if (test == "reset") reset_result = VK_ERROR_OUT_OF_HOST_MEMORY;
++        if (test == "begin") begin_result = VK_ERROR_OUT_OF_HOST_MEMORY;
++        if (test == "end") end_result = VK_ERROR_OUT_OF_HOST_MEMORY;
++        if (test == "reset_fence") fence_reset_result = VK_ERROR_OUT_OF_HOST_MEMORY;
++        if (test == "submit") submit_result = VK_ERROR_DEVICE_LOST;
++        if (test == "submit_oom") submit_result = VK_ERROR_OUT_OF_DEVICE_MEMORY;
++        if (test == "fence_timeout" || test == "cleanup") wait_result = VK_TIMEOUT;
++        if (test == "present") present_result = VK_ERROR_OUT_OF_DATE_KHR;
++        VkResult result = sr_on_present(queue, &pi, present, 1);
++        if (test == "reset" || test == "begin" || test == "end" || test == "reset_fence") {
++            assert(result == VK_SUCCESS && submits == 0 && presents == 1 && present_waits == 1);
++        } else if (test == "submit" || test == "submit_oom") {
++            assert(result == submit_result && submits == 1 && presents == 0);
++            assert(sr_on_present(queue, &pi, present, 2) == submit_result && submits == 1 && presents == 0);
++            if (test == "submit") { assert(!sr_on_destroy_device(device)); return 0; }
++        } else if (test == "fence_timeout" || test == "cleanup") {
++            assert(result < 0 && submits == 1 && presents == 0 && fence_pending);
++            auto held = objects.size();
++            sr_DestroySwapchainKHR(device, sc, nullptr);
++            assert(objects.size() == held && destroys == 0 && fence_pending);
++            assert(!sr_on_destroy_device(device) && objects.size() == held);
++            wait_result = VK_SUCCESS;
++            assert(sr_on_destroy_device(device) && objects.empty() && destroys == 1);
++            return 0;
++        } else if (test == "legacy") {
++            assert(result == VK_SUCCESS && submits == 1 && signal_count == 1 && present_waits == 1);
++        } else {
++            assert(result == present_result && submits == 1 && signal_count == 0 && present_waits == 0);
++            auto marker = sr_json();
++            assert(marker.find("\"dispatches_accepted\":1") != std::string::npos);
++            assert(marker.find("\"submissions_completed\":1") != std::string::npos);
++            assert(marker.find(test == "present" ? "\"presents_succeeded\":0" : "\"presents_succeeded\":1") != std::string::npos);
++            assert(marker.find("adapted-fixture") != std::string::npos);
++        }
++    }
++    assert(sr_on_destroy_device(device));
++    assert(objects.empty());
++}
+diff --git a/vendor/hgamey/phonefarm/knobs/gray/tests/test_selfsr.py b/vendor/hgamey/phonefarm/knobs/gray/tests/test_selfsr.py
+new file mode 100644
+--- /dev/null
++++ b/vendor/hgamey/phonefarm/knobs/gray/tests/test_selfsr.py
+@@ -0,0 +1,68 @@
++"""Compile and exercise the real selfsr translation unit with a fake Vulkan driver."""
++
++import os
++import subprocess
++import tempfile
++import unittest
++from pathlib import Path
++
++
++class SelfsrTests(unittest.TestCase):
++    """Exercise real hooks against a host-only simulated Vulkan driver."""
++
++    @classmethod
++    def setUpClass(cls):
++        """Compile the real translation unit with isolated Vulkan headers."""
++        cls.root = Path(__file__).resolve().parent
++        headers = Path(os.environ.get(
++            "VULKAN_HEADERS_DIR",
++            str(Path.home() / ".cache/llm4ad/android-tools/ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"),
++        ))
++        if not (headers / "vulkan/vulkan.h").is_file():
++            raise RuntimeError("Set VULKAN_HEADERS_DIR to existing Vulkan headers")
++        cls.temp = tempfile.TemporaryDirectory(prefix="selfsr-host-")
++        cls.addClassCleanup(cls.temp.cleanup)
++        folder = Path(cls.temp.name)
++        for name in ("vulkan", "vk_video"):
++            if (headers / name).is_dir():
++                (folder / name).symlink_to(headers / name, target_is_directory=True)
++        (folder / "sys").mkdir()
++        (folder / "sys/system_properties.h").write_text(
++            '#pragma once\n#define PROP_VALUE_MAX 92\nint __system_property_get(const char*, char*);\n'
++        )
++        (folder / "selfsr_spv.h").write_text(
++            'alignas(4) static const unsigned char kSelfsrUpSpv[20]={3,2,35,7};\n'
++            'static const unsigned int kSelfsrUpSpvLen=20;\n'
++            'alignas(4) static const unsigned char kSelfsrRcasSpv[20]={3,2,35,7};\n'
++            'static const unsigned int kSelfsrRcasSpvLen=20;\n'
++        )
++        (folder / "selfsr_candidate_metadata.h").write_text(
++            'static const char kSelfsrCandidateSourceSha256[]="source-fixture";\n'
++            'static const char kSelfsrCandidateSpirvSha256[]="adapted-fixture";\n'
++            'static const char kSelfsrCandidateKind[]="diagnostic";\n'
++        )
++        cls.exe = folder / "selfsr-test"
++        compiled = subprocess.run([
++            os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror",
++            "-Wno-missing-field-initializers", "-Wno-unused-parameter", "-pthread",
++            "-I", str(folder), "-I", str(cls.root / "stubs"),
++            "-I", str(cls.root.parent / "layer"), str(cls.root / "selfsr_test.cpp"),
++            "-o", str(cls.exe),
++        ], capture_output=True, text=True)
++        if compiled.returncode:
++            raise RuntimeError(compiled.stderr)
++
++    def test_real_hooks(self):
++        """Verify queue, submission, completion and cleanup failure boundaries."""
++        for case in (
++            "native", "live", "queue", "family", "format", "usage", "caps", "protected",
++            "shared", "multi", "reset", "begin", "end", "reset_fence", "submit",
++            "submit_oom", "fence_timeout", "present", "cleanup", "legacy",
++        ):
++            with self.subTest(case=case):
++                result = subprocess.run([str(self.exe), case], capture_output=True, text=True)
++                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tools/experiments/build_present_candidate.py b/tools/experiments/build_present_candidate.py
+new file mode 100644
+--- /dev/null
++++ b/tools/experiments/build_present_candidate.py
+@@ -0,0 +1,118 @@
++"""Build an experimental present-stage layer with an exact adapted candidate."""
++
++import argparse
++import hashlib
++import json
++import os
++import shutil
++import subprocess
++from pathlib import Path
++
++
++def digest(path: Path) -> str:
++    """Return the SHA-256 digest of an artifact."""
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def main() -> None:
++    """Compile and freeze a candidate without contacting a device."""
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--source", type=Path, required=True)
++    parser.add_argument("--ndk", type=Path, required=True)
++    parser.add_argument("--phonefarm", type=Path, required=True)
++    parser.add_argument("--out", type=Path, required=True)
++    parser.add_argument("--kind", choices=("seed", "diagnostic"), required=True)
++    args = parser.parse_args()
++    ndk = args.ndk.resolve(strict=True)
++    phonefarm = args.phonefarm.resolve(strict=True)
++    out = args.out.resolve()
++    out.mkdir(parents=True, exist_ok=False)
++    source = out / "candidate.comp"
++    shutil.copyfile(args.source.resolve(strict=True), source)
++    glslc = ndk / "shader-tools/linux-x86_64/glslc"
++    cxx = ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++"
++    original = out / "original.spv"
++    subprocess.run(
++        [str(glslc), "--target-env=vulkan1.1", "-O", str(source), "-o", str(original)],
++        check=True, timeout=60,
++    )
++    adapter = out / "adaptation"
++    receipt = subprocess.check_output(
++        [str(phonefarm), "gray-artifact", "adapt-storage", "--source", str(source),
++         "--spirv", str(original), "--out", str(adapter), "--json"],
++        timeout=60,
++    )
++    (out / "adaptation-receipt.json").write_bytes(receipt)
++    adapter = Path(json.loads(receipt)["path"]).resolve(strict=True)
++    if not adapter.is_relative_to(out / "adaptation"):
++        raise ValueError("Adaptation escaped the owned output directory")
++    subprocess.run(
++        [str(phonefarm), "gray-artifact", "verify-adaptation", "--artifact", str(adapter)],
++        check=True, timeout=60, stdout=subprocess.DEVNULL,
++    )
++    adapted = adapter / "adapted.spv"
++    gray = out / "gray"
++    repository = Path(__file__).resolve().parents[2]
++    shutil.copytree(
++        repository / "vendor/hgamey/phonefarm/knobs/gray", gray,
++        ignore=shutil.ignore_patterns("out", "__pycache__"),
++    )
++    env = dict(os.environ, REFBENCH_NDK=str(ndk))
++    with (out / "native-build.log").open("w") as log:
++        # Generate the shared modules using the repository's actual build recipe.
++        subprocess.run(
++            ["bash", str(gray / "build/build_layer.sh")], env=env,
++            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180,
++        )
++        generated = gray / "build/out"
++        with (generated / "selfsr_spv.h").open("w") as header:
++            for name, binary in (
++                ("kSelfsrUpSpv", adapted),
++                ("kSelfsrRcasSpv", generated / "selfsr_rcas.spv"),
++            ):
++                data = binary.read_bytes()
++                header.write(f"alignas(4) static const unsigned char {name}[] = {{\n")
++                for start in range(0, len(data), 16):
++                    header.write(
++                        "  " + ",".join(str(value) for value in data[start:start + 16]) + ",\n"
++                    )
++                header.write(f"}};\nstatic const unsigned int {name}Len = {len(data)};\n")
++        metadata = {
++            "kSelfsrCandidateSourceSha256": digest(source),
++            "kSelfsrCandidateSpirvSha256": digest(adapted),
++            "kSelfsrCandidateKind": args.kind,
++        }
++        (generated / "selfsr_candidate_metadata.h").write_text("".join(
++            f"static const char {key}[] = {json.dumps(value)};\n"
++            for key, value in metadata.items()
++        ))
++        config = json.loads((gray / "build/layer_build.json").read_text())
++        layer = out / "libVkLayer_refknobs.so"
++        subprocess.run(
++            [str(cxx), *config["compile_flags"], "-I", str(generated), "-o", str(layer),
++             *(str(gray / "layer" / name) for name in config["sources"]),
++             *config["link_flags"]],
++            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=180,
++        )
++    frozen = [source, original, adapted, layer,
++              generated / "selfsr_spv.h", generated / "selfsr_candidate_metadata.h"]
++    frozen += sorted((gray / "layer").glob("*"))
++    frozen += sorted(generated.glob("*"))
++    frozen += [gray / "build/layer_build.json", gray / "build/build_layer.sh"]
++    manifest = {
++        "schema": "llm4ad/experimental-present-candidate@1",
++        "kind": args.kind, "scope": "same_extent_present_stage_postprocessing",
++        "original_game_upscaler_replaced": False, "device_validation": "not_run",
++        "source_sha256": digest(source), "adapted_spirv_sha256": digest(adapted),
++        "layer_sha256": digest(layer),
++        "files": {str(path.relative_to(out)): digest(path) for path in frozen if path.is_file()},
++        "compiler_version": subprocess.check_output([str(cxx), "--version"], text=True),
++        "ndk_properties": (ndk / "source.properties").read_text(),
++    }
++    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
++    print(json.dumps({"artifact": str(out), "layer_sha256": manifest["layer_sha256"],
++                      "device_validation": "not_run", "kind": args.kind}))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tools/experiments/run_present_probe.py b/tools/experiments/run_present_probe.py
+new file mode 100644
+--- /dev/null
++++ b/tools/experiments/run_present_probe.py
+@@ -0,0 +1,581 @@
++#!/usr/bin/env python3
++"""Own an experimental selfsr probe around a supported phonefarm session.
++
++The outer journal owns only selfsr properties. Inner recovery owns the layer and
++target. Recovery never replays requests or guesses the outcome of pending writes.
++This local harness is not a production phonefarm API or a device qualification.
++"""
++
++import argparse
++import fcntl
++import hashlib
++import json
++import os
++import re
++import shlex
++import shutil
++import signal
++import stat
++import subprocess
++import sys
++import time
++import uuid
++from contextlib import contextmanager, suppress
++from pathlib import Path
++
++SCHEMA = "phonefarm/experimental-present-probe@1"
++PROPERTIES = ("debug.knobs.selfsr", "debug.knobs.selfsr_live")
++SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
++STOP_ID = "present-probe-stop"
++MAX_REQUESTS = 256
++
++
++def sync_dir(path):
++    """Persist directory entries after publication."""
++    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
++    try:
++        os.fsync(fd)
++    finally:
++        os.close(fd)
++
++
++def atomic_bytes(path, data):
++    """Atomically replace a local artifact with durable bytes."""
++    temp = path.with_name(f".{path.name}-{uuid.uuid4().hex}.tmp")
++    try:
++        with temp.open("xb") as stream:
++            stream.write(data)
++            stream.flush()
++            os.fsync(stream.fileno())
++        os.replace(temp, path)
++        sync_dir(path.parent)
++    finally:
++        temp.unlink(missing_ok=True)
++
++
++def durable(path, value):
++    """Publish a JSON record without partial-reader visibility."""
++    atomic_bytes(path, (json.dumps(value, indent=2, sort_keys=True) + "\n").encode())
++
++
++def read_bytes(path, limit=1024 * 1024):
++    """Read one bounded regular file without following its final symlink."""
++    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
++    with os.fdopen(fd, "rb") as stream:
++        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
++            raise ValueError(f"not a regular file: {path}")
++        data = stream.read(limit + 1)
++    if len(data) > limit:
++        raise ValueError(f"file exceeds limit: {path}")
++    return data
++
++
++def read_json(path):
++    """Read a bounded JSON record."""
++    return json.loads(read_bytes(path))
++
++
++@contextmanager
++def lock(path, blocking=True):
++    """Hold a host-only flock for an owner or mailbox transaction."""
++    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
++    with os.fdopen(fd, "a+") as stream:
++        fcntl.flock(stream, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
++        yield
++
++
++def owner_live(path):
++    """Check a host owner lock without trusting a recorded PID."""
++    if not path.exists():
++        return False
++    try:
++        with lock(path, blocking=False):
++            return False
++    except BlockingIOError:
++        return True
++
++
++def load_state(out):
++    """Validate the original probe context before using it."""
++    value = read_json(out / "probe.json")
++    if (value.get("schema") != SCHEMA or value.get("out") != str(out)
++            or not isinstance(value.get("serial"), str)
++            or not value["serial"] or value.get("transport") not in ("usb", "wireless")
++            or value.get("duration") not in range(1, 601)
++            or not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+", value.get("package", ""))):
++        raise ValueError("invalid or relocated probe context")
++    for name in ("requests", "started", "results", "commands", "inner"):
++        if (out / name).is_symlink():
++            raise ValueError(f"symlink in probe context: {name}")
++    return value
++
++
++def inherited_fds(serial):
++    """Require the original phonefarm device scope and open lock descriptors."""
++    fds = tuple(int(part) for part in os.environ["PF_LOCK_FDS"].split(","))
++    if not fds or any(fd < 3 for fd in fds):
++        raise ValueError("invalid inherited lock descriptors")
++    for fd in fds:
++        os.fstat(fd)
++    scope = json.loads(os.environ["PF_LOCK_SCOPE"])
++    if scope.get("key") is not None and scope.get("serial") != serial:
++        raise ValueError("inherited lease serial differs from explicit target")
++    return fds
++
++
++class Transport:
++    """Run bounded commands through inherited phonefarm transport launchers."""
++
++    def __init__(self, out, state):
++        """Initialize the inherited transport environment for this probe."""
++        self.out = out
++        self.fds = inherited_fds(state["serial"])
++        self.env = dict(os.environ, ADB_SERVER_SOCKET=state["adb_server_socket"])
++        if not self.env.get("PF_TRANSPORT_ADB") or not self.env.get("ADB_BIN"):
++            raise ValueError("phonefarm lease transport launcher is required")
++        self.adb = self.env["ADB_BIN"]
++
++    def call(self, argv, timeout=30, input_text=None):
++        """Keep original output and command outcome, including timeouts."""
++        stem = self.out / "commands" / uuid.uuid4().hex
++        record = {"argv": argv, "started_at": time.time(), "timeout": timeout}
++        durable(stem.with_suffix(".json"), record)
++        with stem.with_suffix(".stdout").open("xb") as stdout, stem.with_suffix(".stderr").open("xb") as stderr:
++            child = subprocess.Popen(argv, stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
++                                     stdout=stdout, stderr=stderr, env=self.env,
++                                     pass_fds=self.fds, start_new_session=True)
++            try:
++                child.communicate(input_text.encode() if input_text is not None else None, timeout=timeout)
++            except subprocess.TimeoutExpired:
++                with suppress(ProcessLookupError):
++                    os.killpg(child.pid, signal.SIGKILL)
++                child.wait(timeout=5)
++                record.update(status="unknown", error="command timeout; remote completion unknown")
++                durable(stem.with_suffix(".json"), record)
++                raise RuntimeError(f"command timeout; evidence: {stem.name}") from None
++        record.update(returncode=child.returncode, finished_at=time.time())
++        durable(stem.with_suffix(".json"), record)
++        if child.returncode:
++            raise RuntimeError(f"command exit {child.returncode}; evidence: {stem.name}")
++        return read_bytes(stem.with_suffix(".stdout"), 8 * 1024 * 1024).decode()
++
++    def spawn(self, argv):
++        """Launch the finite inner owner with the inherited task descriptors."""
++        with (self.out / "inner.stdout").open("ab") as stdout, (self.out / "inner.stderr").open("ab") as stderr:
++            return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
++                                    env=self.env, pass_fds=self.fds)
++
++
++def publish(out, request_id, action):
++    """Publish an idempotent host-only request; never invoke a subprocess."""
++    if not SAFE_ID.fullmatch(request_id) or action not in ("enable", "disable", "stop"):
++        raise ValueError("invalid request ID or action")
++    with lock(out / "publisher.lock"):
++        state = load_state(out)
++        path = out / "requests" / f"{request_id}.json"
++        if path.exists():
++            prior = read_json(path)
++            if prior["action"] != action:
++                raise ValueError("request ID already has different content")
++            result = out / "results" / path.name
++            return read_json(result) if result.exists() else prior
++        if not state["accepting"] or not owner_live(out / "owner.lock"):
++            raise ValueError("probe owner is not accepting requests")
++        requests = [read_json(p) for p in (out / "requests").glob("*.json")]
++        if any(r["action"] == "stop" for r in requests):
++            raise ValueError("stop is already queued")
++        if len(requests) >= MAX_REQUESTS + (action == "stop"):
++            raise ValueError("request limit reached")
++        request = {"request_id": request_id, "action": action, "status": "accepted",
++                   "sequence": max((r["sequence"] for r in requests), default=0) + 1,
++                   "requested_at": time.time()}
++        durable(path, request)
++        return request
++
++
++class Probe:
++    """Serialize the probe's two property obligations and inner-session lifecycle."""
++
++    def __init__(self, out, transport=None):
++        """Load the probe context and initialize its finite owner lifetime."""
++        self.out = out
++        self.state = load_state(out)
++        self.transport = transport if transport is not None else Transport(out, self.state)
++        self.child = None
++        self.cancelled = False
++        self.deadline = time.monotonic() + self.state["duration"]
++
++    def save(self):
++        """Persist the current outer recovery obligations."""
++        durable(self.out / "probe.json", self.state)
++
++    def shell(self, command):
++        """Address exactly the frozen serial through the inherited launcher."""
++        return self.transport.call([self.transport.adb, "-s", self.state["serial"], "shell", command])
++
++    def identity(self):
++        """Verify physical identity and boot before any property transition."""
++        physical = self.shell("getprop ro.serialno").strip()
++        boot = self.shell("cat /proc/sys/kernel/random/boot_id").strip()
++        if physical != self.state["expected_physical_serial"] or not re.fullmatch(r"[A-Fa-f0-9-]{16,64}", boot):
++            raise ValueError("physical serial or boot identity mismatch")
++        if self.state["boot_id"] is not None and boot != self.state["boot_id"]:
++            raise ValueError("device boot changed; original values cannot be restored automatically")
++        return physical, boot
++
++    def property(self, name):
++        """Read one supported property without normalizing its original value."""
++        if name not in PROPERTIES:
++            raise ValueError("unsupported property")
++        value = self.shell(f"getprop {name}").removesuffix("\n")
++        if len(value.encode()) > 91 or any(c in value for c in "\r\n\0"):
++            raise ValueError("invalid property readback")
++        return value
++
++    def write_property(self, name, value, purpose):
++        """Persist intent before setprop and clear it only after verified readback."""
++        if self.state["pending_write"] is not None:
++            raise ValueError("unknown property write requires independent reconciliation; no replay")
++        if name not in PROPERTIES or len(value.encode()) > 91 or any(c in value for c in "\r\n\0"):
++            raise ValueError("invalid property write")
++        self.state.update(restore_required=True, pending_write={"property": name, "value": value,
++                          "purpose": purpose, "at": time.time()})
++        self.save()
++        self.shell(f"setprop {name} {shlex.quote(value)}")
++        if self.property(name) != value:
++            raise ValueError(f"property readback differs: {name}")
++        pending = self.state["pending_write"]
++        self.state["pending_write"] = None
++        try:
++            self.save()
++        except OSError:
++            self.state["pending_write"] = pending
++            raise
++
++    def prepare(self):
++        """Freeze both original values before the first mutation."""
++        physical, boot = self.identity()
++        originals = {name: self.property(name) for name in PROPERTIES}
++        self.state.update(physical_serial=physical, boot_id=boot, originals=originals, phase="prepared")
++        self.save()
++        self.write_property(PROPERTIES[1], "0", "initial_live_off")
++        self.write_property(PROPERTIES[0], "native", "initial_native")
++
++    def descriptor(self):
++        """Read only the inner descriptor bound to this probe's directory."""
++        d = read_json(self.out / "inner" / "session-control.json")
++        sid = d.get("session_id", "")
++        if (d.get("schema") != "phonefarm/gray-control@1" or d.get("producer") != "phonefarm"
++                or d.get("serial") != self.state["serial"] or d.get("package") != self.state["package"]
++                or not re.fullmatch(r"gray-session-[0-9]+-[0-9]+", sid)
++                or d.get("session_path") != sid or (self.out / "inner" / sid).is_symlink()
++                or self.state["inner_id"] not in (None, sid)):
++            raise ValueError("inner descriptor identity mismatch")
++        if self.state["inner_id"] is None:
++            self.state["inner_id"] = sid
++            self.save()
++        return d
++
++    def start_inner(self):
++        """Launch one passdump owner using only the frozen SO snapshot."""
++        so = self.out / "candidate.so"
++        if hashlib.sha256(read_bytes(so, 128 * 1024 * 1024)).hexdigest() != self.state["so_sha256"]:
++            raise ValueError("frozen SO changed")
++        self.state["inner_launch"] = "pending"
++        self.save()
++        argv = [self.state["phonefarm"], "gray-layer", "session", "--mode", "passdump",
++                "--serial", self.state["serial"], "--package", self.state["package"],
++                "--so", str(so), "--out", str(self.out / "inner"),
++                "--max-seconds", str(self.state["duration"]), "--actor-id", "present-probe",
++                "--power-policy", "observe", "--json"]
++        try:
++            self.child = self.transport.spawn(argv)
++        except OSError:
++            self.state["inner_launch"] = "not_started"
++            self.save()
++            raise
++        self.state["inner_launch"] = "started"
++        self.save()
++
++    def result(self, request, status, **fields):
++        """Keep each request's final receipt immutable."""
++        path = self.out / "results" / f"{request['request_id']}.json"
++        if not path.exists():
++            durable(path, dict(request, status=status, finished_at=time.time(), **fields))
++
++    def process_requests(self):
++        """Execute each durable request once, with stop priority at boundaries."""
++        requests = sorted((read_json(p) for p in (self.out / "requests").glob("*.json")),
++                          key=lambda r: (r["action"] != "stop", r["sequence"]))
++        for request in requests:
++            rid = request["request_id"]
++            if not SAFE_ID.fullmatch(rid) or request["action"] not in ("enable", "disable", "stop"):
++                raise ValueError("invalid persisted request")
++            if (self.out / "results" / f"{rid}.json").exists():
++                continue
++            started = self.out / "started" / f"{rid}.json"
++            if started.exists():
++                raise ValueError("started request lacks result; refusing replay")
++            durable(started, dict(request, status="started", started_at=time.time()))
++            if request["action"] == "stop":
++                self.state["stop_request"] = request
++                self.save()
++                return True
++            try:
++                if self.descriptor()["phase"] != "ready":
++                    raise ValueError("inner session is not ready")
++                self.identity()
++                value = "1" if request["action"] == "enable" else "0"
++                self.write_property(PROPERTIES[1], value, rid)
++                self.result(request, "completed", live_property=value, evidence_scope="property_readback_only")
++            except Exception as error:
++                self.result(request, "unknown" if self.state["pending_write"] else "failed", error=str(error))
++                raise
++        return False
++
++    def serve(self):
++        """Accept bounded requests until stop, owner cancellation, or deadline."""
++        while not self.cancelled and time.monotonic() < self.deadline:
++            if self.child.poll() is not None:
++                d = self.descriptor()
++                if d["phase"] == "closed" and d["recovery"]["status"] == "reported_complete":
++                    return
++                raise RuntimeError("inner owner exited before verified recovery")
++            try:
++                d = self.descriptor()
++            except FileNotFoundError:
++                time.sleep(0.1)
++                continue
++            if d["phase"] == "ready":
++                if not self.state["accepting"]:
++                    self.state.update(accepting=True, phase="ready")
++                    self.save()
++                if self.process_requests():
++                    return
++            elif d["phase"] in ("closed", "recovery_required"):
++                raise RuntimeError(f"inner session ended: {d['phase']}")
++            time.sleep(0.1)
++
++    def finish_inner(self, recover):
++        """Stop or recover the original inner context without remounting it."""
++        if self.state["inner_launch"] == "not_started":
++            return
++        d = self.descriptor()
++        live = owner_live(self.out / "inner" / "gray-control" / "owner.lock")
++        if live:
++            request = {"schema": "phonefarm/gray-control-action@1", "request_id": STOP_ID,
++                       "session_id": d["session_id"], "actor_id": "present-probe",
++                       "control_epoch": d["controller"]["epoch"], "action": "stop", "params": {}}
++            saved = self.out / "inner-stop.json"
++            if saved.exists():
++                request = read_json(saved)
++            else:
++                durable(saved, request)
++            self.transport.call([self.state["phonefarm"], "gray-layer", "session-action",
++                                 "--out", str(self.out / "inner"), "--request", "-", "--json"],
++                                input_text=json.dumps(request))
++            deadline = time.monotonic() + 180
++            while owner_live(self.out / "inner" / "gray-control" / "owner.lock"):
++                if time.monotonic() >= deadline:
++                    raise RuntimeError("inner stop remains incomplete; recovery required")
++                time.sleep(0.1)
++            d = self.descriptor()
++        if d["phase"] != "closed" or d["recovery"]["status"] != "reported_complete":
++            if not recover:
++                raise RuntimeError("inner recovery is not reported_complete")
++            self.transport.call([self.state["phonefarm"], "gray-layer", "session-recover",
++                                 "--session", str(self.out / "inner" / d["session_path"]),
++                                 "--serial", self.state["serial"], "--json"], timeout=300)
++            d = self.descriptor()
++        if d["phase"] != "closed" or d["recovery"]["status"] != "reported_complete":
++            raise RuntimeError("inner recovery is not reported_complete")
++        if self.child is not None:
++            self.child.wait(timeout=5)
++        self.state["inner_recovery"] = d["recovery"]
++        self.save()
++
++    def cleanup(self, recover=False):
++        """Restore originals only after inner recovery and target absence."""
++        with lock(self.out / "publisher.lock"):
++            self.state.update(accepting=False, phase="restoring")
++            self.save()
++        if self.state["restore_required"] or self.state["inner_launch"] != "not_started":
++            self.identity()
++        self.finish_inner(recover)
++        if self.state["pending_write"] is not None:
++            raise ValueError("unknown property write requires independent reconciliation; originals retained")
++        if self.state["restore_required"]:
++            self.identity()
++            names = self.shell("su -c 'ps -A -o NAME'").splitlines()
++            if not names or names[0].strip() != "NAME" or any(len(n.split()) != 1 for n in names[1:]):
++                raise ValueError("invalid target process readback")
++            package = self.state["package"]
++            if any(n.strip() == package or n.strip().startswith(package + ":") for n in names[1:]):
++                raise ValueError("target is still alive; originals retained")
++            for name in PROPERTIES:
++                if name in self.state["restored"]:
++                    if self.property(name) != self.state["originals"][name]:
++                        raise ValueError("restored property changed outside this probe")
++                else:
++                    self.write_property(name, self.state["originals"][name], "restore")
++                    self.state["restored"].append(name)
++                    self.save()
++        self.state.update(restore_required=False, phase="closed", recovery_status="reported_complete")
++        self.save()
++
++    def run(self, recover=False):
++        """Preserve failures separately from cleanup success."""
++        if self.state["phase"] == "closed":
++            return 0
++        if recover and self.state["pending_write"] is not None:
++            self.state.update(phase="recovery_required", accepting=False, recovery_status="required")
++            self.state["failures"].append({
++                "at": time.time(),
++                "error": "unknown property write; independent reconciliation required, no replay",
++            })
++            self.save()
++            return 2
++        failed = False
++        try:
++            if recover:
++                self.identity()
++            else:
++                self.prepare()
++                if not self.cancelled and time.monotonic() < self.deadline:
++                    self.start_inner()
++                    self.serve()
++        except Exception as error:  # noqa: BLE001 - Preserve all failures before owned cleanup.
++            failed = True
++            self.state["failures"].append({"at": time.time(), "error": str(error)})
++            self.save()
++        try:
++            self.cleanup(recover=recover)
++        except Exception as error:  # noqa: BLE001 - Retain recovery obligations on any failure.
++            failed = True
++            self.state.update(phase="recovery_required", accepting=False, recovery_status="required")
++            self.state["failures"].append({"at": time.time(), "error": str(error)})
++            self.save()
++        for path in (self.out / "requests").glob("*.json"):
++            request = read_json(path)
++            if (self.out / "started" / path.name).exists():
++                done = request["action"] == "stop" and self.state["phase"] == "closed"
++                self.result(request, "completed" if done else "unknown")
++            else:
++                self.result(request, "not_executed")
++        return 2 if failed else 0
++
++
++def initialize(args):
++    """Create a new output context and freeze caller-selected candidate bytes."""
++    out = Path(args.out).absolute()
++    data = read_bytes(Path(args.so), 128 * 1024 * 1024)
++    if not data:
++        raise ValueError("custom SO is empty")
++    receipt = read_bytes(Path(args.candidate_receipt)) if args.candidate_receipt else None
++    out.mkdir(parents=True, exist_ok=False)
++    out = out.resolve()
++    for name in ("requests", "started", "results", "commands"):
++        (out / name).mkdir()
++    atomic_bytes(out / "candidate.so", data)
++    if receipt is not None:
++        atomic_bytes(out / "candidate-receipt.json", receipt)
++    value = {"schema": SCHEMA, "out": str(out), "serial": args.serial,
++             "expected_physical_serial": args.expected_physical_serial, "physical_serial": None,
++             "boot_id": None, "transport": args.transport, "adb_server_socket": args.adb_server_socket,
++             "package": args.package, "duration": args.duration, "phonefarm": args.phonefarm,
++             "so_source": str(Path(args.so).absolute()), "so_sha256": hashlib.sha256(data).hexdigest(),
++             "candidate_receipt_source": str(Path(args.candidate_receipt).absolute()) if receipt is not None else None,
++             "candidate_receipt_sha256": hashlib.sha256(receipt).hexdigest() if receipt is not None else None,
++             "phase": "new", "accepting": False, "originals": {}, "pending_write": None,
++             "restore_required": False, "restored": [], "inner_launch": "not_started", "inner_id": None,
++             "inner_recovery": None, "stop_request": None, "failures": [], "created_at": time.time(),
++             "recovery_status": "not_started", "evidence_scope": "experimental_property_lifecycle",
++             "game_state_restored": False, "device_qualification": "not_claimed"}
++    durable(out / "probe.json", value)
++    return out
++
++
++def parser():
++    """Build the small experimental command interface."""
++    cli = argparse.ArgumentParser(description=__doc__)
++    sub = cli.add_subparsers(dest="command", required=True)
++    start = sub.add_parser("start")
++    start.add_argument("--serial", required=True)
++    start.add_argument("--expected-physical-serial", required=True)
++    start.add_argument("--transport", choices=("usb", "wireless"), required=True)
++    start.add_argument("--adb-server-socket", default=os.environ.get("ADB_SERVER_SOCKET", "tcp:127.0.0.1:5037"))
++    start.add_argument("--so", required=True)
++    start.add_argument("--candidate-receipt")
++    start.add_argument("--duration", type=int, choices=range(1, 601), required=True, metavar="1..600")
++    start.add_argument("--package", default="com.miHoYo.Yuanshen")
++    start.add_argument("--phonefarm", default=os.environ.get("PHONEFARM_BIN", "phonefarm"))
++    recovery = sub.add_parser("recover")
++    for item in (start, recovery):
++        item.add_argument("--out", required=True)
++        item.add_argument("--leased", action="store_true", help=argparse.SUPPRESS)
++    request = sub.add_parser("publish")
++    request.add_argument("--out", required=True)
++    request.add_argument("--request-id", required=True)
++    request.add_argument("--action", choices=("enable", "disable", "stop"), required=True)
++    status = sub.add_parser("status")
++    status.add_argument("--out", required=True)
++    return cli
++
++
++def main(argv=None):
++    """Reexec owners under phonefarm lease; publishers stay entirely host-only."""
++    argv = list(sys.argv[1:] if argv is None else argv)
++    args = parser().parse_args(argv)
++    out = Path(args.out).resolve()
++    try:
++        if args.command == "publish":
++            print(json.dumps(publish(out, args.request_id, args.action)))
++            return 0
++        if args.command == "status":
++            print(json.dumps(load_state(out)))
++            return 0
++        if args.command == "start":
++            if not args.serial or not args.expected_physical_serial:
++                raise ValueError("explicit nonempty serials required")
++            if args.transport == "usb" and args.serial != args.expected_physical_serial:
++                raise ValueError("USB transport requires the expected physical serial as its explicit serial")
++            if not re.fullmatch(r"[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+", args.package):
++                raise ValueError("invalid package")
++            phonefarm, serial = args.phonefarm, args.serial
++        else:
++            state = load_state(out)
++            phonefarm, serial = state["phonefarm"], state["serial"]
++        if not args.leased:
++            executable = shutil.which(phonefarm)
++            if executable is None:
++                raise ValueError("phonefarm executable not found")
++            for fd in os.environ.get("PF_LOCK_FDS", "").split(","):
++                if fd:
++                    os.set_inheritable(int(fd), True)
++            os.execvpe(executable, [executable, "lease", "--serial", serial, "--",
++                       sys.executable, str(Path(__file__).resolve()), *argv, "--leased"], os.environ)
++        inherited_fds(serial)
++        if args.command == "start":
++            args.phonefarm = shutil.which(phonefarm) or phonefarm
++            out = initialize(args)
++        with lock(out / "owner.lock", blocking=False):
++            probe = Probe(out)
++            prior = {}
++            def stop(_signum, _frame):
++                probe.cancelled = True
++            try:
++                for signum in (signal.SIGINT, signal.SIGTERM):
++                    prior[signum] = signal.signal(signum, stop)
++                code = probe.run(recover=args.command == "recover")
++            finally:
++                for signum, handler in prior.items():
++                    signal.signal(signum, handler)
++            print(json.dumps(probe.state))
++            return code
++    except (OSError, ValueError, KeyError, RuntimeError) as error:
++        print(json.dumps({"status": "error", "error": str(error), "out": str(out)}), file=sys.stderr)
++        return 2
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/test_present_probe.py b/tests/test_present_probe.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_present_probe.py
+@@ -0,0 +1,256 @@
++#!/usr/bin/env python3
++"""Unit tests with fake transports and evidence; no device operations or claims."""
++
++import argparse
++import importlib.util
++import os
++import shlex
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import Mock, patch
++
++SPEC = importlib.util.spec_from_file_location(
++    "present_probe", Path(__file__).parents[1] / "tools/experiments/run_present_probe.py"
++)
++probe = importlib.util.module_from_spec(SPEC)
++SPEC.loader.exec_module(probe)
++
++
++class FakeTransport:
++    """Model property readbacks and inner recovery using local synthetic records."""
++
++    adb = "/fake/lease/adb"
++
++    def __init__(self, out):
++        """Initialize synthetic properties and failure controls."""
++        self.out = out
++        self.calls = []
++        self.properties = dict(zip(probe.PROPERTIES, ("", "original live"), strict=False))
++        self.boot = "12345678-1234-1234-1234-123456789abc"
++        self.physical = "fake-usb"
++        self.target_alive = False
++        self.fail_write = False
++        self.fail_recover = False
++
++    def call(self, argv, **kwargs):
++        """Model the supported commands without starting a subprocess."""
++        self.calls.append((argv, kwargs))
++        if "session-recover" in argv:
++            if self.fail_recover:
++                raise RuntimeError("synthetic native recovery refusal")
++            descriptor = probe.read_json(self.out / "inner/session-control.json")
++            descriptor.update(phase="closed", recovery={"status": "reported_complete"})
++            probe.durable(self.out / "inner/session-control.json", descriptor)
++            return "{}"
++        if argv[:4] != [self.adb, "-s", "fake-usb", "shell"]:
++            raise AssertionError(f"unexpected fake command: {argv}")
++        command = shlex.split(argv[4])
++        if command == ["getprop", "ro.serialno"]:
++            return self.physical + "\n"
++        if command == ["cat", "/proc/sys/kernel/random/boot_id"]:
++            return self.boot + "\n"
++        if command[:1] == ["getprop"]:
++            return self.properties[command[1]] + "\n"
++        if command[:1] == ["setprop"]:
++            state = probe.load_state(self.out)
++            assert state["pending_write"]["property"] == command[1]
++            assert state["pending_write"]["value"] == command[2]
++            assert state["restore_required"] is True
++            if self.fail_write:
++                raise RuntimeError("synthetic write timeout")
++            self.properties[command[1]] = command[2]
++            return ""
++        if command == ["su", "-c", "ps -A -o NAME"]:
++            return "NAME\ninit\n" + ("com.test.game:render\n" if self.target_alive else "")
++        raise AssertionError(f"unexpected fake shell: {command}")
++
++    def spawn(self, argv):
++        """Reject unexpected inner launches in recovery unit tests."""
++        raise AssertionError(f"unexpected inner launch: {argv}")
++
++    def writes(self):
++        """Return the recorded synthetic property writes."""
++        return [argv for argv, _ in self.calls if len(argv) > 4 and argv[4].startswith("setprop ")]
++
++
++class PresentProbeTests(unittest.TestCase):
++    """Check only host lifecycle and recovery boundaries with fake evidence."""
++
++    def setUp(self):
++        """Create an isolated probe context and fake transport."""
++        self.tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.tmp.cleanup)
++        root = Path(self.tmp.name)
++        so = root / "fixture.so"
++        so.write_bytes(b"synthetic candidate, not an Android library")
++        args = argparse.Namespace(out=str(root / "probe"), so=str(so), candidate_receipt=None,
++                                  serial="fake-usb", expected_physical_serial="fake-usb", transport="usb",
++                                  adb_server_socket="tcp:127.0.0.1:5037", package="com.test.game",
++                                  duration=60, phonefarm="/fake/phonefarm")
++        self.out = probe.initialize(args)
++        self.transport = FakeTransport(self.out)
++        self.owner = probe.Probe(self.out, self.transport)
++
++    def inner(self, complete=True):
++        """Publish synthetic inner-session recovery evidence."""
++        (self.out / "inner").mkdir(exist_ok=True)
++        sid = "gray-session-123-456"
++        probe.durable(self.out / "inner/session-control.json", {
++            "schema": "phonefarm/gray-control@1", "producer": "phonefarm", "serial": "fake-usb",
++            "package": "com.test.game", "session_id": sid, "session_path": sid,
++            "phase": "closed" if complete else "recovery_required", "controller": {"epoch": 1},
++            "recovery": {"status": "reported_complete" if complete else "required"},
++        })
++        self.owner.state["inner_launch"] = "started"
++        self.owner.save()
++
++    def test_normal_cleanup_restores_exact_originals_after_inner_and_absence(self):
++        """Require inner completion and target absence before restoring originals."""
++        self.owner.prepare()
++        self.assertEqual(self.transport.properties, dict(zip(probe.PROPERTIES, ("native", "0"), strict=False)))
++        self.inner()
++        self.owner.cleanup()
++        self.assertEqual(self.transport.properties, dict(zip(probe.PROPERTIES, ("", "original live"), strict=False)))
++        self.assertEqual(self.owner.state["phase"], "closed")
++        self.assertIsNone(self.owner.state["pending_write"])
++        self.assertFalse(self.owner.state["restore_required"])
++        calls = [argv[-1] for argv, _ in self.transport.calls]
++        self.assertLess(calls.index("su -c 'ps -A -o NAME'"), calls.index("setprop debug.knobs.selfsr ''"))
++
++    def test_unknown_write_is_durable_and_recovery_does_not_replay(self):
++        """Retain unknown writes and refuse to replay them during recovery."""
++        self.transport.fail_write = True
++        with self.assertRaisesRegex(RuntimeError, "write timeout"):
++            self.owner.prepare()
++        self.assertIsNotNone(probe.load_state(self.out)["pending_write"])
++        self.transport.calls.clear()
++        recovered = probe.Probe(self.out, self.transport)
++        self.assertEqual(recovered.run(recover=True), 2)
++        self.assertEqual(self.transport.calls, [])
++        self.assertEqual(recovered.state["phase"], "recovery_required")
++
++    def test_inner_recovery_failure_prevents_outer_restoration(self):
++        """Keep outer obligations when native recovery fails."""
++        self.owner.prepare()
++        self.inner(complete=False)
++        self.transport.fail_recover = True
++        self.transport.calls.clear()
++        self.assertEqual(self.owner.run(recover=True), 2)
++        self.assertEqual(self.transport.writes(), [])
++        self.assertTrue(self.owner.state["restore_required"])
++
++    def test_recover_uses_original_inner_context_and_preserves_old_failure(self):
++        """Recover the original inner context without erasing prior failures."""
++        self.owner.prepare()
++        self.inner(complete=False)
++        self.owner.state["failures"].append({"error": "original failure"})
++        self.owner.save()
++        self.assertEqual(self.owner.run(recover=True), 0)
++        command = next(argv for argv, _ in self.transport.calls if "session-recover" in argv)
++        self.assertIn(str(self.out / "inner/gray-session-123-456"), command)
++        self.assertEqual(self.owner.state["failures"][0]["error"], "original failure")
++        self.assertEqual(self.owner.state["phase"], "closed")
++
++    def test_changed_boot_or_physical_identity_prevents_cleanup_writes(self):
++        """Reject cleanup mutations after boot or physical identity changes."""
++        self.owner.prepare()
++        self.inner(complete=False)
++        self.transport.calls.clear()
++        self.transport.boot = "ffffffff-1234-1234-1234-123456789abc"
++        self.assertEqual(self.owner.run(recover=True), 2)
++        self.assertEqual(self.transport.writes(), [])
++        self.assertFalse(any("session-recover" in argv for argv, _ in self.transport.calls))
++        self.transport.boot = self.owner.state["boot_id"]
++        self.transport.physical = "wrong-phone"
++        self.transport.calls.clear()
++        self.assertEqual(self.owner.run(recover=True), 2)
++        self.assertEqual(self.transport.writes(), [])
++
++    def test_target_child_process_prevents_original_property_restoration(self):
++        """Require target child processes to exit before property restoration."""
++        self.owner.prepare()
++        self.inner()
++        self.transport.target_alive = True
++        self.transport.calls.clear()
++        with self.assertRaisesRegex(ValueError, "target is still alive"):
++            self.owner.cleanup()
++        self.assertEqual(self.transport.writes(), [])
++
++    def test_host_publish_is_idempotent_without_subprocesses(self):
++        """Publish duplicate requests idempotently without running commands."""
++        self.owner.state["accepting"] = True
++        self.owner.save()
++        with (
++            probe.lock(self.out / "owner.lock"),
++            patch.object(probe.subprocess, "Popen", side_effect=AssertionError("subprocess forbidden")),
++        ):
++            first = probe.publish(self.out, "enable-1", "enable")
++            self.assertEqual(probe.publish(self.out, "enable-1", "enable"), first)
++            with self.assertRaisesRegex(ValueError, "different content"):
++                probe.publish(self.out, "enable-1", "disable")
++
++    def test_started_request_is_never_replayed(self):
++        """Reject a previously started request without a final receipt."""
++        request = {"request_id": "unknown-1", "action": "enable", "sequence": 1}
++        probe.durable(self.out / "requests/unknown-1.json", request)
++        probe.durable(self.out / "started/unknown-1.json", request)
++        with self.assertRaisesRegex(ValueError, "refusing replay"):
++            self.owner.process_requests()
++        self.assertEqual(self.transport.calls, [])
++
++    def test_getprop_keeps_original_spaces_and_rejects_extra_newlines(self):
++        """Preserve original spaces while rejecting malformed property output."""
++        self.transport.properties[probe.PROPERTIES[0]] = " original "
++        self.assertEqual(self.owner.property(probe.PROPERTIES[0]), " original ")
++        self.transport.properties[probe.PROPERTIES[0]] = "bad\n"
++        with self.assertRaisesRegex(ValueError, "invalid property"):
++            self.owner.property(probe.PROPERTIES[0])
++
++    def test_inner_launch_and_transport_preserve_fds_and_socket(self):
++        """Pass the inherited lease descriptors and ADB endpoint to children."""
++        env = {"ADB_BIN": "/fake/lease/adb", "PF_TRANSPORT_ADB": "/fake/real/adb",
++               "ADB_SERVER_SOCKET": "tcp:127.0.0.1:5037", "ANDROID_ADB_SERVER_PORT": "5037"}
++        child = Mock(returncode=0)
++        with (
++            patch.dict(os.environ, env),
++            patch.object(probe, "inherited_fds", return_value=(17, 18)),
++            patch.object(probe.subprocess, "Popen", return_value=child) as popen,
++        ):
++            transport = probe.Transport(self.out, self.owner.state)
++            transport.call([transport.adb, "-s", "fake-usb", "shell", "getprop ro.serialno"])
++            self.assertEqual(popen.call_args.kwargs["pass_fds"], (17, 18))
++            self.assertEqual(popen.call_args.kwargs["env"]["ADB_SERVER_SOCKET"], env["ADB_SERVER_SOCKET"])
++            self.assertEqual(popen.call_args.kwargs["env"]["ANDROID_ADB_SERVER_PORT"], "5037")
++            self.owner.transport = transport
++            self.owner.start_inner()
++            self.assertEqual(popen.call_args.kwargs["pass_fds"], (17, 18))
++            argv = popen.call_args.args[0]
++            self.assertIn("passdump", argv)
++            self.assertIn(str(self.out / "candidate.so"), argv)
++
++    def test_lease_reexec_inherits_external_socket_and_port(self):
++        """Preserve the externally selected ADB server when reexecuting the lease."""
++        class ReexecError(Exception):
++            pass
++        args = ["start", "--out", str(self.out / "unused"), "--so", str(self.out / "candidate.so"),
++                "--serial", "fake-usb", "--expected-physical-serial", "fake-usb",
++                "--transport", "usb", "--duration", "60"]
++        with (
++            patch.dict(os.environ, {
++                "ADB_SERVER_SOCKET": "tcp:127.0.0.1:5037",
++                "ANDROID_ADB_SERVER_PORT": "5037",
++                "PF_LOCK_FDS": "",
++            }),
++            patch.object(probe.shutil, "which", return_value="/fake/phonefarm"),
++            patch.object(probe.os, "execvpe", side_effect=ReexecError) as execute,
++        ):
++            with self.assertRaises(ReexecError):
++                probe.main(args)
++            self.assertEqual(execute.call_args.args[2]["ADB_SERVER_SOCKET"], "tcp:127.0.0.1:5037")
++            self.assertEqual(execute.call_args.args[2]["ANDROID_ADB_SERVER_PORT"], "5037")
++            self.assertEqual(execute.call_args.args[1][1:4], ["lease", "--serial", "fake-usb"])
++
++
++if __name__ == "__main__":
++    unittest.main()

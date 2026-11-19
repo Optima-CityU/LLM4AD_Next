@@ -1,0 +1,30 @@
+
+-------------------------------[net traffic]-------------------------------
+
+Received Bytes:0
+Sent Bytes:0
+
+-------------------------------[net]-------------------------------
+
+
+cmd is: netstat -nW
+
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address                                       Foreign Address                                     State      
+Active UNIX domain sockets (w/o servers)
+Proto RefCnt Flags       Type       State         I-Node   Path
+unix  159    [ ]         DGRAM      CONNECTED     16604    /dev/unix/socket/hilogInput
+unix  2      [ ]         DGRAM                    25546    /dev/unix/socket/fd_holder
+unix  2      [ ]         DGRAM                    25687    /dev/unix/socket/hisysevent
+unix  2      [ ]         DGRAM                    25690    /dev/unix/socket/hisysevent_fast
+unix  2      [ ]         STREAM                   12558    /dev/unix/socket/native
+unix  2      [ ]         STREAM                   18513    /dev/unix/socket/fusioncall
+unix  2      [ ]         STREAM                   16826    /dev/unix/socket/multivpnfd
+unix  2      [ ]         STREAM                   16828    /dev/unix/socket/tunfd
+unix  2      [ ]         SEQPACKET                13037    /dev/unix/socket/hdcd
+unix  3      [ ]         STREAM     CONNECTED     26137    @0001c
+unix  3      [ ]         STREAM     CONNECTED     17197    @0001b
+unix  3      [ ]         STREAM     CONNECTED     27318    @0000a
+unix  3      [ ]         STREAM     CONNECTED     218      @0000b
+unix  3      [ ]         STREAM     CONNECTED     27380    @0000c
+unix  3      [ ]         STREAM     CONNECTED     49965    @0003a

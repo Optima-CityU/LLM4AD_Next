@@ -358,7 +358,7 @@ requires-dist = [
     { name = "researchclaw", marker = "extra == 'research'", git = "https://github.com/y414987863/AutoResearchClawAD.git?tag=v1.0.3-beta.1" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = ">=1.40.6,<2.0.0" },
     { name = "sqlmodel", specifier = ">=0.0.21,<1.0.0" },
-    { name = "tenacity", specifier = ">=8.2.3,<9.0.0" },
+    { name = "tenacity", specifier = ">=9.2.1,<10" },
     { name = "torch", marker = "extra == 'research'", specifier = ">=2.2", index = "https://download.pytorch.org/whl/cpu" },
     { name = "typst", specifier = ">=0.13.0,<0.14.0" },
     { name = "websockets", specifier = ">=13.0,<14.0" },
@@ -2314,7 +2314,7 @@ wheels = [
 
 [[package]]
 name = "llm4ad-next"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "agentscope" },
@@ -2324,17 +2324,22 @@ dependencies = [
     { name = "click" },
     { name = "inquirerpy" },
     { name = "loguru" },
+    { name = "loky" },
     { name = "numpy" },
     { name = "openai" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "pandas", version = "3.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
+    { name = "persist-queue" },
     { name = "prompt-toolkit" },
+    { name = "psutil" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pytest-custom-exit-code" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "scikit-learn" },
+    { name = "tenacity" },
+    { name = "transitions" },
     { name = "typer" },
     { name = "typing-extensions" },
     { name = "xgboost" },
@@ -2388,6 +2393,7 @@ requires-dist = [
     { name = "claude-agent-sdk" },
     { name = "click", specifier = ">=8.3.1" },
     { name = "codebleu", marker = "extra == 'meoh'", specifier = ">=0.7.0" },
+    { name = "fastapi", marker = "extra == 'gateway-ui'", specifier = ">=0.143.1,<1" },
     { name = "gymnasium", extras = ["box2d"], marker = "extra == 'lunarlander'", specifier = ">=0.29.0" },
     { name = "httpx", marker = "extra == 'mindmemos'", specifier = ">=0.27.0,<1" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
@@ -2395,6 +2401,7 @@ requires-dist = [
     { name = "llm4ad-next", extras = ["infra", "providers", "eval", "scip", "dev", "docs", "tsp", "lunarlander", "dyca", "meoh"], marker = "extra == 'all'" },
     { name = "llvmlite", marker = "extra == 'eval'", specifier = "==0.44.0" },
     { name = "loguru", specifier = ">=0.7.3" },
+    { name = "loky", specifier = ">=3.7.0,<4" },
     { name = "matplotlib", marker = "extra == 'lunarlander'", specifier = ">=3.5.0" },
     { name = "mindmemos-sdk", marker = "python_full_version >= '3.11' and python_full_version < '3.14' and extra == 'mindmemos'", specifier = ">=0.1.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5.0" },
@@ -2404,6 +2411,7 @@ requires-dist = [
     { name = "mkdocs-minify-plugin", marker = "extra == 'docs'", specifier = ">=0.8.0" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.24.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
+    { name = "nicegui", marker = "extra == 'gateway-ui'", specifier = ">=4.0,<4.1" },
     { name = "numba", marker = "extra == 'eval'", specifier = "==0.61.2" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "numpy", marker = "extra == 'dyca'", specifier = ">=1.24.0" },
@@ -2413,7 +2421,9 @@ requires-dist = [
     { name = "openai", marker = "extra == 'providers'", specifier = ">=1.0.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pandas", marker = "extra == 'eval'", specifier = ">=2.0.0" },
+    { name = "persist-queue", specifier = ">=1.1.0,<2" },
     { name = "prompt-toolkit", specifier = ">=3.0.0" },
+    { name = "psutil", specifier = ">=7.2.2,<8" },
     { name = "psutil", marker = "extra == 'infra'", specifier = ">=5.9.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
@@ -2433,15 +2443,18 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'meoh'", specifier = ">=1.3.0" },
     { name = "scipy", marker = "extra == 'eval'", specifier = ">=1.10.0" },
     { name = "sympy", marker = "extra == 'eval'", specifier = ">=1.12.0" },
+    { name = "tenacity", specifier = ">=9.2.1,<10" },
     { name = "textual", marker = "extra == 'mindmemos'", specifier = ">=1.0.0,<2" },
     { name = "tiktoken", marker = "extra == 'providers'", specifier = ">=0.6.0" },
+    { name = "transitions", specifier = ">=0.9.3,<1" },
     { name = "tree-sitter-python", marker = "extra == 'meoh'", specifier = "==0.21.0" },
     { name = "typer", specifier = ">=0.24.1" },
     { name = "typing-extensions", specifier = ">=4.5.0" },
     { name = "umap-learn", marker = "extra == 'eval'", specifier = ">=0.5.12" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'gateway-ui'", specifier = ">=0.22.0,<1" },
     { name = "xgboost", specifier = ">=3.2.0" },
 ]
-provides-extras = ["infra", "providers", "eval", "scip", "tsp", "lunarlander", "dyca", "meoh", "mindmemos", "dev", "docs", "agent", "all"]
+provides-extras = ["gateway-ui", "infra", "providers", "eval", "scip", "tsp", "lunarlander", "dyca", "meoh", "mindmemos", "dev", "docs", "agent", "all"]
 
 [[package]]
 name = "llvmlite"
@@ -2472,6 +2485,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c", size = 61595, upload-time = "2024-12-06T11:20:54.538Z" },
+]
+
+[[package]]
+name = "loky"
+version = "3.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cloudpickle" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/46/dd/c8c848bf610d7449c23e487f5992aed3c053eab748a5d8dfe1c7a413d7a7/loky-3.7.0.tar.gz", hash = "sha256:80928106fe18b5300c6f1b3a871d71e68a81dc9b2fe5c8ee4afe93bb9ba6424d", size = 120523, upload-time = "2026-09-29T10:49:12.131Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/16/8affc9cd2226900f57c5626ae77fa17e349688610c18d8ec3d43f66f85db/loky-3.7.0-py3-none-any.whl", hash = "sha256:f8088c01e58a5bce4389dfc8d9affbe2480bef03863e0bc0d1aa08674e8a2974", size = 67734, upload-time = "2026-09-29T10:49:10.726Z" },
 ]
 
 [[package]]
@@ -3398,10 +3423,10 @@ resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version >= '3.14'" },
-    { name = "python-dateutil", marker = "python_full_version >= '3.14'" },
-    { name = "pytz", marker = "python_full_version >= '3.14'" },
-    { name = "tzdata", marker = "python_full_version >= '3.14'" },
+    { name = "numpy" },
+    { name = "python-dateutil" },
+    { name = "pytz" },
+    { name = "tzdata" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/33/01/d40b85317f86cf08d853a4f495195c73815fdf205eef3993821720274518/pandas-2.3.3.tar.gz", hash = "sha256:e05e1af93b977f7eafa636d043f9f94c7ee3ac81af99c13508215942e64c993b", size = 4495223, upload-time = "2025-09-29T23:34:51.853Z" }
 wheels = [
@@ -3455,9 +3480,9 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version < '3.14'" },
-    { name = "python-dateutil", marker = "python_full_version < '3.14'" },
-    { name = "tzdata", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.14' and sys_platform == 'win32')" },
+    { name = "numpy" },
+    { name = "python-dateutil" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/99/b342345300f13440fe9fe385c3c481e2d9a595ee3bab4d3219247ac94e9a/pandas-3.0.2.tar.gz", hash = "sha256:f4753e73e34c8d83221ba58f232433fca2748be8b18dbca02d242ed153945043", size = 4645855, upload-time = "2026-03-31T06:48:30.816Z" }
 wheels = [
@@ -3524,6 +3549,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz", hash = "sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a", size = 135180, upload-time = "2026-04-27T01:46:08.907Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
+]
+
+[[package]]
+name = "persist-queue"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/9e/865b2a173a272d2f52b0f50534e13c38c159877251a987e0863fc7376acd/persist_queue-1.1.0.tar.gz", hash = "sha256:4c042a3d39c9af4fa24497da76697fb4fff7abe6af04bcf55f099e0c23bc2c67", size = 39294, upload-time = "2025-10-25T13:21:28.339Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/88/7248345679ad5001cdc0211eb83303c62659f86ae7024170c0bc0afd4e4e/persist_queue-1.1.0-py3-none-any.whl", hash = "sha256:be431ad90cd57621be5563dcd2424e21d81db3bb8cdfb918ade722369d640763", size = 53076, upload-time = "2025-10-25T13:21:26.577Z" },
 ]
 
 [[package]]
@@ -5147,11 +5181,11 @@ wheels = [
 
 [[package]]
 name = "tenacity"
-version = "8.5.0"
+version = "9.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a3/4d/6a19536c50b849338fcbe9290d562b52cbdcf30d8963d3588a68a4107df1/tenacity-8.5.0.tar.gz", hash = "sha256:8bc6c0c8a09b31e6cad13c47afbed1a567518250a9a171418582ed8d9c20ca78", size = 47309, upload-time = "2024-07-05T07:25:31.836Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/9e/497c1c8ebe5a5b5d1d4a7511aea22c0bb1a97e3170d98abdef0e1b34265a/tenacity-9.2.1.tar.gz", hash = "sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839", size = 58261, upload-time = "2026-10-07T12:13:01.633Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/3f/8ba87d9e287b9d385a02a7114ddcef61b26f86411e121c9003eb509a1773/tenacity-8.5.0-py3-none-any.whl", hash = "sha256:b594c2a5945830c267ce6b79a166228323ed52718f30302c1359836112346687", size = 28165, upload-time = "2024-07-05T07:25:29.591Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/26/1ff2b0721ac66a3ec5b1402b333110b352ab0a8724052ac279a7b82d40c4/tenacity-9.2.1-py3-none-any.whl", hash = "sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e", size = 32310, upload-time = "2026-10-07T12:13:00.102Z" },
 ]
 
 [[package]]
@@ -5229,13 +5263,13 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
-    { name = "fsspec", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
-    { name = "jinja2", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
-    { name = "networkx", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
-    { name = "setuptools", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
-    { name = "sympy", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
+    { name = "filelock" },
+    { name = "fsspec" },
+    { name = "jinja2" },
+    { name = "networkx" },
+    { name = "setuptools" },
+    { name = "sympy" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:2fe228aba290d14b9f31b049be550dbd469c3fd3013d7a19705b30454da97027", upload-time = "2026-07-08T12:26:18Z" },
@@ -5263,13 +5297,13 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "filelock", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
-    { name = "fsspec", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
-    { name = "jinja2", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
-    { name = "networkx", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
-    { name = "setuptools", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
-    { name = "sympy", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
+    { name = "filelock" },
+    { name = "fsspec" },
+    { name = "jinja2" },
+    { name = "networkx" },
+    { name = "setuptools" },
+    { name = "sympy" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp312-cp312-linux_s390x.whl", hash = "sha256:ffadde149901c8afa138daa38d898264003cfcf1a3336ca5cd964b5af227d867", upload-time = "2026-07-08T19:28:41Z" },
@@ -5323,6 +5357,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl", hash = "sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf", size = 78374, upload-time = "2026-02-03T17:35:50.982Z" },
+]
+
+[[package]]
+name = "transitions"
+version = "0.9.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4f/83/9e90f3494057d73c9e6bd8de8488af7c9fa714666ccc2db30fe07d147818/transitions-0.9.3.tar.gz", hash = "sha256:881fb75bb1654ed55d86060bb067f2c716f8e155f57bb73fd444e53713aafec8", size = 1191029, upload-time = "2025-07-02T10:49:03.153Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/05/fea3020e90aa378941ff10de8860fb3b1288313c27efd10fa0c476498f7e/transitions-0.9.3-py2.py3-none-any.whl", hash = "sha256:02463248f2b668d86f66636b1e3c9e8de84d93e22915247f4e1aa9ee1cae28aa", size = 112792, upload-time = "2025-07-02T10:49:01.415Z" },
 ]
 
 [[package]]

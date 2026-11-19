@@ -14,6 +14,7 @@ import type { ResearchSessionItem, ResearchSessionStatus } from "@/client"
 import ARLAgentStatusPanel from "@/components/AutoResearch/ARLAgentStatusPanel"
 import ARLArtifactsPanel from "@/components/AutoResearch/ARLArtifactsPanel"
 import ARLPanel from "@/components/AutoResearch/ARLPanel"
+import ARLTour from "@/components/AutoResearch/ARLTour"
 import { ARLSessionProvider } from "@/components/AutoResearch/ARLSessionContext"
 import ArtifactsPanel from "@/components/AutoResearch/ArtifactsPanel"
 import ChatPanel from "@/components/AutoResearch/ChatPanel"
@@ -523,6 +524,12 @@ function AutoResearchPage() {
           </div>
         </aside>
       </ARLSessionProvider>
+
+      {/* First-visit guide for ARL sessions; replayable from the help menu. */}
+      <ARLTour
+        enabled={isArlSession && !!activeSession}
+        rightCollapsed={rightCollapsed}
+      />
 
       <CreateSessionDialog
         open={createOpen}

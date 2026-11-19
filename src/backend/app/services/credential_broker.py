@@ -66,6 +66,7 @@ def issue_token(
     workspace_id: str | uuid.UUID | None = None,
     session_id: str | None = None,
     token: str | None = None,
+    upstream_url_template: str = "",
 ) -> str:
     """发放一次性代理 token，并把加密后的真实凭据写入 Redis。
 
@@ -84,6 +85,8 @@ def issue_token(
         session_id: 科研工作区会话 ID（可选），同上用途。
         token: 指定 token（可选）。长期存活的调用方（如 ARL 会话）用确定性
             派生的 token 反复登记以续期；缺省时随机生成。
+        upstream_url_template: Verified builtin URL template for renewing access
+            tokens after a remote evaluator has been offline for a long time.
 
     Returns:
         生成的代理 token（URL-safe 随机串，或调用方指定的值）。
@@ -103,6 +106,8 @@ def issue_token(
         payload["workspace_id"] = str(workspace_id)
     if session_id:
         payload["session_id"] = session_id
+    if upstream_url_template:
+        payload["upstream_url_template"] = upstream_url_template
     blob = encrypt_secret(json.dumps(payload))
     r = get_sync_redis()
     pipe = r.pipeline()
@@ -142,7 +147,16 @@ def resolve_token(token: str) -> dict | None:
     if not plaintext:
         return None
     try:
-        return json.loads(plaintext)
+        payload = json.loads(plaintext)
+        template = payload.get("upstream_url_template")
+        if template:
+            from datetime import timedelta
+
+            from app.core.security import create_access_token
+
+            access_token = create_access_token(payload["user_id"], timedelta(hours=1))
+            payload["base_url"] = template.replace("{accessToken}", access_token)
+        return payload
     except (ValueError, TypeError):
         return None
 

@@ -403,9 +403,10 @@ export default function EditSessionDialog({
           {isArl ? (
             <>
               <Field
-                label="Worker"
+                label={t("autoResearch.create.arlWorkerLabel")}
                 hint={t("autoResearch.create.arlWorkerHint")}
                 required
+                plain
               >
                 <ProviderModelPicker
                   provider={workerProviderId}
@@ -420,9 +421,10 @@ export default function EditSessionDialog({
               </Field>
 
               <Field
-                label="Validator"
+                label={t("autoResearch.create.arlValidatorLabel")}
                 hint={t("autoResearch.create.arlValidatorHint")}
                 required
+                plain
               >
                 <ProviderModelPicker
                   provider={validatorProviderId}
@@ -625,6 +627,7 @@ function Field({
   children,
   required,
   hint,
+  plain,
 }: {
   label: string
   children: React.ReactNode
@@ -632,13 +635,17 @@ function Field({
   required?: boolean
   /** 字段说明：挂在标签旁的问号图标上，悬停/聚焦才展开，不单独占一行。 */
   hint?: string
+  /** 标签按原文显示，不加全大写变换（用于含括号、智能体名称的长标签）。 */
+  plain?: boolean
 }) {
   const { t } = useTranslation()
   return (
     <div className="space-y-1">
       {/* SectionLabel 全站基准是 10px；表单标签承担的是「读字段名」而不是装饰，
           两个弹框里统一抬到 11px（className 会覆盖掉基础字号）。 */}
-      <SectionLabel className="flex items-center gap-1.5 text-[11px]">
+      <SectionLabel
+        className={`flex items-center gap-1.5 text-[11px] ${plain ? "normal-case tracking-normal" : ""}`}
+      >
         <span className="block">{label}</span>
         {required && (
           <span className="rounded bg-destructive/10 px-1 py-px text-[10px] font-medium normal-case tracking-normal text-destructive">

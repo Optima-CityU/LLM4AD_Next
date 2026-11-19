@@ -81,6 +81,14 @@ class Storage:
         buf.seek(0)
         return buf.read()
 
+    def iter_download(self, key: str, bucket: str | None = None):
+        """Yield bounded chunks and release the object connection when closed."""
+        body = self.client.get_object(Bucket=self._bucket(bucket), Key=key)["Body"]
+        try:
+            yield from body.iter_chunks(chunk_size=1024 * 1024)
+        finally:
+            body.close()
+
     def delete(self, key: str, bucket: str | None = None) -> None:
         """删除指定对象。"""
         self.client.delete_object(Bucket=self._bucket(bucket), Key=key)

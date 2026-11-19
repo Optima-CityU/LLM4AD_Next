@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProposerCandidate",
+  "description": "出方案一方回的一个候选 = v2 评测信封 (eval_request.schema.json) 里由出方案一方决定的那一部分: kind + why + payload 的「改什么」。\n\n只认这三个字段, payload 里只认 params (sysparam) 或 rewrites (gray)。信封上其余的东西 —— candidate_id、serial、package、workload、conditions、protocol, 以及 payload 里的 plan、whitelist、deny_keywords、require_hit、side_effect_ack —— 全部由 harness 填。候选里带了这些字段整条打回 (`additionalProperties: false`): 出方案的一方够不着判定。",
+  "type": "object",
+  "required": ["kind", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "type": "string", "enum": ["sysparam", "gray", "whitebox"], "description": "必须与输入的 kind 相同" },
+    "why": { "type": ["string", "null"], "description": "一句话: 这个候选想验证什么。截到 300 字, 只进证据与报告。" },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "sysparam" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["params"],
+            "additionalProperties": false,
+            "properties": {
+              "params": {
+                "type": "object",
+                "description": "参数 id → 取值。id 必须在输入的 constraints.whitelist 里, 取值必须是该项 values 里的原样字符串 (不接受 JSON number)。跨项约束 (同簇 min<=max、GPU pwrlevel 0 是最快档、刷新率 min<=peak) 由 harness 校验。",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "gray" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["rewrites"],
+            "additionalProperties": false,
+            "properties": {
+              "rewrites": {
+                "type": "array",
+                "description": "改写开关。knob 必须是输入 constraints.knobs 里 status=landed 的 id; 带 scopes 的开关必须给 scope, 且只能原样取 scopes 里的某一个。同一 knob+scope 不许重复, 一组最多 4 条写回改写。",
+                "items": {
+                  "type": "object",
+                  "required": ["knob"],
+                  "properties": {
+                    "knob": { "type": "string" },
+                    "scope": { "type": ["string", "null"] },
+                    "args": {}
+                  }
+                }
+              }
+            }
+                    }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "whitebox" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["knobs"],
+            "additionalProperties": false,
+            "properties": {
+              "knobs": {
+                "type": "object",
+                "description": "④ 白盒旋钮 → 值。键只能是输入 constraints.whitebox 里的 id, 值只能取对应 values (或按 free 写)。一组 1-3 个。"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

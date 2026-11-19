@@ -1,30 +1,21 @@
 import axios from "axios"
 
-let isRefreshing = false
-let failedQueue: Array<{
-  resolve: (token: string) => void
-  reject: (error: unknown) => void
-}> = []
+// One renewal owns each refresh credential, including concurrent fetch and SDK calls.
+let renewal: { credential: string; promise: Promise<string> } | null = null
 
-function processQueue(error: unknown, token: string | null) {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) {
-      reject(error)
-    } else {
-      resolve(token!)
-    }
-  })
-  failedQueue = []
-}
-
-export const AUTH_PAGES = ["/login", "/signup", "/verify-email", "/recover-password", "/reset-password"]
+export const AUTH_PAGES = [
+  "/login",
+  "/signup",
+  "/verify-email",
+  "/recover-password",
+  "/reset-password",
+]
 
 export function buildLoginRedirectUrl(): string {
   const currentPath = window.location.pathname
-  if (AUTH_PAGES.some((p) => currentPath.startsWith(p))) {
-    return "/login"
-  }
-  const redirectTarget = currentPath + window.location.search
+  if (AUTH_PAGES.some((p) => currentPath.startsWith(p))) return "/login"
+  const redirectTarget =
+    currentPath + window.location.search + window.location.hash
   return `/login?redirect=${encodeURIComponent(redirectTarget)}`
 }
 
@@ -35,28 +26,93 @@ export function clearAuthAndRedirect() {
   window.location.href = buildLoginRedirectUrl()
 }
 
-async function refreshToken(): Promise<string | null> {
-  const refresh = localStorage.getItem("refresh_token")
-  if (!refresh) return null
-
-  try {
-    const baseUrl = import.meta.env.VITE_API_URL || ""
-    const response = await axios.post(`${baseUrl}/api/v1/login/refresh-token`, {
-      refresh_token: refresh,
-    })
-    const { access_token, refresh_token } = response.data
-    localStorage.setItem("access_token", access_token)
-    localStorage.setItem("refresh_token", refresh_token)
-    return access_token
-  } catch {
-    return null
+/** Renew credentials after a 401, reusing a newer token for delayed responses. */
+export function handleUnauthorized(
+  failedToken?: string | null,
+): Promise<string> {
+  const currentToken = localStorage.getItem("access_token")
+  if (failedToken && currentToken && currentToken !== failedToken) {
+    return Promise.resolve(currentToken)
   }
+  const credential = localStorage.getItem("refresh_token")
+  if (!credential) {
+    clearAuthAndRedirect()
+    return Promise.reject(new Error("Session expired"))
+  }
+  if (renewal?.credential === credential) return renewal.promise
+
+  const promise = (async () => {
+    try {
+      const baseUrl = import.meta.env.VITE_API_URL || ""
+      const response = await axios.post(
+        `${baseUrl}/api/v1/login/refresh-token`,
+        {
+          refresh_token: credential,
+        },
+        { timeout: 15_000 },
+      )
+      // Logout or another tab's login must win over a late renewal response.
+      if (localStorage.getItem("refresh_token") !== credential) {
+        const replacement = localStorage.getItem("access_token")
+        if (replacement) return replacement
+        throw new Error("Session changed during renewal")
+      }
+      const { access_token, refresh_token } = response.data
+      if (
+        typeof access_token !== "string" ||
+        !access_token ||
+        typeof refresh_token !== "string" ||
+        !refresh_token
+      ) {
+        throw new Error("Invalid session renewal response")
+      }
+      localStorage.setItem("access_token", access_token)
+      localStorage.setItem("refresh_token", refresh_token)
+      return access_token
+    } catch (error) {
+      if (localStorage.getItem("refresh_token") !== credential) {
+        const replacement = localStorage.getItem("access_token")
+        if (replacement) return replacement
+      } else if (
+        axios.isAxiosError(error) &&
+        [401, 403].includes(error.response?.status ?? 0)
+      ) {
+        clearAuthAndRedirect()
+      }
+      // Network failures, timeouts, maintenance and malformed responses are retryable.
+      throw error
+    } finally {
+      if (renewal?.credential === credential) renewal = null
+    }
+  })()
+  renewal = { credential, promise }
+  return promise
 }
 
-/**
- * Fetch wrapper with automatic 401 retry via token refresh.
- * Use this for SSE/streaming requests that bypass the axios interceptor.
- */
+/** Refresh near-expiry host tokens on activity; decoded claims are only a hint. */
+export async function ensureAccessToken(): Promise<string | null> {
+  const token = localStorage.getItem("access_token")
+  if (!token) return null
+  let expiresAt: unknown
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
+    expiresAt = JSON.parse(
+      atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, "=")),
+    ).exp
+  } catch {
+    return token
+  }
+  if (
+    typeof expiresAt === "number" &&
+    Number.isFinite(expiresAt) &&
+    expiresAt * 1000 <= Date.now() + 60_000
+  ) {
+    return handleUnauthorized(token)
+  }
+  return token
+}
+
+/** Fetch with one auth retry; transport failures never replay a submitted body. */
 export async function authFetch(
   url: string,
   init?: RequestInit,
@@ -64,44 +120,18 @@ export async function authFetch(
   const token = localStorage.getItem("access_token") || ""
   const headers = new Headers(init?.headers)
   headers.set("Authorization", `Bearer ${token}`)
-
   const response = await fetch(url, { ...init, headers })
+  if (response.status !== 401) return response
 
-  if (response.status === 401) {
-    try {
-      const newToken = await handleUnauthorized()
-      headers.set("Authorization", `Bearer ${newToken}`)
-      return fetch(url, { ...init, headers })
-    } catch {
-      throw new Error(`HTTP 401`)
-    }
-  }
-
-  return response
-}
-
-export async function handleUnauthorized(): Promise<string> {
-  if (isRefreshing) {
-    return new Promise<string>((resolve, reject) => {
-      failedQueue.push({ resolve, reject })
-    })
-  }
-
-  isRefreshing = true
-  try {
-    const newToken = await refreshToken()
-    if (!newToken) {
-      processQueue(new Error("refresh failed"), null)
-      clearAuthAndRedirect()
-      return Promise.reject(new Error("refresh failed"))
-    }
-    processQueue(null, newToken)
-    return newToken
-  } catch (error) {
-    processQueue(error, null)
+  const newToken = await handleUnauthorized(token)
+  init?.signal?.throwIfAborted()
+  headers.set("Authorization", `Bearer ${newToken}`)
+  const retried = await fetch(url, { ...init, headers })
+  if (
+    retried.status === 401 &&
+    localStorage.getItem("access_token") === newToken
+  ) {
     clearAuthAndRedirect()
-    return Promise.reject(error)
-  } finally {
-    isRefreshing = false
   }
+  return retried
 }

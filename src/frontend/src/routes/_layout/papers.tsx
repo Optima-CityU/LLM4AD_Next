@@ -1,4 +1,3 @@
-import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "@/lib/researchModels"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   ArrowRight,
@@ -10,7 +9,6 @@ import {
   ChevronUp,
   FileCheck2,
   FileText,
-  Folder,
   GitBranch,
   ListChecks,
   Loader2,
@@ -43,18 +41,17 @@ import {
   usePanelRef,
 } from "react-resizable-panels"
 import { toast } from "sonner"
-
 import type {
   PaperConversationPreferences,
   ProposalStageState,
   ProviderResponse,
 } from "@/client"
 import ArtifactCodeEditor from "@/components/AutoResearch/ArtifactCodeEditor"
-import WorkflowStepper from "@/components/Common/WorkflowStepper"
 import SourceNavigator, {
   EDITABLE_SUFFIXES,
   PAPER_DIRECTORY_MARKER,
 } from "@/components/Common/SourceNavigator"
+import WorkflowStepper from "@/components/Common/WorkflowStepper"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -62,9 +59,27 @@ import {
 } from "@/components/markdown/markdownComponents"
 import AlgorithmStagePanel from "@/components/Paper/AlgorithmStagePanel"
 import PaperNativeRuntime from "@/components/Paper/PaperNativeRuntime"
-import type { ProposalResultStage } from "@/components/Paper/ProposalResultsDock"
-import ProposalResultsDock from "@/components/Paper/ProposalResultsDock"
+import PaperProjectCreateDialog, {
+  type PaperModelPickerProps,
+} from "@/components/Paper/PaperProjectCreateDialog"
+import { PaperSourceUploadDialog } from "@/components/Paper/PaperSourceFilePicker"
+import PaperVersionHistory from "@/components/Paper/PaperVersionHistory"
+import ProposalDocumentPreview, {
+  ProposalLayoutPreview,
+  proposalDocumentEntryPath,
+  useProposalMarkdownComponents,
+} from "@/components/Paper/ProposalDocumentPreview"
+import ProposalReferences, {
+  proposalReferenceKind,
+} from "@/components/Paper/ProposalReferences"
+import ProposalResultsDock, {
+  ProposalToolbar,
+  type ProposalView,
+} from "@/components/Paper/ProposalResultsDock"
+import ProposalStartGuide from "@/components/Paper/ProposalStartGuide"
 import RebuttalEntriesPanel from "@/components/Paper/RebuttalEntriesPanel"
+import ResearchAgentProgressPanel from "@/components/Paper/ResearchAgentProgressPanel"
+import ResearchWorkbenchTabsHeader from "@/components/Paper/ResearchWorkbenchTabsHeader"
 import TypstLivePreview from "@/components/Paper/TypstLivePreview"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -95,8 +110,8 @@ import {
 } from "@/components/ui/tooltip"
 import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { usePaperHeader } from "@/hooks/usePaperHeader"
+import { usePaperRegions } from "@/hooks/usePaperRegions"
 import {
-  useCreatePaperWorkspace,
   useDeletePaperSourcePath,
   useDeletePaperWorkspace,
   usePaperSourceFile,
@@ -108,22 +123,27 @@ import {
   useUploadPaperSource,
 } from "@/hooks/usePapers"
 import { usePersistentState } from "@/hooks/usePersistentState"
+import { useProposalRender } from "@/hooks/useProposalRender"
 import { useProviders } from "@/hooks/useProviders"
+import type { PaperSourcePurpose } from "@/lib/paperSourceUpload"
+import { PROJECT_CONTEXT_DIRECTORY } from "@/lib/projectContext"
 import {
-  hasProjectContextFiles,
-  projectContextUploads,
-} from "@/lib/projectContext"
+  type ProposalRenderRevision,
+  proposalChapters,
+  proposalDraftChapters,
+} from "@/lib/proposalDocument"
 import {
-  EMPTY_PROPOSAL_BASICS,
-  type ProposalBasics,
-  parseProposalBasics,
-  serializeProposalBasics,
-} from "@/lib/proposalBasics"
+  mergeResearchAgentProgress,
+  type ResearchAgentProgress,
+  researchProgressSteps,
+} from "@/lib/researchAgentProgress"
+import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "@/lib/researchModels"
 import {
   parseResearchWorkspaceMode,
   type ResearchWorkspaceMode,
 } from "@/lib/researchWorkspace"
 import { cn, formatDate } from "@/lib/utils"
+import { authFetch } from "@/utils/auth"
 
 export const Route = createFileRoute("/_layout/papers")({
   component: PaperProjectsPage,
@@ -134,6 +154,9 @@ export const Route = createFileRoute("/_layout/papers")({
   }),
   head: () => ({ meta: [{ title: "Research Studio - LLM4AD Next" }] }),
 })
+
+// Hand off the first turn across client navigation without making it replayable.
+const initialProjectPrompts = new Map<string, string>()
 
 function PaperProjectsPage() {
   const navigate = useNavigate()
@@ -151,19 +174,20 @@ function PaperProjectsPage() {
 
   return (
     <PaperProjectManager
-      onOpen={(id) =>
+      onOpen={(id, initialPrompt) => {
+        if (initialPrompt) initialProjectPrompts.set(id, initialPrompt)
         void navigate({
           to: "/papers/$workspaceId",
           params: { workspaceId: id },
           search: { mode },
         })
-      }
+      }}
       mode={mode}
     />
   )
 }
 
-type ModelBinding = { providerId: string; modelName: string }
+type ModelBinding = PaperModelPickerProps["value"]
 type ConversationPreferencesDraft = Required<PaperConversationPreferences>
 const DEFAULT_CONVERSATION_PREFERENCES: ConversationPreferencesDraft = {
   reply_language: "auto",
@@ -304,51 +328,6 @@ function isGeneratedProposalPath(
   )
 }
 
-function ProposalBasicsFields({
-  basics,
-  onChange,
-}: {
-  basics: ProposalBasics
-  onChange: (basics: ProposalBasics) => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {(["topic", "funding", "question", "foundation"] as const).map(
-        (field) => (
-          <div key={field} className="min-w-0 space-y-1.5">
-            <Label htmlFor={`proposal-basic-${field}`}>
-              {t(`paper.source.basics.${field}`)}
-            </Label>
-            {field === "topic" || field === "funding" ? (
-              <Input
-                id={`proposal-basic-${field}`}
-                value={basics[field]}
-                onChange={(event) =>
-                  onChange({ ...basics, [field]: event.target.value })
-                }
-                placeholder={t(`paper.source.basics.${field}Placeholder`)}
-                maxLength={field === "topic" ? 500 : 200}
-              />
-            ) : (
-              <Textarea
-                id={`proposal-basic-${field}`}
-                value={basics[field]}
-                onChange={(event) =>
-                  onChange({ ...basics, [field]: event.target.value })
-                }
-                placeholder={t(`paper.source.basics.${field}Placeholder`)}
-                className="min-h-24 resize-y"
-                maxLength={field === "question" ? 1000 : 1500}
-              />
-            )}
-          </div>
-        ),
-      )}
-    </div>
-  )
-}
-
 function PaperWorkflowStepper({
   stages,
   activeStage,
@@ -420,10 +399,8 @@ function errorMessage(error: unknown, fallback: string) {
 function ModelPicker({
   value,
   onChange,
-}: {
-  value: ModelBinding
-  onChange: (value: ModelBinding) => void
-}) {
+  disabled,
+}: PaperModelPickerProps) {
   const { t } = useTranslation()
   const providersQuery = useProviders()
   const providers = (providersQuery.data?.items ?? []).filter((provider) =>
@@ -435,8 +412,10 @@ function ModelPicker({
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
         <Select
-          value={value.providerId || undefined}
-          disabled={providersQuery.isLoading || providers.length === 0}
+          value={value.providerId}
+          disabled={
+            disabled || providersQuery.isLoading || providers.length === 0
+          }
           onValueChange={(providerId) => {
             const available = providerModels(
               providers.find((item) => item.id === providerId),
@@ -447,7 +426,10 @@ function ModelPicker({
             })
           }}
         >
-          <SelectTrigger className="min-w-0">
+          <SelectTrigger
+            className="min-w-0"
+            aria-label={t("paper.model.provider")}
+          >
             <SelectValue
               placeholder={
                 providersQuery.isLoading
@@ -469,11 +451,11 @@ function ModelPicker({
           )}
         </Select>
         <Select
-          value={value.modelName || undefined}
-          disabled={!provider || models.length === 0}
+          value={value.modelName}
+          disabled={disabled || !provider || models.length === 0}
           onValueChange={(modelName) => onChange({ ...value, modelName })}
         >
-          <SelectTrigger className="min-w-0">
+          <SelectTrigger className="min-w-0" aria-label={t("paper.model.model")}>
             <SelectValue
               placeholder={
                 !provider
@@ -594,23 +576,21 @@ function PaperProjectManager({
   onOpen,
 }: {
   mode: ResearchWorkspaceMode
-  onOpen: (id: string) => void
+  onOpen: (id: string, initialPrompt?: string) => void
 }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState("")
   const navigate = useNavigate()
   const [createOpen, setCreateOpen] = useState(false)
+  const [createInstance, setCreateInstance] = useState(0)
   const startDesign = () => {
     if (mode === "algorithm") void navigate({ to: "/autodesign" })
     else setCreateOpen(true)
   }
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
   const workspacesQuery = usePaperWorkspaces(search)
   const workspaces = (workspacesQuery.data?.items ?? []).filter(
     (item) => item.mode === mode,
   )
-  const createWorkspace = useCreatePaperWorkspace()
   const deleteWorkspace = useDeletePaperWorkspace()
   const ModeIcon = RESEARCH_WORKSPACE_MODE_ICONS[mode]
 
@@ -755,55 +735,20 @@ function PaperProjectManager({
           )}
         </div>
       </main>
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("paper.workspace.createTitle")}</DialogTitle>
-            <DialogDescription>
-              {t("paper.workspace.createDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>{t("paper.workspace.name")}</Label>
-              <Input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder={t("paper.workspace.namePlaceholder")}
-                maxLength={255}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>{t("paper.workspace.description")}</Label>
-              <Textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder={t("paper.workspace.descriptionPlaceholder")}
-                className="min-h-24 resize-none"
-                maxLength={4000}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              disabled={!title.trim() || createWorkspace.isPending}
-              onClick={async () => {
-                const created = await createWorkspace.mutateAsync({
-                  title: title.trim(),
-                  description: description.trim() || null,
-                  mode,
-                })
-                setCreateOpen(false)
-                setTitle("")
-                setDescription("")
-                onOpen(created.id)
-              }}
-            >
-              {t("paper.workspace.create")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {mode !== "algorithm" && (
+        <PaperProjectCreateDialog
+          key={`${mode}:${createInstance}`}
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          mode={mode}
+          modelPicker={ModelPicker}
+          onCreated={(id, initialPrompt) => {
+            setCreateOpen(false)
+            setCreateInstance((value) => value + 1)
+            onOpen(id, initialPrompt)
+          }}
+        />
+      )}
     </>
   )
 }
@@ -897,6 +842,7 @@ function paperSourceContexts(value: unknown): PaperSourceContext[] {
 }
 
 function PaperSourceManager({
+  workspaceId,
   manifest,
   sourceVersionId,
   sourceHash,
@@ -929,6 +875,7 @@ function PaperSourceManager({
   showNavigator = true,
   canDeletePath,
 }: {
+  workspaceId: string
   manifest: string[]
   sourceVersionId: string
   sourceHash: string
@@ -969,12 +916,22 @@ function PaperSourceManager({
   const editorActive = editing || continuousEditing
   const sourceDirty = editorActive && sourceDraft !== sourceContent
   const previewRef = useRef<HTMLElement>(null)
+  const resourceComponents = useProposalMarkdownComponents(
+    workspaceId,
+    sourceVersionId,
+    sourceHash,
+    selectedPath ?? "proposal.md",
+  )
   const previewComponents = useMemo(
     () =>
       makeMarkdownComponents(
         `paper-source-${selectedPath?.replace(/[^a-zA-Z0-9_-]/g, "-") ?? "preview"}`,
       ),
     [selectedPath],
+  )
+  const sourcePreviewComponents = useMemo(
+    () => ({ ...previewComponents, ...resourceComponents }),
+    [previewComponents, resourceComponents],
   )
   const locateSection = (section: string) => {
     const targetLabel = normalizeSectionLabel(section)
@@ -1148,7 +1105,7 @@ function PaperSourceManager({
                     <ReactMarkdown
                       remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                       rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                      components={previewComponents}
+                      components={sourcePreviewComponents}
                     >
                       {sourceContent}
                     </ReactMarkdown>
@@ -1252,6 +1209,8 @@ function PaperDocumentDock({
   canDeletePath,
   onDraftChange,
   embedded = false,
+  selectableSuffixes,
+  expandEditorOnMount = false,
 }: {
   manifest: string[]
   sourceVersionId: string
@@ -1281,19 +1240,31 @@ function PaperDocumentDock({
   uploading: boolean
   canDeletePath?: (path: string, isDirectory: boolean) => boolean
   onDraftChange: (value: string) => void
+  selectableSuffixes?: readonly string[] | null
   embedded?: boolean
+  expandEditorOnMount?: boolean
 }) {
   const { t } = useTranslation()
   const suffix = selectedPath?.toLowerCase() ?? ""
   const isMarkdown = suffix.endsWith(".md") || suffix.endsWith(".markdown")
   const isTypst = suffix.endsWith(".typ")
   const showTypstPreview = typstPreview && isTypst
+  const resourceComponents = useProposalMarkdownComponents(
+    workspaceKey,
+    sourceVersionId,
+    sourceHash,
+    selectedPath ?? "proposal.md",
+  )
   const previewComponents = useMemo(
     () =>
       makeMarkdownComponents(
         `paper-dock-${selectedPath?.replace(/[^a-zA-Z0-9_-]/g, "-") ?? "preview"}`,
       ),
     [selectedPath],
+  )
+  const sourcePreviewComponents = useMemo(
+    () => ({ ...previewComponents, ...resourceComponents }),
+    [previewComponents, resourceComponents],
   )
 
   // The editor starts collapsed and remembers what the reader did with it.
@@ -1333,8 +1304,9 @@ function PaperDocumentDock({
   // happened to fire. Until then the separator stays disabled and the enlarged
   // drag target is not even rendered, so the reader's first drag does nothing.
   useEffect(() => {
+    if (expandEditorOnMount) editorPanelRef.current?.expand()
     syncEditorCollapsed()
-  }, [syncEditorCollapsed])
+  }, [editorPanelRef, expandEditorOnMount, syncEditorCollapsed])
 
   // Remember the dragged height for an open editor only: a collapsed panel
   // reports its placeholder height, and storing that would reopen it as a
@@ -1355,7 +1327,8 @@ function PaperDocumentDock({
   return (
     <aside
       className={cn(
-        "hidden h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background lg:flex",
+        "h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background",
+        embedded ? "flex" : "hidden lg:flex",
         !embedded && "border-l",
       )}
     >
@@ -1412,7 +1385,7 @@ function PaperDocumentDock({
                     <ReactMarkdown
                       remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                       rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                      components={previewComponents}
+                      components={sourcePreviewComponents}
                     >
                       {sourceContent}
                     </ReactMarkdown>
@@ -1563,6 +1536,7 @@ function PaperDocumentDock({
                     uploading={uploading}
                     locked={locked}
                     canDeletePath={canDeletePath}
+                    selectableSuffixes={selectableSuffixes}
                   />
                 </div>
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
@@ -1641,12 +1615,10 @@ function PaperWorkbenchHeader({
   title,
   onConfigureModel,
   onConfigurePreferences,
-  onEditBasics,
 }: {
   title: string
   onConfigureModel?: () => void
   onConfigurePreferences?: () => void
-  onEditBasics?: () => void
 }) {
   const { t } = useTranslation()
   const { setHeaderCenter, setHeaderRight } = usePaperHeader()
@@ -1674,14 +1646,8 @@ function PaperWorkbenchHeader({
   )
   const right = useMemo(
     () =>
-      onConfigureModel || onConfigurePreferences || onEditBasics ? (
+      onConfigureModel || onConfigurePreferences ? (
         <div className="flex items-center gap-2">
-          {onEditBasics && (
-            <Button size="sm" variant="ghost" onClick={onEditBasics}>
-              <FileText className="size-3.5" />
-              {t("paper.source.basicsTitle")}
-            </Button>
-          )}
           {onConfigureModel && (
             <Button size="sm" variant="outline" onClick={onConfigureModel}>
               <Settings2 className="size-3.5" />
@@ -1700,7 +1666,7 @@ function PaperWorkbenchHeader({
           )}
         </div>
       ) : null,
-    [onConfigureModel, onConfigurePreferences, onEditBasics, t],
+    [onConfigureModel, onConfigurePreferences, t],
   )
 
   useEffect(() => {
@@ -1724,6 +1690,71 @@ export function PaperWorkbench({
 }) {
   const { t } = useTranslation()
   useHljsTheme()
+  const [initialProjectRequest, setInitialProjectRequest] = useState<{
+    workspaceId: string
+    id: string
+    prompt: string
+  } | null>(null)
+  useEffect(() => {
+    const prompt = initialProjectPrompts.get(workspaceId)
+    if (!prompt) return
+    initialProjectPrompts.delete(workspaceId)
+    setInitialProjectRequest({
+      workspaceId,
+      id: `project-start:${workspaceId}`,
+      prompt,
+    })
+  }, [workspaceId])
+  const initialRequest =
+    initialProjectRequest?.workspaceId === workspaceId
+      ? initialProjectRequest
+      : null
+  const [regionalQueue, setRegionalQueue] = useState<{
+    workspaceId: string
+    requests: Array<{ id: string; prompt: string }>
+  }>({ workspaceId, requests: [] })
+  const regionalRequests =
+    regionalQueue.workspaceId === workspaceId ? regionalQueue.requests : []
+  const regionalDispatching = useRef(new Set<string>())
+  const requestRegionalAgent = useCallback(
+    (request: { id: string; prompt: string }) => {
+      setRegionalQueue((state) => {
+        const queue = state.workspaceId === workspaceId ? state.requests : []
+        return {
+          workspaceId,
+          requests: queue.some((item) => item.id === request.id)
+            ? queue
+            : [...queue, request],
+        }
+      })
+    },
+    [workspaceId],
+  )
+  const acceptRegionalRequest = useCallback(
+    async (id: string) => {
+      const dispatchKey = `${workspaceId}:${id}`
+      if (regionalDispatching.current.has(dispatchKey)) return
+      regionalDispatching.current.add(dispatchKey)
+      try {
+        const response = await authFetch(
+          `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/papers/workspaces/${workspaceId}/region-requests/${encodeURIComponent(id)}/dispatch`,
+          { method: "POST" },
+        )
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        setRegionalQueue((state) =>
+          state.workspaceId === workspaceId
+            ? {
+                ...state,
+                requests: state.requests.filter((item) => item.id !== id),
+              }
+            : state,
+        )
+      } catch {
+        regionalDispatching.current.delete(dispatchKey)
+      }
+    },
+    [workspaceId],
+  )
   const providerItems = useProviders().data?.items
   const runtimeProviderIds = useMemo(
     () =>
@@ -1748,32 +1779,17 @@ export function PaperWorkbench({
     null,
   )
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [uploadPurpose, setUploadPurpose] = useState<
-    "source" | "project_context"
-  >("source")
-  const [projectContextSkipped, setProjectContextSkipped] = usePersistentState(
-    `paper:${workspaceId}:project-context-skipped`,
-    false,
-  )
+  const [uploadPurpose, setUploadPurpose] = useState<PaperSourcePurpose>("source")
   const [algorithmIntakeOpen, setAlgorithmIntakeOpen] = usePersistentState(
     `paper:${workspaceId}:algorithm-intake-open`,
     false,
   )
-  const [proposalEditorState, setProposalEditorState] = useState({
-    workspaceId,
-    stage: null as PaperTool | null,
-    open: false,
-  })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const modelSettingsWorkspaceId = useRef<string | null>(null)
   const openModelSettings = useCallback(() => setSettingsOpen(true), [])
   const [preferencesOpen, setPreferencesOpen] = useState(false)
   const [preferencesDraft, setPreferencesDraft] =
     useState<ConversationPreferencesDraft>(DEFAULT_CONVERSATION_PREFERENCES)
-  const [basicsOpen, setBasicsOpen] = useState(false)
-  const openBasics = useCallback(() => setBasicsOpen(true), [])
-  const [proposalBasics, setProposalBasics] = useState<ProposalBasics>({
-    ...EMPTY_PROPOSAL_BASICS,
-  })
   const updateWorkspace = useUpdatePaperWorkspace(workspaceId)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const openSourceUpload = () => {
@@ -1794,12 +1810,14 @@ export function PaperWorkbench({
   const [outputTokens, setOutputTokens] = useState(16_384)
   const [editingSource, setEditingSource] = useState(false)
   const [sourceDraft, setSourceDraft] = useState("")
+  const currentSourceDraft = useRef(sourceDraft)
+  currentSourceDraft.current = sourceDraft
   const [sourceAutoSaveError, setSourceAutoSaveError] = useState<string | null>(
     null,
   )
-  const fileInput = useRef<HTMLInputElement>(null)
-  const folderInput = useRef<HTMLInputElement>(null)
-  const lastAutoSelectedProposalStage = useRef<string | null>(null)
+  const [sourceSnapshotPath, setSourceSnapshotPath] = useState<string | null>(
+    null,
+  )
   const sourceServerSnapshot = useRef<{
     path: string
     content: string
@@ -1828,24 +1846,6 @@ export function PaperWorkbench({
       "auto" ||
       workspace?.conversation_preferences?.additional_guidance?.trim(),
   )
-  useEffect(() => {
-    if (!workspace?.id) return
-    setProposalBasics(parseProposalBasics(workspace?.description))
-  }, [workspace?.id, workspace?.description])
-  const openInitialUpload = async () => {
-    if (workspace?.mode === "proposal") {
-      const description = serializeProposalBasics(proposalBasics)
-      if (description !== (workspace.description ?? "")) {
-        try {
-          await updateWorkspace.mutateAsync({ description })
-        } catch {
-          toast.error(t("paper.source.basicsSaveFailed"))
-          return
-        }
-      }
-    }
-    openSourceUpload()
-  }
   const workflowStages = useMemo(
     () =>
       (workspace?.workflow_stages ?? []).filter((stage): stage is PaperTool =>
@@ -1853,15 +1853,33 @@ export function PaperWorkbench({
       ),
     [workspace?.workflow_stages],
   )
-  const nativeStage = workflowStages.includes(activeStage)
-    ? activeStage
-    : (workflowStages[0] ?? "formatting")
-  const proposalEditorOpen =
-    proposalEditorState.workspaceId === workspaceId &&
-    proposalEditorState.stage === nativeStage &&
-    proposalEditorState.open
-  const setProposalEditorOpen = (open: boolean) =>
-    setProposalEditorState({ workspaceId, stage: nativeStage, open })
+  const autoWorkflow =
+    workspace?.mode === "proposal" || workspace?.mode === "manuscript"
+  const regionalSnapshot = usePaperRegions(
+    autoWorkflow ? workspaceId : undefined,
+  )
+  useEffect(() => {
+    if (!regionalSnapshot.data) return
+    for (const request of regionalSnapshot.data.requests) {
+      if (request.state === "queued")
+        requestRegionalAgent({ id: request.id, prompt: request.prompt })
+    }
+    const queued = new Set(
+      regionalSnapshot.data.requests
+        .filter((request) => request.state === "queued")
+        .map((request) => request.id),
+    )
+    setRegionalQueue((state) =>
+      state.workspaceId === workspaceId
+        ? {
+            ...state,
+            requests: state.requests.filter((request) =>
+              queued.has(request.id),
+            ),
+          }
+        : state,
+    )
+  }, [regionalSnapshot.data, requestRegionalAgent, workspaceId])
   const activeSource = useMemo(
     () =>
       workspace?.active_source_version_id
@@ -1871,15 +1889,162 @@ export function PaperWorkbench({
         : undefined,
     [workspace],
   )
-  const projectContextAvailable = hasProjectContextFiles(
+  const proposalEntryPath = proposalDocumentEntryPath(
     activeSource?.manifest ?? [],
+    workspace?.proposal_entry_path,
   )
-  const showProjectContextPrompt =
+  const isMarkdownProposal =
     workspace?.mode === "proposal" &&
-    nativeStage === "formatting" &&
-    !workspace.proposal_stage_states?.formatting &&
-    !projectContextAvailable &&
-    !projectContextSkipped
+    /\.(md|markdown)$/i.test(proposalEntryPath)
+  const chapters = proposalChapters(
+    activeSource?.manifest ?? [],
+    proposalEntryPath,
+    workspace?.proposal_chapters ?? [],
+  )
+  const draftedChapters = proposalDraftChapters(chapters)
+  const hasProposalDraft = Boolean(
+    activeSource &&
+      (!isMarkdownProposal ||
+        draftedChapters.some((chapter) => chapter.id !== "S4")),
+  )
+  const visibleProposalChapters = hasProposalDraft ? draftedChapters : []
+  const [proposalDocumentView, setProposalDocumentView] =
+    useState<ProposalView>("progress")
+  const [proposalMobileView, setProposalMobileView] = useState<
+    "chat" | "proposal"
+  >("chat")
+  const [chapterPath, setChapterPath] = useState<string | null>(null)
+  const firstProposalPath =
+    visibleProposalChapters[0]?.path ?? proposalEntryPath
+  const currentChapterPath =
+    visibleProposalChapters.find((chapter) => chapter.path === chapterPath)
+      ?.path ?? firstProposalPath
+  const initializedProposal = useRef<string | null>(null)
+  useEffect(() => {
+    if (
+      workspace?.mode === "proposal" &&
+      activeSource &&
+      initializedProposal.current !== workspaceId
+    ) {
+      initializedProposal.current = workspaceId
+      setChapterPath(null)
+      setSelectedPath(firstProposalPath)
+      setProposalDocumentView("progress")
+      setProposalMobileView("chat")
+    }
+  }, [
+    workspace?.mode,
+    activeSource,
+    workspaceId,
+    firstProposalPath,
+    setSelectedPath,
+  ])
+  const [researchView, setResearchView] = useState("progress")
+  const [agentActivity, setAgentActivity] = useState<{
+    workspaceId: string
+    progress: ResearchAgentProgress
+  } | null>(null)
+  const agentProgress =
+    agentActivity?.workspaceId === workspaceId ? agentActivity.progress : null
+  const proposalProgressSteps = useMemo(
+    () =>
+      researchProgressSteps(
+        agentProgress,
+        workspace?.proposal_stage_states ?? {},
+      ),
+    [agentProgress, workspace?.proposal_stage_states],
+  )
+  const currentProposalStep =
+    [...proposalProgressSteps]
+      .reverse()
+      .find((step) => step.status === "running" || step.status === "waiting") ??
+    proposalProgressSteps[proposalProgressSteps.length - 1]
+  const receiveAgentProgress = useCallback(
+    (progress: ResearchAgentProgress) => {
+      setAgentActivity((previous) => ({
+        workspaceId,
+        progress: mergeResearchAgentProgress(
+          previous?.workspaceId === workspaceId ? previous.progress : null,
+          progress,
+        ),
+      }))
+      const active = [
+        ...(progress.workflowSteps?.length
+          ? progress.workflowSteps
+          : progress.agents),
+      ]
+        .reverse()
+        .find(
+          (agent) =>
+            agent.status === "running" &&
+            workflowStages.includes(agent.stage as PaperTool),
+        )
+      if (
+        active &&
+        researchView === "progress" &&
+        workspace?.mode !== "proposal" &&
+        workflowStages.includes(active.stage as PaperTool)
+      )
+        setActiveStage(active.stage as PaperTool)
+    },
+    [
+      workspaceId,
+      workflowStages,
+      setActiveStage,
+      researchView,
+      workspace?.mode,
+    ],
+  )
+  const openStageResult = (stage: string) => {
+    if (workspace?.mode === "proposal") {
+      void changeProposalView("document")
+      return
+    }
+    setActiveStage(stage as PaperTool)
+    setResearchView("result")
+  }
+  const progressPanel = (
+    <ResearchAgentProgressPanel
+      stages={workflowStages}
+      stageStates={workspace?.proposal_stage_states ?? {}}
+      progress={agentProgress}
+      emptyMessage={
+        workspace?.mode === "proposal"
+          ? t("paper.proposalStart.stepsHint")
+          : undefined
+      }
+      onOpenStage={openStageResult}
+    />
+  )
+  const nativeStage = workflowStages.includes(activeStage)
+    ? activeStage
+    : (workflowStages[0] ?? "formatting")
+  const versionHistory =
+    workspace && autoWorkflow ? (
+      <PaperVersionHistory
+        workspaceId={workspace.id}
+        activeSource={activeSource}
+        sourceVersions={workspace.source_versions ?? []}
+        candidates={workspace.revision_candidates ?? []}
+        onChanged={() => void workspaceQuery.refetch()}
+      />
+    ) : null
+  const proposalReferencePaths = useMemo(
+    () =>
+      (activeSource?.manifest ?? []).filter(
+        (path) =>
+          path.startsWith(`${PROJECT_CONTEXT_DIRECTORY}/`) ||
+          path.startsWith("materials/"),
+      ),
+    [activeSource?.manifest],
+  )
+  const proposalReferenceFiles = useMemo(
+    () =>
+      proposalReferencePaths.filter(
+        (path) => !path.endsWith(`/${PAPER_DIRECTORY_MARKER}`),
+      ),
+    [proposalReferencePaths],
+  )
   const sourceContexts = useMemo(
     () => paperSourceContexts(workspace?.boundary?.content.source_map),
     [workspace?.boundary?.content],
@@ -1894,9 +2059,16 @@ export function PaperWorkbench({
       ) ?? null
     )
   }, [selectedPath, sourceContexts])
+  const proposalReferenceView =
+    workspace?.mode === "proposal" && proposalDocumentView === "references"
+  const referenceKind = selectedPath
+    ? proposalReferenceKind(selectedPath)
+    : null
+  const referenceHasText =
+    referenceKind === "text" || referenceKind === "markdown"
   const sourceFile = usePaperSourceFile(
     activeSource?.id ?? null,
-    selectedPath,
+    proposalReferenceView && !referenceHasText ? null : selectedPath,
     activeSource?.content_hash,
   )
   const completedStages = useMemo(() => {
@@ -1922,47 +2094,6 @@ export function PaperWorkbench({
       completed.add("branch")
     return completed
   }, [workspace, workflowStages])
-  const proposalEntryPath =
-    workspace?.proposal_entry_path ??
-    (selectedPath?.toLowerCase().endsWith(".typ") ? selectedPath : null) ??
-    activeSource?.manifest.find((path) =>
-      path.toLowerCase().endsWith(".typ"),
-    ) ??
-    "proposal.typ"
-  const proposalResultStage = useMemo<ProposalResultStage>(() => {
-    const stage = isProposalStage(nativeStage) ? nativeStage : "formatting"
-    const state = workspace?.proposal_stage_states?.[stage]
-    const candidateFiles =
-      stage === "formatting" || stage === "final_review"
-        ? [proposalEntryPath]
-        : PROPOSAL_STAGE_FILES[stage]
-    return {
-      key: stage,
-      title: t(`paper.workflow.stage.${stage}`),
-      hint: t(`paper.workflow.stage.${stage}Hint`),
-      status: state
-        ? t(
-            `paper.workflow.${state.status === "ready" ? "ready" : state.status === "stale" ? "stale" : "needsRevision"}`,
-          )
-        : t("paper.workflow.notStarted"),
-      summary: state?.summary ?? null,
-      findings: state?.findings ?? [],
-      files: state
-        ? candidateFiles.filter((path) => activeSource?.manifest.includes(path))
-        : [],
-      foundationBlocks:
-        stage === "formatting" && state
-          ? (workspace?.proposal_foundation?.blocks ?? [])
-          : [],
-    }
-  }, [
-    activeSource?.manifest,
-    nativeStage,
-    proposalEntryPath,
-    t,
-    workspace?.proposal_foundation?.blocks,
-    workspace?.proposal_stage_states,
-  ])
   const nativeArtifactPaths = useMemo(() => {
     const stagePublished =
       completedStages.has(nativeStage) ||
@@ -1987,6 +2118,7 @@ export function PaperWorkbench({
     if (workspace?.mode !== "proposal") return true
     const generatedPaths = [
       proposalEntryPath,
+      ...chapters.map((chapter) => chapter.path),
       ...Object.values(PROPOSAL_STAGE_FILES).flat(),
     ]
     return !generatedPaths.some(
@@ -2007,6 +2139,13 @@ export function PaperWorkbench({
       : null
   const selectedPathEditable = Boolean(
     selectedPath &&
+      !proposalReferenceView &&
+      !(
+        workspace?.mode === "proposal" &&
+        (proposalDocumentView === "progress" ||
+          proposalDocumentView === "layout") &&
+        proposalReferenceFiles.includes(selectedPath)
+      ) &&
       EDITABLE_SUFFIXES.some((suffix) =>
         selectedPath.toLowerCase().endsWith(suffix),
       ),
@@ -2014,6 +2153,8 @@ export function PaperWorkbench({
   const sourceDirty =
     Boolean(selectedPath) &&
     selectedPathEditable &&
+    (workspace?.mode !== "proposal" ||
+      sourceServerSnapshot.current?.path === selectedPath) &&
     sourceDraft !== (sourceFile.data?.content ?? "")
   const workflowPrerequisitesReady =
     (!proposalActiveStage ||
@@ -2042,6 +2183,174 @@ export function PaperWorkbench({
   const deletePath = useDeletePaperSourcePath(activeId)
   const updateModel = useUpdatePaperModelBinding(activeId)
   const updateSourceFile = useUpdatePaperSourceFile(activeId)
+  const sourceWorkspace = useRef(workspaceId)
+  if (sourceWorkspace.current !== workspaceId) {
+    sourceWorkspace.current = workspaceId
+    sourceServerSnapshot.current = null
+    submittedSourceDraft.current = null
+  }
+  const pendingProposalSave = useRef<{
+    workspaceId: string
+    promise: Promise<void>
+  } | null>(null)
+  const proposalSaveTimer = useRef<number | null>(null)
+  const proposalSaving = useRef(false)
+  const sourceState = useRef({
+    activeSource,
+    selectedPath,
+    selectedPathEditable,
+  })
+  sourceState.current = { activeSource, selectedPath, selectedPathEditable }
+
+  const flushProposalSource = async () => {
+    if (proposalSaveTimer.current) clearTimeout(proposalSaveTimer.current)
+    while (pendingProposalSave.current?.workspaceId === workspaceId)
+      await pendingProposalSave.current.promise
+    if (sourceWorkspace.current !== workspaceId)
+      throw new Error("Workspace changed")
+    const state = sourceState.current
+    const snapshot = sourceServerSnapshot.current
+    if (
+      !state.activeSource ||
+      !state.selectedPath ||
+      !state.selectedPathEditable
+    )
+      return
+    if (snapshot?.path !== state.selectedPath) {
+      throw new Error(t("paper.proposalDocument.sourceNotReady"))
+    }
+    const content = currentSourceDraft.current
+    if (content === snapshot.content) return
+    const submitted = { path: state.selectedPath, content }
+    submittedSourceDraft.current = submitted
+    const save = async () => {
+      try {
+        const fresh = (await workspaceQuery.refetch({ throwOnError: true }))
+          .data
+        if (sourceWorkspace.current !== workspaceId)
+          throw new Error("Workspace changed")
+        if (!fresh?.active_source_version_id)
+          throw new Error(t("paper.proposalDocument.sourceNotReady"))
+        await updateSourceFile.mutateAsync({
+          sourceVersionId: fresh.active_source_version_id,
+          body: submitted,
+        })
+        if (sourceWorkspace.current !== workspaceId)
+          throw new Error("Workspace changed")
+        sourceServerSnapshot.current = submitted
+        setSourceAutoSaveError(null)
+      } catch (error) {
+        if (sourceWorkspace.current === workspaceId) {
+          submittedSourceDraft.current = null
+          setSourceAutoSaveError(content)
+        }
+        throw error
+      }
+    }
+    const pending = { workspaceId, promise: save() }
+    pendingProposalSave.current = pending
+    try {
+      await pending.promise
+    } finally {
+      if (pendingProposalSave.current === pending)
+        pendingProposalSave.current = null
+    }
+    if (sourceWorkspace.current !== workspaceId)
+      throw new Error("Workspace changed")
+    if (currentSourceDraft.current !== content) await flushProposalSource()
+  }
+
+  const flushProposalSourceRef = useRef(flushProposalSource)
+  flushProposalSourceRef.current = flushProposalSource
+
+  const beforeProposalRender = async (): Promise<ProposalRenderRevision> => {
+    proposalSaving.current = true
+    try {
+      while (true) {
+        await flushProposalSource()
+        const fresh = (await workspaceQuery.refetch({ throwOnError: true }))
+          .data
+        if (sourceWorkspace.current !== workspaceId)
+          throw new Error("Workspace changed")
+        const current = sourceState.current
+        if (current.selectedPath && current.selectedPathEditable) {
+          const snapshot = sourceServerSnapshot.current
+          if (snapshot?.path !== current.selectedPath)
+            throw new Error(t("paper.proposalDocument.sourceNotReady"))
+          if (currentSourceDraft.current !== snapshot.content) continue
+        }
+        const source = fresh?.source_versions?.find(
+          (item) => item.id === fresh.active_source_version_id,
+        )
+        if (!source) throw new Error(t("paper.proposalDocument.sourceNotReady"))
+        const entry = proposalDocumentEntryPath(
+          source.manifest,
+          fresh?.proposal_entry_path,
+        )
+        const ordered = proposalChapters(
+          source.manifest,
+          entry,
+          fresh?.proposal_chapters ?? [],
+        )
+        return {
+          sourceVersionId: source.id,
+          sourceHash: source.content_hash,
+          entryPaths: ordered.length
+            ? ordered.map((chapter) => chapter.path)
+            : [entry],
+        }
+      }
+    } finally {
+      proposalSaving.current = false
+    }
+  }
+  const proposalRender = useProposalRender({
+    workspaceId,
+    enabled: workspace?.mode === "proposal",
+    revision: {
+      sourceVersionId: activeSource?.id ?? "",
+      sourceHash: activeSource?.content_hash ?? "",
+      entryPaths: chapters.length
+        ? chapters.map((chapter) => chapter.path)
+        : [proposalEntryPath],
+    },
+    onBeforeRender: beforeProposalRender,
+  })
+  const selectProposalPath = async (
+    path: string | null,
+    view?: ProposalView,
+  ) => {
+    try {
+      if (
+        path !== selectedPath &&
+        (sourceDirty ||
+          pendingProposalSave.current?.workspaceId === workspaceId)
+      )
+        await flushProposalSource()
+      setSelectedPath(path)
+      if (view === "document") setChapterPath(path)
+      if (view) setProposalDocumentView(view)
+      return true
+    } catch (error) {
+      toast.error(errorMessage(error, t("paper.editor.saveFailed")))
+      return false
+    }
+  }
+  const changeProposalView = async (
+    view: ProposalView,
+    requestedPath?: string,
+  ) => {
+    const path =
+      requestedPath ??
+      (view === "references"
+        ? selectedPath && proposalReferenceFiles.includes(selectedPath)
+          ? selectedPath
+          : (proposalReferenceFiles[0] ?? null)
+        : view === "document"
+          ? currentChapterPath
+          : selectedPath)
+    return selectProposalPath(path, view)
+  }
 
   useEffect(() => {
     if (
@@ -2063,47 +2372,58 @@ export function PaperWorkbench({
       setSelectedPath(null)
       return
     }
+    if (proposalReferenceView) {
+      if (!selectedPath || !proposalReferenceFiles.includes(selectedPath)) {
+        const nextPath = proposalReferenceFiles[0] ?? null
+        if (selectedPath !== nextPath) setSelectedPath(nextPath)
+      }
+      return
+    }
+    if (
+      workspace?.mode === "proposal" &&
+      proposalDocumentView === "document" &&
+      isMarkdownProposal
+    ) {
+      if (selectedPath !== currentChapterPath)
+        setSelectedPath(currentChapterPath)
+      return
+    }
     if (!selectedPath || !activeSource.manifest.includes(selectedPath)) {
       setSelectedPath(
-        activeSource.manifest.find((path) =>
-          EDITABLE_SUFFIXES.some((suffix) =>
-            path.toLowerCase().endsWith(suffix),
-          ),
-        ) ?? null,
+        (workspace?.mode === "proposal" &&
+        activeSource.manifest.includes(proposalEntryPath)
+          ? proposalEntryPath
+          : null) ??
+          activeSource.manifest.find((path) =>
+            EDITABLE_SUFFIXES.some((suffix) =>
+              path.toLowerCase().endsWith(suffix),
+            ),
+          ) ??
+          null,
       )
     }
-  }, [activeSource, selectedPath, setSelectedPath])
-
-  useEffect(() => {
-    if (
-      workspace?.mode !== "proposal" ||
-      !activeSource ||
-      !isProposalStage(activeStage)
-    )
-      return
-    const stageKey = `${workspace.id}:${activeStage}`
-    if (lastAutoSelectedProposalStage.current === stageKey) return
-    lastAutoSelectedProposalStage.current = stageKey
-    const entryPath = workspace.proposal_entry_path
-    const ownedPaths =
-      activeStage === "formatting" || activeStage === "final_review"
-        ? entryPath
-          ? [entryPath]
-          : activeSource.manifest.filter((path) =>
-              path.toLowerCase().endsWith(".typ"),
-            )
-        : PROPOSAL_STAGE_FILES[activeStage]
-    const firstAvailable = ownedPaths.find((path) =>
-      activeSource.manifest.includes(path),
-    )
-    if (firstAvailable) setSelectedPath(firstAvailable)
-  }, [activeSource, activeStage, setSelectedPath, workspace])
+  }, [
+    activeSource,
+    selectedPath,
+    setSelectedPath,
+    proposalEntryPath,
+    workspace?.mode,
+    proposalDocumentView,
+    proposalReferenceView,
+    proposalReferenceFiles,
+    isMarkdownProposal,
+    currentChapterPath,
+  ])
 
   useEffect(() => {
     if (!workspace) return
+    if (settingsOpen && modelSettingsWorkspaceId.current === workspace.id)
+      return
+    modelSettingsWorkspaceId.current = workspace.id
     const analysisSupported = Boolean(
       workspace.analysis_provider_id &&
-        runtimeProviderIds.has(workspace.analysis_provider_id),
+        (providerItems === undefined ||
+          runtimeProviderIds.has(workspace.analysis_provider_id)),
     )
     setBinding({
       providerId: analysisSupported ? workspace.analysis_provider_id || "" : "",
@@ -2111,13 +2431,18 @@ export function PaperWorkbench({
     })
     setContextTokens(workspace.analysis_context_window_tokens)
     setOutputTokens(workspace.analysis_max_output_tokens)
-  }, [runtimeProviderIds, workspace])
+  }, [providerItems, runtimeProviderIds, settingsOpen, workspace])
 
   useEffect(() => {
     if (!selectedPath || !sourceFile.data) return
     const incoming = sourceFile.data.content
     const previous = sourceServerSnapshot.current
     const submitted = submittedSourceDraft.current
+    const concurrentEdit =
+      previous?.path === selectedPath &&
+      incoming !== previous.content &&
+      currentSourceDraft.current !== previous.content &&
+      submitted?.content !== incoming
 
     setSourceDraft((current) => {
       if (previous?.path !== selectedPath) return incoming
@@ -2127,12 +2452,14 @@ export function PaperWorkbench({
       return current === previous.content ? incoming : current
     })
     sourceServerSnapshot.current = { path: selectedPath, content: incoming }
+    setSourceSnapshotPath(selectedPath)
     if (submitted?.path === selectedPath && submitted.content === incoming) {
       submittedSourceDraft.current = null
     }
-    setSourceAutoSaveError(null)
-    setEditingSource(false)
-  }, [selectedPath, sourceFile.data])
+    setSourceAutoSaveError(concurrentEdit ? currentSourceDraft.current : null)
+    if (concurrentEdit) toast.error(t("paper.regions.conflict"))
+    if (workspace?.mode !== "proposal") setEditingSource(false)
+  }, [selectedPath, sourceFile.data, t, workspace?.mode])
 
   useEffect(() => {
     if (
@@ -2143,11 +2470,20 @@ export function PaperWorkbench({
       !selectedPathEditable ||
       !sourceDirty ||
       updateSourceFile.isPending ||
+      proposalSaving.current ||
       sourceAutoSaveError === sourceDraft
     )
       return
 
     const timer = window.setTimeout(() => {
+      if (workspace.mode === "proposal") {
+        void flushProposalSourceRef
+          .current()
+          .catch((error) =>
+            toast.error(errorMessage(error, t("paper.editor.saveFailed"))),
+          )
+        return
+      }
       const submitted = { path: selectedPath, content: sourceDraft }
       submittedSourceDraft.current = submitted
       updateSourceFile.mutate(
@@ -2156,10 +2492,6 @@ export function PaperWorkbench({
           body: {
             path: selectedPath,
             content: sourceDraft,
-            workflow_stage:
-              workspace.mode === "proposal" && proposalActiveStage
-                ? proposalActiveStage
-                : undefined,
           },
         },
         {
@@ -2172,10 +2504,10 @@ export function PaperWorkbench({
       )
     }, 1_000)
 
+    proposalSaveTimer.current = timer
     return () => window.clearTimeout(timer)
   }, [
     activeSource,
-    proposalActiveStage,
     selectedPath,
     selectedPathEditable,
     sourceAutoSaveError,
@@ -2209,39 +2541,45 @@ export function PaperWorkbench({
 
   const createSourceFile = async (path: string) => {
     const filename = path.split("/").pop() || "section.typ"
-    await uploadSource.mutateAsync([
-      {
-        file: new File([initialPaperFileContent(path)], filename, {
-          type: "text/plain",
-        }),
-        relativePath: path,
-      },
-    ])
+    await uploadSource.mutateAsync({
+      files: [
+        {
+          file: new File([initialPaperFileContent(path)], filename, {
+            type: "text/plain",
+          }),
+          relativePath: path,
+        },
+      ],
+    })
     setSelectedPath(path)
   }
 
   const createSourceFolder = async (path: string) => {
-    await uploadSource.mutateAsync([
-      {
-        file: new File(["managed directory\n"], PAPER_DIRECTORY_MARKER, {
-          type: "text/plain",
-        }),
-        relativePath: `${path}/${PAPER_DIRECTORY_MARKER}`,
-      },
-    ])
+    await uploadSource.mutateAsync({
+      files: [
+        {
+          file: new File(["managed directory\n"], PAPER_DIRECTORY_MARKER, {
+            type: "text/plain",
+          }),
+          relativePath: `${path}/${PAPER_DIRECTORY_MARKER}`,
+        },
+      ],
+    })
   }
 
   const saveSourceDraft = async () => {
     if (!workspace || !activeSource || !selectedPath) return
+    if (workspace.mode === "proposal") {
+      await flushProposalSource()
+      setEditingSource(false)
+      toast.success(t("paper.editor.saved"))
+      return
+    }
     await updateSourceFile.mutateAsync({
       sourceVersionId: activeSource.id,
       body: {
         path: selectedPath,
         content: sourceDraft,
-        workflow_stage:
-          workspace.mode === "proposal" && proposalActiveStage
-            ? proposalActiveStage
-            : undefined,
       },
     })
     setEditingSource(false)
@@ -2283,6 +2621,46 @@ export function PaperWorkbench({
     )
   }
 
+  const proposalSourceDock = (expandEditorOnMount = false) =>
+    activeSource ? (
+      <PaperDocumentDock
+        embedded
+        expandEditorOnMount={expandEditorOnMount}
+        selectableSuffixes={null}
+        manifest={activeSource.manifest}
+        sourceVersionId={activeSource.id}
+        sourceHash={activeSource.content_hash}
+        selectedPath={selectedPath}
+        sourceContent={sourceFile.data?.content ?? ""}
+        sourceContext={selectedSourceContext}
+        sourceLoading={sourceFile.isLoading}
+        sourceDraft={sourceDraft}
+        sourceDirty={sourceDirty}
+        sourceSaveError={sourceAutoSaveError === sourceDraft}
+        sourceSaving={updateSourceFile.isPending}
+        typstEntryPath={workspace.proposal_entry_path}
+        typstDownloadEnabled={false}
+        typstPreview={false}
+        editable={selectedPathEditable}
+        locked={false}
+        highlightStartLine={null}
+        highlightEndLine={null}
+        workspaceKey={workspace.id}
+        onSelect={(path) => void selectProposalPath(path)}
+        onDelete={(path) => void removeSourcePath(path)}
+        onCreateFile={createSourceFile}
+        onCreateFolder={createSourceFolder}
+        onUpload={openSourceUpload}
+        uploading={uploadSource.isPending}
+        canDeletePath={canDeleteProposalPath}
+        onDraftChange={(value) => {
+          currentSourceDraft.current = value
+          setSourceAutoSaveError(null)
+          setSourceDraft(value)
+        }}
+      />
+    ) : null
+
   return (
     <div className="flex h-full min-h-0 overflow-hidden bg-background">
       <PaperWorkbenchHeader
@@ -2297,11 +2675,35 @@ export function PaperWorkbench({
             ? openModelSettings
             : undefined
         }
-        onEditBasics={
-          activeSource && workspace.mode === "proposal" ? openBasics : undefined
-        }
       />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {workspace.mode === "proposal" && activeSource && (
+          <nav
+            aria-label={t("paper.proposalDocument.workbench")}
+            className="grid shrink-0 grid-cols-2 gap-1 border-b bg-muted/25 px-2 py-1.5 lg:hidden"
+          >
+            <Button
+              size="sm"
+              variant={proposalMobileView === "chat" ? "secondary" : "ghost"}
+              aria-pressed={proposalMobileView === "chat"}
+              onClick={() => setProposalMobileView("chat")}
+            >
+              <MessagesSquare data-icon="inline-start" aria-hidden="true" />
+              {t("paper.proposalDocument.conversation")}
+            </Button>
+            <Button
+              size="sm"
+              variant={
+                proposalMobileView === "proposal" ? "secondary" : "ghost"
+              }
+              aria-pressed={proposalMobileView === "proposal"}
+              onClick={() => setProposalMobileView("proposal")}
+            >
+              <FileText data-icon="inline-start" aria-hidden="true" />
+              {t("paper.proposalDocument.workbench")}
+            </Button>
+          </nav>
+        )}
         {workspace.mode === "algorithm" &&
         algorithmIntakeOpen &&
         !workspace.proposal_stage_states?.discovery_baseline ? (
@@ -2429,67 +2831,13 @@ export function PaperWorkbench({
                   </Button>
                 </section>
 
-                {workspace.mode === "proposal" && (
-                  <section className="border-t p-4 sm:p-5">
-                    <div className="flex items-start gap-4">
-                      <span
-                        aria-hidden="true"
-                        className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
-                      >
-                        02
-                      </span>
-                      <div className="min-w-0">
-                        <h3 className="font-serif text-lg font-semibold">
-                          {t("paper.source.basicsTitle")}
-                        </h3>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                          {t("paper.source.basicsDescription")}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <ProposalBasicsFields
-                        basics={proposalBasics}
-                        onChange={setProposalBasics}
-                      />
-                    </div>
-                    <div className="mt-4 flex justify-end">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={
-                          updateWorkspace.isPending ||
-                          serializeProposalBasics(proposalBasics) ===
-                            (workspace.description ?? "")
-                        }
-                        onClick={async () => {
-                          try {
-                            await updateWorkspace.mutateAsync({
-                              description:
-                                serializeProposalBasics(proposalBasics),
-                            })
-                            toast.success(t("paper.source.basicsSaved"))
-                          } catch {
-                            toast.error(t("paper.source.basicsSaveFailed"))
-                          }
-                        }}
-                      >
-                        {updateWorkspace.isPending && (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        )}
-                        {t("paper.source.basicsSave")}
-                      </Button>
-                    </div>
-                  </section>
-                )}
-
                 {workspace.mode !== "algorithm" && (
                   <section className="flex flex-col gap-4 border-t p-4 sm:flex-row sm:items-center sm:p-5">
                     <span
                       aria-hidden="true"
                       className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
                     >
-                      {workspace.mode === "proposal" ? "03" : "02"}
+                      02
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -2522,11 +2870,7 @@ export function PaperWorkbench({
                     aria-hidden="true"
                     className="grid size-10 shrink-0 place-items-center border bg-muted/40 font-serif text-lg text-muted-foreground"
                   >
-                    {workspace.mode === "proposal"
-                      ? "04"
-                      : workspace.mode === "algorithm"
-                        ? "02"
-                        : "03"}
+                    {workspace.mode === "algorithm" ? "02" : "03"}
                   </span>
                   <div className="min-w-0 flex-1">
                     <h3 className="font-serif text-lg font-semibold">
@@ -2543,8 +2887,7 @@ export function PaperWorkbench({
                   <Button
                     variant="outline"
                     className="w-full shrink-0 sm:w-auto"
-                    disabled={updateWorkspace.isPending}
-                    onClick={() => void openInitialUpload()}
+                    onClick={openSourceUpload}
                   >
                     <Upload data-icon="inline-start" />
                     {t("paper.source.upload")}
@@ -2580,32 +2923,47 @@ export function PaperWorkbench({
             </div>
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]">
-            <section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">
-              {workspace.workflow_available && (
+          <div
+            className={cn(
+              "grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(28rem,1fr)]",
+              workspace.mode === "proposal" && "grid-rows-[minmax(0,1fr)]",
+              workspace.mode === "manuscript" &&
+                "max-lg:grid-rows-[minmax(26rem,70dvh)_minmax(26rem,70dvh)] max-lg:overflow-y-auto",
+            )}
+          >
+            <section
+              className={cn(
+                "flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]",
+                workspace.mode === "proposal" &&
+                  proposalMobileView === "proposal" &&
+                  "max-lg:hidden",
+              )}
+            >
+              {workspace.workflow_available && !autoWorkflow && (
                 <PaperWorkflowStepper
                   stages={workflowStages}
                   activeStage={nativeStage}
                   completedStages={completedStages}
                   stageStates={workspace.proposal_stage_states ?? {}}
-                  onSelect={(stage) => {
-                    setActiveStage(stage)
-                    if (workspace.mode === "proposal")
-                      setProposalEditorState({
-                        workspaceId,
-                        stage,
-                        open: false,
-                      })
-                  }}
+                  onSelect={setActiveStage}
                 />
               )}
               {workspace.workflow_available ? (
                 <PaperNativeRuntime
                   workspaceId={workspace.id}
+                  autoWorkflow={autoWorkflow}
+                  onAgentProgress={receiveAgentProgress}
+                  pendingRequest={initialRequest ?? regionalRequests[0] ?? null}
+                  onRequestAccepted={(id) => {
+                    if (initialRequest?.id === id) setInitialProjectRequest(null)
+                    else void acceptRegionalRequest(id)
+                  }}
                   stage={nativeStage}
                   modelReady={modelReady}
                   prerequisiteReady={workflowPrerequisitesReady}
-                  artifactPaths={nativeArtifactPaths}
+                  artifactPaths={
+                    workspace.mode === "proposal" ? [] : nativeArtifactPaths
+                  }
                   stageState={workspace.proposal_stage_states?.[nativeStage]}
                   modelName={workspace.analysis_model_name}
                   modelProviderId={workspace.analysis_provider_id}
@@ -2616,13 +2974,33 @@ export function PaperWorkbench({
                   }
                   onConfigureModel={openModelSettings}
                   onConfigurePreferences={openPreferences}
-                  showProjectContextPrompt={showProjectContextPrompt}
-                  onUploadProjectContext={openProjectContextUpload}
-                  onSkipProjectContext={() => setProjectContextSkipped(true)}
+                  conversationFirst={workspace.mode === "proposal"}
+                  guidance={
+                    workspace.mode === "proposal"
+                      ? {
+                          title: t(
+                            hasProposalDraft
+                              ? "paper.proposalStart.assistantTitle"
+                              : "paper.proposalStart.title",
+                          ),
+                          description: t(
+                            hasProposalDraft
+                              ? "paper.proposalStart.continueDescription"
+                              : "paper.proposalStart.description",
+                          ),
+                          examples: t(
+                            hasProposalDraft
+                              ? "paper.agentProgress.proposalExamples"
+                              : "paper.proposalStart.examples",
+                            { returnObjects: true },
+                          ) as string[],
+                        }
+                      : undefined
+                  }
                   onOpenArtifact={(path) => {
-                    setSelectedPath(path)
                     if (workspace.mode === "proposal")
-                      setProposalEditorOpen(true)
+                      void changeProposalView("source", path)
+                    else setSelectedPath(path)
                   }}
                   profileKey={[
                     workspace.analysis_provider_id,
@@ -2648,35 +3026,46 @@ export function PaperWorkbench({
               )}
             </section>
             {workspace.mode === "manuscript" ? (
-              <aside className="hidden h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-card/30 lg:flex">
+              <aside className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-card/30">
                 <Tabs
-                  defaultValue="rebuttal"
+                  value={researchView}
+                  onValueChange={setResearchView}
                   className="flex min-h-0 flex-1 flex-col"
                 >
-                  <div className="shrink-0 border-b bg-background/65 px-5 pt-2">
-                    <TabsList className="grid h-11 w-full grid-cols-2 rounded-none bg-transparent p-0">
-                      <TabsTrigger
-                        value="rebuttal"
-                        className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 font-serif text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent"
-                      >
-                        <MessagesSquare aria-hidden="true" />
-                        {t("paper.rebuttal.tabs.entries")}
-                      </TabsTrigger>
-                      <TabsTrigger
-                        value="source"
-                        className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 font-serif text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none dark:data-[state=active]:border-primary dark:data-[state=active]:bg-transparent"
-                      >
-                        <FileText aria-hidden="true" />
-                        {t("paper.rebuttal.tabs.source")}
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
+                  <ResearchWorkbenchTabsHeader
+                    listClassName="grid-cols-3"
+                    actions={versionHistory}
+                  >
+                    <TabsTrigger value="progress">
+                      <GitBranch data-icon="inline-start" />
+                      {t("paper.agentProgress.tab")}
+                    </TabsTrigger>
+                    <TabsTrigger value="result">
+                      <MessagesSquare aria-hidden="true" />
+                      {t("paper.agentProgress.responsesTab")}
+                    </TabsTrigger>
+                    <TabsTrigger value="source">
+                      <FileText aria-hidden="true" />
+                      {t("paper.rebuttal.tabs.source")}
+                    </TabsTrigger>
+                  </ResearchWorkbenchTabsHeader>
                   <TabsContent
-                    value="rebuttal"
+                    value="progress"
+                    className="mt-0 min-h-0 flex-1 overflow-hidden"
+                  >
+                    {progressPanel}
+                  </TabsContent>
+                  <TabsContent
+                    value="result"
                     className="mt-0 min-h-0 flex-1 overflow-hidden"
                   >
                     <RebuttalEntriesPanel
                       workspaceId={workspace.id}
+                      onRequestAgent={requestRegionalAgent}
+                      onOpenFile={(path) => {
+                        setSelectedPath(path)
+                        setResearchView("source")
+                      }}
                       sourceVersionId={activeSource.id}
                       activeStage={nativeStage as RebuttalStage}
                       reviews={workspace.reviews ?? []}
@@ -2818,102 +3207,130 @@ export function PaperWorkbench({
                 </Tabs>
               </aside>
             ) : (
-              <ProposalResultsDock
-                stage={proposalResultStage}
-                editorOpen={proposalEditorOpen}
-                onEditorOpenChange={setProposalEditorOpen}
-                onOpenFile={setSelectedPath}
-                onUploadProjectContext={openProjectContextUpload}
+              <div
+                className={cn(
+                  "h-full min-h-0 min-w-0",
+                  proposalMobileView === "chat" && "max-lg:hidden",
+                )}
               >
-                <PaperDocumentDock
-                  embedded
-                  manifest={activeSource.manifest}
-                  sourceVersionId={activeSource.id}
-                  sourceHash={activeSource.content_hash}
-                  selectedPath={selectedPath}
-                  sourceContent={sourceFile.data?.content ?? ""}
-                  sourceContext={selectedSourceContext}
-                  sourceLoading={sourceFile.isLoading}
-                  sourceDraft={sourceDraft}
-                  sourceDirty={sourceDirty}
-                  sourceSaveError={sourceAutoSaveError === sourceDraft}
-                  sourceSaving={updateSourceFile.isPending}
-                  typstEntryPath={workspace.proposal_entry_path}
-                  typstDownloadEnabled={
-                    workspace.proposal_stage_states?.final_review?.status ===
-                    "ready"
+                <ProposalResultsDock
+                  key={workspace.id}
+                  workspaceId={workspace.id}
+                  hasDraft={hasProposalDraft}
+                  draftFormat={isMarkdownProposal ? "Markdown" : "Typst"}
+                  onboarding={<ProposalStartGuide />}
+                  toolbar={
+                    <ProposalToolbar
+                      referenceCount={proposalReferenceFiles.length}
+                      onUploadReferences={openProjectContextUpload}
+                      progressSummary={
+                        currentProposalStep
+                          ? `${currentProposalStep.title || currentProposalStep.summary || currentProposalStep.goal} · ${t(
+                              currentProposalStep.status === "waiting"
+                                ? "paper.proposalDocument.waitingForAuthor"
+                                : `paper.agentProgress.status.${currentProposalStep.status}`,
+                            )}`
+                          : undefined
+                      }
+                      history={
+                        hasProposalDraft ||
+                        (workspace.source_versions?.length ?? 0) > 1 ||
+                        workspace.revision_candidates?.length
+                          ? versionHistory
+                          : undefined
+                      }
+                    />
                   }
-                  editable={selectedPathEditable}
-                  locked={false}
-                  highlightStartLine={null}
-                  highlightEndLine={null}
-                  workspaceKey={workspace.id}
-                  onSelect={setSelectedPath}
-                  onDelete={(path) => void removeSourcePath(path)}
-                  onCreateFile={createSourceFile}
-                  onCreateFolder={createSourceFolder}
-                  onUpload={openSourceUpload}
-                  uploading={uploadSource.isPending}
-                  canDeletePath={canDeleteProposalPath}
-                  onDraftChange={(value) => {
-                    setSourceAutoSaveError(null)
-                    setSourceDraft(value)
-                  }}
-                />
-              </ProposalResultsDock>
+                  onRequestAgent={requestRegionalAgent}
+                  progress={progressPanel}
+                  view={proposalDocumentView}
+                  onViewChange={changeProposalView}
+                  renderAction={
+                    hasProposalDraft && (
+                      <Button
+                        size="sm"
+                        disabled={
+                          proposalRender.pending || sourceFile.isLoading
+                        }
+                        onClick={() => {
+                          setProposalDocumentView("layout")
+                          void proposalRender.confirm()
+                        }}
+                      >
+                        {proposalRender.pending && (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        )}
+                        {t("paper.proposalDocument.confirmRender")}
+                      </Button>
+                    )
+                  }
+                  layout={
+                    proposalRender.available ? (
+                      <ProposalLayoutPreview
+                        render={proposalRender}
+                        dirty={sourceDirty}
+                      />
+                    ) : undefined
+                  }
+                  references={
+                    <ProposalReferences
+                      workspaceId={workspace.id}
+                      sourceVersionId={activeSource.id}
+                      sourceHash={activeSource.content_hash}
+                      manifest={proposalReferencePaths}
+                      selectedPath={
+                        selectedPath &&
+                        proposalReferenceFiles.includes(selectedPath)
+                          ? selectedPath
+                          : null
+                      }
+                      content={sourceFile.data?.content ?? ""}
+                      loading={sourceFile.isLoading}
+                      failed={sourceFile.isError}
+                      onSelect={(path) => void selectProposalPath(path)}
+                      onDelete={(path) => void removeSourcePath(path)}
+                      canDeletePath={canDeleteProposalPath}
+                    />
+                  }
+                  document={
+                    isMarkdownProposal ? (
+                      <ProposalDocumentPreview
+                        workspaceId={workspace.id}
+                        sourceVersionId={activeSource.id}
+                        sourceHash={activeSource.content_hash}
+                        entryPath={currentChapterPath}
+                        chapters={visibleProposalChapters}
+                        onSelectChapter={(path) =>
+                          changeProposalView("document", path)
+                        }
+                        content={
+                          selectedPath === currentChapterPath ? sourceDraft : ""
+                        }
+                        loading={
+                          sourceFile.isLoading ||
+                          selectedPath !== currentChapterPath ||
+                          sourceSnapshotPath !== selectedPath
+                        }
+                        onEditChapter={(path) =>
+                          void changeProposalView("source", path)
+                        }
+                        saving={updateSourceFile.isPending}
+                        dirty={sourceDirty}
+                        saveError={sourceAutoSaveError === sourceDraft}
+                      />
+                    ) : (
+                      proposalSourceDock()
+                    )
+                  }
+                  onOpenFile={(path) => void changeProposalView("source", path)}
+                >
+                  {proposalSourceDock(true)}
+                </ProposalResultsDock>
+              </div>
             )}
           </div>
         )}
       </main>
-
-      {workspace.mode === "proposal" && (
-        <Dialog
-          open={basicsOpen}
-          onOpenChange={(open) => {
-            setBasicsOpen(open)
-            if (!open)
-              setProposalBasics(parseProposalBasics(workspace.description))
-          }}
-        >
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{t("paper.source.basicsTitle")}</DialogTitle>
-              <DialogDescription>
-                {t("paper.source.basicsDescription")}
-              </DialogDescription>
-            </DialogHeader>
-            <ProposalBasicsFields
-              basics={proposalBasics}
-              onChange={setProposalBasics}
-            />
-            <DialogFooter>
-              <Button
-                disabled={
-                  updateWorkspace.isPending ||
-                  serializeProposalBasics(proposalBasics) ===
-                    (workspace.description ?? "")
-                }
-                onClick={async () => {
-                  try {
-                    await updateWorkspace.mutateAsync({
-                      description: serializeProposalBasics(proposalBasics),
-                    })
-                    setBasicsOpen(false)
-                    toast.success(t("paper.source.basicsSaved"))
-                  } catch {
-                    toast.error(t("paper.source.basicsSaveFailed"))
-                  }
-                }}
-              >
-                {updateWorkspace.isPending && (
-                  <Loader2 className="size-3.5 animate-spin" />
-                )}
-                {t("paper.source.basicsSave")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
 
       {activeSource && (
         <Dialog
@@ -2938,6 +3355,7 @@ export function PaperWorkbench({
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-hidden">
               <PaperSourceManager
+                workspaceId={workspace.id}
                 manifest={activeSource.manifest}
                 sourceVersionId={activeSource.id}
                 sourceHash={activeSource.content_hash}
@@ -2945,12 +3363,9 @@ export function PaperWorkbench({
                 sourceContent={sourceFile.data?.content ?? ""}
                 sourceContext={selectedSourceContext}
                 sourceLoading={sourceFile.isLoading}
-                typstPreview={workspace.mode === "proposal"}
+                typstPreview={false}
                 typstEntryPath={workspace.proposal_entry_path}
-                typstDownloadEnabled={
-                  workspace.proposal_stage_states?.final_review?.status ===
-                  "ready"
-                }
+                typstDownloadEnabled={Boolean(workspace.proposal_entry_path)}
                 editing={editingSource}
                 editable={selectedPathEditable}
                 sourceDraft={sourceDraft}
@@ -2958,7 +3373,11 @@ export function PaperWorkbench({
                 highlightEndLine={null}
                 sidebarExpanded={false}
                 saving={updateSourceFile.isPending}
-                onSelect={setSelectedPath}
+                onSelect={
+                  workspace.mode === "proposal"
+                    ? (path) => void selectProposalPath(path)
+                    : setSelectedPath
+                }
                 onDelete={(path) => void removeSourcePath(path)}
                 onCreateFile={createSourceFile}
                 onCreateFolder={createSourceFolder}
@@ -2981,31 +3400,19 @@ export function PaperWorkbench({
         </Dialog>
       )}
 
-      <SourceUploadDialog
+      <PaperSourceUploadDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
         purpose={uploadPurpose}
         files={pendingFiles}
         setFiles={setPendingFiles}
-        fileInput={fileInput}
-        folderInput={folderInput}
         pending={uploadSource.isPending}
         onUpload={async () => {
-          if (
-            uploadPurpose === "project_context" &&
-            pendingFiles.some((file) =>
-              file.name.toLowerCase().endsWith(".zip"),
-            )
-          ) {
-            toast.error(t("paper.source.projectContext.archiveUnsupported"))
-            return
-          }
           try {
-            await uploadSource.mutateAsync(
-              uploadPurpose === "project_context"
-                ? projectContextUploads(pendingFiles)
-                : pendingFiles,
-            )
+            await uploadSource.mutateAsync({
+              files: pendingFiles,
+              purpose: uploadPurpose,
+            })
             if (workspace.mode === "algorithm" && uploadPurpose === "source") {
               setAlgorithmIntakeOpen(false)
             }
@@ -3197,151 +3604,5 @@ export function PaperWorkbench({
         </Dialog>
       )}
     </div>
-  )
-}
-
-function SourceUploadDialog({
-  open,
-  onOpenChange,
-  purpose,
-  files,
-  setFiles,
-  fileInput,
-  folderInput,
-  pending,
-  onUpload,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  purpose: "source" | "project_context"
-  files: File[]
-  setFiles: (files: File[]) => void
-  fileInput: React.RefObject<HTMLInputElement | null>
-  folderInput: React.RefObject<HTMLInputElement | null>
-  pending: boolean
-  onUpload: () => void
-}) {
-  const { t } = useTranslation()
-  const append = (incoming: FileList | null) => {
-    if (!incoming) return
-    const indexed = new Map(
-      files.map((file) => [file.webkitRelativePath || file.name, file]),
-    )
-    for (const file of Array.from(incoming))
-      indexed.set(file.webkitRelativePath || file.name, file)
-    setFiles([...indexed.values()])
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="min-w-0 max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            {t(
-              purpose === "project_context"
-                ? "paper.source.projectContext.dialogTitle"
-                : "paper.source.dialogTitle",
-            )}
-          </DialogTitle>
-          <DialogDescription>
-            {t(
-              purpose === "project_context"
-                ? "paper.source.projectContext.dialogDescription"
-                : "paper.source.dialogDescription",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          className="hidden"
-          accept={
-            purpose === "project_context"
-              ? ".typ,.md,.markdown,.tex,.bib,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.pdf,.svg"
-              : ".typ,.md,.markdown,.tex,.bib,.bst,.cls,.sty,.txt,.csv,.json,.yaml,.yml,.png,.jpg,.jpeg,.pdf,.eps,.svg,.zip"
-          }
-          onChange={(event) => {
-            append(event.target.files)
-            event.currentTarget.value = ""
-          }}
-        />
-        <input
-          ref={folderInput}
-          type="file"
-          multiple
-          className="hidden"
-          {...({ webkitdirectory: "", directory: "" } as Record<
-            string,
-            string
-          >)}
-          onChange={(event) => {
-            append(event.target.files)
-            event.currentTarget.value = ""
-          }}
-        />
-        <div
-          className={cn(
-            "grid gap-3",
-            purpose === "project_context" ? "grid-cols-1" : "grid-cols-2",
-          )}
-        >
-          <Button variant="outline" onClick={() => fileInput.current?.click()}>
-            <FileText className="size-4" /> {t("paper.source.selectFiles")}
-          </Button>
-          {purpose === "source" && (
-            <Button
-              variant="outline"
-              onClick={() => folderInput.current?.click()}
-            >
-              <Folder className="size-4" /> {t("paper.source.selectFolder")}
-            </Button>
-          )}
-        </div>
-        <ScrollArea className="h-56 min-w-0 rounded-lg border [&>[data-radix-scroll-area-viewport]]:overflow-x-hidden [&>[data-radix-scroll-area-viewport]>div]:!block [&>[data-radix-scroll-area-viewport]>div]:!w-full">
-          <div className="min-w-0 space-y-1 p-2">
-            {files.map((file) => {
-              const path = file.webkitRelativePath || file.name
-              return (
-                <div
-                  key={path}
-                  className="flex min-w-0 items-center gap-2 overflow-hidden rounded px-2 py-1.5 text-xs hover:bg-muted"
-                >
-                  <FileText className="size-3.5 shrink-0" />
-                  <span className="block min-w-0 flex-1 truncate" title={path}>
-                    {path}
-                  </span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-7 shrink-0"
-                    onClick={() =>
-                      setFiles(
-                        files.filter(
-                          (item) =>
-                            (item.webkitRelativePath || item.name) !== path,
-                        ),
-                      )
-                    }
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-              )
-            })}
-            {!files.length && (
-              <p className="p-6 text-center text-xs text-muted-foreground">
-                {t("paper.source.noSelection")}
-              </p>
-            )}
-          </div>
-        </ScrollArea>
-        <DialogFooter>
-          <Button disabled={!files.length || pending} onClick={onUpload}>
-            {pending && <Loader2 className="size-4 animate-spin" />}
-            {t("paper.source.uploadSelection")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

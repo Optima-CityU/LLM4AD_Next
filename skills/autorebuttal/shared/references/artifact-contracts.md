@@ -1,81 +1,76 @@
-# Stage artifact contracts
+# Versioned research output contract
 
-Publish exactly one object with `publish_stage_result(artifact, idempotency_key)`.
-Use a stable key such as `<stage>-v1`. Repair schema errors returned by the
-tool; do not bypass them.
+Read fresh `get_workflow_context` for `revision` and `publication_schemas`
+before preparing an output. The artifact discriminator is `type`; its exact
+allowed fields, defaults and nested types are exposed in those schemas. Publish through
+`publish_research_revision(summary, idempotency_key, base_revision, artifact=...)`.
+Keep the captured revision unchanged as the base; use a fresh key for changed
+content, and reuse a key only for an exact retry. The platform detects file
+changes. Do not guess discriminator names, field types or required metadata.
 
-## Baseline phase
+The publication envelope carries `summary`, `idempotency_key`, `base_revision`
+and optional `artifact`. Put the author-facing summary in that envelope, not
+inside a strict artifact variant.
 
-Publish `summary`, nested `intake`, nested `analysis`,
-`ready_for_generation`, and `findings`. Complete both internal steps before
-publishing. Follow the blocking rules in `input-contract.md`; assumptions,
-warnings, and open questions do not automatically block generation. When the
-source material is unusable, set `ready_for_generation` false and record the
-exact author action in intake `open_questions` or phase `findings`.
+## Independent optional outputs
 
-### Intake
+Choose only the output the author's request needs:
 
-`summary`, `paper_summary`, `constraints`, `reviewer_sources`, `open_questions`.
-Constraints contain `venue`, `venue_year`, `response_mode`, `output_format`,
-`author_notes`, and `forbidden_claims`. Each reviewer source contains
-`review_id`, the same stable UUID string in `reviewer_id`, `display_label`, and
-optional `title`, plus `source_system`, `external_id`, and `source_url` when
-known. For a report pasted only in the conversation, include its complete,
-reviewer-specific `review_markdown` for display in the right-hand reviewer
-panel; Markdown organization must preserve the author's original content.
-Create a UUID for both
-`review_id` and `reviewer_id` and set `source_system` to `conversation`. Record
-an OpenReview URL or Note ID only if the author supplied it; do not infer
-review content from the URL. Use `reviewer_id` for
-every concern, reviewer card, strategy reference,
-and reviewer-specific response; use `display_label` only in prose.
+- `type="baseline"`: a useful saved analysis of the supplied paper/reviews, such as
+  paper understanding, stable reviewer identities, concerns and reviewer-level
+  reasoning. Use the current schema's supported fields; a baseline is not a
+  required prerequisite for another output.
+- `type="rebuttal"`: the current response and the few structured fields needed for its
+  display and author actions, using the flat contract described below.
+- `type="ac_summary"`: an author-to-chair message grounded in what was actually answered,
+  using its required `message` and other fields permitted by its exposed schema. It is
+  independent of a fixed publication order.
 
-### Analysis
+An artifact is optional when saving canonical files alone. Method reasoning is
+not a requirement to publish separate intermediate analysis objects.
 
-`summary`, non-empty `concerns`, non-empty `reviewer_cards`. Concern fields:
-`id`, `reviewer_id`, `label`, `concern`, `concern_type`, `severity`,
-`answer_source`, `draft_move`, `source_refs`. Card fields: `reviewer_id`,
-`sentiment`, `movability`, `attitude`, `primary_concerns`, `concern_ids`.
+## Flat rebuttal output
 
-## AutoRebuttal phase
+Use `type="rebuttal"` with the required agent-produced `rendered_text`. Its
+flat optional response fields include `entries`, `global_response`,
+`findings`, `open_placeholders` and the schema's `output_format`. The response
+summary remains the publication call's `summary` argument. Include fields according to that schema and the actual
+UI deliverable, without manufacturing unused metadata or nested method phases.
+Entry/global-response subfields, evidence references, allowed enum values and
+required fields come from the exact schema, not from a historical example.
 
-Publish `summary`, nested `strategy`, nested `draft`, and nested `compliance`.
-Complete all three internal steps in order before publishing.
+The agent produces the canonical `rendered_text` itself. It must faithfully
+represent the final reviewer entries and optional global response, including
+intentional wording, language and unresolved placeholders. The backend persists
+this response; it does not generate or paraphrase the submission.
 
-### Strategy
+Use platform-returned reviewer UUIDs, stable concern IDs and original evidence
+links. Before a baseline uses an unindexed chat-pasted report, record its full
+original text with the main-agent `record_reviewer_feedback` tool; never invent
+a review/reviewer UUID inside an artifact. Refresh context and capture the
+revision after input changes. Already indexed reports need no additional gate. Do not
+turn a current regional source reference into a different artifact type without
+checking the exposed schema. A supplied exact quotation can support verification;
+a missing quote or legacy association must not become fabricated support.
 
-`summary`, `shared_issues`, `priority_reviewers`, non-empty `global_strategy`,
-and `format_plan`. `format_plan` contains `response_mode`, `output_format`,
-`global_summary`, and `assumptions`.
+## Author guidance and semantic review
 
-### Draft
+`open_placeholders` identify specific author facts, measurements or decisions
+still needed. Each should explain what is missing, why it matters and a practical
+next step. `findings` contain useful advice, not internal schema/UUID validation
+logs. Never present unresolved measurements or planned experiments as complete.
 
-`summary`, optional `global_response`, and `entries`. A global response contains
-`title`, `response`, `concern_ids`, `evidence_status`, and `source_refs`. Each
-reviewer entry contains `id`, `reviewer_id`, `label`, `title`, `response`,
-non-empty `concern_ids`, `evidence_status`, and `source_refs`. Emit at least a
-global response or one reviewer entry.
+For a complete response, check concern coverage without duplicate answers,
+reviewer identity, shared-response consistency and evidence integrity. For a
+scoped edit, review only its requested scope while preserving unrelated author
+text. These are Skill-level research checks, not backend scientific gates.
 
-### Compliance
-
-All draft fields plus `findings`, `ready_for_submission`, `open_placeholders`,
-and non-empty `rendered_text`. `rendered_text` is the exact canonical Markdown
-or plain-text rebuttal assembled by the agent from the final global response
-and reviewer entries. An unready result must identify the remaining author
-action in a finding or placeholder.
-
-`open_placeholders` are author-facing requests for specific author input. Make
-each item self-contained: use a short descriptive title, state what is missing,
-explain why it matters, and offer a concrete next step or supported wording
-option. `findings` contain useful non-blocking recommendations for improving
-the rebuttal. Do not place internal compliance results or validation logs in
-either list.
-
-Before publication, the skill must verify semantic correctness itself:
-
-- every analyzed concern ID appears exactly once across `global_response` and
-  all reviewer entries;
-- every reviewer-specific entry uses the stable reviewer UUID from intake;
-- global/shared placement agrees with `format_plan`;
-- every factual claim follows the evidence status and source-reference rules;
-- `rendered_text` faithfully represents the final checked response blocks.
+Inspect publication results: a candidate or `requires_author_approval` awaits
+author acceptance and is not an applied canonical revision. On source conflict,
+compare base, proposed response and current author edits before preparing a new
+revision. Preserve prior artifacts, raw review originals and output history.
+Do not add approval to every automatic draft. Publisher author protection
+targets actual manual changes since the last agent publication; the returned
+state determines whether a candidate or a saved revision exists.
+Scoped author requests keep their own `read_region_request` /
+`propose_region_change` approval flow rather than whole-output publication.

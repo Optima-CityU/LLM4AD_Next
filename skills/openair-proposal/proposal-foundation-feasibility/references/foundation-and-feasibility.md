@@ -1,8 +1,8 @@
 # Research Foundation and Feasibility Method
 
-This stage establishes whether the applicant and project conditions can support
-the already-defined research plan. It owns achieved facts and feasibility
-reasoning, not innovation or future work planning.
+This method assesses whether the applicant and project conditions can support
+the proposed research plan. Keep achieved facts and feasibility reasoning
+distinct from innovation claims and future work planning.
 
 ## 1. Document the research foundation
 
@@ -32,17 +32,15 @@ Assess feasibility across the dimensions actually relevant to the project:
 Every feasibility assertion requires a concrete basis. Ask the author for missing
 consequential facts rather than filling them with plausible boilerplate.
 
-## 3. Maintain section boundaries
+## 3. Keep facts and plans distinguishable
 
-Write research foundation, conditions, team support, feasibility analysis, and
-risk controls in `sections/06-feasibility.typ`.
+Explain research foundation, conditions, team support, feasibility and risk
+controls separately from innovation, milestones and expected outcomes. Do not
+rewrite evidence or achieved facts to make feasibility appear stronger. Explain
+mismatches and let the main agent integrate requested Markdown corrections
+while preserving author facts and revision integrity.
 
-Innovation, milestones, annual schedules, and expected outcomes belong to
-`sections/07-plan.typ`. Do not rewrite earlier claims to make
-feasibility appear stronger; report mismatches so the author can return to the
-owning stage.
-
-## 4. Quality gate
+## 4. Review prompts
 
 Confirm that:
 

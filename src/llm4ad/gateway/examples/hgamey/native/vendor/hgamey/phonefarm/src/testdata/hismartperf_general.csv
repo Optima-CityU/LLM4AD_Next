@@ -1,0 +1,16 @@
+startTime,1789738596000
+testDuration,119
+target_fps,60
+battery_change,0
+report_version,v1.6
+big_endian,0
+data_mask,127
+fix_freq_data_block_size,1184
+fix_freq_data_block_count,118
+var_freq_data_block_size,176
+var_freq_data_block_count,118
+gpu_counter_qualcomm_version,v1.0
+gpu_counter_mail_version,v1.0
+unity_data_version,v1.0
+gpu_max_freq,0
+gpu_min_freq,0

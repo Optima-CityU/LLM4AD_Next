@@ -43,6 +43,8 @@
 
 ## 🔥 News
 
+- 🔬 [2026.11] **AutoResearch** adds an interactive ARL workflow with separate research and validation agents, guided setup, and resumable sessions. [Try AutoResearch](https://llm4ad-next.cn/autoresearch)
+- 📝 [2026.11] **AutoProposal and AutoRebuttal** each use a single conversation. Authors can confirm a proposal for Typst/PDF layout and revise individual rebuttal passages with the original reviews in view. [AutoProposal](https://llm4ad-next.cn/autoproposal) · [AutoRebuttal](https://llm4ad-next.cn/autorebuttal)
 - 🔬 [2026.09][AutoResearch]: **[LLM4AD_Next × AutoResearchClaw](https://github.com/Optima-CityU/LLM4AD_Next/wiki/News%E2%80%90and%E2%80%90Articles%E2%80%90Index_en)** adds algorithm evolution before code is finalized in stage 13 of the 23-stage research workflow. Candidates are checked with the original evaluator; only better algorithms replace the baseline, while unsuccessful attempts leave the original code intact. [Try AutoResearch](https://llm4ad-next.cn/autoresearch) with the `llm4ad` experiment mode.
 - 🧮 [2026.09][New Dataset]: The **[AlphaEvolve Mathematics Benchmark Suite](examples/applications/alphaevolve_math_benchmark/README.md)** adds 11 independently runnable mathematical optimization cases, case-local evaluators, evolved implementations, and reusable experience artifacts.
 - 🏝️ [2026.09][New Search Method]: **Diverse Island GA** is now available, assigning a continuous spectrum of exploitation, correction, and independent-exploration behaviors across any number of islands while coordinating migration and memory use.

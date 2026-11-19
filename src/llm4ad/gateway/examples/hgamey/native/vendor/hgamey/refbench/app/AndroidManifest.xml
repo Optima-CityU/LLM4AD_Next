@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.hgamey.refbench"
+    android:versionCode="3"
+    android:versionName="0.1.2-mali-whitebox">
+
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35"/>
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true"/>
+
+    <application
+        android:label="refbench"
+        android:hasCode="false"
+        android:allowBackup="false">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:turnScreenOn="true"
+            android:showWhenLocked="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density">
+            <meta-data android:name="android.app.lib_name" android:value="refbench"/>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

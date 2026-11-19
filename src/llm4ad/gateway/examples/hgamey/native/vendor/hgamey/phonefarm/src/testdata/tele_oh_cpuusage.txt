@@ -1,0 +1,25 @@
+
+-------------------------------[cpuusage]-------------------------------
+
+Load average: 11.2 / 11.2 / 11.2; the cpu load average in 1 min, 5 min and 15 min
+CPU usage from 1970-01-02 02:12:55 to 1970-01-02 02:12:55
+Total: 11.28%; User Space: 2.74%; Kernel Space: 8.54%; iowait: 0.00%; irq: 0.61%; idle: 88.11%
+Details of Processes:
+    PID   Total Usage	   User Space    Kernel Space    Page Fault Minor    Page Fault Major    Name
+    396        0.82%           0.24%          0.58%         1275984                1423            hiview         
+    972        0.55%           0.30%          0.24%          319945                   4            hdcd           
+    828        0.21%           0.21%          0.00%            7690                  28            powermgr       
+    378        0.18%           0.03%          0.15%           27268                   4            hilogd         
+    1          0.15%           0.09%          0.06%          111437                 167            init           
+    395        0.15%           0.00%          0.15%            2796                  24            samgr          
+    75         0.15%           0.00%          0.15%               0                   0            kworker/6:1+pm 
+    80         0.12%           0.00%          0.12%               0                   0            kauditd        
+    62         0.12%           0.00%          0.12%               0                   0            ksoftirqd/6    
+    1660       0.09%           0.03%          0.06%            4167                  28            wifi_manager_service
+    820        0.09%           0.03%          0.06%          117237                  12            sensors        
+    1867       0.06%           0.03%          0.03%          544549              167529            com.ohos.sceneboard
+    22385      0.06%           0.00%          0.06%               0                   0            kworker/u16:2-events_unbound
+    776        0.06%           0.00%          0.06%             808                  11            sensor_host    
+    556        0.03%           0.03%          0.00%            8725                 243            audio_server   
+    9883       0.03%           0.00%          0.03%           44976                 340            appspawn-x     
+    959        0.03%           0.00%          0.03%          183486                2897            foundation     

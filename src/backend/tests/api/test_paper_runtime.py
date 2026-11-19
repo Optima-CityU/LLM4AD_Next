@@ -195,7 +195,7 @@ def test_runtime_html_keeps_existing_base_tag() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("workspace_mode", ["proposal", "autodesign"])
+@pytest.mark.parametrize(("workspace_mode", "auto_workflow"), [("proposal", False), ("proposal", True), ("autodesign", False)])
 @pytest.mark.parametrize(
     ("provider_type", "expected_api_format"),
     [
@@ -210,6 +210,7 @@ async def test_runtime_session_uses_scoped_protocol_adapter(
     provider_type: models.ProviderType,
     expected_api_format: str,
     workspace_mode: str,
+    auto_workflow: bool,
 ) -> None:
     """Keep every provider behind the workspace-local Anthropic endpoint."""
     captured: dict = {}
@@ -320,7 +321,7 @@ async def test_runtime_session_uses_scoped_protocol_adapter(
 
         session = await paper_runtime.create_runtime_session(
             workspace.id,
-            PaperRuntimeSessionCreate(workflow_stage="formatting" if workspace_mode == "proposal" else "autodesign"),
+            PaperRuntimeSessionCreate(workflow_stage="formatting" if workspace_mode == "proposal" else "autodesign", auto_workflow=auto_workflow),
             response,
             db,
             user,
@@ -330,6 +331,12 @@ async def test_runtime_session_uses_scoped_protocol_adapter(
 
     issued = captured["credentials"]
     profile = captured["profile"]
+    if auto_workflow:
+        assert session.session_id == f"{workspace.id.hex}-workflow"
+        assert profile["mainSkills"] == ["research-workflow-coordinator"]
+        assert profile["agents"]["methods"]["model"] == "inherit"
+        assert "proposal-methods" in profile["agents"]["methods"]["skills"]
+        assert "Agent" in profile["toolsSettings"]["allowedTools"]
     assert issued["user_id"] == user.id
     assert issued["provider_type"] == provider_type.value
     assert issued["model"] == "claude-sonnet-4-5"

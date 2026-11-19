@@ -1,0 +1,34 @@
+#version 450
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D input_image;
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D output_image;
+
+// EVOLVE_START
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+vec4 load_clamped(ivec2 position, ivec2 size) {
+    return imageLoad(input_image, clamp(position, ivec2(0), size - ivec2(1)));
+}
+
+void main() {
+    ivec2 destination = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 output_size = imageSize(output_image);
+    if (any(greaterThanEqual(destination, output_size))) {
+        return;
+    }
+
+    ivec2 input_size = imageSize(input_image);
+    vec2 source = (vec2(destination) + vec2(0.5))
+        * vec2(input_size) / vec2(output_size) - vec2(0.5);
+    ivec2 origin = ivec2(floor(source));
+    vec2 fraction = fract(source);
+
+    vec4 top_left = load_clamped(origin, input_size);
+    vec4 top_right = load_clamped(origin + ivec2(1, 0), input_size);
+    vec4 bottom_left = load_clamped(origin + ivec2(0, 1), input_size);
+    vec4 bottom_right = load_clamped(origin + ivec2(1, 1), input_size);
+    vec4 top = mix(top_left, top_right, fraction.x);
+    vec4 bottom = mix(bottom_left, bottom_right, fraction.x);
+    imageStore(output_image, destination, mix(top, bottom, fraction.y));
+}
+// EVOLVE_END

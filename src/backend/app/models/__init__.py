@@ -127,6 +127,7 @@ from app.models.rbac import (  # noqa: F401
     RolePermissionLink,
     UserRoleLink,
 )
+from app.models.remote_evaluation import EvaluationGateway, RemoteEvaluationJob  # noqa: F401
 
 # 自动科研（Research）模型
 from app.models.research import (  # noqa: F401

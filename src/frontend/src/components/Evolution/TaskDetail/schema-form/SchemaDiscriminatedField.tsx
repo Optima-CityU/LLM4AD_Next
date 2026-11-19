@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import GatewayPicker from "@/components/EvaluationGateway/GatewayPicker"
 import {
   Select,
   SelectContent,
@@ -72,11 +73,27 @@ export default function SchemaDiscriminatedField({
     const defaults = getDefaultValue(option.schema, root) as
       | Record<string, unknown>
       | undefined
-    onChange({ ...defaults, [info.propertyName]: newType })
+    const next = { ...defaults, [info.propertyName]: newType }
+    onChange(next)
   }
 
+  const isRemote = selectedOption.value === "remote"
   const filteredProperties = { ...selectedOption.schema.properties }
   delete filteredProperties[info.propertyName]
+  if (isRemote) {
+    for (const key of [
+      "gateway_id",
+      "gateway_ids",
+      "contract",
+      "selection_mode",
+      "max_attempts",
+      "lease_timeout",
+      "dataset",
+      "provider",
+      "max_retries",
+    ])
+      delete filteredProperties[key]
+  }
 
   const requiredSet = new Set(
     selectedOption.schema.required?.filter((r) => r !== info.propertyName) ??
@@ -156,6 +173,12 @@ export default function SchemaDiscriminatedField({
         </Select>
       </div>
 
+      {isRemote && (
+        <GatewayPicker
+          value={value ?? { type: "remote" }}
+          onChange={onChange}
+        />
+      )}
       {sortedEntries.length > 0 && (
         <div className="ml-2 space-y-4 border-l-2 border-border pl-4">
           {isDiverseIsland ? (

@@ -1,19 +1,27 @@
 # Full Proposal Assembly and Review Method
 
-The final stage assembles the document and audits the full argument. It does not take ownership of substantive section text.
+Review the ordered chapters (or legacy document) as a coherent argument in
+Phase 6 of the [author-paced workflow](../../references/author-paced-workflow.md).
+The main agent may make requested corrections across related passages while
+preserving author facts, decisions, citations and source revision integrity.
+Method responsibilities are conceptual, not stage ownership or restrictions on
+document files.
 
-## 1. Assemble the entry document
+## 1. Check the actual document structure
 
-Verify that the entry document:
+Verify that the selected document:
 
-- imports the established style modules and all seven section files once, in the intended order;
-- declares document metadata required by the selected template;
-- wires `references.bib` through a compatible bibliography style;
-- preserves labels, numbering, cross-references, figures, tables, equations, and assets;
-- contains no copied duplicate of section content;
-- can serve as the single browser Typst compilation entry.
+- contains the sections and metadata actually required by the author or verified rules;
+- uses S1–S9 as the canonical new-project chapters without a duplicate aggregate,
+  or preserves a legacy project's actual files and format;
+- resolves numbered citations against S4, or legacy keys against their bibliography;
+- preserves labels, cross-references, figures, tables, equations and assets;
+- has a clear canonical chapter order (or legacy entry) for the platform's
+  conversion after the author's explicit **确认并排版** UI action.
 
-Only entry-level Typst code may be changed in this stage.
+Use official Phase 0–6 as conversational guidance, with author confirmation
+before advancing. Do not turn it into mandatory frontend stages or an invented
+template, and do not migrate existing documents automatically.
 
 ## 2. Audit the central argument
 
@@ -25,47 +33,46 @@ and:
 
 `expected outcome -> milestone -> method -> work package -> objective -> evidence-based need`
 
-Flag any broken link, unsupported expansion, duplicated responsibility, or contradiction. Do not silently repair the owning section.
+Flag broken links, unsupported expansion, duplicated responsibility and
+contradictions. Apply requested targeted corrections or explain the exact
+remaining issue and its consequence; do not require switching to an owning stage.
 
 ## 3. Run cross-section checks
 
-Check at least these relationships:
-
-| Relationship | Required consistency |
+| Relationship | Relevant consistency |
 | --- | --- |
-| shared context ↔ all sections | every relevant confirmed requirement, decision, fact, and unresolved matter |
-| literature ↔ rationale | evidence supports the stated limitation and necessity |
-| rationale ↔ objectives | objectives answer the stated purpose without scope drift |
-| objectives ↔ methods | every objective and key problem has a method and evidence path |
-| methods ↔ feasibility | resources, assumptions, risks, and fallbacks are credible |
-| methods ↔ plan | milestones follow technical dependencies |
-| literature ↔ innovation | novelty language respects known prior work |
-| plan ↔ outcomes | outputs are scheduled, observable, and proportionate |
+| shared context and all sections | confirmed requirements, decisions, facts and unresolved matters |
+| literature and rationale | evidence supports the limitation and necessity |
+| rationale and objectives | objectives answer the purpose without scope drift |
+| objectives and methods | each relevant objective/problem has a method and evidence path |
+| methods and feasibility | resources, assumptions, risks and fallbacks are credible |
+| methods and plan | milestones follow technical dependencies |
+| literature and innovation | novelty language respects known prior work |
+| plan and outcomes | outputs are scheduled, observable and proportionate |
+
+Use the relationships relevant to the request rather than a mandatory form.
 
 ## 4. Verify references and technical consistency
 
-- every citation key used in Typst exists in `references.bib`;
-- every bibliography item is used or intentionally retained under a template requirement;
-- factual claims are not supported by unrelated citations;
-- symbols, abbreviations, terminology, units, and names are consistent;
-- figure, table, and equation references resolve structurally;
-- no placeholder, unresolved question, fabricated result, or hidden submission requirement is presented as complete.
+- Numbered in-text references match S4 and first-occurrence order across the
+  chapters, or legacy citation keys resolve in the selected bibliography.
+- Bibliography items are used or intentionally retained for a stated reason.
+- Factual claims are supported by the cited material.
+- Symbols, abbreviations, terminology, units and names remain consistent.
+- Figure, table and equation references identify their intended targets.
+- Placeholders, questions and intended experiments are not presented as achieved facts.
 
-## 5. Classify findings
+## 5. Explain actionable findings
 
-Return concise findings that identify the severity, owning stage, exact file,
-and required correction whenever possible:
+Identify the exact Markdown passage, issue type, effect and useful next action.
+Distinguish evidence, logic, method, citation, requirement and presentation
+issues. Prioritize consequential problems and preserve uncertainty. Scientific
+and editorial judgments remain author guidance, not backend publication gates.
 
-- **blocking:** invalid assembly, missing required section, broken citation, or unresolved hard constraint;
-- **substantive:** logic or evidence issue requiring a return to an owning stage;
-- **editorial:** non-blocking consistency or presentation issue.
-
-Set `ready_for_export` to true only when the entry is structurally compilable and no blocking finding remains. Set it to false when any blocking finding remains; the backend records that successful review as `needs_revision` so the author can return to the named owning stage. Substantive findings may be reported while the assembled document remains exportable if they do not break compilation or a hard requirement.
-
-## 6. Respect ownership
-
-Do not edit section files, bibliography entries, evidence, results, or author
-facts in the final stage. Entry-level assembly may include sections and
-configure metadata, bibliography, headings, and presentation. All substantive
-changes must return to the responsible stage so ownership and stale-state
-propagation remain understandable.
+Save useful drafts with unresolved findings. Summarize outcomes and next options
+for the author; neither tool success nor `draft_done` is finalization. Only the
+author's explicit **确认并排版** UI action requests platform conversion of the
+ordered chapters. The model does not automatically generate/export Typst/PDF or
+require a compiler. Actual export diagnostics explain a failed PDF attempt
+without removing saved sources or previous successful outputs. Never describe a
+pending revision candidate as applied or an unsuccessful export as available.

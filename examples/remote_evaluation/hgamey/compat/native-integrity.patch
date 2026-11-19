@@ -1,0 +1,386 @@
+--- a/vendor/hgamey/phonefarm/src/gpuop.rs
++++ b/vendor/hgamey/phonefarm/src/gpuop.rs
+@@ -498,8 +498,32 @@
+     }
+ }
+ 
+-/// 解析 runner 的 stdout。契约要求 `--json` 时 stdout 只有一个 JSON 对象,
+-/// 但实现难免混进进度行, 故从后往前找第一个能解析的对象。
++// The completion trailer is emitted by the parent shell after runner teardown.
++fn completed_runner_command(command: &str) -> String {
++    format!("{command}; runner_status=$?; printf '\\nPHONEFARM_VKOP_EXIT=%s\\n' \"$runner_status\"")
++}
++
++fn parse_completed_runner_output(output: &str) -> Result<RunnerReport, String> {
++    let (body, receipt) = output.trim_end().rsplit_once('\n')
++        .ok_or("runner completion receipt is missing")?;
++    let status = receipt.strip_prefix("PHONEFARM_VKOP_EXIT=")
++        .and_then(|value| value.parse::<u32>().ok())
++        .ok_or("runner completion receipt is missing or invalid")?;
++    if body.lines().any(|line| line.starts_with("PHONEFARM_VKOP_EXIT=")) {
++        return Err("runner completion receipt is duplicated".into());
++    }
++    let report = parse_runner_output(body);
++    if status != 0 {
++        // A structured negative result remains candidate failure, never fitness.
++        if let Ok(ref failed) = report {
++            if !failed.ok { return report; }
++        }
++        return Err(format!("runner process failed with exit status {status}; JSON metrics rejected"));
++    }
++    report
++}
++
++/// Parse a raw runner JSON payload; execution callers must also verify completion.
+ pub fn parse_runner_output(stdout: &str) -> Result<RunnerReport, String> {
+     let trimmed = stdout.trim();
+     if trimmed.is_empty() {
+@@ -1472,12 +1496,14 @@
+             break;
+         }
+ 
+-        match parse_runner_output(&out) {
++        match parse_completed_runner_output(&out) {
+             Ok(r) if r.ok => {
+                 let Some(ms) = r.median_ms() else {
+                     fatal = Some("runner 未给出时延".into());
+                     break;
+                 };
++                // Completion was checked before accepting any emitted metrics.
++                last["runner_exit_status"] = serde_json::json!(0);
+                 // Keep the per-arm measurements, not only rounded progress text.
+                 last["operator_latency_ms"] = serde_json::json!(ms);
+                 last["psnr_db"] = serde_json::json!(r.psnr_db);
+@@ -1967,8 +1993,8 @@
+             "cd {REMOTE_DIR} && ./vkop_runner --shader {spv} --track {} --iterations {QUALITY_ITERS}{ref_arg} --json 2>&1",
+             req.track
+         );
+-        let out = phone.shell(&cmd, 120_000);
+-        let r = parse_runner_output(&out)?;
++        let out = phone.shell(&completed_runner_command(&cmd), 120_000);
++        let r = parse_completed_runner_output(&out)?;
+         if !r.ok {
+             return Err(format!("{spv} 跑失败: {:?}", r.error));
+         }
+@@ -2325,7 +2351,7 @@
+         "cd {REMOTE_DIR} && ./vkop_runner --shader {spv} --track {} --seconds {}{ref_arg} --json 2>&1",
+         req.track, req.protocol.replay_seconds
+     );
+-    let out = phone.shell(&cmd, (req.protocol.replay_seconds as u64 + 60) * 1000);
++    let out = phone.shell(&completed_runner_command(&cmd), (req.protocol.replay_seconds as u64 + 60) * 1000);
+ 
+     let mut power = Vec::new();
+     if let Some(mut child) = sampler {
+@@ -3003,6 +3029,28 @@
+     // ---------- runner 回包 ----------
+ 
+     #[test]
++    fn runner_exit_status_precedes_successful_json() {
++        let report = r#"{"v":1,"ok":true,"timing_us":{"samples":[850.0],"median":850.0},"psnr_db":41.0,"error":null}"#;
++        let completed = format!("{report}\nPHONEFARM_VKOP_EXIT=0\n");
++        assert!(parse_completed_runner_output(&completed).unwrap().ok);
++        for code in [1, 2, 134, 139] {
++            let failed = format!("{report}\nPHONEFARM_VKOP_EXIT={code}\n");
++            assert!(parse_completed_runner_output(&failed).is_err(), "accepted exit {code}");
++        }
++        assert!(parse_completed_runner_output(report).is_err(), "missing completion was accepted");
++        assert!(parse_completed_runner_output(&format!("{completed}diagnostic tail")).is_err());
++    }
++
++    #[test]
++    fn runner_exit_command_retains_child_failure() {
++        let command = completed_runner_command("sh -c 'printf \"{\\\"ok\\\":true}\\n\"; exit 134'");
++        let output = std::process::Command::new("sh").args(["-c", &command]).output().unwrap();
++        let text = String::from_utf8(output.stdout).unwrap();
++        assert!(text.trim_end().ends_with("PHONEFARM_VKOP_EXIT=134"), "{text}");
++        assert!(parse_completed_runner_output(&text).is_err());
++    }
++
++    #[test]
+     fn parses_a_successful_runner_report() {
+         let out = r#"{"v":1,"ok":true,
+             "timing_us":{"samples":[1102.0,1098.5,1105.2],"median":1102.0},
+--- a/vendor/hgamey/phonefarm/tools/vkop/main.cpp
++++ b/vendor/hgamey/phonefarm/tools/vkop/main.cpp
+@@ -290,6 +290,11 @@
+ };
+ 
+ struct Ctx {
++  Ctx() = default;
++  Ctx(const Ctx &) = delete;
++  Ctx &operator=(const Ctx &) = delete;
++  ~Ctx() { close(); }
++
+   VkInstance inst = VK_NULL_HANDLE;
+   VkPhysicalDevice phys = VK_NULL_HANDLE;
+   VkDevice dev = VK_NULL_HANDLE;
+@@ -305,6 +310,33 @@
+   VkPipeline pipe = VK_NULL_HANDLE;
+   VkShaderModule module = VK_NULL_HANDLE;
+   VkQueryPool qpool = VK_NULL_HANDLE;
++
++  VkResult close() {
++    VkResult waited = VK_SUCCESS;
++    if (dev != VK_NULL_HANDLE) {
++      // Drain GPU work before releasing children and the driver's worker threads.
++      waited = vkDeviceWaitIdle(dev);
++      if (pool) vkDestroyCommandPool(dev, pool, nullptr);
++      if (pipe) vkDestroyPipeline(dev, pipe, nullptr);
++      if (playout) vkDestroyPipelineLayout(dev, playout, nullptr);
++      if (dpool) vkDestroyDescriptorPool(dev, dpool, nullptr);
++      if (dsl) vkDestroyDescriptorSetLayout(dev, dsl, nullptr);
++      if (module) vkDestroyShaderModule(dev, module, nullptr);
++      if (qpool) vkDestroyQueryPool(dev, qpool, nullptr);
++      for (auto &image : images) {
++        if (image.view) vkDestroyImageView(dev, image.view, nullptr);
++        if (image.image) vkDestroyImage(dev, image.image, nullptr);
++        if (image.mem) vkFreeMemory(dev, image.mem, nullptr);
++      }
++      vkDestroyDevice(dev, nullptr);
++      dev = VK_NULL_HANDLE;
++    }
++    if (inst != VK_NULL_HANDLE) {
++      vkDestroyInstance(inst, nullptr);
++      inst = VK_NULL_HANDLE;
++    }
++    return waited;
++  }
+ };
+ 
+ uint32_t find_mem(VkPhysicalDevice p, uint32_t bits, VkMemoryPropertyFlags want) {
+@@ -843,6 +875,12 @@
+   size_t stride = (samples.size() + kMaxEmit - 1) / kMaxEmit;
+   if (stride == 0) stride = 1;
+ 
++  // Successful metrics are published only after explicit Vulkan teardown.
++  if (c.close() != VK_SUCCESS) {
++    emit_failure("Vulkan device did not become idle during cleanup");
++    return 2;
++  }
++
+   printf("{\"v\":1,\"ok\":true,\"timing_us\":{\"samples\":[");
+   bool first = true;
+   for (size_t i = 0; i < samples.size(); i += stride) {
+--- a/vendor/hgamey/phonefarm/src/capture_worker.rs
++++ b/vendor/hgamey/phonefarm/src/capture_worker.rs
+@@ -4,6 +4,7 @@
+ use crate::plugins::genshin::QuestDevice;
+ use image::DynamicImage;
+ use serde_json::{json, Value};
++use sha2::{Digest, Sha256};
+ use std::cell::{Cell, RefCell};
+ use std::fs::{self, File, OpenOptions};
+ use std::io::Read;
+@@ -298,10 +299,48 @@
+ 
+     pub fn png(&self) -> Result<Vec<u8>, String> {
+         self.check()?;
+-        let bytes = self.raw(&["exec-out", "screencap", "-p"], self.screenshot_timeout_ms)?;
+-        if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+-            return self.fail("capture screencap did not return PNG");
+-        }
++        if !self.state.borrow()["screenshot_file"].is_null() {
++            return self.fail("capture has an unresolved screenshot file");
++        }
++        let token = self.state.borrow()["token"].as_str().ok_or("missing capture token")?.to_owned();
++        let path = format!("/data/local/tmp/phonefarm_capture_{token}_{}.png", self.sequence.get());
++        // Persist ownership before the device can create evidence. The parent
++        // reconciles this exact file after a known worker failure.
++        self.save(|state| state["screenshot_file"] = json!(path))?;
++        crate::capture_session::screenshot_file(&self.state.borrow())?;
++        let seconds = self.screenshot_timeout_ms.div_ceil(1000);
++        self.text(&format!("timeout -k 2 {seconds} screencap -p {path}"), self.screenshot_timeout_ms)?;
++        let metadata = self.text(&format!("stat -c %s {path} && sha256sum {path}"), 8_000)?;
++        let mut lines = metadata.lines();
++        let size = lines.next().and_then(|line| line.parse::<usize>().ok());
++        let digest = lines.next().and_then(|line| line.split_whitespace().next());
++        let (size, digest) = match (size, digest) {
++            (Some(size), Some(digest)) if size >= 8 && size < OUTPUT_LIMIT as usize
++                && digest.len() == 64 && digest.bytes().all(|c| c.is_ascii_hexdigit()) => (size, digest),
++            _ => return self.fail("capture screenshot metadata is invalid"),
++        };
++        // A single live screencap stream can stall on wireless ADB. Freeze the
++        // lossless frame first, then read bounded chunks through the same proxy.
++        const CHUNK: usize = 256 * 1024;
++        let mut bytes = Vec::with_capacity(size);
++        while bytes.len() < size {
++            let offset = bytes.len();
++            // exec-out combines remote stdout/stderr. Suppress dd's transfer
++            // statistics on the device so they can never enter the PNG bytes.
++            let command = format!("dd if={path} bs=262144 skip={} count=1 2>/dev/null", offset / CHUNK);
++            let chunk = self.raw(&["exec-out", &command], self.screenshot_timeout_ms)?;
++            if chunk.len() != CHUNK.min(size - offset) {
++                return self.fail("capture screenshot chunk is incomplete");
++            }
++            bytes.extend_from_slice(&chunk);
++        }
++        if !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
++            || format!("{:x}", Sha256::digest(&bytes)) != digest.to_ascii_lowercase()
++        {
++            return self.fail("capture screenshot PNG or SHA-256 does not match");
++        }
++        self.text(&format!("rm -f {path} && test ! -e {path}"), 8_000)?;
++        self.save(|state| state["screenshot_file"] = Value::Null)?;
+         Ok(bytes)
+     }
+ 
+@@ -421,7 +460,7 @@
+                 hid_name: "synthetic".into(),
+                 group: std::process::id() as i32,
+                 state: RefCell::new(json!({
+-                    "transport_uncertain": false, "write_pending": null, "hid_started": false,
++                    "token": "fixture", "transport_uncertain": false, "write_pending": null, "hid_started": false,
+                 })),
+                 fatal: RefCell::new(None),
+                 gamepad: RefCell::new(None),
+@@ -429,23 +468,47 @@
+                 screenshot_timeout_ms: std::env::var(FIXTURE_TIMEOUT).unwrap().parse().unwrap(),
+                 dir,
+             };
+-            assert_eq!(worker.png().unwrap(), b"\x89PNG\r\n\x1a\n");
++            let result = worker.png();
++            match std::env::var("PF_CAPTURE_SCREENSHOT_TEST_CASE").unwrap().as_str() {
++                "short" => assert!(result.unwrap_err().contains("chunk is incomplete")),
++                "digest" => assert!(result.unwrap_err().contains("SHA-256 does not match")),
++                _ => {
++                    assert_eq!(result.unwrap(), b"\x89PNG\r\n\x1a\n");
++                    assert!(worker.state.borrow()["screenshot_file"].is_null());
++                }
++            }
+             return;
+         }
+         let root = std::env::temp_dir().join(format!(
+             "pf-capture-screenshot-timeout-{}", std::process::id(),
+         ));
+-        for timeout in [45_000_u64, 1] {
+-            let dir = root.join(timeout.to_string());
++        for (timeout, case) in [(45_000_u64, "valid"), (1, "timeout"), (45_000, "short"), (45_000, "digest")] {
++            let dir = root.join(case);
+             fs::create_dir_all(dir.join("worker-commands")).unwrap();
+             let fake = dir.join("fake-transport");
+             // A local producer exercises the real proxy without contacting a device.
+-            fs::write(&fake, b"#!/bin/sh\nsleep 0.1\nprintf '\\211PNG\\r\\n\\032\\n'\n").unwrap();
++            fs::write(&fake, r#"#!/bin/sh
++sleep 0.1
++case "$*" in
++  *'shell timeout '*) exit 0;;
++  *'shell stat '*) printf '8\n4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6  filename\n';;
++  *'exec-out dd '*)
++    case "$*" in *'2>/dev/null') ;; *) echo 'dd statistics mixed into image';; esac
++    case "$PF_CAPTURE_SCREENSHOT_TEST_CASE" in
++      short) printf '\211PNG';;
++      digest) printf '\211PNG\r\nXX';;
++      *) printf '\211PNG\r\n\032\n';;
++    esac;;
++  *'shell rm '*) exit 0;;
++  *) echo unexpected arguments >&2; exit 2;;
++esac
++"#).unwrap();
+             fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+             let output = std::process::Command::new(std::env::current_exe().unwrap())
+                 .args(["--exact", "capture_worker::tests::png_uses_configured_timeout_and_preserves_uncertainty"])
+                 .env(FIXTURE_DIR, &dir)
+                 .env(FIXTURE_TIMEOUT, timeout.to_string())
++                .env("PF_CAPTURE_SCREENSHOT_TEST_CASE", case)
+                 .env_remove("PF_TRANSPORT_LIFELINE")
+                 .env_remove("PF_TRANSPORT_PATH")
+                 .env_remove("ADB_BIN")
+@@ -456,18 +519,22 @@
+                 .unwrap();
+             let intent = fs::read_dir(dir.join("worker-commands")).unwrap()
+                 .map(|entry| entry.unwrap().path())
+-                .find(|path| path.extension().is_some_and(|ext| ext == "json"))
++                .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
++                .min()
+                 .unwrap();
+             let record: Value = serde_json::from_slice(&fs::read(intent).unwrap()).unwrap();
+             assert_eq!(record["timeout_ms"], timeout);
+-            assert_eq!(record["argv"], json!(["exec-out", "screencap", "-p"]));
++            assert_eq!(record["argv"][0], "shell");
++            assert!(record["argv"][1].as_str().unwrap().starts_with("timeout -k 2 "));
++            assert!(record["argv"][1].as_str().unwrap().contains("screencap -p /data/local/tmp/phonefarm_capture_fixture_"));
+             if timeout == 1 {
+                 assert_eq!(output.status.signal(), Some(libc::SIGKILL));
+                 assert!(record["exit"].is_null());
+                 let state: Value = serde_json::from_slice(&fs::read(dir.join("session.json")).unwrap()).unwrap();
+                 assert_eq!(state["transport_uncertain"], true);
++                assert!(state["screenshot_file"].as_str().unwrap().ends_with(".png"));
+             } else {
+-                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++                assert!(output.status.success(), "status={} stderr={} stdout={}", output.status, String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout));
+                 assert_eq!(record["exit"], 0);
+             }
+         }
+--- a/vendor/hgamey/phonefarm/src/capture_session.rs
++++ b/vendor/hgamey/phonefarm/src/capture_session.rs
+@@ -50,7 +50,7 @@
+         let state = json!({"schema":SCHEMA,"serial":lease.serial,"token":lease.token(),
+             "stage":"prepared","boot_id":null,"stayon":null,"shutdown":shutdown,
+             "hid_name":format!("Phonefarm Capture {}",lease.token()),"hid_started":false,"hid_registered":false,
+-            "write_pending":null,"transport_uncertain":false,"evidence_origin":origin,
++            "write_pending":null,"transport_uncertain":false,"screenshot_file":null,"evidence_origin":origin,
+             "created_at":chrono::Utc::now().to_rfc3339()});
+         let s = Self {
+             lease: RefCell::new(lease),
+@@ -231,6 +231,12 @@
+             let boot = self.read("recovery_boot", "cat /proc/sys/kernel/random/boot_id", 8000)?;
+             if self.state.borrow()["boot_id"].as_str() != Some(boot.trim()) {
+                 return Err("capture device boot changed; automatic restore refused".into());
++            }
++            let screenshot = screenshot_file(&self.state.borrow())?.map(str::to_owned);
++            if let Some(path) = screenshot {
++                self.write("remove_screenshot", &format!("rm -f {path} && test ! -e {path}"))?;
++                self.state.borrow_mut()["screenshot_file"] = Value::Null;
++                self.save()?;
+             }
+             let mut input_absent = Value::Null;
+             if self.state.borrow()["hid_started"] == true {
+@@ -383,7 +389,26 @@
+             && value.bytes().all(|b| b.is_ascii_digit())
+             && value.parse::<u32>().is_ok())
+ }
++/// Accept only a file owned by this capture token, never an arbitrary saved path.
++pub(crate) fn screenshot_file(state: &Value) -> Result<Option<&str>, String> {
++    if state["screenshot_file"].is_null() {
++        return Ok(None);
++    }
++    let token = state["token"].as_str().ok_or("missing capture token")?;
++    if token.is_empty() || !token.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
++        return Err("invalid capture screenshot token".into());
++    }
++    let path = state["screenshot_file"].as_str().ok_or("invalid capture screenshot path")?;
++    let prefix = format!("/data/local/tmp/phonefarm_capture_{token}_");
++    let sequence = path.strip_prefix(&prefix).and_then(|s| s.strip_suffix(".png"));
++    if !sequence.is_some_and(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit())) {
++        return Err("screenshot file does not belong to this capture".into());
++    }
++    Ok(Some(path))
++}
++
+ pub(crate) fn validate(state: &Value, serial: &str) -> Result<(), String> {
++    screenshot_file(state)?;
+     let token = state["token"].as_str().ok_or("missing capture token")?;
+     if state["schema"] != SCHEMA
+         || state["serial"] != serial
+@@ -438,6 +463,21 @@
+ mod tests {
+     use super::*;
+     #[test]
++    fn screenshot_cleanup_accepts_only_this_sessions_file() {
++        let mut state = json!({"token":"fixture", "screenshot_file":null});
++        assert!(screenshot_file(&state).unwrap().is_none());
++        state["screenshot_file"] = json!("/data/local/tmp/phonefarm_capture_fixture_12.png");
++        assert!(screenshot_file(&state).unwrap().is_some());
++        for path in ["/data/local/tmp/phonefarm_capture_other_12.png",
++            "/data/local/tmp/phonefarm_capture_fixture_../other.png",
++            "/data/local/tmp/phonefarm_capture_fixture_.png",
++            "/data/local/tmp/phonefarm_capture_fixture_1.png; echo bad"] {
++            state["screenshot_file"] = json!(path);
++            assert!(screenshot_file(&state).is_err(), "{path}");
++        }
++    }
++
++    #[test]
+     fn recovery_readback_requires_known_shape_and_exact_identity() {
+         assert!(input_absent_from("", "owned").is_err());
+         let input = "I: Bus=0003\nN: Name=\"owned\"\n";

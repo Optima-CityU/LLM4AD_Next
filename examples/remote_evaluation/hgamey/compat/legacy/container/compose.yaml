@@ -1,0 +1,108 @@
+name: hgamey-evaluator
+services:
+  executor:
+    image: hgamey-evaluator:local
+    build:
+      context: .
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        TRACE_PROCESSOR_URL: ${TRACE_PROCESSOR_URL:-}
+        ADB_PLATFORM_TOOLS_URL: ${ADB_PLATFORM_TOOLS_URL:-https://dl.google.com/android/repository/platform-tools_r36.0.2-linux.zip}
+        ADB_PLATFORM_TOOLS_SHA256: ${ADB_PLATFORM_TOOLS_SHA256:-3afdea91441815ab41254193df0343d92c1b1c0d0237165c3a345c8af8891c31}
+    init: true
+    network_mode: host
+    environment:
+      EXECUTOR_CONFIG: /config/devices.json
+      EXECUTOR_BIND: 127.0.0.1
+      EXECUTOR_PORT: ${EXECUTOR_PORT:-8767}
+      ANDROID_ADB_SERVER_PORT: ${ANDROID_ADB_SERVER_PORT:-5039}
+      DEVLOCK_DIR: /work/locks
+      PHONEFARM_STATE_DIR: /work/state
+      ADB_VENDOR_KEYS: /run/adb-identity
+      HTTP_PROXY: ''
+      HTTPS_PROXY: ''
+      ALL_PROXY: ''
+      http_proxy: ''
+      https_proxy: ''
+      all_proxy: ''
+      LLM4AD_SERVER_URL: ${LLM4AD_SERVER_URL:-}
+      LLM4AD_GATEWAY_NAME: ${LLM4AD_GATEWAY_NAME:-}
+      LLM4AD_ALLOWED_USER_IDS: ${LLM4AD_ALLOWED_USER_IDS:-}
+      HGAMEY_DEVICE_HOST: ${HGAMEY_DEVICE_HOST:-}
+      HGAMEY_DEVICES_JSON: ${HGAMEY_DEVICES_JSON:-}
+      HGAMEY_DEVICE_PORT: ${HGAMEY_DEVICE_PORT:-5555}
+      HGAMEY_DEVICE_SERIAL: ${HGAMEY_DEVICE_SERIAL:-}
+      HGAMEY_DEVICE_ID: ${HGAMEY_DEVICE_ID:-}
+      HGAMEY_DEVICE_PROFILE: ${HGAMEY_DEVICE_PROFILE:-}
+      HGAMEY_REFERENCE_PATH: ${HGAMEY_REFERENCE_PATH:-/inputs/genshin}
+      HGAMEY_PROFILE_VERSION: ${HGAMEY_PROFILE_VERSION:-genshin-sr-v1}
+      HGAMEY_EVAL_SECONDS: ${HGAMEY_EVAL_SECONDS:-5}
+      HGAMEY_EVAL_ROUNDS: ${HGAMEY_EVAL_ROUNDS:-8}
+      HGAMEY_ELITE_EVAL_SECONDS: ${HGAMEY_ELITE_EVAL_SECONDS:-5}
+      HGAMEY_ELITE_EVAL_ROUNDS: ${HGAMEY_ELITE_EVAL_ROUNDS:-16}
+      HGAMEY_COOL_C: ${HGAMEY_COOL_C:-50}
+      HGAMEY_GPU_LEVEL: ${HGAMEY_GPU_LEVEL:-}
+      HGAMEY_BUDGET_MS: ${HGAMEY_BUDGET_MS:-10}
+      HGAMEY_QUALITY_BASELINE_DB: ${HGAMEY_QUALITY_BASELINE_DB:-30}
+      HGAMEY_REQUIRE_DISCHARGING: ${HGAMEY_REQUIRE_DISCHARGING:-false}
+      HGAMEY_ALLOW_MISSING_POWER: ${HGAMEY_ALLOW_MISSING_POWER:-true}
+      HGAMEY_PAUSE_FOREGROUND: ${HGAMEY_PAUSE_FOREGROUND:-false}
+      HGAMEY_PACKAGE: ${HGAMEY_PACKAGE:-com.miHoYo.Yuanshen}
+      HGAMEY_STARTUP_CHECK: ${HGAMEY_STARTUP_CHECK:-true}
+      HGAMEY_STARTUP_CHECK_SECONDS: ${HGAMEY_STARTUP_CHECK_SECONDS:-1}
+      HGAMEY_STARTUP_CHECK_ROUNDS: ${HGAMEY_STARTUP_CHECK_ROUNDS:-2}
+      HGAMEY_STARTUP_CHECK_TIMEOUT: ${HGAMEY_STARTUP_CHECK_TIMEOUT:-1800}
+      HGAMEY_CLEANUP_ENABLED: ${HGAMEY_CLEANUP_ENABLED:-true}
+      HGAMEY_CLEANUP_INTERVAL_SECONDS: ${HGAMEY_CLEANUP_INTERVAL_SECONDS:-30}
+      HGAMEY_LOCAL_EVIDENCE_KEEP_HOURS: ${HGAMEY_LOCAL_EVIDENCE_KEEP_HOURS:-0}
+      HGAMEY_DEVICE_LABEL: ${HGAMEY_DEVICE_LABEL:-}
+      HGAMEY_P_THRESHOLD: ${HGAMEY_P_THRESHOLD:-0.01}
+      HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT: ${HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT:-1}
+      HGAMEY_COMPILE_TIMEOUT: ${HGAMEY_COMPILE_TIMEOUT:-60}
+      HGAMEY_POLL_INTERVAL: ${HGAMEY_POLL_INTERVAL:-2}
+      HGAMEY_GAME_CHECK_CONFIG: ${HGAMEY_GAME_CHECK_CONFIG:-}
+    volumes:
+    - ${ADB_IDENTITY_FILE:-./secrets}:/run/adb-identity:ro
+    - ${HGAMEY_CONFIG_DIR:-./config}:/config:ro
+    - ${HGAMEY_INPUTS_DIR:-./inputs}:/inputs:ro
+    - ./examples:/examples:ro
+    - ${HGAMEY_STATE_DIR:-./runtime/executor}:/data
+    - ${HGAMEY_STATE_DIR:-./runtime/executor}/android:/home/hgamey/.android
+    - ${HGAMEY_PHONEFARM_DIR:-./runtime/phonefarm}:/work
+    - ${HGAMEY_NDK_DIR:-./toolchain/ndk-r27d}:/ndk:ro
+    tmpfs:
+    - /work/locks/transport-bin:rw,uid=1000,gid=1000,mode=0755
+    stop_grace_period: ${HGAMEY_STOP_GRACE_PERIOD:-35m}
+    healthcheck:
+      test:
+      - CMD
+      - python3
+      - /opt/gateway/health.py
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: ${HGAMEY_HEALTH_START_PERIOD:-30m}
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+    restart: unless-stopped
+    command:
+    - gateway
+  native-build:
+    profiles:
+    - build
+    image: hgamey-evaluator-native:local
+    build:
+      context: .
+      dockerfile: Dockerfile.native
+    user: 1000:1000
+    environment:
+      ANDROID_REPOSITORY_BASE: ${ANDROID_REPOSITORY_BASE:-https://dl.google.com/android/repository}
+    volumes:
+    - ./vendor/hgamey:/input:ro
+    - ./dist:/out
+    - ./toolchain:/toolchain
+    - ./secrets:/secrets:ro

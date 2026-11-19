@@ -391,6 +391,7 @@ function NumberField({
         ) : (
           <Input
             type="number"
+            aria-label={label}
             value={value ?? ""}
             min={schema.minimum ?? schema.exclusiveMinimum}
             max={schema.maximum ?? schema.exclusiveMaximum}

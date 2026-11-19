@@ -42,7 +42,10 @@ import {
 } from "@/components/ui/tooltip"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
-
+import {
+  getLanguageFromPath as getSourceLanguageFromPath,
+  SHADER_FILE_EXTENSIONS,
+} from "./EvolveAnnotationStep/types"
 import FileTreeView from "./FileTreeView"
 
 /* ── Common text file extensions (allowed for selection / preview) ── */
@@ -110,6 +113,7 @@ const TEXT_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
   "hh",
   "hpp",
   "hxx",
+  ...SHADER_FILE_EXTENSIONS,
   "cs",
   "m",
   "mm",
@@ -408,7 +412,7 @@ function getLanguageFromPath(path: string): string {
     html: "html",
     css: "css",
   }
-  return map[ext] ?? "plaintext"
+  return map[ext] ?? getSourceLanguageFromPath(path)
 }
 
 export default function DataPreparationStep({

@@ -1,0 +1,39 @@
+#version 450
+// 路线 B 第 3 步: 块位移场平滑。块网格上先 3x3 逐分量中值, 再 5x5 二项式核 ([1,4,6,4,1]/16 可分离),
+// 边缘夹边; 输出换算成全分辨率像素单位 (乘 up=4)。全程整数再乘 4/256, 结果在 float 里精确, 与参考逐位一致。
+// 调度: x = ceil(gw*gh/64)。
+#include "interp_common.glsl"
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) readonly buffer MV { int v[]; } mv;       // gh*gw*2 (1/4 分辨率单位)
+layout(std430, binding = 1) writeonly buffer Flow { float v[]; } fl;  // gh*gw*2 (全分辨率单位)
+layout(push_constant) uniform P { int gw; int gh; int up; } pc;
+
+int getv(int x, int y, int c) {
+    x = clamp(x, 0, pc.gw - 1); y = clamp(y, 0, pc.gh - 1);
+    return mv.v[(y * pc.gw + x) * 2 + c];
+}
+
+int med9(int x, int y, int c) {
+    int a[9];
+    for (int j = 0; j < 3; j++) for (int i = 0; i < 3; i++) a[j * 3 + i] = getv(x + i - 1, y + j - 1, c);
+    for (int i = 1; i < 9; i++) {        // 插入排序
+        int t = a[i]; int j = i - 1;
+        while (j >= 0 && a[j] > t) { a[j + 1] = a[j]; j--; }
+        a[j + 1] = t;
+    }
+    return a[4];
+}
+
+void main() {
+    int g = int(gl_GlobalInvocationID.x);
+    if (g >= pc.gw * pc.gh) return;
+    int x = g % pc.gw, y = g / pc.gw;
+    const int wgt[5] = int[5](1, 4, 6, 4, 1);
+    for (int c = 0; c < 2; c++) {
+        int acc = 0;
+        for (int j = 0; j < 5; j++)
+            for (int i = 0; i < 5; i++)
+                acc += wgt[j] * wgt[i] * med9(clamp(x + i - 2, 0, pc.gw - 1), clamp(y + j - 2, 0, pc.gh - 1), c);   // 中值场本身夹边
+        fl.v[g * 2 + c] = float(acc) * float(pc.up) / 256.0;
+    }
+}

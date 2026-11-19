@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from llm4ad.config.app import AppConfig
 from llm4ad.config.schema import EvalContext
 
 EXAMPLE_DIR = Path(__file__).resolve().parents[3] / "examples" / "applications" / "alphaevolve_math_benchmark"
@@ -36,26 +37,19 @@ async def test_circle_packing_baseline_uses_raw_objective_score():
     assert "alphaevolve_gap" not in result.metrics
 
 
-def test_circle_packing_config_uses_comparable_candidate_budget():
-    """The default run should approximate the paper's 100-evaluation budget."""
-    config = yaml.safe_load(
-        (EXAMPLE_DIR / "circle_packing" / "code_config.yaml").read_text(encoding="utf-8")
+def test_circle_packing_example_config_references_runnable_sources():
+    """Load tunable example settings and verify their actual source entry points."""
+    config = AppConfig.model_validate(
+        yaml.safe_load(
+            (EXAMPLE_DIR / "circle_packing" / "code_config.yaml").read_text(encoding="utf-8")
+        )
     )
 
-    evolution = config["evolution"]
-    initial_candidates = evolution["num_islands"] * evolution["island_population_size"]
-    elites_per_island = max(1, int(evolution["island_population_size"] * evolution["elite_ratio"]))
-    candidates_per_generation = evolution["num_islands"] * (
-        evolution["island_population_size"] - elites_per_island
-    )
-    total_candidates = initial_candidates + candidates_per_generation * evolution["max_generations"]
-
-    assert total_candidates == 99
-    assert evolution["early_stop_patience"] > evolution["max_generations"]
-    assert config["providers"][0]["temperature"] == pytest.approx(0.7)
-    assert config["providers"][0]["max_tokens"] == 8192
-    assert config["coder"]["max_gen_tokens"] == 4096
-    assert config["coder"]["context_max_tokens"] == 8192
+    assert config.version_control is not None
+    assert (EXAMPLE_DIR / config.version_control.local_path / "solve.py").is_file()
+    module_path, class_name = config.evaluator.module.rsplit(":", 1)
+    assert (EXAMPLE_DIR / module_path).is_file()
+    assert _load_evaluator_class().__name__ == class_name
 
 
 def test_circle_packing_model_context_does_not_leak_published_targets():

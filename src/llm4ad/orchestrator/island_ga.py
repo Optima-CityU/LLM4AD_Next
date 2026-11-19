@@ -145,6 +145,16 @@ def is_repairable_evaluation_error(error: str | None) -> bool:
     return any(marker in normalized for marker in _REPAIRABLE_EVALUATION_ERROR_MARKERS)
 
 
+def is_repairable_evaluation_result(result: EvaluationResult) -> bool:
+    """Respect structured pool failures before applying legacy text heuristics."""
+    category = result.metadata.get("failure_category")
+    if isinstance(category, str) and category in {"infrastructure", "evaluator", "configuration"}:
+        return False
+    if result.metadata.get("infrastructure_failure") is True:
+        return False
+    return result.metadata.get("candidate_failure") is True or is_repairable_evaluation_error(result.error_message)
+
+
 
 
 class Island(BaseModel):
@@ -700,6 +710,7 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
                 if r is not None and not isinstance(r, BaseException)
             ]
             island_population = self._prepare_population(island_population)
+            await self._reevaluate_elite_offspring(island_population)
 
             # Create island
             island = Island(
@@ -738,8 +749,13 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
         """
         self.state = EvolutionState.RUNNING
         self.start_time = time.time()
-        self.current_generation = 0
-        self.state_tracker.start_run(self.config.max_generations)
+        if not self.islands:
+            self.current_generation = 0
+            self.state_tracker.start_run(self.config.max_generations)
+        else:
+            # Loaded populations retain their generation, metrics and budgets.
+            self.state_tracker.state = EvolutionState.RUNNING
+            self.state_tracker.end_time = None
 
         try:
             # Initialize population if empty
@@ -804,6 +820,8 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
                     self.monitor.log_info(f"Early stopping: {reason}")
                     break
 
+            if self.state == EvolutionState.RUNNING:
+                await self._finalize_elite_evaluation()
             self.state = EvolutionState.COMPLETED
 
         except Exception as e:
@@ -823,6 +841,8 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
             ]
         metadata["island_diversity"] = self._diversity_metrics()
         metadata["migration_events"] = self._migration_events
+        if self.global_best_individual is not None:
+            metadata["evaluation_profiles"] = self.global_best_individual.custom_metadata.get("evaluation_profiles", {})
 
         # Return final result
         return EvolutionResult(
@@ -1072,19 +1092,31 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
         if count <= 0:
             return
         candidates = sorted(
-            [algorithm for algorithm in offspring if algorithm.is_evaluated()],
+            [
+                algorithm for algorithm in offspring
+                if algorithm.is_evaluated() and not self._elite_evaluation_passed(algorithm)
+            ],
             key=lambda item: item.score,
             reverse=True,
         )[:count]
         if not candidates:
             return
-        results = await self.dispatcher.dispatch_batch(
-            algorithms=candidates,
-            evaluation_profile="elite",
-        )
+        try:
+            results = await self.dispatcher.dispatch_batch(
+                algorithms=candidates,
+                evaluation_profile="elite",
+            )
+        except Exception as error:
+            results = [
+                EvaluationResult(success=False, metrics={}, error_message=f"Elite evaluation request failed: {error}")
+                for _ in candidates
+            ]
         for algorithm, result in zip(candidates, results, strict=True):
-            self._record_evaluation_outcome(algorithm)
+            self._save_evaluation_profile(algorithm, result, "elite")
+            self._record_evaluation_outcome(algorithm, success=result.success)
             if not result.success:
+                if is_repairable_evaluation_result(result):
+                    algorithm.set_evaluation_failure(result.error_message or "Elite candidate validation failed")
                 logger.warning(
                     "Elite reevaluation failed for {}: {}",
                     algorithm.name,
@@ -1106,6 +1138,68 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
                 algorithm.name,
                 algorithm.score,
             )
+
+    def _save_evaluation_profile(
+        self, algorithm: Algorithm, result: EvaluationResult, profile: str = "standard"
+    ) -> None:
+        """Retain compact stage results while remote reports keep the full evidence.
+
+        Args:
+            algorithm: Candidate whose current source was evaluated.
+            result: Actual evaluator response, including unsuccessful measurements.
+            profile: Requested fidelity, independent of statistical improvement.
+        """
+        profiles = dict(algorithm.custom_metadata.get("evaluation_profiles", {}))
+        algorithm.custom_metadata = {**algorithm.custom_metadata, "evaluation_profiles": profiles}
+        if profile == "standard":
+            profiles.pop("elite", None)
+        if result.success:
+            algorithm.custom_metadata["evaluation_profile"] = profile
+        profiles[profile] = {
+            "status": "passed" if result.success else "failed",
+            "score": result.score if result.success else None,
+            "metrics": dict(result.metrics),
+            "monitor_metrics": dict(result.monitor_metrics),
+            "error": result.error_message,
+            "candidate_failure": result.metadata.get("candidate_failure") is True,
+            **{key: result.metadata[key] for key in (
+                "failure_category", "attempt_count", "max_attempts", "attempts_exhausted", "attempt_history",
+            ) if key in result.metadata},
+            "source_fingerprint": algorithm.code_fingerprint(),
+            "assessment": result.metadata.get("evaluation_summary", {}),
+            "evidence": {
+                key: result.metadata[key]
+                for key in ("remote_job_id", "remote_attempt_id", "artifacts", "evaluation_records") if key in result.metadata
+            },
+        }
+
+    def _elite_evaluation_passed(self, algorithm: Algorithm) -> bool:
+        """Check successful fidelity separately from an improvement claim."""
+        result = algorithm.custom_metadata.get("evaluation_profiles", {}).get("elite", {})
+        return result.get("status") == "passed" and result.get("source_fingerprint") == algorithm.code_fingerprint()
+
+    async def _finalize_elite_evaluation(self) -> None:
+        """Check an unverified final best and refresh selection after rejection."""
+        if self._elite_reevaluation_count() <= 0:
+            return
+        attempted = set()
+        while self.global_best_individual is not None:
+            candidate = self.global_best_individual
+            if self._elite_evaluation_passed(candidate) or candidate.id in attempted:
+                return
+            previous = candidate.custom_metadata.get("evaluation_profiles", {}).get("elite", {})
+            if previous.get("status") == "failed":
+                return
+            attempted.add(candidate.id)
+            await self._reevaluate_elite_offspring([candidate])
+            evaluated = []
+            for island in self.islands:
+                valid = [individual for individual in island.population if individual.is_evaluated()]
+                island.best_individual = max(valid, key=lambda item: item.score) if valid else None
+                evaluated.extend(valid)
+            if candidate.is_evaluated():
+                evaluated.append(candidate)
+            self.global_best_individual = max(evaluated, key=lambda item: item.score) if evaluated else None
 
     def _elite_reevaluation_count(self) -> int:
         """Return the configured number of second-stage evaluations."""
@@ -1198,7 +1292,11 @@ class DiverseIslandGAOrchestrator(BaseOrchestrator):
             checkpoint.metadata.get("exported_migrant_ids", []) or []
         )
         self.current_generation = checkpoint.generation
-        self.global_best_individual = checkpoint.best_individual
+        self.global_best_individual = (
+            Algorithm.model_validate(checkpoint.best_individual)
+            if isinstance(checkpoint.best_individual, dict)
+            else checkpoint.best_individual
+        )
         self.history = checkpoint.history
 
         # Restore state tracker from checkpoint if available
@@ -1816,6 +1914,7 @@ and leave the corrected files in the working directory for reevaluation.
                 result = results[0]
 
             if result.success:
+                self._save_evaluation_profile(algorithm, result)
                 algorithm.set_evaluation_result(
                     score=result.score,
                     metrics=result.metrics,
@@ -1830,12 +1929,13 @@ and leave the corrected files in the working directory for reevaluation.
                 return algorithm
 
             error = result.error_message or "Unknown evaluation error"
+            self._save_evaluation_profile(algorithm, result)
             algorithm.set_evaluation_failure(error)
             logger.warning(f"Evaluation failed for {algorithm.name}: {error}")
 
             if (
                 repair_attempt >= max_retries
-                or not is_repairable_evaluation_error(error)
+                or not is_repairable_evaluation_result(result)
             ):
                 self.version_control.delete_worktree(algorithm.worktree, force=True)
                 return algorithm
@@ -1910,6 +2010,7 @@ and leave the corrected files in the working directory for reevaluation.
                 for ind, result in zip(valid, results, strict=True):
                     eval_time_ms = result.duration_ms or 0.0
                     if result.success:
+                        self._save_evaluation_profile(ind, result)
                         ind.set_evaluation_result(
                             score=result.score,
                             metrics=result.metrics,
@@ -2000,12 +2101,13 @@ and leave the corrected files in the working directory for reevaluation.
         """Get cumulative candidate evaluations, including discarded offspring."""
         return getattr(self, "_total_evaluation_attempts", 0)
 
-    def _record_evaluation_outcome(self, algorithm: Algorithm) -> None:
+    def _record_evaluation_outcome(self, algorithm: Algorithm, *, success: bool | None = None) -> None:
         """Record one completed candidate evaluation before survival can discard it."""
         self._total_evaluation_attempts = (
             getattr(self, "_total_evaluation_attempts", 0) + 1
         )
-        if algorithm.is_evaluated():
+        succeeded = algorithm.is_evaluated() if success is None else success
+        if succeeded:
             self._total_successful_evaluations = (
                 getattr(self, "_total_successful_evaluations", 0) + 1
             )

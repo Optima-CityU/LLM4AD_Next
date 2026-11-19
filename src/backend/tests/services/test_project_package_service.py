@@ -115,6 +115,28 @@ def test_import_preserves_context_and_owns_task_without_executing_code(environme
         assert stored[name] == data
 
 
+def test_import_remote_package_without_a_platform_dataset(environment, entries):
+    """Keep the new task unbound while its evaluator and data stay on the gateway."""
+    db, user, objects = environment
+    config = yaml.safe_load(entries["config.yaml"])
+    evaluator = {
+        "type": "remote",
+        "gateway_id": None,
+        "candidate_paths": ["*.py"],
+        "parameters": {"case": "small"},
+    }
+    config["evaluator"] = evaluator
+    inputs = {
+        "config.yaml": yaml.safe_dump(config).encode(),
+        "algorithm/solver.py": entries["algorithm/solver.py"],
+    }
+    result = service.import_project_package(db, user, archive(inputs))
+    task = db.get(models.Task, result.task_id)
+    assert task.status == models.TaskStatus.UNINITIALIZED
+    assert task.input_args["evaluator"] == {**evaluator, "provider": "default", "provider_model": ""}
+    assert len(objects.files) == len(inputs) + 1
+
+
 def test_desktop_zip_metadata_does_not_change_the_task_root(environment, entries):
     """Ignore macOS/Windows metadata without ignoring actual package files."""
     db, user, objects = environment

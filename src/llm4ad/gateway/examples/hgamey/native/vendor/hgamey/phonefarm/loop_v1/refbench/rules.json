@@ -1,0 +1,29 @@
+{
+ "_comment": "refbench M0 判定规则 (冻结)。报告里的 rules_sha256 就是本文件的 sha256 —— 改这里的任何值, 新报告的哈希跟着变, 与切换点之前的归档证据不再可比。键序即报告输出顺序, 不要重排。",
+ "_notes": {
+  "dispersion_gate_pct": "判据 1: (max-min)/median, 阈值不动 (同原神对照口径)",
+  "repeatability_metric": "判据 1 门限指标: 中位帧时 = 负载可重复性的本征信号; 为什么不是 frame_p95: p95 是尾分位, 混入平台 DVFS/访存尾抖动",
+  "drift_slope_gate_pct": "判据 1: 最小二乘斜率 (每轮 %) 超此即疑似系统性漂移 (原神黄昏 slope≈+1%/轮 + mono=1.0; refbench slope≈0.01%/轮)",
+  "drift_monotonic_gate": "判据 1: 相邻递增比例超此 (且斜率显著) 才判漂移",
+  "intensity_min_step_pct": "判据 2: 阶梯相邻档最小涨幅",
+  "alpha": "判据 3: 精确置换检验",
+  "bw_separation_x": "判据 4: bandwidth/fragment 的 bus vote 分离倍数"
+ },
+ "rules": {
+  "primary_metric": "frame_p95",
+  "dispersion_gate_pct": 0.5,
+  "repeatability_metric": "frame_p50",
+  "drift_slope_gate_pct": 0.15,
+  "drift_monotonic_gate": 0.9,
+  "intensity_min_step_pct": 10.0,
+  "alpha": 0.05,
+  "bw_separation_x": 3.0,
+  "expected_declared": {
+   "bw_pingpong": "bandwidth",
+   "frag_alu": "fragment",
+   "idle_cap": "none"
+  },
+  "verdict_gpu": "GPU 计算受限",
+  "verdict_cap_prefix": "限帧器封顶"
+ }
+}

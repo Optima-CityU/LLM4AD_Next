@@ -1,0 +1,21 @@
+
+-------------------------------[ability]-------------------------------
+
+
+----------------------------------BatteryService----------------------------------
+Current time: 1970-01-02 02:12:58.511
+capacity: 85 
+batteryLevel: 3 
+chargingStatus: 1 
+healthState: 1 
+pluggedType: 1 
+voltage: 4190000 
+present: 1 
+technology: Li-poly 
+nowCurrent: 0 
+currentAverage: 0 
+totalEnergy: 5108000 
+remainingEnergy: 4346908 
+remainingChargeTime: 0 
+temperature: 200 
+chargeType: 0 

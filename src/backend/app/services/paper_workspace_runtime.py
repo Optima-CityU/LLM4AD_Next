@@ -358,6 +358,8 @@ def ensure_paper_workspace_container(spec: PaperWorkspaceExecSpec):
     workspace = Path(spec.host_workspace)
     prepare_paper_workspace_path(workspace)
     prepare_paper_workspace_path(workspace / "source")
+    prepare_paper_workspace_path(workspace / ".research")
+    prepare_paper_workspace_path(workspace / ".research" / "drafts")
     draft = workspace / "source" / "draft"
     if draft.is_dir():
         prepare_paper_workspace_path(draft, recursive=True)

@@ -119,6 +119,17 @@ async def test_container_network_mode_publishes_no_port(captured_run, monkeypatc
     assert captured_run.kwargs["network"] == settings.arl_network_name
 
 
+@pytest.mark.parametrize("role", list(ARLRole))
+def test_paseo_hostnames_allows_backend_and_peer_dns_names(role) -> None:
+    """Allow both Docker DNS names using Paseo's comma-separated host allowlist."""
+    env = runtime._build_container_env(
+        _session("abc123"), role, _daemon_config(), "daemon-password"
+    )
+
+    allowed_hostnames = set(env["PASEO_HOSTNAMES"].split(","))
+    assert allowed_hostnames == {"llm4ad-arl-w-abc123", "llm4ad-arl-v-abc123"}
+
+
 @pytest.mark.asyncio
 async def test_host_mode_publishes_adjacent_ports(captured_run, monkeypatch) -> None:
     """宿主机模式下 worker/validator 占相邻端口，同会话内不自撞。"""
@@ -241,6 +252,54 @@ async def test_proxy_disabled_passes_credentials_through(captured_run, monkeypat
     assert env["OPENAI_BASE_URL"] == "https://gateway.example.com/v1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_type", "expected_format", "expected_small_model"),
+    [
+        ("anthropic", "anthropic", "claude-haiku-4-5-20251001"),
+        ("openai", "openai_chat", "deepseek-v4.1-flash"),
+        ("openai-compatible", "openai_chat", "deepseek-v4.1-flash"),
+    ],
+)
+async def test_worker_env_selects_protocol_by_provider_type(
+    captured_run, monkeypatch, provider_type, expected_format, expected_small_model
+) -> None:
+    """非 Anthropic 供应商的 Worker 走 cc-switch；快速模型不回落到 Claude 型号。"""
+    monkeypatch.setattr(runtime, "use_container_network", lambda: True)
+    monkeypatch.setattr(settings, "LLM_PROXY_ENABLE", False)
+    service = runtime.ARLRuntimeService()
+
+    await service._start_container(
+        role=ARLRole.WORKER,
+        session=_session(),
+        daemon_config=_daemon_config(
+            provider_type=provider_type, model="deepseek-v4.1-flash"
+        ),
+        fingerprint="fp",
+    )
+    env = captured_run.kwargs["environment"]
+
+    assert env["LLM4AD_UPSTREAM_API_FORMAT"] == expected_format
+    assert env["ANTHROPIC_SMALL_FAST_MODEL"] == expected_small_model
+    # 上游地址照旧下发，由 entrypoint 决定交给 Claude Code 还是 cc-switch
+    assert env["ANTHROPIC_BASE_URL"] == "https://gateway.example.com"
+
+
+@pytest.mark.asyncio
+async def test_validator_env_has_no_protocol_adapter(captured_run, monkeypatch) -> None:
+    """Codex 原生说 OpenAI 协议，Validator 不需要转换器。"""
+    monkeypatch.setattr(runtime, "use_container_network", lambda: True)
+    service = runtime.ARLRuntimeService()
+
+    await service._start_container(
+        role=ARLRole.VALIDATOR,
+        session=_session(),
+        daemon_config=_daemon_config(provider_type="openai"),
+        fingerprint="fp",
+    )
+    assert "LLM4AD_UPSTREAM_API_FORMAT" not in captured_run.kwargs["environment"]
+
+
 def test_worker_base_url_drops_v1_suffix() -> None:
     """Claude CLI 自行拼 /v1/messages，base URL 不能带 /v1。"""
     assert (
@@ -271,6 +330,13 @@ def test_fingerprint_changes_when_credentials_change() -> None:
     )
 
 
+def test_fingerprint_tracks_worker_protocol() -> None:
+    """切换供应商类型会决定是否起 cc-switch，必须触发重建。"""
+    anthropic = runtime._config_fingerprint(_daemon_config(provider_type="anthropic"))
+    openai = runtime._config_fingerprint(_daemon_config(provider_type="openai"))
+    assert anthropic != openai
+
+
 def test_fingerprint_is_stable_for_equivalent_config() -> None:
     """同一份配置（含 /v1 后缀差异）指纹不变，避免每次连接都重建容器。"""
     first = runtime._config_fingerprint(_daemon_config())
@@ -278,6 +344,18 @@ def test_fingerprint_is_stable_for_equivalent_config() -> None:
         _daemon_config(base_url="https://gateway.example.com/")
     )
     assert first == second
+
+
+def test_fingerprint_tracks_effective_hostname_format(monkeypatch) -> None:
+    """An allowlist hostname change invalidates otherwise identical container settings."""
+    config = _daemon_config()
+    previous = runtime._config_fingerprint(config)
+    original = runtime.container_name
+    monkeypatch.setattr(runtime, "container_name", lambda session_id, role: f"{original(session_id, role)}-new")
+
+    assert runtime._config_fingerprint(config) != previous
+    env = runtime._build_container_env(_session(), ARLRole.WORKER, config, "daemon-password")
+    assert env["PASEO_HOSTNAMES"] == "llm4ad-arl-w-abc123-new,llm4ad-arl-v-abc123-new"
 
 
 def test_fingerprint_does_not_leak_credentials() -> None:

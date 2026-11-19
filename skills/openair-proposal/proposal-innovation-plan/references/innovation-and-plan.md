@@ -1,6 +1,6 @@
 # Innovation, Work Plan, and Expected Outcomes Method
 
-This stage turns the completed research design into defensible innovation claims
+This method turns the completed research design into defensible innovation claims
 and an executable implementation plan.
 
 ## 1. Distill innovation
@@ -45,16 +45,14 @@ Outcomes must be observable at project completion and proportionate to duration,
 team, and resources. Do not infer fixed publication counts, venues, patents, or
 performance values without author confirmation.
 
-## 4. Maintain section boundaries
+## 4. Keep the argument roles clear
 
-Write innovation, milestones, annual schedule, expected outcomes, and
-contingency points in `sections/07-plan.typ`.
+Keep innovation, milestones, schedules, expected outcomes and contingencies
+distinct from achieved foundation facts, available conditions and feasibility.
+Relate them to the method design without forcing file ownership or a sequence.
+The main agent integrates requested changes into the canonical Markdown.
 
-Research foundation, available conditions, team support, and feasibility belong
-to `sections/06-feasibility.typ`. Method details and equations remain
-in the methods stage.
-
-## 5. Quality gate
+## 5. Review prompts
 
 Confirm that:
 

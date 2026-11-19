@@ -1,75 +1,89 @@
 # Proposal Foundation and Coordination Method
 
-This method adapts a full-proposal writing workflow to LLM4AD Next's
-backend-managed stages. The platform owns stage status, source persistence,
-session continuity, and write isolation; do not create a second state file or
-workflow log in the source tree. The latest published result is authoritative;
-do not assume that the source tree is a version-control history.
+This method adapts the attributed full-proposal research guidance to one
+author-paced conversation. Read [the workflow contract](../../references/author-paced-workflow.md)
+for the nine chapters, Phase 0–6, state/log and recovery. The platform preserves
+revisions and output history; `proposal-state.json` and `proposal-log.md` retain
+progress, confirmed facts and author choices without duplicating proposal text.
+Current author text and regional edits are authoritative over stale state or
+older artifacts. Keep legacy Markdown/Typst formats and files without migration.
 
 ## 1. Establish the project foundation
 
-Derive or confirm the project-specific information needed before section drafting begins. The following are prompts for analysis, not a required schema:
+Derive or confirm the information needed for the actual task. These are
+prompts for analysis, not a required schema:
 
-- proposal or funding-program type, target readers, language, and submission format;
-- research theme, object of study, central problem, and intended decision or outcome;
-- required sections, evidence, deliverables, page or word limits, and deadline constraints;
-- available source material, preliminary results, team facts, equipment, and institutional facts;
-- explicit exclusions, confidentiality constraints, and facts that remain unknown;
-- presentation principles that later sections must preserve.
+- proposal or funding-program type, target readers, language and submission format;
+- research theme, object of study, central problem and intended decision or outcome;
+- author-supplied required sections, evidence, deliverables, limits and deadlines;
+- relevant source material, preliminary results, team, equipment and institutional facts;
+- scope exclusions, confidentiality constraints and facts that remain unknown;
+- presentation requirements that matter to the selected document.
 
-Do not turn guesses into foundation facts. Use `AskUserQuestion` only for choices that materially change scope, compliance, or the document architecture. Represent confirmed facts and unresolved matters as clearly titled model-defined context blocks. Their number and internal Markdown hierarchy should follow the project, not this checklist.
+Do not turn guesses into facts. Ask about choices that materially change scope,
+compliance or document architecture. Preserve confirmed facts and unresolved
+matters in clear project-specific Markdown, reusing stable headings/context
+identities where they already exist rather than forcing a block taxonomy.
 
-## 2. Inspect the source before changing layout
+## 2. Inspect the authoring source and requirements
 
-1. Identify the Typst entry file, imported section files, bibliography, assets, and style modules.
-2. Detect an institutional or venue template. Its required page geometry, headings, numbering, and metadata take precedence over generic preferences.
-3. Identify missing imports or paths without editing stage-owned content files.
-4. Preserve mathematical meaning, labels, citation keys, and source ordering.
+1. Identify S1–S9 and state/log for a new project, or the actual existing
+   Markdown/Typst sources, bibliography, figures and author materials from
+   workflow context. Do not create an aggregate `proposal.md` for new chapters.
+2. Detect an actual author or institutional outline; current verified official
+   rules take precedence over generic defaults and dated examples.
+3. Identify missing assets or broken references without inventing their contents.
+4. Preserve mathematical meaning, labels, citation identities and intentional
+   ordering. New chapters use numbered references matching S4; existing BibTeX
+   projects retain their keys without forcing new bibliography files.
 
-## 3. Create a durable Typst system
+## 3. Express a durable document structure
 
-Centralize reusable presentation rules in the entry document or `styles/`:
+Use semantic Markdown headings, paragraphs, lists, tables, equations, figures
+and citations. Keep document meaning and reference identity stable. Presentation
+requirements can include page geometry, readable typography, multilingual
+support, numbering, captions and cross-references when the author needs them.
 
-- page size, margins, header, footer, and page numbering;
-- body font with multilingual fallbacks, line spacing, and paragraph rhythm;
-- heading hierarchy, numbering, and keep-with-next behavior;
-- figure, table, equation, caption, cross-reference, and bibliography styles;
-- restrained emphasis and color that remain legible in print.
+Only the author's explicit **确认并排版** UI action asks the platform to apply
+presentation assets and convert the ordered canonical chapters to Typst/PDF.
+The authoring agent does not generate/export Typst/PDF automatically, maintain
+duplicate export source or require a compiler before saving a draft. A real
+export error is reported separately from scientific/editorial findings and
+preserves saved text and earlier outputs.
 
-Prefer semantic Typst structure over manual coordinates and repeated spacing. Reuse an existing template instead of replacing it. Do not add remote Typst packages unless the author explicitly approves them.
+## 4. Maintain the argument across research methods
 
-## 4. Preserve the proposal dependency chain
+Useful research responsibilities include:
 
-The eight platform stages correspond to these writing responsibilities:
+- foundation and document organization;
+- evidence, research landscape and references;
+- purpose, necessity, significance and application value;
+- objectives, research content and key problems;
+- methods, technical route and evaluation;
+- innovation, schedule, milestones and expected outcomes;
+- achieved foundation, available conditions, feasibility and risk controls;
+- assembly and cross-section review.
 
-1. foundation and presentation;
-2. evidence, research landscape, and references;
-3. research purpose, necessity, significance, and application value;
-4. objectives, research content, and key problems;
-5. methods, technical route, and evaluation;
-6. innovation, schedule, milestones, and expected outputs;
-7. research foundation, available conditions, feasibility, and risk controls;
-8. assembly and cross-section review.
+Select these reusable methods within the official Phase 0–6 guidance. Summarize
+results and options and obtain author confirmation before advancing a meaningful
+phase; this does not create an eight-step frontend plan or stage-agent ownership
+rules. Research is iterative: literature and rationale may need another pass,
+and method design can reveal a missing comparison or over-broad objective.
+The main agent integrates related changes within the author's actual scope,
+explaining consequential choices and preserving manual edits. Optional workers
+analyze read-only material and return text diffs, evidence and uncertainties.
 
-Later stages may read earlier and later draft files for consistency, but the platform controls which stage owns each output. Do not create, rewrite, or repair another stage's file.
+## 5. Foundation review prompts
 
-The sequence is iterative rather than write-once. Literature and rationale may
-need more than one pass, and later stages can expose missing evidence or an
-over-broad objective. Return to the owning stage when that happens. The backend
-marks only its transitive dependents stale, so repair the earliest affected
-stage and then refresh the downstream chain instead of silently patching files
-from the wrong agent. Each successful publication increments the owning stage's
-iteration counter; it records how many accepted passes occurred, not a complete
-source snapshot history.
+Before returning the result, consider whether:
 
-## 5. Foundation quality gate
+- the theme identifies a bounded research object rather than only a broad field;
+- the intended outcome is reviewable without promising unsupported results;
+- actual requirements, expected evidence, exclusions and durable author decisions
+  are preserved without forcing irrelevant headings;
+- relevant presentation requirements are explicit;
+- durable factual claims are traceable to source material or author answers.
 
-Before returning the result, confirm:
-
-- the theme names a bounded research object rather than only a broad field;
-- the intended outcome is reviewable and does not promise an unsupported result;
-- the chosen context blocks capture the actual submission rules, expected evidence, scope exclusions, and non-negotiable author requirements without forcing irrelevant headings;
-- presentation decisions are actionable throughout the document when they matter;
-- every durable context claim is traceable to a source file or author answer.
-
-Return an explicit context patch. Reuse stable keys for changed blocks, add keys for materially new topics, and remove keys only when they are explicitly invalidated. Unchanged blocks must be omitted from the patch so the backend can preserve them exactly.
+These prompts guide reasoning; they do not impose backend scientific gates.
+Preserve untouched author content and stable identities. Save the requested
+revision using the current publication contract and retain its output history.

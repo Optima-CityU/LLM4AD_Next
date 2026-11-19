@@ -31,7 +31,7 @@
   )
   set text(size: 11.8pt, font: nsfc-body-font, lang: "zh", region: "cn")
   set par(leading: 14.5pt, first-line-indent: 24pt, justify: true)
-  show par: set block(spacing: 1em, above: 14.2pt)
+  set par(spacing: 14.2pt)
   set heading(numbering: none)
 
   show heading.where(level: 1): it => nsfc-fixed-heading(it.body)

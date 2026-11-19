@@ -1,0 +1,107 @@
+{
+  "candidate_id": "o3_storeop3_genshin_60fps",
+  "conditions": {
+    "charging_suspend": {
+      "enabled": true,
+      "node": "/sys/class/qcom-battery/charging_enabled"
+    },
+    "cool_c": 48.0,
+    "fan": "off",
+    "ingame_fps_setting": "60fps (游戏内设置, 人工确认)",
+    "require_discharging": true,
+    "require_root": true,
+    "temp_cap_c": 70.0
+  },
+  "kind": "gray",
+  "package": "com.miHoYo.Yuanshen",
+  "payload": {
+    "image_check": {
+      "min_psnr_db": 30.0,
+      "exclude": [
+        [
+          0,
+          0,
+          537,
+          389
+        ],
+        [
+          0,
+          0,
+          2688,
+          121
+        ],
+        [
+          2204,
+          121,
+          2688,
+          668
+        ],
+        [
+          1666,
+          668,
+          2688,
+          1216
+        ],
+        [
+          0,
+          851,
+          1666,
+          1216
+        ]
+      ]
+    },
+    "require_hit": true,
+    "rewrites": [
+      {
+        "knob": "storeop_dont_care",
+        "scope": "15a51a879df99c32:2"
+      },
+      {
+        "knob": "storeop_dont_care",
+        "scope": "9d0b4db80bf552b8:0"
+      },
+      {
+        "knob": "storeop_dont_care",
+        "scope": "9d0b4db80bf552b8:1"
+      }
+    ],
+    "side_effect_ack": "debug.vulkan.layers 是全局属性; 层加载成功后立刻清属性, 收尾还原",
+    "why": "O3: 一次去掉原神 3 处确定白存的写回 (frame-audit 10_frameaudit 第 3 节 A+B; 11_storeop_check 三处都命中 716/716/748)。rp103 C2 R32F 1070x484 2071520 B + rp71 C0 R16F 256² 131072 B + C1 RGBA8 256² 262144 B = 2464736 B/帧 (模型值)"
+  },
+  "protocol": {
+    "alternating": true,
+    "cool_c": 48.0,
+    "metrics": [
+      {
+        "better": "lower",
+        "id": "fps_p95_ms"
+      },
+      {
+        "better": "higher",
+        "id": "fps_mean"
+      },
+      {
+        "better": "lower",
+        "id": "power_watt"
+      },
+      {
+        "better": "higher",
+        "constraint": true,
+        "id": "psnr_db"
+      }
+    ],
+    "multiple_comparison": "bonferroni_on_wins",
+    "p_threshold": 0.05,
+    "replay_seconds": 30,
+    "rounds": 10,
+    "stage": "full",
+    "stat": "exact_permutation"
+  },
+  "serial": "91253241019A",
+  "version": 2,
+  "workload": {
+    "carrier": "game_replay",
+    "script": "knobs/gray/workload_spin_touch_v1.json",
+    "seconds": 30
+  }
+}

@@ -1,0 +1,19 @@
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba8) uniform readonly image2D u_InputTexture;
+layout(binding = 1, rgba8) uniform writeonly image2D u_OutputTexture;
+
+void main() {
+    ivec2 outPos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 outSize = imageSize(u_OutputTexture);
+    if (outPos.x >= outSize.x || outPos.y >= outSize.y) return;
+
+    vec2 inCoord = (vec2(outPos) + 0.5) / vec2(outSize);
+    ivec2 inPos = ivec2(inCoord * vec2(imageSize(u_InputTexture)));
+    vec4 color = imageLoad(u_InputTexture, inPos);
+
+    // [LLM 变异插槽: 高频重构与边缘自适应锐化]
+
+    imageStore(u_OutputTexture, outPos, color);
+}

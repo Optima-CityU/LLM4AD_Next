@@ -19,7 +19,10 @@
    current project.
 5. In the task configuration, select the platform model for planning/code
    generation. Review the imported method, evaluator, context/output settings
-   against the selected model, and any required embedding service.
+   against the selected model, and any required embedding service. For a remote
+   task, copy **My User ID** from the platform, start the gateway with that ID
+   authorized, and select its online evaluator in the task configuration.
+   Follow the handoff steps in [remote-evaluation.md](remote-evaluation.md).
 6. Start evolution when ready and inspect logs and resulting candidates.
 
 The import saves source/data in RustFS under a single task folder and writes
@@ -27,7 +30,8 @@ the parsed configuration into `Task.input_args`. Model bindings are reset for th
 current account; importing never starts evolution or runs uploaded Python. The
 effective task memory settings come from the import choice and platform defaults;
 the uploaded `config.yaml` and validation hashes remain unchanged. Package-specific
-extraction and static-card settings are preserved, while remote bindings are reset.
+extraction and static-card settings are preserved. The standalone gateway workflow
+exports `evaluator.gateway_id: null`, so the imported task awaits selection.
 The runtime downloads fresh files and strips the single top-level directory, so
 candidate/evaluator/dataset paths remain relative to the package root.
 
@@ -35,7 +39,8 @@ The local report is preserved as a file. Matching hashes confirm that its input
 files have not changed, not that the report was issued by a trusted server.
 Local baseline verification does not certify generated candidates, server
 dependency compatibility, or a real LLM evolution run. A server rerun uses the
-normal task-container execution path, not the import API process.
+configured evaluator during evolution. A gateway report records an offline smoke
+test of the installed evaluator and the candidate bundle.
 
 After import, edit configuration in the task settings and source/data in the
 task inputs. Uploading or editing `config.yaml` alone does not replace stored
