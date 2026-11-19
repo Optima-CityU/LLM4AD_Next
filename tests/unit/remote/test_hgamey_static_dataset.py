@@ -162,7 +162,7 @@ def test_static_job_requires_all_frames_and_publishes_two_collages(tmp_path, fai
     assert report["operator_improvement_pct"] == 62.5
     assert report["status"] == ("POOR_QUALITY" if failure == "dataset-quality" else "PASS")
     expected = ["collages/GameIR-SR.png"] if failure == "one-collage" else ["collages/QRISP.png", "collages/GameIR-SR.png"]
-    assert [file["name"] for file in report["artifacts"]] == expected
+    assert [file["name"] for file in report["artifacts"]] == expected, report["artifact_errors"]
     assert bool(report["artifact_errors"]) == (failure == "one-collage")
     adapter = HGameyStaticEvaluator.__new__(HGameyStaticEvaluator)
     adapter.benchmark = SimpleNamespace(

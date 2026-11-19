@@ -180,16 +180,17 @@ def _collage(folder: Path, dataset: str, frames: list[dict]) -> dict:
     name = f"collages/{dataset}.png"
     path = folder / "evidence" / name
     path.parent.mkdir(exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
-        temporary = Path(output.name)
-        try:
+    descriptor, temporary_name = tempfile.mkstemp(dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
             canvas.save(output, format="PNG")
             output.flush()
             os.fsync(output.fileno())
-            content = temporary.read_bytes()
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        content = temporary.read_bytes()
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return {
         "name": name,
         "size": len(content),
