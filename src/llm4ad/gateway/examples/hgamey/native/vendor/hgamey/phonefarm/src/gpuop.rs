@@ -74,6 +74,8 @@ pub struct EvalRequest {
     /// 命令行 `--reference` 优先于本字段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality_reference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality_input: Option<String>,
     pub protocol: EvalProtocol,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub v2_context: Option<Value>,
@@ -480,6 +482,7 @@ pub struct RunnerReport {
     /// 每次 dispatch 的 GPU 侧耗时 (微秒)
     pub timing_us: Vec<f64>,
     pub psnr_db: Option<f64>,
+    pub paired_ssim: Option<f64>,
     /// 插帧专属: HUD 区域 PSNR。HUD 在屏幕空间静止, 正确插帧应与真值逐像素吻合;
     /// 块匹配把 HUD 当成运动内容时字会被拉成双份, 这个数断崖下跌。
     pub hud_ghost_db: Option<f64>,
@@ -763,6 +766,8 @@ pub fn parse_runner_output(stdout: &str) -> Result<RunnerReport, String> {
         ok,
         timing_us,
         psnr_db: v.get("psnr_db").and_then(Value::as_f64),
+        paired_ssim: (v["input_source"] == "paired_rgba8")
+            .then(|| v["ssim"].as_f64()).flatten(),
         hud_ghost_db: v.pointer("/artifacts/hud_ghost_db").and_then(Value::as_f64),
         stretch_pct: v.pointer("/artifacts/stretch_pct").and_then(Value::as_f64),
         device_name: v
@@ -1471,6 +1476,14 @@ pub(crate) fn run_gpu_op_with_report(
         .reference
         .clone()
         .or_else(|| req.quality_reference.clone());
+    if req.quality_input.is_some()
+        && (a.carrier != Carrier::Headless || req.track != "sr"
+            || !ref_source.as_ref().is_some_and(|path| Path::new(path).is_file()))
+    {
+        eprintln!("Paired SR requires a single HR reference and the headless carrier");
+        cleanup(&phone);
+        bail!(2);
+    }
     let mut image_evidence = (req.track == "sr"
         && ref_source.is_some()
         && (a.carrier == Carrier::Headless || quality_pass))
@@ -1560,6 +1573,17 @@ pub(crate) fn run_gpu_op_with_report(
     // 每张参考帧都跑一遍等于把整轮真机时间乘以帧数, 而该载体的主指标是时延,
     // 不是画质。帧集平均只在画质补测里做 —— 那一步本来就只跑两次。
     let inline_reference = remote_references.first().cloned();
+    if let Some(source) = &req.quality_input {
+        let raw = Path::new(&out_dir).join("input.rgba");
+        match prepare_reference(source, 960, 540, &raw) {
+            Ok((960, 540, _)) if phone.push_file(&raw.to_string_lossy(), &format!("{REMOTE_DIR}/input.rgba")) => {}
+            _ => {
+                eprintln!("Unable to stage the exact 960x540 RGBA8 LR image");
+                cleanup(&phone);
+                bail!(2);
+            }
+        }
+    }
 
     // ---- A/B/A/B 交替跑测 ----
     let schedule = ab_schedule(req.protocol.rounds, req.protocol.alternating);
@@ -1717,10 +1741,11 @@ pub(crate) fn run_gpu_op_with_report(
         }
 
         let round = schedule[..i].iter().filter(|prior| **prior == *arm).count();
+        let capture = req.quality_input.is_none() || round == 0;
         // Each measured invocation owns a fresh readback path, including repeated rounds.
         let output_rgba = image_evidence
             .as_ref()
-            .and_then(|e| e.remote_output(0, round, *arm));
+            .and_then(|e| capture.then(|| e.remote_output(0, round, *arm)).flatten());
         let (out, power) = run_one(
             &phone, *arm, &req, a.power_rail, inline_reference.as_deref(),
             power_unavailable.is_none(), output_rgba.as_deref(), &runner_state, &_lease.serial,
@@ -1759,7 +1784,14 @@ pub(crate) fn run_gpu_op_with_report(
                 // Keep the per-arm measurements, not only rounded progress text.
                 last["operator_latency_ms"] = serde_json::json!(ms);
                 last["psnr_db"] = serde_json::json!(r.psnr_db);
-                if let Some(evidence) = image_evidence.as_mut() {
+                if req.quality_input.is_some() {
+                    if !r.paired_ssim.is_some_and(|ssim| (-1.0..=1.0).contains(&ssim)) {
+                        fatal = Some("runner did not report valid paired LR SSIM; rebuild the native runner".into());
+                        break;
+                    }
+                    last["ssim"] = serde_json::json!(r.paired_ssim);
+                }
+                if let Some(evidence) = image_evidence.as_mut().filter(|_| capture) {
                     evidence.measured(0, round, *arm, output_rgba, r.psnr_db);
                 }
                 let w = if power_unavailable.is_none() { hwcond::power_stats(&power).map(|(mean, _, _, _)| mean) } else { None };
@@ -3011,8 +3043,11 @@ fn run_one(
         .map(|r| format!(" --reference {r}"))
         .unwrap_or_default();
     let output_arg = output_rgba.map(|r| format!(" --output-rgba {r}")).unwrap_or_default();
+    let input_arg = req.quality_input.as_ref().map(|_| {
+        format!(" --input-rgba {REMOTE_DIR}/input.rgba --in-width 960 --in-height 540")
+    }).unwrap_or_default();
     let cmd = format!(
-        "cd {REMOTE_DIR} && exec ./vkop_runner --shader {spv} --track {} --seconds {}{ref_arg}{output_arg} --json 2>&1",
+        "cd {REMOTE_DIR} && exec ./vkop_runner --shader {spv} --track {} --seconds {}{ref_arg}{input_arg}{output_arg} --json 2>&1",
         req.track, req.protocol.replay_seconds
     );
     let out = run_owned_runner(phone, serial, runner_state, &cmd, (req.protocol.replay_seconds as u64 + 60) * 1000);
@@ -3843,6 +3878,7 @@ mod tests {
             quality_baseline_db: 37.286,
             incumbent_latency_ms: None,
             quality_reference: None,
+            quality_input: None,
             v2_context: None,
             protocol: EvalProtocol {
                 cool_c: 32.0,
@@ -4189,6 +4225,14 @@ mod tests {
         assert_eq!(r.psnr_db, Some(38.42));
         assert_eq!(r.device_name.as_deref(), Some("Adreno (TM) 840"));
         assert!((r.median_ms().unwrap() - 1.102).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ssim_requires_explicit_paired_input_provenance() {
+        let paired = r#"{"ok":true,"timing_us":{"samples":[1000]},"input_source":"paired_rgba8","ssim":0.9}"#;
+        let legacy = r#"{"ok":true,"timing_us":{"samples":[1000]},"ssim":0.9}"#;
+        assert_eq!(parse_runner_output(paired).unwrap().paired_ssim, Some(0.9));
+        assert_eq!(parse_runner_output(legacy).unwrap().paired_ssim, None);
     }
 
     #[test]

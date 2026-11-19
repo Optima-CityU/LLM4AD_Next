@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 ARG LLM4AD_PACKAGE=llm4ad-next=={{SDK_VERSION}}
-ARG LLM4AD_EXTRAS=""
+ARG LLM4AD_EXTRAS=gateway-ui
 ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY wheels/ /wheels/
 RUN extras=""; \
@@ -19,9 +19,9 @@ RUN extras=""; \
     fi
 COPY requirements.txt /tmp/evaluator-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/evaluator-requirements.txt
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 LLM4AD_GATEWAY_UI_HOST=0.0.0.0
 WORKDIR /evaluator
 EXPOSE 8768
-CMD ["python", "-m", "llm4ad.gateway", "start", "--no-ui"]
+CMD ["python", "-m", "llm4ad.gateway", "start", "--no-open-browser"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["python", "-m", "llm4ad.gateway", "health", "--state-dir", "/state"]

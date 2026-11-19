@@ -31,6 +31,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { useEmbeddedAuthSession } from "@/hooks/useEmbeddedAuthSession"
 import { useEmbeddedModelBinding } from "@/hooks/useEmbeddedModelBinding"
 import {
   useInvalidatePaperWorkflowStage,
@@ -45,6 +46,7 @@ import {
   researchAgentProgressSchema,
 } from "@/lib/researchAgentProgress"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/utils/auth"
 
 type PaperWorkflowStage = PaperRuntimeSessionCreate["workflow_stage"]
 
@@ -52,6 +54,8 @@ type PaperNativeRuntimeProps = {
   workspaceId: string
   autoWorkflow?: boolean
   onAgentProgress?: (progress: ResearchAgentProgress) => void
+  pendingRequest?: { id: string; prompt: string } | null
+  onRequestAccepted?: (id: string) => void
   stage: PaperWorkflowStage
   modelReady: boolean
   prerequisiteReady: boolean
@@ -72,6 +76,7 @@ type PaperNativeRuntimeProps = {
   arxivIntake?: boolean
   onConversationRewind?: () => void
   headerAction?: ReactNode
+  conversationFirst?: boolean
   guidance?: {
     title: string
     description: string
@@ -143,6 +148,8 @@ export default function PaperNativeRuntime({
   workspaceId,
   autoWorkflow = false,
   onAgentProgress,
+  pendingRequest,
+  onRequestAccepted,
   stage,
   modelReady,
   prerequisiteReady,
@@ -164,6 +171,7 @@ export default function PaperNativeRuntime({
   onConversationRewind,
   headerAction,
   guidance,
+  conversationFirst = false,
 }: PaperNativeRuntimeProps) {
   const { t, i18n } = useTranslation()
   const [loadedFrameKey, setLoadedFrameKey] = useState<string | null>(null)
@@ -208,6 +216,99 @@ export default function PaperNativeRuntime({
     ? `${session.data.session_id}:${session.data.runtimeProfileKey}`
     : null
   const frameReady = frameKey !== null && frameKey === loadedFrameKey
+  const progressListener = useRef(onAgentProgress)
+  progressListener.current = onAgentProgress
+  const pendingProgress = useRef<ResearchAgentProgress | null>(null)
+  useEffect(() => {
+    pendingProgress.current = null
+    if (!autoWorkflow || !session.data?.session_id) return
+    const sessionId = session.data.session_id
+    const url = `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/papers/workspaces/${workspaceId}/runtime-progress`
+    let disposed = false
+    let saving = false
+    const refreshProgress = async () => {
+      if (disposed || saving) return
+      const progress = pendingProgress.current
+      saving = true
+      pendingProgress.current = null
+      try {
+        const response = await authFetch(
+          url,
+          progress
+            ? {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(progress),
+              }
+            : undefined,
+        )
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const parsed = researchAgentProgressSchema.safeParse(
+          (await response.json()).progress,
+        )
+        if (!disposed && parsed.success && parsed.data.sessionId === sessionId)
+          progressListener.current?.(parsed.data)
+      } catch {
+        if (!disposed && progress && !pendingProgress.current)
+          pendingProgress.current = progress
+      } finally {
+        saving = false
+      }
+    }
+    void refreshProgress()
+    const timer = window.setInterval(() => void refreshProgress(), 2000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [autoWorkflow, workspaceId, session.data?.session_id])
+  useEmbeddedAuthSession(
+    frameRef,
+    async () => {
+      const response = await authFetch(
+        `${import.meta.env.VITE_API_URL || ""}/api/v1/llm4ad/papers/workspaces/${workspaceId}/runtime-session/renew`,
+        { method: "POST" },
+      )
+      if (!response.ok)
+        throw Object.assign(new Error("Session renewal failed"), {
+          status: response.status,
+        })
+      return response.json()
+    },
+    Boolean(session.data),
+  )
+  useEffect(() => {
+    if (!frameReady || !pendingRequest) return
+    const dispatch = () =>
+      frameRef.current?.contentWindow?.postMessage(
+        {
+          type: "llm4ad:submit-prompt",
+          requestId: pendingRequest.id,
+          prompt: pendingRequest.prompt,
+        },
+        window.location.origin,
+      )
+    dispatch()
+    const timer = window.setInterval(dispatch, 3000)
+    return () => window.clearInterval(timer)
+  }, [frameReady, pendingRequest])
+
+  useEffect(() => {
+    const acknowledge = (event: MessageEvent) => {
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== frameRef.current?.contentWindow
+      )
+        return
+      if (
+        event.data?.type === "llm4ad:prompt-accepted" &&
+        event.data.requestId === pendingRequest?.id
+      )
+        onRequestAccepted?.(event.data.requestId)
+    }
+    window.addEventListener("message", acknowledge)
+    return () => window.removeEventListener("message", acknowledge)
+  }, [pendingRequest, onRequestAccepted])
   const submitArxivQuery = () => {
     const query = arxivQuery.trim()
     if (!query || !frameReady) return
@@ -220,20 +321,25 @@ export default function PaperNativeRuntime({
     )
     setArxivQuery("")
   }
-  const stageTitle = autoWorkflow
-    ? t("paper.agentProgress.coordinator")
-    : (guidance?.title ?? t(`paper.workflow.stage.${stage}`))
-  const stageDescription = autoWorkflow
-    ? t("paper.agentProgress.description")
-    : (guidance?.description ?? t(`paper.workflow.stage.${stage}Hint`))
+  const stageTitle =
+    guidance?.title ??
+    (autoWorkflow
+      ? t("paper.agentProgress.coordinator")
+      : t(`paper.workflow.stage.${stage}`))
+  const stageDescription =
+    guidance?.description ??
+    (autoWorkflow
+      ? t("paper.agentProgress.description")
+      : t(`paper.workflow.stage.${stage}Hint`))
   const stageExamples = useMemo(() => {
     const translated =
+      guidance?.examples ??
       (autoWorkflow
         ? t(
             `paper.agentProgress.${stage === "rebuttal_baseline" || stage === "autorebuttal" || stage === "ac_summary" ? "rebuttalExamples" : "proposalExamples"}`,
             { returnObjects: true },
           )
-        : guidance?.examples) ??
+        : undefined) ??
       t(`paper.workflow.stage.${stage}Examples`, {
         returnObjects: true,
       })
@@ -337,8 +443,20 @@ export default function PaperNativeRuntime({
         if (
           parsed.success &&
           parsed.data.sessionId === session.data?.session_id
-        )
-          onAgentProgress?.(parsed.data)
+        ) {
+          const progress = session.data?.run_id
+            ? {
+                ...parsed.data,
+                runId: session.data.run_id,
+                agents: parsed.data.agents.map((step) => ({
+                  ...step,
+                  runId: session.data!.run_id!,
+                })),
+              }
+            : parsed.data
+          if (autoWorkflow) pendingProgress.current = progress
+          onAgentProgress?.(progress)
+        }
         return
       }
       if (event.data?.type === "llm4ad:update-model-binding") {
@@ -374,6 +492,7 @@ export default function PaperNativeRuntime({
     autoWorkflow,
     onAgentProgress,
     session.data?.session_id,
+    session.data?.run_id,
     onConversationRewind,
     stage,
     stageState?.iteration,
@@ -387,21 +506,32 @@ export default function PaperNativeRuntime({
     return (
       <div className="grid min-h-0 flex-1 place-items-center p-8">
         <div className="max-w-lg border-y bg-background/70 px-8 py-10 text-center shadow-sm">
-          <AlertCircle className="mx-auto size-8 text-muted-foreground" />
+          {!conversationFirst && (
+            <AlertCircle className="mx-auto size-8 text-muted-foreground" />
+          )}
           <h2 className="mt-4 font-serif text-xl font-semibold text-pretty">
-            {t(
-              modelReady
-                ? "paper.runtime.prerequisiteTitle"
-                : "paper.runtime.modelTitle",
-            )}
+            {conversationFirst
+              ? stageTitle
+              : t(
+                  modelReady
+                    ? "paper.runtime.prerequisiteTitle"
+                    : "paper.runtime.modelTitle",
+                )}
           </h2>
           <p className="mt-3 text-[15px] leading-7 text-muted-foreground">
-            {t(
-              modelReady
-                ? "paper.runtime.prerequisiteDescription"
-                : "paper.runtime.modelDescription",
-            )}
+            {conversationFirst
+              ? stageDescription
+              : t(
+                  modelReady
+                    ? "paper.runtime.prerequisiteDescription"
+                    : "paper.runtime.modelDescription",
+                )}
           </p>
+          {conversationFirst && (
+            <p className="mt-4 text-sm leading-6 text-muted-foreground">
+              {t("paper.proposalStart.modelHint")}
+            </p>
+          )}
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {headerAction}
             {!modelReady && (
@@ -467,117 +597,119 @@ export default function PaperNativeRuntime({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <header
-        className={cn(
-          "flex shrink-0 flex-wrap items-start gap-4 border-b bg-card/40 px-5 py-3.5",
-          compactHeader && "items-center gap-2 bg-background py-3",
-        )}
-      >
-        <div
+      {!conversationFirst && (
+        <header
           className={cn(
-            "min-w-0 flex-1",
-            !compactHeader && "border-l-2 border-primary/65 pl-3.5",
+            "flex shrink-0 flex-wrap items-start gap-4 border-b bg-card/40 px-5 py-3.5",
+            compactHeader && "items-center gap-2 bg-background py-3",
           )}
         >
-          <h2
+          <div
             className={cn(
-              "text-lg font-semibold tracking-tight text-pretty",
-              compactHeader ? "text-base" : "font-serif",
+              "min-w-0 flex-1",
+              !compactHeader && "border-l-2 border-primary/65 pl-3.5",
             )}
           >
-            {stageTitle}
-          </h2>
-          <p
-            className={cn(
-              "mt-1 max-w-2xl text-sm leading-5 text-muted-foreground",
-              compactHeader && "sr-only",
-            )}
-          >
-            {stageDescription}
-          </p>
-        </div>
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
-          {headerAction}
-          {showRevisionSummary && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-9 max-w-56 gap-2 border-amber-500/40 bg-amber-500/10 px-3 text-sm text-amber-800 hover:bg-amber-500/15 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
-                  aria-label={`${revisionTitle}，${t("paper.runtime.revisionDetails")}`}
-                >
-                  <AlertTriangle className="size-3.5 shrink-0" />
-                  <span className="truncate">{revisionTitle}</span>
-                  {revisionFindingCount > 0 && (
-                    <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-amber-500/20 px-1.5 text-xs font-semibold tabular-nums">
-                      {revisionFindingCount}
-                    </span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                sideOffset={8}
-                className="max-h-[min(32rem,75vh)] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto p-0"
-              >
-                <div className="sticky top-0 flex items-start gap-2.5 border-b bg-popover/95 px-4 py-3 backdrop-blur">
-                  <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                    <AlertTriangle className="size-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold leading-5">
-                      {revisionTitle}
-                    </p>
-                    <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                      {t("paper.runtime.revisionDetailsDescription")}
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-4 px-4 py-4 text-sm">
-                  {stageState.summary && (
-                    <p className="whitespace-pre-wrap break-words leading-5 text-foreground/90">
-                      {stageState.summary}
-                    </p>
-                  )}
-                  {revisionFindingCount > 0 && (
-                    <ul className="space-y-3 border-t pt-4 text-muted-foreground">
-                      {stageState.findings?.map((finding, index) => (
-                        <li
-                          key={`${index}-${finding}`}
-                          className="flex gap-2.5 leading-6"
-                        >
-                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
-                          <span className="min-w-0 whitespace-pre-wrap break-words">
-                            {finding}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-          {!compactHeader && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-9 gap-2 px-3 text-sm"
-              disabled={artifactPaths.length === 0}
-              onClick={() =>
-                artifactPaths[0] && onOpenArtifact(artifactPaths[0])
-              }
-              title={artifactPaths.join("\n") || artifactSummary}
+            <h2
+              className={cn(
+                "text-lg font-semibold tracking-tight text-pretty",
+                compactHeader ? "text-base" : "font-serif",
+              )}
             >
-              <FileCheck2 className="size-3.5" />
-              {artifactSummary}
-            </Button>
-          )}
-        </div>
-      </header>
+              {stageTitle}
+            </h2>
+            <p
+              className={cn(
+                "mt-1 max-w-2xl text-sm leading-5 text-muted-foreground",
+                compactHeader && "sr-only",
+              )}
+            >
+              {stageDescription}
+            </p>
+          </div>
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
+            {headerAction}
+            {showRevisionSummary && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-9 max-w-56 gap-2 border-amber-500/40 bg-amber-500/10 px-3 text-sm text-amber-800 hover:bg-amber-500/15 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
+                    aria-label={`${revisionTitle}，${t("paper.runtime.revisionDetails")}`}
+                  >
+                    <AlertTriangle className="size-3.5 shrink-0" />
+                    <span className="truncate">{revisionTitle}</span>
+                    {revisionFindingCount > 0 && (
+                      <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-amber-500/20 px-1.5 text-xs font-semibold tabular-nums">
+                        {revisionFindingCount}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="end"
+                  sideOffset={8}
+                  className="max-h-[min(32rem,75vh)] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto p-0"
+                >
+                  <div className="sticky top-0 flex items-start gap-2.5 border-b bg-popover/95 px-4 py-3 backdrop-blur">
+                    <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                      <AlertTriangle className="size-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-5">
+                        {revisionTitle}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                        {t("paper.runtime.revisionDetailsDescription")}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-4 px-4 py-4 text-sm">
+                    {stageState.summary && (
+                      <p className="whitespace-pre-wrap break-words leading-5 text-foreground/90">
+                        {stageState.summary}
+                      </p>
+                    )}
+                    {revisionFindingCount > 0 && (
+                      <ul className="space-y-3 border-t pt-4 text-muted-foreground">
+                        {stageState.findings?.map((finding, index) => (
+                          <li
+                            key={`${index}-${finding}`}
+                            className="flex gap-2.5 leading-6"
+                          >
+                            <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
+                            <span className="min-w-0 whitespace-pre-wrap break-words">
+                              {finding}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+            {!compactHeader && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-9 gap-2 px-3 text-sm"
+                disabled={artifactPaths.length === 0}
+                onClick={() =>
+                  artifactPaths[0] && onOpenArtifact(artifactPaths[0])
+                }
+                title={artifactPaths.join("\n") || artifactSummary}
+              >
+                <FileCheck2 className="size-3.5" />
+                {artifactSummary}
+              </Button>
+            )}
+          </div>
+        </header>
+      )}
       {showProjectContextPrompt &&
         onUploadProjectContext &&
         onSkipProjectContext && (

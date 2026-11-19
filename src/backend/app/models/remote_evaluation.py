@@ -24,7 +24,7 @@ class EvaluationGateway(SQLModel, table=True):
 
 
 class RemoteEvaluationJob(SQLModel, table=True):
-    """One candidate with durable, fenced device-attempt ownership."""
+    """One candidate with durable, fenced execution ownership."""
 
     __tablename__ = "remote_evaluation_job"
     id: uuid.UUID = Field(primary_key=True)

@@ -1,7 +1,7 @@
 # Venue presentation guidance
 
 Adapted from AutoRebuttal's dated venue-policy reference and default formatting
-rules. See `/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+rules. See [the adaptation attribution](../../ATTRIBUTION.md).
 
 This integration does not allocate or enforce numeric response limits. Use this
 reference only to choose presentation and tone. Never invent a venue rule; an

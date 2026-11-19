@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException
 from llm4ad.remote.contracts import EvaluationContract
 from pydantic import ValidationError
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -17,6 +17,7 @@ from app.models import EvaluationGateway, Project, RemoteEvaluationJob, Task, Ta
 
 TERMINAL = {"completed", "failed", "cancelled"}
 ACTIVE = {"accepted", "running", "recovery_required", "cancel_requested"}
+GATEWAY_HEARTBEAT_WINDOW = timedelta(seconds=30)
 
 
 def digest(value: str) -> str:
@@ -54,59 +55,45 @@ def runtime_task(db: Session, task_id: uuid.UUID, token: str) -> Task:
     return task
 
 
-def validate_pool(db: Session, user_id: uuid.UUID, evaluator: dict) -> dict:
-    """Validate selected identities, visibility and comparable scoring."""
+def target_id(evaluator: dict) -> uuid.UUID:
+    """Resolve an exact evaluator registration from a task or submission."""
+    target = evaluator.get("gateway_id")
+    previous = evaluator.get("gateway_ids") or []
+    if not isinstance(previous, list) or evaluator.get("selection_mode", "selected") != "selected" or (
+        not target and len(previous) != 1
+    ):
+        raise HTTPException(422, "Choose one gateway and evaluator before running this task")
     try:
-        ids = list(dict.fromkeys(str(uuid.UUID(value)) for value in evaluator.get("gateway_ids", [])))
-    except (ValueError, TypeError, AttributeError) as exc:
-        raise HTTPException(422, "Gateway IDs must be UUIDs") from exc
-    mode = selection_mode(evaluator)
-    if mode == "auto":
-        contract = evaluator.get("contract")
-        if not contract and ids:
-            selected = db.get(EvaluationGateway, uuid.UUID(ids[0]))
-            if selected and str(user_id) in selected.allowed_user_ids:
-                contract = selected.contract
-        try:
-            normalized = EvaluationContract.model_validate(contract or {}).model_dump(mode="json")
-        except (ValidationError, TypeError, ValueError) as exc:
-            raise HTTPException(422, "Choose an evaluation method and benchmark for the automatic pool") from exc
-        # A valid benchmark can wait for an authorized future pool member.
-        # Authorization is checked again against every actual claimant.
-        return normalized
-    if not ids:
-        raise HTTPException(422, "Select at least one remote evaluation gateway")
-    gateways = [db.get(EvaluationGateway, uuid.UUID(value)) for value in ids]
-    if any(g is None or str(user_id) not in g.allowed_user_ids for g in gateways):
-        raise HTTPException(403, "A selected gateway is not available to this user")
-    keys = {g.contract_key for g in gateways}
-    if len(keys) != 1:
-        raise HTTPException(422, "Selected gateways use incompatible evaluation contracts")
+        chosen = uuid.UUID(str(target or previous[0]))
+        if previous and [uuid.UUID(str(value)) for value in previous] != [chosen]:
+            raise HTTPException(422, "Choose one gateway and evaluator before running this task")
+        return chosen
+    except (ValueError, TypeError, AttributeError, KeyError) as exc:
+        raise HTTPException(422, "Gateway ID must be a UUID") from exc
+
+
+def validate_target(db: Session, user_id: uuid.UUID, evaluator: dict) -> EvaluationGateway:
+    """Validate an exact registration and its pinned comparison contract."""
+    gateway = db.get(EvaluationGateway, target_id(evaluator))
+    if gateway is None or str(user_id) not in gateway.allowed_user_ids:
+        raise HTTPException(403, "The selected gateway is not available to this user")
     try:
-        if evaluator.get("contract") and contract_key(evaluator["contract"]) not in keys:
+        if evaluator.get("contract") and contract_key(evaluator["contract"]) != gateway.contract_key:
             raise HTTPException(422, "The selected evaluator contract changed; review the task configuration")
     except ValidationError as exc:
         raise HTTPException(422, "Invalid evaluation contract") from exc
-    return gateways[0].contract
+    return gateway
 
 
-def selection_mode(evaluator: dict) -> str:
-    """Preserve legacy explicit lists while defaulting new pools to automatic."""
-    mode = evaluator.get("selection_mode", "selected" if evaluator.get("gateway_ids") else "auto")
-    if not isinstance(mode, str) or mode not in {"auto", "selected"}:
-        raise HTTPException(422, "Unknown remote evaluation selection mode")
-    return mode
-
-
-def eligible(job: RemoteEvaluationJob, gateway: EvaluationGateway, *, online: bool = True) -> bool:
-    """Resolve authorization and comparison semantics independently of phone IDs."""
+def eligible(job: RemoteEvaluationJob, gateway: EvaluationGateway) -> bool:
+    """Check that this is the authorized evaluator registration for the job."""
     return (
-        (job.selection_mode == "auto" or str(gateway.id) in job.selected_gateway_ids)
+        (job.selection_mode == "selected" and job.selected_gateway_ids == [str(gateway.id)])
         and str(job.user_id) in gateway.allowed_user_ids
         and gateway.contract_key == job.contract_key
         and (not job.request.get("managed_attempt") or gateway.protocol_version >= 2)
         and gateway.ready
-        and (not online or is_online(gateway))
+        and is_online(gateway)
     )
 
 
@@ -124,8 +111,10 @@ def failure_category(report: dict) -> str:
     return "evaluator"
 
 
-def finish_attempt(db: Session, job: RemoteEvaluationJob, report: dict, category: str, *, now=None) -> bool:
-    """Fence one failed device attempt and either requeue or exhaust its budget.
+def finish_attempt(
+    db: Session, job: RemoteEvaluationJob, report: dict, category: str, *, now=None, lease_expired: bool = False
+) -> bool:
+    """Fence one failed gateway attempt and either requeue or exhaust its budget.
 
     Args:
         db: Session holding the job row lock.
@@ -133,25 +122,35 @@ def finish_attempt(db: Session, job: RemoteEvaluationJob, report: dict, category
         report: Diagnostic failure, never a fabricated candidate score.
         category: Candidate, infrastructure, evaluator or configuration failure.
         now: Optional UTC observation time for deterministic lease checks.
+        lease_expired: Whether transport lost the ability to renew attempt authority.
 
     Returns:
-        Whether another device attempt remains eligible.
+        Whether the same registration can claim a fresh attempt.
     """
     now = now or datetime.now(UTC)
     message = report.get("error_message") or report.get("message") or category
-    history = [*job.attempt_history, attempt_entry(db, job, "failed", category, str(message), now=now)]
-    retry = category in {"infrastructure", "evaluator"} and job.attempt_count < job.max_attempts
     task = db.get(Task, job.task_id)
     cancelled = job.state == "cancel_requested" or task is None or task.status not in {TaskStatus.RUNNING, TaskStatus.PENDING}
-    retry = retry and not cancelled
+    reconnect = lease_expired and not cancelled
+    history = [*job.attempt_history, attempt_entry(
+        db, job, "reconnecting" if reconnect else "failed", None if reconnect else category, str(message), now=now
+    )]
+    if reconnect:
+        job.attempt_count = max(0, job.attempt_count - 1)
+    retry = not cancelled and (reconnect or category in {"infrastructure", "evaluator"} and job.attempt_count < job.max_attempts)
     job.attempt_history, job.lease_expires_at = history, None
     if retry:
         job.attempt_id, job.gateway_id, job.sequence = uuid.uuid4(), None, -1
         job.state = "queued"
-        job.report = {"message": "Retrying evaluation on an available compatible device", "metadata": {
-            "failure_category": category, "attempt_history": history,
-            "attempt_count": job.attempt_count, "max_attempts": job.max_attempts,
-        }}
+        job.report = {
+            "message": "Waiting for the selected gateway to reconnect" if reconnect else "Waiting to retry on the selected gateway",
+            "metadata": {
+                "failure_category": None if reconnect else category,
+                "attempt_count": job.attempt_count,
+                "max_attempts": job.max_attempts,
+                "attempt_history": history,
+            },
+        }
     else:
         job.state = "cancelled" if cancelled else "failed"
         job.report = {
@@ -171,7 +170,7 @@ def attempt_entry(db: Session, job: RemoteEvaluationJob, state: str, category=No
     """Return compact durable provenance for the original attempt before fencing."""
     gateway = db.get(EvaluationGateway, job.gateway_id) if job.gateway_id else None
     return {
-        "attempt_id": str(job.attempt_id), "attempt": job.attempt_count,
+        "attempt_id": str(job.attempt_id), "attempt": len(job.attempt_history) + 1,
         "state": state,
         "gateway_id": str(job.gateway_id) if job.gateway_id else None,
         "gateway_name": gateway.name if gateway else None,
@@ -181,15 +180,15 @@ def attempt_entry(db: Session, job: RemoteEvaluationJob, state: str, category=No
 
 
 def expire_attempt(db: Session, job: RemoteEvaluationJob, *, now=None) -> bool:
-    """Retire expired authority without assuming an offline device was restored."""
+    """Retire expired authority while keeping cleanup under the gateway's control."""
     now = now or datetime.now(UTC)
     if job.state not in ACTIVE or job.lease_expires_at is None or job.lease_expires_at.replace(tzinfo=UTC) > now:
         return False
     prior = job.attempt_id
     finish_attempt(db, job, {
-        "message": "Device attempt lease expired before its gateway renewed authority",
+        "message": "Evaluation attempt lease expired before the gateway renewed authority",
         "error_type": "EvaluationLeaseExpired", "metadata": {"failure_category": "infrastructure"},
-    }, "infrastructure", now=now)
+    }, "infrastructure", now=now, lease_expired=True)
     if job.attempt_id == prior:
         job.attempt_id = uuid.uuid4()
     return True
@@ -217,7 +216,7 @@ def lock_job(db: Session, job_id: uuid.UUID) -> RemoteEvaluationJob | None:
 
 def is_online(gateway: EvaluationGateway) -> bool:
     """Interpret a stale heartbeat as offline without changing job ownership."""
-    return (datetime.now(UTC) - gateway.last_seen.replace(tzinfo=UTC)).total_seconds() <= 30
+    return datetime.now(UTC) - gateway.last_seen.replace(tzinfo=UTC) <= GATEWAY_HEARTBEAT_WINDOW
 
 
 def job_payload(job: RemoteEvaluationJob, include_result: bool = False) -> dict:
@@ -255,7 +254,7 @@ def job_payload(job: RemoteEvaluationJob, include_result: bool = False) -> dict:
 
 def claim(db: Session, gateway_id: uuid.UUID) -> RemoteEvaluationJob | None:
     """Atomically reserve capacity and claim one eligible queued candidate."""
-    expire_leases(db)
+    expire_leases(db, gateway_id=gateway_id)
     gateway = db.exec(select(EvaluationGateway).where(EvaluationGateway.id == gateway_id).with_for_update()).one()
     db.refresh(gateway, with_for_update=True)
     gateway.last_seen = datetime.now(UTC)
@@ -271,10 +270,6 @@ def claim(db: Session, gateway_id: uuid.UUID) -> RemoteEvaluationJob | None:
     if len(active) >= gateway.capacity:
         db.commit()
         return None
-    gateways = db.exec(select(EvaluationGateway)).all()
-    loads = dict(db.exec(select(RemoteEvaluationJob.gateway_id, func.count())
-                         .where(RemoteEvaluationJob.state.in_(ACTIVE))
-                         .group_by(RemoteEvaluationJob.gateway_id)).all())
     for job in db.exec(
         select(RemoteEvaluationJob)
         .where(RemoteEvaluationJob.state == "queued", RemoteEvaluationJob.contract_key == gateway.contract_key)
@@ -285,17 +280,9 @@ def claim(db: Session, gateway_id: uuid.UUID) -> RemoteEvaluationJob | None:
         task = db.get(Task, job.task_id)
         if task is None or task.status not in {TaskStatus.RUNNING, TaskStatus.PENDING}:
             continue
-        if job.request.get("managed_attempt"):
-            counts = {str(g.id): sum(row["gateway_id"] == str(g.id) for row in job.attempt_history) for g in gateways}
-            previous = job.attempt_history[-1].get("gateway_id") if job.attempt_history else None
-            rank = counts[str(gateway.id)], str(gateway.id) == previous
-            best = min((counts[str(g.id)], str(g.id) == previous) for g in gateways
-                       if eligible(job, g) and loads.get(g.id, 0) < g.capacity)
-            if rank > best:
-                continue
-            if job.attempt_count >= job.max_attempts:
-                finish_attempt(db, job, {"message": "Evaluation attempt budget exhausted"}, "infrastructure")
-                continue
+        if job.request.get("managed_attempt") and job.attempt_count >= job.max_attempts:
+            finish_attempt(db, job, {"message": "Evaluation attempt budget exhausted"}, "infrastructure")
+            continue
         now = datetime.now(UTC)
         values = {"state": "accepted", "gateway_id": gateway.id, "updated_at": now}
         if job.request.get("managed_attempt"):

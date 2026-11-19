@@ -297,7 +297,23 @@ def exported_result(folder: Path) -> dict:
 
 def stage_for(gateway, job: dict, saved: dict, metadata: dict) -> Path | None:
     """Resolve one attempt's staging directory without touching shared reference data."""
-    benchmark = gateway.adapter.benchmark
+    adapter = gateway.adapter
+    if hasattr(adapter, "adapter_for"):
+        remote_job = RemoteJob.model_validate(job)
+        assigned = adapter.adapter_for(remote_job)
+        if assigned is None:
+            # Startup checks use the original per-phone profiles.
+            device = saved.get("request", {}).get("device_id")
+            if not device:
+                return None
+            from llm4ad.gateway.sdk.contracts import load_evaluator
+
+            spec = adapter.config["startup_members"].get(device)
+            if spec is None:
+                raise ValueError("No owned HGamey profile for the saved attempt")
+            assigned = load_evaluator(spec)
+        adapter = assigned
+    benchmark = adapter.benchmark
     if saved.get("evidence_directory"):
         if saved.get("remote_job_id") != job["id"] or saved.get("remote_attempt_id") != job["attempt_id"]:
             raise ValueError("Evidence state belongs to a different SDK attempt")

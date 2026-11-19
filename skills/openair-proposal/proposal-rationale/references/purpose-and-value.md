@@ -1,6 +1,6 @@
 # Research Purpose, Significance, and Value Method
 
-This stage answers two connected questions: why the research must be undertaken, and what credible value follows if it succeeds.
+This method answers two connected questions: why the research must be undertaken, and what credible value follows if it succeeds.
 
 ## 1. Construct the necessity argument
 
@@ -14,9 +14,9 @@ Build a narrowing chain:
 
 Avoid a generic background section followed by an unrelated project announcement. Each paragraph must advance the same argument.
 
-Treat the relationship with the literature stage as iterative. If the intended
+Treat the relationship with literature research as iterative. If the intended
 purpose depends on an unsupported comparison or limitation, report the exact
-evidence gap and return to the literature stage rather than converting the
+evidence gap and revisit the literature evidence rather than converting the
 assumption into a factual claim.
 
 ## 2. Separate purpose from significance
@@ -52,18 +52,18 @@ When the proposal has an applied component, describe a small set of distinct pra
 
 Cover distinct lifecycle stages or problem types only when the project actually addresses them.
 
-## 5. Maintain section boundaries
+## 5. Keep the argument roles clear
 
-- `01-rationale.typ` contains the research purpose, necessity, and significance argument.
-- `03-value.typ` contains academic value, credible application prospects, and practical problems.
-- Detailed literature synthesis remains in the literature section.
-- Objective enumeration and technical procedures remain in their owning later stages.
+- The rationale explains research purpose, necessity and significance.
+- The value argument explains academic value, credible application prospects and practical problems.
+- Literature synthesis, objectives and technical procedures remain conceptually distinct while the main agent integrates related Markdown revisions within the author's scope.
 
-## 6. Quality gate
+## 6. Review prompts
 
 Check that:
 
-- every factual trend or prior-work claim uses an existing bibliography key;
+- every factual trend or prior-work claim has a matching numbered reference in
+  S4, or a valid citation in the legacy project's existing bibliography;
 - the stated gap matches the literature section rather than exaggerating it;
 - the purpose preserves the foundation's scope and exclusions;
 - each value claim maps to a planned output or capability;

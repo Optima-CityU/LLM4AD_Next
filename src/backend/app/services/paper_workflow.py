@@ -39,11 +39,12 @@ class ResearchWorkflowDefinition:
     Attributes:
         mode: Stable workspace mode identifier.
         available: Whether the workflow can currently start agent runs.
-        stages: Ordered frontend stages supplied by the backend.
+        stages: Historical artifact adapters, or ordered stages for discovery.
         skills_by_run_kind: Skills enabled for each supported agent run.
         run_kind_by_stage: Agent run assigned to each frontend stage.
-        prerequisites_by_run_kind: Required completed stages for each run.
-        writable_paths_by_run_kind: Source paths owned by each run. A trailing
+        prerequisites_by_run_kind: Advisory context dependencies for proposal/rebuttal;
+            required completed stages for discovery.
+        writable_paths_by_run_kind: Historical artifact source roles. A trailing
             slash denotes an allowed directory prefix.
         prompt_preamble: Trusted mode context appended by the backend.
     """
@@ -75,7 +76,9 @@ class ResearchWorkflowDefinition:
         prerequisite: ResearchWorkflowStage,
         status: str | None,
     ) -> bool:
-        """Allow chair synthesis after a published draft with unresolved author actions."""
+        """Treat proposal/rebuttal dependencies as advice, preserving discovery gates."""
+        if self.mode in {"proposal", "manuscript"}:
+            return True
         if stage == "ac_summary" and prerequisite == "autorebuttal":
             return status in {"ready", "needs_revision"}
         return status == "ready"
@@ -132,35 +135,29 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
             ),
             skills_by_run_kind=MappingProxyType(
                 {
-                    # Two skills, two concerns. `typst-author` (vendored, see its
-                    # ATTRIBUTION.md) owns Typst syntax and ships a local copy of
-                    # the official docs so the model reads the language instead of
-                    # recalling it — the previous single skill named no list
-                    # functions and a stage emitted `#numbered-list`, which does
-                    # not exist. This one owns the proposal-specific part: the
-                    # durable foundation and the write boundary for the stage.
+                    # Stable artifact adapters share one proposal assistant Skill.
                     "proposal_formatting": (
-                        "proposal-foundation-layout",
+                        "openair-proposal",
                         "typst-author",
                         _REVISION_PUBLICATION_SKILL,
                     ),
                     "proposal_literature": (
-                        "proposal-literature-evidence",
+                        "openair-proposal",
                         _REVISION_PUBLICATION_SKILL,
                     ),
-                    "proposal_rationale": ("proposal-rationale", _REVISION_PUBLICATION_SKILL),
-                    "proposal_objectives": ("proposal-objectives", _REVISION_PUBLICATION_SKILL),
-                    "proposal_methods": ("proposal-methods", _REVISION_PUBLICATION_SKILL),
+                    "proposal_rationale": ("openair-proposal", _REVISION_PUBLICATION_SKILL),
+                    "proposal_objectives": ("openair-proposal", _REVISION_PUBLICATION_SKILL),
+                    "proposal_methods": ("openair-proposal", _REVISION_PUBLICATION_SKILL),
                     "proposal_innovation_plan": (
-                        "proposal-innovation-plan",
+                        "openair-proposal",
                         _REVISION_PUBLICATION_SKILL,
                     ),
                     "proposal_foundation_feasibility": (
-                        "proposal-foundation-feasibility",
+                        "openair-proposal",
                         _REVISION_PUBLICATION_SKILL,
                     ),
                     "proposal_final_review": (
-                        "proposal-final-review",
+                        "openair-proposal",
                         _REVISION_PUBLICATION_SKILL,
                     ),
                 }
@@ -202,12 +199,12 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
                 }
             ),
             prompt_preamble=(
-                "Work on a research proposal as one stage in a backend-governed workflow. Treat the persisted project "
-                "foundation as authoritative when it is used. Project documents are optional context whose roles are "
-                "described by the runtime; the agent decides whether and when to inspect them. Edit only the source "
-                "paths explicitly assigned to the current stage. Preserve claims, evidence, citations, equations, and "
-                "author intent. After every edit to .typ files, run the check_typst tool and fix all reported errors "
-                "before calling publish_stage_result — publication is rejected while the document does not compile."
+                "Work on a research proposal in one coordinator conversation using openair-proposal. "
+                "Historical stages identify artifact shapes and method references, not execution locks. "
+                "Use confirmed project context and relevant evidence; preserve author intent, citations and equations. "
+                "Workers read shared source and return isolated scratch drafts; the parent integrates reviewed diffs. "
+                "For a scoped request use read_region_request and propose_region_change against its base revision. "
+                "Check integrated Typst and fix real compile/export errors. Editorial findings remain author guidance."
             ),
         ),
         "manuscript": ResearchWorkflowDefinition(
@@ -221,11 +218,11 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
             skills_by_run_kind=MappingProxyType(
                 {
                     "rebuttal_baseline": (
-                        "rebuttal-baseline",
+                        "autorebuttal-workflow",
                         _REVISION_PUBLICATION_SKILL,
                     ),
-                    "autorebuttal": ("autorebuttal", _REVISION_PUBLICATION_SKILL),
-                    "ac_summary": ("ac-summary", _REVISION_PUBLICATION_SKILL),
+                    "autorebuttal": ("autorebuttal-workflow", _REVISION_PUBLICATION_SKILL),
+                    "ac_summary": ("autorebuttal-workflow", _REVISION_PUBLICATION_SKILL),
                 }
             ),
             run_kind_by_stage=MappingProxyType(
@@ -250,19 +247,23 @@ _WORKFLOWS: Mapping[ResearchWorkspaceMode, ResearchWorkflowDefinition] = Mapping
                 }
             ),
             prompt_preamble=(
-                "Work on an author rebuttal as one stage in a backend-governed workflow. The paper source and "
-                "review files are authoritative, read-only evidence. Never invent results, measurements, citations, "
-                "or completed experiments. Mark unsupported claims as explicit author placeholders. Publish only the "
-                "structured stage artifact; do not edit the submitted paper."
+                "Work on an author rebuttal in one coordinator conversation using autorebuttal-workflow. "
+                "Historical stage keys preserve artifact compatibility, not prerequisites or manual switches. "
+                "Paper source and review files are read-only evidence; workers return isolated response drafts. "
+                "Never invent measurements, citations or completed experiments. Mark unsupported claims as author "
+                "placeholders. For scoped response changes use read_region_request and propose_region_change. "
+                "Keep editorial guidance separate from export availability; do not edit the submitted paper."
             ),
         ),
         "autodesign": ResearchWorkflowDefinition(
             mode="autodesign",
             available=True,
             stages=("autodesign",),
-            skills_by_run_kind=MappingProxyType({
-                "autodesign": ("autodesign", "llm4ad-cloud-package", "llm4ad-run-analysis", "llm4ad-task-memory"),
-            }),
+            skills_by_run_kind=MappingProxyType(
+                {
+                    "autodesign": ("autodesign", "llm4ad-cloud-package", "llm4ad-run-analysis", "llm4ad-task-memory"),
+                }
+            ),
             run_kind_by_stage=MappingProxyType({"autodesign": "autodesign"}),
             prerequisites_by_run_kind=MappingProxyType({"autodesign": ()}),
             writable_paths_by_run_kind=MappingProxyType({"autodesign": ("draft/", "analysis/")}),

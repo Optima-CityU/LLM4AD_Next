@@ -102,7 +102,7 @@ async def test_gateway_offline_queue_wait_exceeds_execution_timeout_without_resu
         assert len(submissions) == 1 and set(poll_ids) == {request_id}
         assert requests == [("POST", submission_path)] + [("GET", f"{submission_path}/{request_id}")] * len(poll_ids)
         assert submissions[0]["timeout"] == context.timeout
-        assert submissions[0]["gateway_ids"] == config.gateway_ids
+        assert submissions[0]["gateway_id"] == config.gateway_id
         assert submissions[0]["contract"] == config.contract
         assert submissions[0]["parameters"] == config.parameters
         for field in ("evaluation_profile", "behavior_storage", "algorithm_id", "algorithm_name",

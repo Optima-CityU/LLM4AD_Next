@@ -415,6 +415,20 @@ class Settings(BaseSettings):
     PAPER_MODEL_MAX_RETRIES: int = Field(default=2, ge=0)
     PAPER_MODEL_RETRY_DELAY_SECONDS: float = Field(default=1, ge=0)
 
+    # Shared research web search; the SearXNG endpoint stays on the Docker network.
+    PAPER_SEARCH_ENABLED: bool = True
+    PAPER_SEARCH_SEARXNG_URL: str = "http://searxng:8080"
+    PAPER_SEARCH_ENGINES: str = "bing,baidu,sogou,360search"
+    PAPER_SEARCH_DEFAULT_ENGINES: str = "bing"
+    PAPER_SEARCH_MAX_CONCURRENCY: int = Field(default=2, ge=1, le=16)
+    PAPER_SEARCH_MIN_INTERVAL_SECONDS: float = Field(default=1, ge=0.1, le=60)
+    PAPER_SEARCH_WAIT_TIMEOUT_SECONDS: float = Field(default=10, gt=0, le=60)
+    PAPER_SEARCH_REQUEST_TIMEOUT_SECONDS: float = Field(default=20, gt=0, le=60)
+    PAPER_SEARCH_MAX_RETRIES: int = Field(default=1, ge=0, le=2)
+    PAPER_SEARCH_MAX_RESULTS: int = Field(default=10, ge=1, le=30)
+    PAPER_SEARCH_READ_MAX_BYTES: int = Field(default=524288, ge=1024, le=2097152)
+    PAPER_SEARCH_READ_MAX_CHARS: int = Field(default=16000, ge=256, le=50000)
+
     # ---- 首页资讯（GitHub Wiki 拉取） ----
     # 资讯数据源为 GitHub Wiki 的 raw markdown（唯一真源，定期人工发布）。
     NEWS_WIKI_URL_ZH: str = (

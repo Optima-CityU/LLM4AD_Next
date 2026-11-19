@@ -103,11 +103,8 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
             path.write_text(json.dumps(generated_devices))
             devices = executor.load_devices(path)
     devices = [item for item in devices if item["enabled"]]
-    selection = environment.get("HGAMEY_DEVICE_ID")
-    if selection:
-        devices = [item for item in devices if item["id"] == selection]
     if not devices:
-        raise ValueError("Configure an enabled device; HGAMEY_DEVICE_ID must match an enabled entry")
+        raise ValueError("Configure at least one enabled HGamey device")
     for device in devices:
         profile = device_profiles.get(device["id"], environment.get("HGAMEY_DEVICE_PROFILE", "").strip())
         if not profile:
@@ -191,13 +188,16 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
             device_settings.update(
                 device_id=device["id"], expected_serial=device["expected_serial"], device_profile=device_profiles[device["id"]]
             )
-            label = name if len(devices) == 1 else f"{name} / {device['label']} ({device['id']})"
+            label = f"{name} / Shader"
             if mode != "legacy":
                 device_settings["evaluation_mode"] = mode
-                label += " / " + ("Static images" if mode == "static" else "Genshin game")
+                label = f"{name} / " + ("Static images" if mode == "static" else "Genshin game")
                 if mode == "static":
                     device_settings.pop("game_check", None)
                     device_settings.pop("game_scoring", None)
+                    if dataset_manifest := environment.get("HGAMEY_STATIC_DATASET_MANIFEST", "").strip():
+                        device_settings["static_dataset_manifest"] = dataset_manifest
+                        label = f"{name} / QRISP + GameIR-SR"
             fingerprint = hashlib.sha256(
                 json.dumps(
                     {"settings": device_settings, "implementation": implementation,

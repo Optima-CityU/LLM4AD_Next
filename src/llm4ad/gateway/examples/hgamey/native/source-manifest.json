@@ -26,8 +26,8 @@
       "size": 17179
     },
     "game_opt_loop/contracts/eval_request.schema.json": {
-      "sha256": "67e14e4d5c82fe08782b41e68a317fbd9d2ead457790313a4d8f8e937d91f769",
-      "size": 25117
+      "sha256": "a7ac951b314185e4f35cb6e3435278ca61b8158bb9b78cec55ef67e35014960f",
+      "size": 25412
     },
     "game_opt_loop/contracts/game_profile.schema.json": {
       "sha256": "3cbfcbf306053750ebef1a38d687c90fea9d5ac13e7d0c2143371168ce11c067",
@@ -850,8 +850,8 @@
       "size": 46273
     },
     "phonefarm/src/gpuop.rs": {
-      "sha256": "3bf460ab085323d403208a507e693169f7864c9c77340feb5b6e8f286bb7fa44",
-      "size": 199324
+      "sha256": "0ee02070c2512016fd731d98048bd6ef34a59a9818ff1a9c30f23a68654cb848",
+      "size": 201513
     },
     "phonefarm/src/gpustat.rs": {
       "sha256": "cfd08969146683090887689751d44712081fe6a82c84d6bdf6b7ceba2ff88c1a",
@@ -1078,8 +1078,8 @@
       "size": 18424
     },
     "phonefarm/src/shaderplan.rs": {
-      "sha256": "f384ace221829ab583f0f580927f8c6ebc3a9cb545a5334a5e62f7cd385565c1",
-      "size": 17228
+      "sha256": "20811b09efe4b84ab5b8c5de4f0a5b37358d231fd6992a5eec183404d7fe7865",
+      "size": 18140
     },
     "phonefarm/src/shotdiff.rs": {
       "sha256": "caf6c3b250f7b328d2c61dcc7dc4dbb0d6ebee9b3f9d5741539ba4a99a0eaca8",
@@ -1530,8 +1530,8 @@
       "size": 991
     },
     "phonefarm/tools/vkop/main.cpp": {
-      "sha256": "e2ecbc50aa45f35a0c0822a9c6cacefb8b2f661bcd49549ce3ca357aab4e42a1",
-      "size": 38261
+      "sha256": "e2217e7130e77a5d8b4b98a6413fb5cc24e4d95d0a9aff25f90d9afc18d3e417",
+      "size": 40326
     },
     "refbench/.gitignore": {
       "sha256": "5cb07f9ce80d41b7763f5b151dc5db0c30de47bb9330a866d554cda5c1c5d39d",

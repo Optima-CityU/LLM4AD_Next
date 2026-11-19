@@ -359,14 +359,11 @@ class EvalContext(BaseModel):
 
 
 class RemoteEvaluatorConfig(EvaluatorConfig):
-    """Use an authorized pool of compatible remote gateways."""
+    """Send evaluations to one registered gateway evaluator."""
     type: Literal["remote"] = "remote"
-    selection_mode: Literal["auto", "selected"] = "auto"
-    gateway_ids: list[str] = Field(
-        default_factory=list, json_schema_extra=ui(label_zh="评估网关", label_en="Evaluation gateways")
+    gateway_id: str | None = Field(
+        default=None, json_schema_extra=ui(label_zh="评估网关", label_en="Evaluation gateway")
     )
-    max_attempts: int = Field(default=3, gt=0)
-    lease_timeout: float = Field(default=60.0, gt=0, allow_inf_nan=False)
     contract: dict = Field(default_factory=dict)
     parameters: dict = Field(default_factory=dict, json_schema_extra=ui(label_zh="评估器参数", label_en="Evaluator parameters"))
     candidate_paths: list[str] = Field(default_factory=list, json_schema_extra=ui(
@@ -378,15 +375,16 @@ class RemoteEvaluatorConfig(EvaluatorConfig):
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_legacy_selection(cls, value):
-        """Keep raw configurations with explicit gateway IDs on their selected pool."""
-        if isinstance(value, dict) and "selection_mode" not in value and value.get("gateway_ids"):
-            return {**value, "selection_mode": "selected"}
+    def normalize_legacy_target(cls, value):
+        """Read a legacy configuration that unambiguously selected one gateway."""
+        if not isinstance(value, dict):
+            return value
+        target = value.get("gateway_id")
+        previous = value.get("gateway_ids") or []
+        if value.get("selection_mode", "selected") != "selected" or (
+            previous and (not isinstance(previous, list) or len(previous) != 1 or target and previous[0] != target)
+        ):
+            return {**value, "gateway_id": None}
+        if not target and previous:
+            return {**value, "gateway_id": previous[0]}
         return value
-
-    @model_validator(mode="after")
-    def validate_selected_pool(self):
-        """Require an explicit pool when automatic device selection is disabled."""
-        if self.selection_mode == "selected" and not self.gateway_ids:
-            raise ValueError("selected remote evaluation requires nonempty gateway_ids")
-        return self

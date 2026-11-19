@@ -25,6 +25,10 @@ import type {
   RebuttalEntry,
   RebuttalOutput,
 } from "@/client"
+import PaperRegionWorkbench, {
+  PaperRegionProvider,
+} from "@/components/Paper/PaperRegionWorkbench"
+import { PaperReviewFields } from "@/components/Paper/PaperReviewFields"
 import RebuttalBaselinePanel from "@/components/Paper/RebuttalBaselinePanel"
 import {
   AlertDialog,
@@ -54,12 +58,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard"
 import {
   useAttachReviewerFeedback,
@@ -67,6 +68,7 @@ import {
   usePaperReviewContent,
   useUpdateReviewerFeedback,
 } from "@/hooks/usePapers"
+import type { PaperRegionAgentRequest } from "@/lib/paperRegions"
 import type { RebuttalBaselineReviewerSource } from "@/lib/rebuttalBaseline"
 import { parseRebuttalBaseline } from "@/lib/rebuttalBaseline"
 
@@ -83,10 +85,12 @@ type RebuttalEntriesPanelProps = {
   activeStage: "rebuttal_baseline" | "autorebuttal" | "ac_summary"
   chairMessage?: string | null
   chairStale: boolean
+  onRequestAgent?: (request: PaperRegionAgentRequest) => void
+  onOpenFile?: (path: string) => void
 }
 
 type ReviewEditorMode = "create" | "edit"
-type RebuttalWorkspaceView = "baseline" | "reviews" | "chair"
+type RebuttalWorkspaceView = "baseline" | "reviews" | "author" | "chair"
 
 function viewForStage(
   stage: RebuttalEntriesPanelProps["activeStage"],
@@ -193,6 +197,8 @@ export default function RebuttalEntriesPanel({
   activeStage,
   chairMessage,
   chairStale,
+  onRequestAgent,
+  onOpenFile,
 }: RebuttalEntriesPanelProps) {
   const { t, i18n } = useTranslation()
   const [activeView, setActiveView] = useState<RebuttalWorkspaceView>(() =>
@@ -405,215 +411,113 @@ export default function RebuttalEntriesPanel({
   }
 
   return (
-    <div
-      data-testid="rebuttal-dossier"
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"
+    <PaperRegionProvider
+      workspaceId={workspaceId}
+      onRequestAgent={onRequestAgent}
+      onOpenFile={onOpenFile}
     >
-      <h2 className="sr-only">{t("paper.rebuttal.title")}</h2>
-
-      <Tabs
-        value={activeView}
-        onValueChange={(value) => setActiveView(value as RebuttalWorkspaceView)}
-        className="min-h-0 flex-1 gap-0"
+      <div
+        data-testid="rebuttal-dossier"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background"
       >
-        <div className="shrink-0 border-b bg-background px-5 sm:px-6">
-          <TabsList className="grid h-12 w-full grid-cols-3 rounded-none bg-transparent p-0 shadow-none">
-            <TabsTrigger
-              value="baseline"
-              className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
-              <ScanSearch aria-hidden="true" />
-              <span>{t("paper.rebuttal.views.baseline")}</span>
-              {baseline && (
-                <span className="tabular-nums text-xs text-muted-foreground">
-                  {baseline.concerns.length}
-                </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger
-              value="reviews"
-              className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
-              <MessagesSquare aria-hidden="true" />
-              <span>{t("paper.rebuttal.views.reviews")}</span>
-              <span className="tabular-nums text-xs text-muted-foreground">
-                {reviewerGroups.length}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger
-              value="chair"
-              className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
-              <PenLine aria-hidden="true" />
-              <span>{t("paper.rebuttal.views.chair")}</span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        <h2 className="sr-only">{t("paper.rebuttal.title")}</h2>
 
-        {stale && (entries.length > 0 || rebuttalOutput) && (
-          <div className="flex shrink-0 gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-100">
-            <ShieldAlert
-              aria-hidden="true"
-              className="mt-0.5 size-4 shrink-0"
-            />
-            <span className="leading-5">{t("paper.rebuttal.stale")}</span>
-          </div>
-        )}
-
-        <TabsContent
-          value="reviews"
-          className="mt-0 min-h-0 flex-1 overflow-hidden"
+        <Tabs
+          value={activeView}
+          onValueChange={(value) =>
+            setActiveView(value as RebuttalWorkspaceView)
+          }
+          className="min-h-0 flex-1 gap-0"
         >
-          <ScrollArea className="h-full min-h-0 min-w-0">
-            <div className="flex w-full min-w-0 flex-col gap-5 overflow-x-hidden p-3 sm:p-4">
-              {rebuttalOutput?.global_response && (
-                <section className="min-w-0 overflow-hidden border border-primary/20 border-l-4 border-l-primary/45 bg-primary/[0.02]">
-                  <header className="relative border-b border-primary/15 px-5 py-4 pr-14">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-serif text-lg font-semibold">
-                        {rebuttalOutput.global_response.title}
-                      </h3>
-                      <Badge variant="secondary" className="font-normal">
-                        {t("paper.rebuttal.globalResponse")}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      {t("paper.rebuttal.globalResponseDescription")}
-                    </p>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      className="absolute top-2.5 right-2.5"
-                      title={t("paper.rebuttal.copy")}
-                      aria-label={t("paper.rebuttal.copy")}
-                      onClick={async () => {
-                        const response =
-                          rebuttalOutput.global_response?.response
-                        if (response && (await copy(response))) {
-                          toast.success(t("paper.rebuttal.copied"))
-                        } else {
-                          toast.error(t("paper.rebuttal.copyFailed"))
-                        }
-                      }}
-                    >
-                      {copiedText ===
-                      rebuttalOutput.global_response.response ? (
-                        <Check />
-                      ) : (
-                        <Clipboard />
-                      )}
-                    </Button>
-                  </header>
-                  <article className="prose min-w-0 max-w-none break-words px-5 py-5 text-[15px] leading-7 text-foreground/90 dark:prose-invert [&_a]:break-all [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {rebuttalOutput.global_response.response}
-                    </ReactMarkdown>
-                  </article>
-                </section>
-              )}
+          <div className="shrink-0 border-b bg-background px-5 sm:px-6">
+            <TabsList className="grid h-12 w-full grid-cols-4 rounded-none bg-transparent p-0 shadow-none">
+              <TabsTrigger
+                value="baseline"
+                className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                <ScanSearch aria-hidden="true" />
+                <span>{t("paper.rebuttal.views.baseline")}</span>
+                {baseline && (
+                  <span className="tabular-nums text-xs text-muted-foreground">
+                    {baseline.concerns.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger
+                value="reviews"
+                className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                <MessagesSquare aria-hidden="true" />
+                <span>{t("paper.rebuttal.views.reviews")}</span>
+                <span className="tabular-nums text-xs text-muted-foreground">
+                  {reviewerGroups.length}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="author"
+                className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                <ListTodo aria-hidden="true" />
+                <span>{t("paper.regions.authorTab")}</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="chair"
+                className="h-12 gap-2 rounded-none border-b-2 border-transparent font-serif text-sm shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                <PenLine aria-hidden="true" />
+                <span>{t("paper.rebuttal.views.chair")}</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-              {rebuttalOutput && guidanceCount > 0 && (
-                <details
-                  data-testid="rebuttal-guidance-layout"
-                  className="group min-w-0 border border-amber-500/20 bg-amber-500/[0.035]"
-                >
-                  <summary className="flex min-w-0 cursor-pointer list-none items-center gap-3 px-4 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
-                    <ListTodo
-                      aria-hidden="true"
-                      className="size-4 shrink-0 text-amber-700 dark:text-amber-300"
-                    />
-                    <span className="min-w-0 flex-1 font-serif text-base font-semibold">
-                      {t(
-                        authorActions.length > 0
-                          ? "paper.rebuttal.guidanceTitle"
-                          : "paper.rebuttal.guidanceReadyTitle",
-                      )}
-                    </span>
-                    <Badge variant="outline" className="shrink-0 tabular-nums">
-                      {guidanceCount}
-                    </Badge>
-                    <ChevronDown
-                      aria-hidden="true"
-                      className="size-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none"
-                    />
-                  </summary>
-                  <div className="space-y-5 border-t px-4 py-4">
-                    {authorActions.length > 0 && (
-                      <section className="min-w-0 space-y-3">
-                        <h3 className="font-serif text-lg font-semibold">
-                          {t("paper.rebuttal.authorActions")}
-                        </h3>
-                        <div
-                          data-testid="rebuttal-author-action-list"
-                          className="space-y-3"
-                        >
-                          {authorActions.map((item, index) => (
-                            <GuidanceCard
-                              key={`required-${index}-${item}`}
-                              accent="required"
-                              index={index}
-                              item={item}
-                              fallbackTitle={t(
-                                "paper.rebuttal.authorActionFallback",
-                                { index: index + 1 },
-                              )}
-                              label={t("paper.rebuttal.authorActionLabel")}
-                            />
-                          ))}
-                        </div>
-                      </section>
-                    )}
-                    {agentSuggestions.length > 0 && (
-                      <section className="min-w-0 space-y-3">
-                        <h3 className="font-serif text-lg font-semibold">
-                          {t("paper.rebuttal.agentSuggestions")}
-                        </h3>
-                        <div
-                          data-testid="rebuttal-agent-suggestion-list"
-                          className="space-y-3"
-                        >
-                          {agentSuggestions.map((item, index) => (
-                            <GuidanceCard
-                              key={`suggestion-${index}-${item}`}
-                              accent="suggestion"
-                              index={index}
-                              item={item}
-                              fallbackTitle={t(
-                                "paper.rebuttal.agentSuggestionFallback",
-                                { index: index + 1 },
-                              )}
-                              label={t("paper.rebuttal.agentSuggestionLabel")}
-                            />
-                          ))}
-                        </div>
-                      </section>
-                    )}
-                  </div>
-                </details>
-              )}
+          {stale && (entries.length > 0 || rebuttalOutput) && (
+            <div className="flex shrink-0 gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-100">
+              <ShieldAlert
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0"
+              />
+              <span className="leading-5">{t("paper.rebuttal.stale")}</span>
+            </div>
+          )}
 
-              {reviewerGroups.length > 0 && (
-                <section
-                  data-testid="review-feedback-groups"
-                  className="flex min-w-0 max-w-full flex-col gap-2.5"
-                >
-                  <div className="flex flex-wrap items-end justify-between gap-3 px-0.5">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-serif text-lg font-semibold">
-                          {t("paper.rebuttal.attachedReviews")}
-                        </h3>
-                        {readyForSubmission && (
-                          <Badge variant="secondary" className="gap-1 text-xs">
-                            <Check aria-hidden="true" className="size-3" />
-                            {t("paper.rebuttal.ready")}
-                          </Badge>
+          <TabsContent
+            value="author"
+            className="mt-0 min-h-0 flex-1 overflow-hidden"
+          >
+            <ScrollArea className="h-full min-h-0 min-w-0">
+              <div className="w-full min-w-0 space-y-4 overflow-x-hidden p-3 sm:p-4">
+                <PaperRegionWorkbench view="author">
+                  <h3 className="font-serif text-xl font-semibold">
+                    {t("paper.regions.authorTab")}
+                  </h3>
+                  {[...authorActions, ...(baseline?.openQuestions ?? [])].map(
+                    (item, index) => (
+                      <GuidanceCard
+                        key={`${index}-${item}`}
+                        accent="required"
+                        index={index}
+                        item={item}
+                        fallbackTitle={t(
+                          "paper.rebuttal.authorActionFallback",
+                          { index: index + 1 },
                         )}
-                      </div>
-                      <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                        {t("paper.rebuttal.reviewResponseRelationship")}
-                      </p>
-                    </div>
+                        label={t("paper.rebuttal.authorActionLabel")}
+                      />
+                    ),
+                  )}
+                </PaperRegionWorkbench>
+              </div>
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent
+            value="reviews"
+            className="mt-0 min-h-0 flex-1 overflow-hidden"
+          >
+            <ScrollArea className="h-full min-h-0 min-w-0">
+              <div className="flex w-full min-w-0 flex-col gap-5 overflow-x-hidden p-3 sm:p-4">
+                <PaperRegionWorkbench
+                  view="reviews"
+                  toolbar={
                     <Button
                       size="sm"
                       variant="outline"
@@ -622,591 +526,770 @@ export default function RebuttalEntriesPanel({
                       <MessageSquarePlus data-icon="inline-start" />
                       {t("paper.rebuttal.addReview")}
                     </Button>
-                  </div>
-                  <div className="flex min-w-0 max-w-full flex-col gap-2">
-                    {reviewerGroups.map((reviewerGroup, index) => {
-                      const reviewerEntries =
-                        groupedEntries[reviewerGroup.reviewerId] ?? []
-                      const expanded =
-                        expandedReviewId === reviewerGroup.reviewerId
-                      const noResponseNeeded =
-                        reviewerConcernCounts.get(reviewerGroup.reviewerId) ===
-                        0
-                      const reviewerConcerns =
-                        baseline?.concerns.filter(
-                          (concern) =>
-                            concern.reviewerId === reviewerGroup.reviewerId,
-                        ) ?? []
-
-                      return (
-                        <Card
-                          key={reviewerGroup.reviewerId}
-                          className={`min-w-0 max-w-full gap-0 overflow-hidden rounded-none py-0 shadow-none transition-colors ${
-                            expanded
-                              ? "border-foreground/20 bg-muted/10"
-                              : "hover:border-foreground/20"
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            className="group flex w-full min-w-0 items-center gap-3 p-3 text-left transition-colors hover:bg-muted/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
-                            aria-expanded={expanded}
-                            aria-controls={`review-content-${reviewerGroup.reviewerId}`}
-                            title={t(
-                              expanded
-                                ? "paper.rebuttal.collapseReview"
-                                : "paper.rebuttal.expandReview",
-                            )}
-                            onClick={() =>
-                              toggleReview(reviewerGroup.reviewerId)
+                  }
+                  reviewerLabels={Object.fromEntries(
+                    reviewerGroups
+                      .flatMap((group) => [
+                        [group.reviewerId, group.displayLabel],
+                        [group.review?.id ?? "", group.displayLabel],
+                      ])
+                      .filter(([id]) => Boolean(id)),
+                  )}
+                >
+                  {rebuttalOutput?.global_response && (
+                    <section className="min-w-0 overflow-hidden border border-primary/20 border-l-4 border-l-primary/45 bg-primary/[0.02]">
+                      <header className="relative border-b border-primary/15 px-5 py-4 pr-14">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-serif text-lg font-semibold">
+                            {rebuttalOutput.global_response.title}
+                          </h3>
+                          <Badge variant="secondary" className="font-normal">
+                            {t("paper.rebuttal.globalResponse")}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {t("paper.rebuttal.globalResponseDescription")}
+                        </p>
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          className="absolute top-2.5 right-2.5"
+                          title={t("paper.rebuttal.copy")}
+                          aria-label={t("paper.rebuttal.copy")}
+                          onClick={async () => {
+                            const response =
+                              rebuttalOutput.global_response?.response
+                            if (response && (await copy(response))) {
+                              toast.success(t("paper.rebuttal.copied"))
+                            } else {
+                              toast.error(t("paper.rebuttal.copyFailed"))
                             }
-                          >
-                            <span className="grid w-12 shrink-0 place-items-center self-stretch border-r bg-muted/20 font-serif text-xl font-semibold text-muted-foreground">
-                              {String(index + 1).padStart(2, "0")}
-                            </span>
-                            <span className="flex min-w-0 flex-1 flex-col gap-1">
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="truncate text-sm font-semibold">
-                                  {reviewerGroup.displayLabel}
-                                </span>
-                                <span className="shrink-0 text-xs text-muted-foreground">
-                                  {reviewerGroup.sourceSystem}
-                                </span>
-                              </span>
-                              <span className="truncate text-xs text-muted-foreground">
-                                {reviewerGroup.title ||
-                                  t("paper.rebuttal.untitledReview")}
-                              </span>
-                              {reviewerGroup.review && (
-                                <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                  {dateFormatter.format(
-                                    new Date(reviewerGroup.review.created_time),
-                                  )}
-                                </span>
-                              )}
-                            </span>
-                            <Badge
-                              variant={
-                                reviewerEntries.length > 0
-                                  ? "secondary"
-                                  : "outline"
-                              }
-                              className="shrink-0 text-xs font-normal"
-                            >
-                              {noResponseNeeded
-                                ? t("paper.rebuttal.noResponseNeeded")
-                                : t("paper.rebuttal.entryCount", {
-                                    count: reviewerEntries.length,
-                                  })}
-                            </Badge>
-                            <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                              {t(
-                                expanded
-                                  ? "paper.rebuttal.collapseReviewAction"
-                                  : "paper.rebuttal.expandReviewAction",
-                              )}
-                            </span>
-                            <ChevronDown
-                              aria-hidden="true"
-                              className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${
-                                expanded ? "rotate-180" : ""
-                              }`}
-                            />
-                          </button>
-                          {expanded && (
-                            <div
-                              id={`review-content-${reviewerGroup.reviewerId}`}
-                              className="flex w-full min-w-0 max-w-full flex-col overflow-hidden border-t bg-background/70"
-                            >
-                              <section className="min-w-0 max-w-full overflow-hidden border-b">
-                                <div className="flex items-center justify-between gap-3 border-b bg-muted/10 px-5 py-4">
-                                  <h4 className="font-serif text-base font-semibold text-foreground">
-                                    {t("paper.rebuttal.originalReview")}
-                                  </h4>
-                                  {reviewerGroup.review && (
-                                    <div className="flex shrink-0 items-center gap-1">
-                                      <Button
-                                        size="icon-sm"
-                                        variant="ghost"
-                                        className="text-destructive hover:text-destructive"
-                                        title={t("common.delete")}
-                                        aria-label={t("common.delete")}
-                                        onClick={() =>
-                                          setReviewToDelete(
-                                            reviewerGroup.review,
-                                          )
-                                        }
-                                      >
-                                        <Trash2 />
-                                      </Button>
-                                      <Button
-                                        size="icon-sm"
-                                        variant="ghost"
-                                        disabled={!reviewContent.data}
-                                        title={t("common.edit")}
-                                        aria-label={t("common.edit")}
-                                        onClick={openEditEditor}
-                                      >
-                                        <Edit3 />
-                                      </Button>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="min-w-0 max-w-full overflow-hidden px-5 py-6">
-                                  {!reviewerGroup.review &&
-                                  reviewerGroup.baselineSource
-                                    ?.reviewMarkdown ? (
-                                    <article className="prose min-w-0 max-w-full break-words whitespace-pre-wrap text-[15px] leading-7 text-foreground/90 dark:prose-invert [&_a]:break-all [&_img]:max-w-full [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
-                                      <ReactMarkdown
-                                        remarkPlugins={[remarkGfm]}
-                                      >
-                                        {
-                                          reviewerGroup.baselineSource
-                                            .reviewMarkdown
-                                        }
-                                      </ReactMarkdown>
-                                    </article>
-                                  ) : !reviewerGroup.review ? (
-                                    <div className="space-y-5">
-                                      <div className="border-l-2 border-primary/35 pl-4">
-                                        <p className="text-[15px] leading-7 text-muted-foreground">
-                                          {t(
-                                            "paper.rebuttal.baselineOnlySourceDescription",
-                                          )}
-                                        </p>
-                                        {reviewerGroup.sourceUrl && (
-                                          <a
-                                            href={reviewerGroup.sourceUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="mt-2 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                                          >
-                                            {t(
-                                              "paper.rebuttal.viewReviewSource",
-                                            )}
-                                          </a>
-                                        )}
-                                      </div>
-                                      {reviewerConcerns.length > 0 && (
-                                        <ol className="divide-y border-y">
-                                          {reviewerConcerns.map(
-                                            (concern, concernIndex) => (
-                                              <li
-                                                key={concern.id}
-                                                className="flex gap-4 py-4 text-[15px] leading-7"
-                                              >
-                                                <span className="w-7 shrink-0 font-serif text-base text-muted-foreground tabular-nums">
-                                                  {String(
-                                                    concernIndex + 1,
-                                                  ).padStart(2, "0")}
-                                                </span>
-                                                <span className="min-w-0 break-words">
-                                                  {concern.concern}
-                                                </span>
-                                              </li>
-                                            ),
-                                          )}
-                                        </ol>
-                                      )}
-                                    </div>
-                                  ) : reviewContent.isLoading ? (
-                                    <div className="flex flex-col gap-3">
-                                      <Skeleton className="h-4 w-full" />
-                                      <Skeleton className="h-4 w-5/6" />
-                                      <Skeleton className="h-4 w-2/3" />
-                                    </div>
-                                  ) : reviewContent.isError ? (
-                                    <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                                      {t("paper.rebuttal.reviewLoadFailed")}
-                                    </div>
-                                  ) : (
-                                    <article className="prose min-w-0 max-w-full break-words whitespace-pre-wrap text-[15px] leading-7 text-foreground/90 dark:prose-invert [&_a]:break-all [&_img]:max-w-full [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
-                                      <ReactMarkdown
-                                        remarkPlugins={[remarkGfm]}
-                                      >
-                                        {reviewContent.data?.content}
-                                      </ReactMarkdown>
-                                    </article>
-                                  )}
-                                </div>
-                              </section>
+                          }}
+                        >
+                          {copiedText ===
+                          rebuttalOutput.global_response.response ? (
+                            <Check />
+                          ) : (
+                            <Clipboard />
+                          )}
+                        </Button>
+                      </header>
+                      <article className="prose min-w-0 max-w-none break-words px-5 py-5 text-[15px] leading-7 text-foreground/90 dark:prose-invert [&_a]:break-all [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {rebuttalOutput.global_response.response}
+                        </ReactMarkdown>
+                      </article>
+                    </section>
+                  )}
 
-                              <section className="min-w-0 max-w-full overflow-hidden bg-primary/[0.015]">
-                                <div className="flex items-center justify-between gap-3 border-b bg-primary/[0.025] px-5 py-4">
-                                  <h4 className="font-serif text-base font-semibold text-foreground">
-                                    {t("paper.rebuttal.reviewerRebuttal")}
-                                  </h4>
-                                  <Badge
-                                    variant="outline"
-                                    className="text-xs font-normal"
-                                  >
-                                    {t("paper.rebuttal.entryCount", {
-                                      count: reviewerEntries.length,
-                                    })}
-                                  </Badge>
-                                </div>
-                                <div className="flex min-w-0 max-w-full flex-col gap-4 overflow-hidden p-5">
-                                  {reviewerEntries.length === 0 ? (
-                                    <div className="rounded-lg border border-dashed bg-muted/15 px-4 py-4 text-center">
-                                      <p className="text-sm font-medium">
-                                        {t(
-                                          noResponseNeeded
-                                            ? "paper.rebuttal.noResponseNeededTitle"
-                                            : "paper.rebuttal.noReviewerEntries",
-                                        )}
-                                      </p>
-                                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                                        {t(
-                                          noResponseNeeded
-                                            ? "paper.rebuttal.noResponseNeededDescription"
-                                            : "paper.rebuttal.noEntriesDescription",
-                                        )}
-                                      </p>
-                                    </div>
-                                  ) : (
-                                    reviewerEntries.map((entry, entryIndex) => (
-                                      <Card
-                                        key={entry.id}
-                                        className="min-w-0 max-w-full gap-0 overflow-hidden rounded-none border-l-2 border-l-primary/50 py-0 shadow-none"
-                                      >
-                                        <CardHeader className="relative min-w-0 gap-1.5 border-b bg-muted/15 px-4 py-3 pr-12">
-                                          <CardTitle className="flex min-w-0 items-start gap-3 font-serif text-base leading-6">
-                                            <span className="font-serif text-base text-muted-foreground">
-                                              {String(entryIndex + 1).padStart(
-                                                2,
-                                                "0",
-                                              )}
-                                            </span>
-                                            <span className="min-w-0 flex-1">
-                                              {entry.title}
-                                            </span>
-                                          </CardTitle>
-                                          <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
-                                            <Badge
-                                              variant="outline"
-                                              className="font-mono"
-                                            >
-                                              {entry.label}
-                                            </Badge>
-                                            <span className="min-w-0 break-all">
-                                              {entry.concern_ids.join(" · ")}
-                                            </span>
-                                          </CardDescription>
+                  {rebuttalOutput && guidanceCount > 0 && (
+                    <details
+                      data-testid="rebuttal-guidance-layout"
+                      className="group min-w-0 border border-amber-500/20 bg-amber-500/[0.035]"
+                    >
+                      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-3 px-4 py-3 text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+                        <ListTodo
+                          aria-hidden="true"
+                          className="size-4 shrink-0 text-amber-700 dark:text-amber-300"
+                        />
+                        <span className="min-w-0 flex-1 font-serif text-base font-semibold">
+                          {t(
+                            authorActions.length > 0
+                              ? "paper.rebuttal.guidanceTitle"
+                              : "paper.rebuttal.guidanceReadyTitle",
+                          )}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 tabular-nums"
+                        >
+                          {guidanceCount}
+                        </Badge>
+                        <ChevronDown
+                          aria-hidden="true"
+                          className="size-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                        />
+                      </summary>
+                      <div className="space-y-5 border-t px-4 py-4">
+                        {authorActions.length > 0 && (
+                          <section className="min-w-0 space-y-3">
+                            <h3 className="font-serif text-lg font-semibold">
+                              {t("paper.rebuttal.authorActions")}
+                            </h3>
+                            <div
+                              data-testid="rebuttal-author-action-list"
+                              className="space-y-3"
+                            >
+                              {authorActions.map((item, index) => (
+                                <GuidanceCard
+                                  key={`required-${index}-${item}`}
+                                  accent="required"
+                                  index={index}
+                                  item={item}
+                                  fallbackTitle={t(
+                                    "paper.rebuttal.authorActionFallback",
+                                    { index: index + 1 },
+                                  )}
+                                  label={t("paper.rebuttal.authorActionLabel")}
+                                />
+                              ))}
+                            </div>
+                          </section>
+                        )}
+                        {agentSuggestions.length > 0 && (
+                          <section className="min-w-0 space-y-3">
+                            <h3 className="font-serif text-lg font-semibold">
+                              {t("paper.rebuttal.agentSuggestions")}
+                            </h3>
+                            <div
+                              data-testid="rebuttal-agent-suggestion-list"
+                              className="space-y-3"
+                            >
+                              {agentSuggestions.map((item, index) => (
+                                <GuidanceCard
+                                  key={`suggestion-${index}-${item}`}
+                                  accent="suggestion"
+                                  index={index}
+                                  item={item}
+                                  fallbackTitle={t(
+                                    "paper.rebuttal.agentSuggestionFallback",
+                                    { index: index + 1 },
+                                  )}
+                                  label={t(
+                                    "paper.rebuttal.agentSuggestionLabel",
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          </section>
+                        )}
+                      </div>
+                    </details>
+                  )}
+
+                  {reviewerGroups.length > 0 && (
+                    <section
+                      data-testid="review-feedback-groups"
+                      className="flex min-w-0 max-w-full flex-col gap-2.5"
+                    >
+                      <div className="flex flex-wrap items-end justify-between gap-3 px-0.5">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-serif text-lg font-semibold">
+                              {t("paper.rebuttal.attachedReviews")}
+                            </h3>
+                            {readyForSubmission && (
+                              <Badge
+                                variant="secondary"
+                                className="gap-1 text-xs"
+                              >
+                                <Check aria-hidden="true" className="size-3" />
+                                {t("paper.rebuttal.ready")}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                            {t("paper.rebuttal.reviewResponseRelationship")}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={openCreateEditor}
+                        >
+                          <MessageSquarePlus data-icon="inline-start" />
+                          {t("paper.rebuttal.addReview")}
+                        </Button>
+                      </div>
+                      <div className="flex min-w-0 max-w-full flex-col gap-2">
+                        {reviewerGroups.map((reviewerGroup, index) => {
+                          const reviewerEntries =
+                            groupedEntries[reviewerGroup.reviewerId] ?? []
+                          const expanded =
+                            expandedReviewId === reviewerGroup.reviewerId
+                          const noResponseNeeded =
+                            reviewerConcernCounts.get(
+                              reviewerGroup.reviewerId,
+                            ) === 0
+                          const reviewerConcerns =
+                            baseline?.concerns.filter(
+                              (concern) =>
+                                concern.reviewerId === reviewerGroup.reviewerId,
+                            ) ?? []
+
+                          return (
+                            <Card
+                              key={reviewerGroup.reviewerId}
+                              className={`min-w-0 max-w-full gap-0 overflow-hidden rounded-none py-0 shadow-none transition-colors ${
+                                expanded
+                                  ? "border-foreground/20 bg-muted/10"
+                                  : "hover:border-foreground/20"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                className="group flex w-full min-w-0 items-center gap-3 p-3 text-left transition-colors hover:bg-muted/35 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
+                                aria-expanded={expanded}
+                                aria-controls={`review-content-${reviewerGroup.reviewerId}`}
+                                title={t(
+                                  expanded
+                                    ? "paper.rebuttal.collapseReview"
+                                    : "paper.rebuttal.expandReview",
+                                )}
+                                onClick={() =>
+                                  toggleReview(reviewerGroup.reviewerId)
+                                }
+                              >
+                                <span className="grid w-12 shrink-0 place-items-center self-stretch border-r bg-muted/20 font-serif text-xl font-semibold text-muted-foreground">
+                                  {String(index + 1).padStart(2, "0")}
+                                </span>
+                                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <span className="truncate text-sm font-semibold">
+                                      {reviewerGroup.displayLabel}
+                                    </span>
+                                    <span className="shrink-0 text-xs text-muted-foreground">
+                                      {reviewerGroup.sourceSystem}
+                                    </span>
+                                  </span>
+                                  <span className="truncate text-xs text-muted-foreground">
+                                    {reviewerGroup.title ||
+                                      t("paper.rebuttal.untitledReview")}
+                                  </span>
+                                  {reviewerGroup.review && (
+                                    <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                      {dateFormatter.format(
+                                        new Date(
+                                          reviewerGroup.review.created_time,
+                                        ),
+                                      )}
+                                    </span>
+                                  )}
+                                </span>
+                                <Badge
+                                  variant={
+                                    reviewerEntries.length > 0
+                                      ? "secondary"
+                                      : "outline"
+                                  }
+                                  className="shrink-0 text-xs font-normal"
+                                >
+                                  {noResponseNeeded
+                                    ? t("paper.rebuttal.noResponseNeeded")
+                                    : t("paper.rebuttal.entryCount", {
+                                        count: reviewerEntries.length,
+                                      })}
+                                </Badge>
+                                <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                                  {t(
+                                    expanded
+                                      ? "paper.rebuttal.collapseReviewAction"
+                                      : "paper.rebuttal.expandReviewAction",
+                                  )}
+                                </span>
+                                <ChevronDown
+                                  aria-hidden="true"
+                                  className={`size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${
+                                    expanded ? "rotate-180" : ""
+                                  }`}
+                                />
+                              </button>
+                              {expanded && (
+                                <div
+                                  id={`review-content-${reviewerGroup.reviewerId}`}
+                                  className="flex w-full min-w-0 max-w-full flex-col overflow-hidden border-t bg-background/70"
+                                >
+                                  <section className="min-w-0 max-w-full overflow-hidden border-b">
+                                    <div className="flex items-center justify-between gap-3 border-b bg-muted/10 px-5 py-4">
+                                      <h4 className="font-serif text-base font-semibold text-foreground">
+                                        {t("paper.rebuttal.originalReview")}
+                                      </h4>
+                                      {reviewerGroup.review && (
+                                        <div className="flex shrink-0 items-center gap-1">
                                           <Button
                                             size="icon-sm"
                                             variant="ghost"
-                                            className="absolute top-2 right-2"
-                                            title={t("paper.rebuttal.copy")}
-                                            aria-label={t(
-                                              "paper.rebuttal.copy",
-                                            )}
-                                            onClick={async () => {
-                                              if (await copy(entry.response)) {
-                                                toast.success(
-                                                  t("paper.rebuttal.copied"),
-                                                )
-                                              } else {
-                                                toast.error(
-                                                  t(
-                                                    "paper.rebuttal.copyFailed",
-                                                  ),
-                                                )
-                                              }
-                                            }}
+                                            className="text-destructive hover:text-destructive"
+                                            title={t("common.delete")}
+                                            aria-label={t("common.delete")}
+                                            onClick={() =>
+                                              setReviewToDelete(
+                                                reviewerGroup.review,
+                                              )
+                                            }
                                           >
-                                            {copiedText === entry.response ? (
-                                              <Check />
-                                            ) : (
-                                              <Clipboard />
-                                            )}
+                                            <Trash2 />
                                           </Button>
-                                        </CardHeader>
-                                        <CardContent className="px-5 py-5">
-                                          <p className="break-words whitespace-pre-wrap text-[15px] leading-7 text-foreground/90 [overflow-wrap:anywhere]">
-                                            {entry.response}
-                                          </p>
-                                          {(entry.source_refs?.length ?? 0) >
-                                            0 && (
-                                            <div className="mt-3 flex flex-wrap gap-1.5">
-                                              {entry.source_refs?.map(
-                                                (sourceRef) => (
-                                                  <Badge
-                                                    key={sourceRef}
-                                                    variant="outline"
-                                                    className="max-w-full truncate font-mono text-xs font-normal"
+                                          <Button
+                                            size="icon-sm"
+                                            variant="ghost"
+                                            disabled={!reviewContent.data}
+                                            title={t("common.edit")}
+                                            aria-label={t("common.edit")}
+                                            onClick={openEditEditor}
+                                          >
+                                            <Edit3 />
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 max-w-full overflow-hidden px-5 py-6">
+                                      {!reviewerGroup.review &&
+                                      reviewerGroup.baselineSource
+                                        ?.reviewMarkdown ? (
+                                        <article className="prose min-w-0 max-w-full break-words whitespace-pre-wrap text-[15px] leading-7 text-foreground/90 dark:prose-invert [&_a]:break-all [&_img]:max-w-full [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+                                          <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                          >
+                                            {
+                                              reviewerGroup.baselineSource
+                                                .reviewMarkdown
+                                            }
+                                          </ReactMarkdown>
+                                        </article>
+                                      ) : !reviewerGroup.review ? (
+                                        <div className="space-y-5">
+                                          <div className="border-l-2 border-primary/35 pl-4">
+                                            <p className="text-[15px] leading-7 text-muted-foreground">
+                                              {t(
+                                                "paper.rebuttal.baselineOnlySourceDescription",
+                                              )}
+                                            </p>
+                                            {reviewerGroup.sourceUrl && (
+                                              <a
+                                                href={reviewerGroup.sourceUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="mt-2 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                              >
+                                                {t(
+                                                  "paper.rebuttal.viewReviewSource",
+                                                )}
+                                              </a>
+                                            )}
+                                          </div>
+                                          {reviewerConcerns.length > 0 && (
+                                            <ol className="divide-y border-y">
+                                              {reviewerConcerns.map(
+                                                (concern, concernIndex) => (
+                                                  <li
+                                                    key={concern.id}
+                                                    className="flex gap-4 py-4 text-[15px] leading-7"
                                                   >
-                                                    {sourceRef}
-                                                  </Badge>
+                                                    <span className="w-7 shrink-0 font-serif text-base text-muted-foreground tabular-nums">
+                                                      {String(
+                                                        concernIndex + 1,
+                                                      ).padStart(2, "0")}
+                                                    </span>
+                                                    <span className="min-w-0 break-words">
+                                                      {concern.concern}
+                                                    </span>
+                                                  </li>
                                                 ),
                                               )}
-                                            </div>
+                                            </ol>
                                           )}
-                                        </CardContent>
-                                        <CardFooter className="border-t bg-muted/10 px-4 py-2.5 text-xs text-muted-foreground">
-                                          <Badge
-                                            variant="secondary"
-                                            className="font-normal"
+                                        </div>
+                                      ) : reviewContent.isLoading ? (
+                                        <div className="flex flex-col gap-3">
+                                          <Skeleton className="h-4 w-full" />
+                                          <Skeleton className="h-4 w-5/6" />
+                                          <Skeleton className="h-4 w-2/3" />
+                                        </div>
+                                      ) : reviewContent.isError ? (
+                                        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                                          {t("paper.rebuttal.reviewLoadFailed")}
+                                        </div>
+                                      ) : (
+                                        <article className="prose min-w-0 max-w-full break-words whitespace-pre-wrap text-[15px] leading-7 text-foreground/90 dark:prose-invert [&_a]:break-all [&_img]:max-w-full [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+                                          <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
                                           >
+                                            {reviewContent.data?.content}
+                                          </ReactMarkdown>
+                                        </article>
+                                      )}
+                                    </div>
+                                  </section>
+
+                                  <section className="min-w-0 max-w-full overflow-hidden bg-primary/[0.015]">
+                                    <div className="flex items-center justify-between gap-3 border-b bg-primary/[0.025] px-5 py-4">
+                                      <h4 className="font-serif text-base font-semibold text-foreground">
+                                        {t("paper.rebuttal.reviewerRebuttal")}
+                                      </h4>
+                                      <Badge
+                                        variant="outline"
+                                        className="text-xs font-normal"
+                                      >
+                                        {t("paper.rebuttal.entryCount", {
+                                          count: reviewerEntries.length,
+                                        })}
+                                      </Badge>
+                                    </div>
+                                    <div className="flex min-w-0 max-w-full flex-col gap-4 overflow-hidden p-5">
+                                      {reviewerEntries.length === 0 ? (
+                                        <div className="rounded-lg border border-dashed bg-muted/15 px-4 py-4 text-center">
+                                          <p className="text-sm font-medium">
                                             {t(
-                                              `paper.rebuttal.evidence.${entry.evidence_status}`,
+                                              noResponseNeeded
+                                                ? "paper.rebuttal.noResponseNeededTitle"
+                                                : "paper.rebuttal.noReviewerEntries",
                                             )}
-                                          </Badge>
-                                        </CardFooter>
-                                      </Card>
-                                    ))
-                                  )}
+                                          </p>
+                                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                                            {t(
+                                              noResponseNeeded
+                                                ? "paper.rebuttal.noResponseNeededDescription"
+                                                : "paper.rebuttal.noEntriesDescription",
+                                            )}
+                                          </p>
+                                        </div>
+                                      ) : (
+                                        reviewerEntries.map(
+                                          (entry, entryIndex) => (
+                                            <Card
+                                              key={entry.id}
+                                              className="min-w-0 max-w-full gap-0 overflow-hidden rounded-none border-l-2 border-l-primary/50 py-0 shadow-none"
+                                            >
+                                              <CardHeader className="relative min-w-0 gap-1.5 border-b bg-muted/15 px-4 py-3 pr-12">
+                                                <CardTitle className="flex min-w-0 items-start gap-3 font-serif text-base leading-6">
+                                                  <span className="font-serif text-base text-muted-foreground">
+                                                    {String(
+                                                      entryIndex + 1,
+                                                    ).padStart(2, "0")}
+                                                  </span>
+                                                  <span className="min-w-0 flex-1">
+                                                    {entry.title}
+                                                  </span>
+                                                </CardTitle>
+                                                <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
+                                                  <Badge
+                                                    variant="outline"
+                                                    className="font-mono"
+                                                  >
+                                                    {entry.label}
+                                                  </Badge>
+                                                  <span className="min-w-0 break-all">
+                                                    {entry.concern_ids.join(
+                                                      " · ",
+                                                    )}
+                                                  </span>
+                                                </CardDescription>
+                                                <Button
+                                                  size="icon-sm"
+                                                  variant="ghost"
+                                                  className="absolute top-2 right-2"
+                                                  title={t(
+                                                    "paper.rebuttal.copy",
+                                                  )}
+                                                  aria-label={t(
+                                                    "paper.rebuttal.copy",
+                                                  )}
+                                                  onClick={async () => {
+                                                    if (
+                                                      await copy(entry.response)
+                                                    ) {
+                                                      toast.success(
+                                                        t(
+                                                          "paper.rebuttal.copied",
+                                                        ),
+                                                      )
+                                                    } else {
+                                                      toast.error(
+                                                        t(
+                                                          "paper.rebuttal.copyFailed",
+                                                        ),
+                                                      )
+                                                    }
+                                                  }}
+                                                >
+                                                  {copiedText ===
+                                                  entry.response ? (
+                                                    <Check />
+                                                  ) : (
+                                                    <Clipboard />
+                                                  )}
+                                                </Button>
+                                              </CardHeader>
+                                              <CardContent className="px-5 py-5">
+                                                <p className="break-words whitespace-pre-wrap text-[15px] leading-7 text-foreground/90 [overflow-wrap:anywhere]">
+                                                  {entry.response}
+                                                </p>
+                                                {(entry.source_refs?.length ??
+                                                  0) > 0 && (
+                                                  <div className="mt-3 flex flex-wrap gap-1.5">
+                                                    {entry.source_refs?.map(
+                                                      (sourceRef) => (
+                                                        <Badge
+                                                          key={sourceRef}
+                                                          variant="outline"
+                                                          className="max-w-full truncate font-mono text-xs font-normal"
+                                                        >
+                                                          {sourceRef}
+                                                        </Badge>
+                                                      ),
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </CardContent>
+                                              <CardFooter className="border-t bg-muted/10 px-4 py-2.5 text-xs text-muted-foreground">
+                                                <Badge
+                                                  variant="secondary"
+                                                  className="font-normal"
+                                                >
+                                                  {t(
+                                                    "paper.regions.evidence.unverified",
+                                                  )}
+                                                </Badge>
+                                              </CardFooter>
+                                            </Card>
+                                          ),
+                                        )
+                                      )}
+                                    </div>
+                                  </section>
                                 </div>
-                              </section>
-                            </div>
-                          )}
-                        </Card>
-                      )
-                    })}
-                  </div>
-                </section>
-              )}
-
-              {reviewerGroups.length === 0 && (
-                <section className="border border-dashed bg-muted/15 p-8 text-center">
-                  <MessageSquarePlus className="mx-auto size-6 text-muted-foreground" />
-                  <p className="mt-2 text-sm font-medium">
-                    {t("paper.rebuttal.noReviewsTitle")}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    {t("paper.rebuttal.noReviewsDescription")}
-                  </p>
-                  <Button className="mt-3" size="sm" onClick={openCreateEditor}>
-                    {t("paper.rebuttal.addFirstReview")}
-                  </Button>
-                </section>
-              )}
-            </div>
-          </ScrollArea>
-        </TabsContent>
-
-        <TabsContent
-          value="baseline"
-          className="mt-0 min-h-0 flex-1 overflow-hidden"
-        >
-          <ScrollArea className="h-full min-h-0 min-w-0">
-            <div className="w-full min-w-0 overflow-x-hidden p-3 sm:p-4">
-              <div className="mb-3 flex justify-end">
-                <Button size="sm" variant="outline" onClick={openCreateEditor}>
-                  <MessageSquarePlus data-icon="inline-start" />
-                  {t("paper.rebuttal.addReview")}
-                </Button>
-              </div>
-              {baseline ? (
-                <RebuttalBaselinePanel
-                  baseline={baseline}
-                  stale={baselineStale}
-                />
-              ) : (
-                <section className="border border-dashed bg-muted/15 px-6 py-12 text-center">
-                  <ScanSearch
-                    aria-hidden="true"
-                    className="mx-auto size-7 text-muted-foreground"
-                  />
-                  <h3 className="mt-3 text-sm font-semibold">
-                    {t("paper.rebuttal.noBaselineTitle")}
-                  </h3>
-                  <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-muted-foreground">
-                    {t("paper.rebuttal.noBaselineDescription")}
-                  </p>
-                </section>
-              )}
-            </div>
-          </ScrollArea>
-        </TabsContent>
-        <TabsContent
-          value="chair"
-          className="mt-0 min-h-0 flex-1 overflow-hidden"
-        >
-          <ScrollArea className="h-full min-h-0 min-w-0">
-            <div className="w-full min-w-0 overflow-x-hidden p-3 sm:p-4">
-              {chairMessage ? (
-                <section
-                  data-testid="rebuttal-chair-message"
-                  className="min-w-0 overflow-hidden border border-border/80 bg-card/70"
-                >
-                  <header className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b px-5 py-4 sm:px-6">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-serif text-xl font-semibold text-pretty">
-                        {t("paper.rebuttal.chair.title")}
-                      </h3>
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {t("paper.rebuttal.chair.description")}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        if (await copy(chairMessage)) {
-                          toast.success(t("paper.rebuttal.copied"))
-                        } else {
-                          toast.error(t("paper.rebuttal.copyFailed"))
-                        }
-                      }}
-                    >
-                      {copiedText === chairMessage ? (
-                        <Check aria-hidden="true" />
-                      ) : (
-                        <Clipboard aria-hidden="true" />
-                      )}
-                      {t("paper.rebuttal.chair.copy")}
-                    </Button>
-                  </header>
-                  {chairStale && (
-                    <p className="border-b border-amber-500/25 bg-amber-500/10 px-5 py-3 text-sm leading-6 text-amber-900 dark:text-amber-100">
-                      {t("paper.rebuttal.chair.stale")}
-                    </p>
+                              )}
+                            </Card>
+                          )
+                        })}
+                      </div>
+                    </section>
                   )}
-                  <article className="prose min-w-0 max-w-none break-words px-5 py-5 text-base leading-7 text-foreground/90 dark:prose-invert sm:px-6 [&_a]:break-all [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {chairMessage}
-                    </ReactMarkdown>
-                  </article>
-                </section>
-              ) : (
-                <section className="border border-dashed bg-muted/15 px-6 py-12 text-center">
-                  <PenLine
-                    aria-hidden="true"
-                    className="mx-auto size-7 text-muted-foreground"
+
+                  {reviewerGroups.length === 0 && (
+                    <section className="border border-dashed bg-muted/15 p-8 text-center">
+                      <MessageSquarePlus className="mx-auto size-6 text-muted-foreground" />
+                      <p className="mt-2 text-sm font-medium">
+                        {t("paper.rebuttal.noReviewsTitle")}
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {t("paper.rebuttal.noReviewsDescription")}
+                      </p>
+                      <Button
+                        className="mt-3"
+                        size="sm"
+                        onClick={openCreateEditor}
+                      >
+                        {t("paper.rebuttal.addFirstReview")}
+                      </Button>
+                    </section>
+                  )}
+                </PaperRegionWorkbench>
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent
+            value="baseline"
+            className="mt-0 min-h-0 flex-1 overflow-hidden"
+          >
+            <ScrollArea className="h-full min-h-0 min-w-0">
+              <div className="w-full min-w-0 overflow-x-hidden p-3 sm:p-4">
+                <div className="mb-3 flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={openCreateEditor}
+                  >
+                    <MessageSquarePlus data-icon="inline-start" />
+                    {t("paper.rebuttal.addReview")}
+                  </Button>
+                </div>
+                {baseline ? (
+                  <RebuttalBaselinePanel
+                    baseline={baseline}
+                    stale={baselineStale}
+                    workspaceId={workspaceId}
+                    onRequestAgent={onRequestAgent}
+                    onOpenFile={onOpenFile}
                   />
-                  <h3 className="mt-3 font-serif text-lg font-semibold">
-                    {t("paper.rebuttal.chair.emptyTitle")}
-                  </h3>
-                  <p className="mx-auto mt-1.5 max-w-md text-sm leading-6 text-muted-foreground">
-                    {t("paper.rebuttal.chair.emptyDescription")}
-                  </p>
-                </section>
-              )}
-            </div>
-          </ScrollArea>
-        </TabsContent>
-      </Tabs>
+                ) : (
+                  <PaperRegionWorkbench view="baseline">
+                    <section className="border border-dashed bg-muted/15 px-6 py-12 text-center">
+                      <ScanSearch
+                        aria-hidden="true"
+                        className="mx-auto size-7 text-muted-foreground"
+                      />
+                      <h3 className="mt-3 text-sm font-semibold">
+                        {t("paper.rebuttal.noBaselineTitle")}
+                      </h3>
+                      <p className="mx-auto mt-1.5 max-w-sm text-sm leading-6 text-muted-foreground">
+                        {t("paper.rebuttal.noBaselineDescription")}
+                      </p>
+                    </section>
+                  </PaperRegionWorkbench>
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+          <TabsContent
+            value="chair"
+            className="mt-0 min-h-0 flex-1 overflow-hidden"
+          >
+            <ScrollArea className="h-full min-h-0 min-w-0">
+              <div className="w-full min-w-0 overflow-x-hidden p-3 sm:p-4">
+                <PaperRegionWorkbench view="chair">
+                  {chairMessage ? (
+                    <section
+                      data-testid="rebuttal-chair-message"
+                      className="min-w-0 overflow-hidden border border-border/80 bg-card/70"
+                    >
+                      <header className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b px-5 py-4 sm:px-6">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-serif text-xl font-semibold text-pretty">
+                            {t("paper.rebuttal.chair.title")}
+                          </h3>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {t("paper.rebuttal.chair.description")}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            if (await copy(chairMessage)) {
+                              toast.success(t("paper.rebuttal.copied"))
+                            } else {
+                              toast.error(t("paper.rebuttal.copyFailed"))
+                            }
+                          }}
+                        >
+                          {copiedText === chairMessage ? (
+                            <Check aria-hidden="true" />
+                          ) : (
+                            <Clipboard aria-hidden="true" />
+                          )}
+                          {t("paper.rebuttal.chair.copy")}
+                        </Button>
+                      </header>
+                      {chairStale && (
+                        <p className="border-b border-amber-500/25 bg-amber-500/10 px-5 py-3 text-sm leading-6 text-amber-900 dark:text-amber-100">
+                          {t("paper.rebuttal.chair.stale")}
+                        </p>
+                      )}
+                      <article className="prose min-w-0 max-w-none break-words px-5 py-5 text-base leading-7 text-foreground/90 dark:prose-invert sm:px-6 [&_a]:break-all [&_li]:leading-7 [&_p]:leading-7 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {chairMessage}
+                        </ReactMarkdown>
+                      </article>
+                    </section>
+                  ) : (
+                    <section className="border border-dashed bg-muted/15 px-6 py-12 text-center">
+                      <PenLine
+                        aria-hidden="true"
+                        className="mx-auto size-7 text-muted-foreground"
+                      />
+                      <h3 className="mt-3 font-serif text-lg font-semibold">
+                        {t("paper.rebuttal.chair.emptyTitle")}
+                      </h3>
+                      <p className="mx-auto mt-1.5 max-w-md text-sm leading-6 text-muted-foreground">
+                        {t("paper.rebuttal.chair.emptyDescription")}
+                      </p>
+                    </section>
+                  )}
+                </PaperRegionWorkbench>
+              </div>
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
 
-      <Dialog
-        open={editorOpen}
-        onOpenChange={(open) => {
-          if (!open && editorPending) return
-          setEditorOpen(open)
-          if (!open) resetForm()
-        }}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t(
-                editorMode === "edit"
-                  ? "paper.rebuttal.editReviewTitle"
-                  : "paper.rebuttal.addReviewTitle",
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              {t(
-                editorMode === "edit"
-                  ? "paper.rebuttal.editReviewDescription"
-                  : "paper.rebuttal.addReviewDescription",
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="rebuttal-reviewer">
-                {t("paper.rebuttal.reviewerLabel")}
-              </Label>
-              <Input
-                id="rebuttal-reviewer"
-                value={reviewerLabel}
-                onChange={(event) => setReviewerLabel(event.target.value)}
-                placeholder={t("paper.rebuttal.reviewerPlaceholder")}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="rebuttal-review-title">
-                {t("paper.rebuttal.reviewTitle")}
-              </Label>
-              <Input
-                id="rebuttal-review-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="rebuttal-review-content">
-                {t("paper.rebuttal.reviewContent")}
-              </Label>
-              <Textarea
-                id="rebuttal-review-content"
-                className="min-h-56 resize-y"
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                placeholder={t("paper.rebuttal.reviewContentPlaceholder")}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
+        <Dialog
+          open={editorOpen}
+          onOpenChange={(open) => {
+            if (!open && editorPending) return
+            setEditorOpen(open)
+            if (!open) resetForm()
+          }}
+        >
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>
+                {t(
+                  editorMode === "edit"
+                    ? "paper.rebuttal.editReviewTitle"
+                    : "paper.rebuttal.addReviewTitle",
+                )}
+              </DialogTitle>
+              <DialogDescription>
+                {t(
+                  editorMode === "edit"
+                    ? "paper.rebuttal.editReviewDescription"
+                    : "paper.rebuttal.addReviewDescription",
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <PaperReviewFields
+              value={{ label: reviewerLabel, title, content }}
               disabled={editorPending}
-              onClick={() => setEditorOpen(false)}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              disabled={
-                !reviewerLabel.trim() || !content.trim() || editorPending
-              }
-              onClick={() => void submitReview()}
-            >
-              {editorPending && <Loader2 className="animate-spin" />}
-              {t(
-                editorMode === "edit"
-                  ? "paper.rebuttal.saveChanges"
-                  : "paper.rebuttal.saveReview",
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog
-        open={Boolean(reviewToDelete)}
-        onOpenChange={(open) => {
-          if (!open && !deleteReview.isPending) setReviewToDelete(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("paper.rebuttal.deleteReviewTitle")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("paper.rebuttal.deleteReviewDescription", {
-                reviewer: reviewToDelete?.reviewer_label,
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteReview.isPending}>
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className={buttonVariants({ variant: "destructive" })}
-              disabled={deleteReview.isPending}
-              onClick={(event) => {
-                event.preventDefault()
-                void confirmDelete()
+              contentClassName="min-h-56"
+              onChange={(value) => {
+                setReviewerLabel(value.label)
+                setTitle(value.title)
+                setContent(value.content)
               }}
-            >
-              {deleteReview.isPending && <Loader2 className="animate-spin" />}
-              {t("paper.rebuttal.deleteReviewConfirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+            />
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={editorPending}
+                onClick={() => setEditorOpen(false)}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                disabled={
+                  !reviewerLabel.trim() || !content.trim() || editorPending
+                }
+                onClick={() => void submitReview()}
+              >
+                {editorPending && <Loader2 className="animate-spin" />}
+                {t(
+                  editorMode === "edit"
+                    ? "paper.rebuttal.saveChanges"
+                    : "paper.rebuttal.saveReview",
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog
+          open={Boolean(reviewToDelete)}
+          onOpenChange={(open) => {
+            if (!open && !deleteReview.isPending) setReviewToDelete(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("paper.rebuttal.deleteReviewTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("paper.rebuttal.deleteReviewDescription", {
+                  reviewer: reviewToDelete?.reviewer_label,
+                })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteReview.isPending}>
+                {t("common.cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className={buttonVariants({ variant: "destructive" })}
+                disabled={deleteReview.isPending}
+                onClick={(event) => {
+                  event.preventDefault()
+                  void confirmDelete()
+                }}
+              >
+                {deleteReview.isPending && <Loader2 className="animate-spin" />}
+                {t("paper.rebuttal.deleteReviewConfirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </PaperRegionProvider>
   )
 }

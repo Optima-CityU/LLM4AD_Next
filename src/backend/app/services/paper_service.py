@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -10,7 +11,6 @@ import os
 import posixpath
 import re
 import shutil
-import stat
 import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -27,6 +27,7 @@ from app.core.config import settings
 from app.core.redis import forget_paper_workspace_active
 from app.schemas import paper as schemas
 from app.services import paper_workflow
+from app.services.paper_archives import expand_paper_uploads, is_paper_archive, safe_archive_path
 
 MAX_PAPER_SOURCE_BYTES = 100 * 1024 * 1024
 MAX_PAPER_EXPANDED_BYTES = 500 * 1024 * 1024
@@ -280,10 +281,13 @@ def _validate_source_entries(
         if not data:
             raise HTTPException(status_code=400, detail=f"Paper source file is empty: {path}")
         total_size += len(data)
-        if total_size > MAX_PAPER_SOURCE_BYTES:
-            raise HTTPException(status_code=413, detail="Paper source cannot exceed 100 MiB")
+        if total_size > MAX_PAPER_EXPANDED_BYTES:
+            raise HTTPException(status_code=413, detail="Expanded paper source is too large")
         source_found = source_found or suffix in {".tex", ".typ"} or suffix in _MARKDOWN_SUFFIXES
         validated.append((path, data))
+    for path, _data in validated:
+        if any(parent.as_posix().casefold() in seen for parent in path.parents if parent.parts):
+            raise HTTPException(status_code=400, detail=f"Conflicting file and directory paths: {path}")
     if require_primary_source and not source_found:
         raise HTTPException(
             status_code=400,
@@ -297,15 +301,17 @@ def _expand_upload_entries(
     *,
     require_primary_source: bool,
 ) -> list[tuple[str, bytes]]:
-    """Validate uploads and expand a standalone LaTeX archive into tree entries."""
-    if len(files) == 1 and PurePosixPath(files[0][0]).suffix.lower() == ".zip":
-        validated = validate_paper_source(files[0][0], files[0][1])
-        with zipfile.ZipFile(io.BytesIO(validated.data)) as archive:
-            return [(path, archive.read(path)) for path in validated.manifest]
+    """Validate and unpack a mixed batch before merging it into the source tree."""
+    expanded = expand_paper_uploads(
+        files,
+        max_upload_bytes=MAX_PAPER_SOURCE_BYTES,
+        max_expanded_bytes=MAX_PAPER_EXPANDED_BYTES,
+        max_files=MAX_PAPER_ARCHIVE_FILES,
+    )
     return [
         (path.as_posix(), data)
         for path, data in _validate_source_entries(
-            files,
+            expanded,
             require_primary_source=require_primary_source,
         )
     ]
@@ -313,14 +319,22 @@ def _expand_upload_entries(
 
 def validate_paper_source_batch(files: list[tuple[str, bytes]]) -> ValidatedPaperSource:
     """Validate and package multiple nested paper files into one working bundle."""
-    if len(files) == 1:
-        raw_path, data = files[0]
-        normalized = raw_path.replace("\\", "/")
-        if "/" not in normalized:
-            suffix = PurePosixPath(normalized).suffix.lower()
-            if suffix in _MARKDOWN_SUFFIXES or suffix == ".zip" or suffix == ".pdf":
-                return validate_paper_source(normalized, data)
+    if any(is_paper_archive(path) for path, _ in files):
+        files = _expand_upload_entries(files, require_primary_source=True)
+    if len(files) == 1 and PurePosixPath(files[0][0]).suffix.lower() == ".pdf":
+        return validate_paper_source(*files[0])
     entries = _validate_source_entries(files)
+    if len(entries) == 1:
+        path, data = entries[0]
+        if len(path.parts) == 1 and path.suffix.lower() in _MARKDOWN_SUFFIXES:
+            _validate_markdown_content(data)
+            return ValidatedPaperSource(
+                filename=path.as_posix(),
+                kind="markdown",
+                data=data,
+                content_hash=hashlib.sha256(data).hexdigest(),
+                manifest=[path.as_posix()],
+            )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path, data in sorted(entries, key=lambda item: item[0].as_posix()):
@@ -519,10 +533,7 @@ def ensure_proposal_assembly(
 
 
 def _validate_zip_path(raw: str) -> PurePosixPath:
-    path = PurePosixPath(raw.replace("\\", "/"))
-    if path.is_absolute() or ".." in path.parts or any(part in {"", "."} for part in path.parts):
-        raise HTTPException(status_code=400, detail=f"Archive contains an unsafe path: {raw}")
-    return path
+    return safe_archive_path(raw)
 
 
 def _proposal_formatting_entry(manifest: list[str], requested_path: str | None) -> str:
@@ -540,9 +551,12 @@ def _proposal_formatting_entry(manifest: list[str], requested_path: str | None) 
     """
     if requested_path:
         entry = _validate_zip_path(requested_path).as_posix()
-        if PurePosixPath(entry).suffix.lower() != ".typ":
-            raise HTTPException(status_code=409, detail="Select a Typst proposal entry")
+        if PurePosixPath(entry).suffix.lower() not in {".typ", ".md", ".markdown"}:
+            raise HTTPException(status_code=409, detail="Select a Markdown or Typst proposal entry")
         return entry
+    for preferred in ("proposal.md", "main.md"):
+        if preferred in manifest:
+            return preferred
 
     typst_paths = sorted(path for path in manifest if PurePosixPath(path).suffix.lower() == ".typ")
     for preferred in ("proposal.typ", "main.typ"):
@@ -551,46 +565,19 @@ def _proposal_formatting_entry(manifest: list[str], requested_path: str | None) 
     return typst_paths[0] if typst_paths else "proposal.typ"
 
 
-def _validate_latex_zip(data: bytes) -> list[str]:
+def _validate_markdown_content(data: bytes) -> None:
+    """Keep a standalone Markdown source readable without rewriting its bytes."""
     try:
-        archive = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=400, detail="LaTeX source must be a valid ZIP archive") from exc
-
-    entries = [entry for entry in archive.infolist() if not entry.is_dir()]
-    if not entries:
-        raise HTTPException(status_code=400, detail="LaTeX ZIP archive is empty")
-    if len(entries) > MAX_PAPER_ARCHIVE_FILES:
-        raise HTTPException(status_code=413, detail="LaTeX ZIP contains too many files")
-
-    expanded_size = 0
-    manifest: list[str] = []
-    primary_source_found = False
-    for entry in entries:
-        path = _validate_zip_path(entry.filename)
-        mode = entry.external_attr >> 16
-        if stat.S_ISLNK(mode):
-            raise HTTPException(status_code=400, detail=f"Archive contains a symbolic link: {entry.filename}")
-        if path.suffix.lower() not in _LATEX_SUFFIXES:
-            raise HTTPException(status_code=400, detail=f"Unsupported paper source file: {entry.filename}")
-        expanded_size += entry.file_size
-        if expanded_size > MAX_PAPER_EXPANDED_BYTES:
-            raise HTTPException(status_code=413, detail="Expanded LaTeX source is too large")
-        primary_source_found = primary_source_found or path.suffix.lower() in {
-            ".tex",
-            ".typ",
-        }
-        manifest.append(path.as_posix())
-    if not primary_source_found:
-        raise HTTPException(
-            status_code=400,
-            detail="Source ZIP must contain at least one .tex or .typ file",
-        )
-    return sorted(manifest)
+        content = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Markdown source must use UTF-8") from exc
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Paper source cannot be empty")
 
 
 def validate_paper_source(filename: str, data: bytes) -> ValidatedPaperSource:
-    """Validate a Markdown or LaTeX ZIP upload without altering its bytes."""
+    """Validate one upload and normalize archives into a readable source bundle."""
+    _validate_zip_path(filename)
     safe_name = _safe_upload_name(filename)
     suffix = PurePosixPath(safe_name).suffix.lower()
     if suffix == ".pdf":
@@ -603,21 +590,15 @@ def validate_paper_source(filename: str, data: bytes) -> ValidatedPaperSource:
     if len(data) > MAX_PAPER_SOURCE_BYTES:
         raise HTTPException(status_code=413, detail="Paper source cannot exceed 100 MiB")
     if suffix in _MARKDOWN_SUFFIXES:
-        try:
-            content = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise HTTPException(status_code=400, detail="Markdown source must use UTF-8") from exc
-        if not content.strip():
-            raise HTTPException(status_code=400, detail="Paper source cannot be empty")
+        _validate_markdown_content(data)
         kind: schemas.PaperSourceKind = "markdown"
         manifest = [safe_name]
-    elif suffix == ".zip":
-        kind = "latex_zip"
-        manifest = _validate_latex_zip(data)
+    elif is_paper_archive(safe_name):
+        return validate_paper_source_batch([(filename, data)])
     else:
         raise HTTPException(
             status_code=400,
-            detail="Only Typst, Markdown, and LaTeX ZIP sources are supported",
+            detail="Upload Typst, Markdown, or LaTeX files, or a ZIP, TAR, TAR.GZ, or TGZ archive",
         )
     return ValidatedPaperSource(
         filename=safe_name,
@@ -808,8 +789,13 @@ def _owned_source_version(
 def _ensure_paper_workspace_source_mutable(
     db: Session,
     workspace_id: uuid.UUID,
+    *,
+    allow_versioned: bool = False,
 ) -> None:
     """Reject source mutations while an agent owns the project workspace."""
+    workspace = db.get(models.PaperWorkspace, workspace_id)
+    if allow_versioned and workspace is not None and workspace.mode in {"proposal", "manuscript"}:
+        return
     active_run = db.exec(
         select(models.PaperAgentRun.id).where(
             models.PaperAgentRun.workspace_id == workspace_id,
@@ -828,15 +814,98 @@ def _ensure_paper_workspace_source_mutable(
         )
 
 
+def _guard_source_publication(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    parent: models.PaperSourceVersion | None,
+    *,
+    expected_content_hash: str | None = None,
+) -> None:
+    """Lock the workspace and reject publication based on an obsolete source.
+
+    Args:
+        db: Session holding the lock until the publication commits.
+        workspace: Workspace receiving a new source version.
+        parent: Source read before preparing the changes, or None for intake.
+        expected_content_hash: Hash observed when the changes were prepared.
+
+    Raises:
+        HTTPException: If the active source or its content changed.
+    """
+    with db.no_autoflush:
+        active_id = db.exec(
+            select(models.PaperWorkspace.active_source_version_id)
+            .where(models.PaperWorkspace.id == workspace.id)
+            .with_for_update()
+        ).one()
+        if active_id != (parent.id if parent else None):
+            raise HTTPException(status_code=409, detail="Research source changed; reload before publishing")
+        if parent is not None:
+            stored_hash = db.exec(
+                select(models.PaperSourceVersion.content_hash).where(
+                    models.PaperSourceVersion.id == parent.id,
+                    models.PaperSourceVersion.workspace_id == workspace.id,
+                )
+            ).first()
+            if stored_hash != (expected_content_hash if expected_content_hash is not None else parent.content_hash):
+                raise HTTPException(status_code=409, detail="Research source content changed; reload before publishing")
+
+
+def _rebase_source_associations(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    parent: models.PaperSourceVersion,
+    source: models.PaperSourceVersion,
+) -> None:
+    """Carry author review identities and actionable targets to a new version."""
+    for model in (models.PaperReview, models.PaperEvaluationMetric, models.PaperOptimizationTarget):
+        for item in db.exec(
+            select(model).where(model.workspace_id == workspace.id, model.source_version_id == parent.id)
+        ).all():
+            item.source_version_id = source.id
+            db.add(item)
+    boundary = db.exec(
+        select(models.PaperBoundarySnapshot).where(models.PaperBoundarySnapshot.source_version_id == parent.id)
+    ).first()
+    if boundary is not None:
+        copied = models.PaperBoundarySnapshot(
+            **boundary.model_dump(exclude={"id", "source_version_id", "created_time", "updated_time"}),
+            source_version_id=source.id,
+        )
+        db.add(copied)
+        db.flush()
+        for target in db.exec(
+            select(models.PaperOptimizationTarget).where(
+                models.PaperOptimizationTarget.source_version_id == source.id,
+                models.PaperOptimizationTarget.boundary_id == boundary.id,
+            )
+        ).all():
+            target.boundary_id = copied.id
+            db.add(target)
+    states = dict(workspace.proposal_stage_states or {})
+    for stage, state in states.items():
+        if isinstance(state, dict) and state.get("source_version_id") == str(parent.id):
+            states[stage] = {**state, "source_version_id": str(source.id)}
+    workspace.proposal_stage_states = states
+
+
 def _create_source_version(
     db: Session,
     workspace: models.PaperWorkspace,
     payloads: list[tuple[str, bytes]],
     *,
     change_summary: str,
+    parent: models.PaperSourceVersion | None = None,
+    expected_content_hash: str | None = None,
+    commit: bool = True,
 ) -> models.PaperSourceVersion:
-    """Create and activate the first source bundle for a research workspace."""
+    """Create a linked immutable source using the workspace's next version."""
     validated = validate_paper_source_batch(payloads)
+    _guard_source_publication(db, workspace, parent, expected_content_hash=expected_content_hash)
+    if commit and parent is not None and workspace.mode in {"proposal", "manuscript"}:
+        from app.services.paper_revision_history import capture_revision
+
+        capture_revision(db, workspace, origin="checkpoint", summary="Before source edit")
     current_version = db.exec(
         select(func.max(models.PaperSourceVersion.version)).where(
             models.PaperSourceVersion.workspace_id == workspace.id
@@ -852,6 +921,7 @@ def _create_source_version(
         content_size=len(validated.data),
         manifest=validated.manifest,
         change_summary=change_summary[:500],
+        parent_version_id=parent.id if parent else None,
     )
     source.object_key = f"paper/{workspace.user_id}/{workspace.id}/sources/{source.id}/current/" f"{validated.filename}"
     content_type = "text/markdown" if validated.kind == "markdown" else "application/zip"
@@ -860,15 +930,23 @@ def _create_source_version(
         db.add(source)
         db.flush()
         workspace.active_source_version_id = source.id
+        if parent is not None and workspace.mode in {"proposal", "manuscript"}:
+            _rebase_source_associations(db, workspace, parent, source)
         db.add(workspace)
-        db.commit()
-        db.refresh(source)
-        db.refresh(workspace)
+        if commit:
+            if workspace.mode in {"proposal", "manuscript"}:
+                from app.services.paper_revision_history import capture_revision
+
+                capture_revision(db, workspace, origin="author", summary=change_summary)
+            db.commit()
+            db.refresh(source)
+            db.refresh(workspace)
     except Exception:
         db.rollback()
         _storage().delete(source.object_key)
         raise
-    _sync_paper_workspace_source_best_effort(workspace, source)
+    if commit:
+        _sync_paper_workspace_source_best_effort(workspace, source)
     return source
 
 
@@ -946,14 +1024,11 @@ def create_workspace(
     db.add(workspace)
     if request.mode == models.ResearchWorkspaceMode.PROPOSAL.value:
         db.flush()
-        workspace.proposal_entry_path = "proposal.typ"
-        initial_entries = ensure_proposal_assembly(
-            [
-                ("proposal.typ", _default_proposal_source(title, request.description)),
-                (_PROPOSAL_STYLE_PATH, _PROPOSAL_STYLE_SOURCE),
-            ],
-            "proposal.typ",
-        )
+        from app.services.paper_proposal import DEFAULT_PROPOSAL_ENTRY
+        from app.services.paper_rendering import default_markdown_proposal
+
+        workspace.proposal_entry_path = DEFAULT_PROPOSAL_ENTRY
+        initial_entries = default_markdown_proposal(title, request.description)
         _create_source_version(
             db,
             workspace,
@@ -1024,7 +1099,7 @@ async def upload_source_version(
 ) -> models.PaperSourceVersion:
     """Add or replace files in the workspace's current paper source."""
     workspace = _owned_workspace(db, current_user.id, workspace_id)
-    _ensure_paper_workspace_source_mutable(db, workspace.id)
+    _ensure_paper_workspace_source_mutable(db, workspace.id, allow_versioned=True)
     if relative_paths is not None and len(relative_paths) != len(uploads):
         raise HTTPException(status_code=400, detail="File path metadata does not match uploaded files")
     payloads: list[tuple[str, bytes]] = []
@@ -1044,15 +1119,16 @@ async def upload_source_version(
         if workspace.active_source_version_id is not None
         else None
     )
+    incoming = _expand_upload_entries(payloads, require_primary_source=parent is None)
     if parent is not None:
         merged = dict(_source_entries(parent))
-        incoming = _expand_upload_entries(payloads, require_primary_source=False)
         for path, data in incoming:
             parts = PurePosixPath(path).parts
             for depth in range(1, len(parts)):
                 marker = PurePosixPath(*parts[:depth], PAPER_DIRECTORY_MARKER).as_posix()
                 merged.pop(marker, None)
             merged[path] = data
+        _validate_source_entries(list(merged.items()))
         if workspace.mode == models.ResearchWorkspaceMode.PROPOSAL.value:
             _stale_proposal_stages(workspace, "formatting")
         elif workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
@@ -1069,8 +1145,8 @@ async def upload_source_version(
     return _create_source_version(
         db,
         workspace,
-        payloads,
-        change_summary=f"Uploaded {len(payloads)} source file(s)",
+        incoming,
+        change_summary=f"Uploaded {len(incoming)} source file(s)",
     )
 
 
@@ -1241,8 +1317,33 @@ def _persist_source_entries(
     entries: list[tuple[str, bytes]],
     *,
     change_summary: str,
+    expected_content_hash: str | None = None,
+    commit: bool = True,
 ) -> models.PaperSourceVersion:
-    """Replace the current source object and metadata without creating history."""
+    """Version author sources, preserving the legacy mutable algorithm flow.
+
+    Args:
+        db: Active database session.
+        workspace: Workspace whose active source will advance.
+        parent: Source version used to prepare the replacement.
+        entries: Complete replacement tree with safe relative paths.
+        change_summary: Description recorded on the resulting version.
+        expected_content_hash: Optional hash observed before preparing changes.
+        commit: Whether to commit and mirror now or join the caller's transaction.
+
+    Returns:
+        The newly active source, or the legacy mutable source in algorithm mode.
+    """
+    if workspace.mode in {"proposal", "manuscript"}:
+        return _create_source_version(
+            db,
+            workspace,
+            entries,
+            change_summary=change_summary,
+            parent=parent,
+            expected_content_hash=expected_content_hash,
+            commit=commit,
+        )
     validated = validate_paper_source_batch(entries)
     previous_data = _storage().download(parent.object_key)
     previous_content_type = (
@@ -1282,7 +1383,8 @@ def delete_source_path(
 ) -> models.PaperSourceVersion | None:
     """Remove a file or directory prefix from the current paper source."""
     workspace, source = _owned_source_version(db, current_user.id, source_version_id)
-    _ensure_paper_workspace_source_mutable(db, workspace.id)
+    _ensure_paper_workspace_source_mutable(db, workspace.id, allow_versioned=True)
+    _guard_source_publication(db, workspace, source)
     path = _validate_zip_path(request.path.strip().rstrip("/")).as_posix()
     if workspace.mode == models.ResearchWorkspaceMode.PROPOSAL.value:
         protected_paths = [
@@ -1317,6 +1419,17 @@ def delete_source_path(
     elif workspace.mode == models.ResearchWorkspaceMode.ALGORITHM.value:
         _stale_proposal_stages(workspace, "discovery_baseline")
     if not retained:
+        if workspace.mode in {"proposal", "manuscript"}:
+            workspace.active_source_version_id = None
+            workspace.proposal_stage_states = {}
+            db.add(workspace)
+            db.commit()
+            source_root = paper_workspace_source_dir(current_user.id, workspace.id)
+            if source_root.is_symlink():
+                source_root.unlink()
+            elif source_root.exists():
+                shutil.rmtree(source_root)
+            return None
         object_keys = [source.object_key]
         source_runs = list(
             db.exec(select(models.PaperAgentRun).where(models.PaperAgentRun.source_version_id == source.id)).all()
@@ -1408,7 +1521,8 @@ def update_source_file(
 ) -> models.PaperSourceVersion:
     """Replace one text file in the current paper source."""
     workspace, source = _owned_source_version(db, current_user.id, source_version_id)
-    _ensure_paper_workspace_source_mutable(db, workspace.id)
+    _ensure_paper_workspace_source_mutable(db, workspace.id, allow_versioned=True)
+    _guard_source_publication(db, workspace, source)
     path = _validate_zip_path(request.path).as_posix()
     entries = dict(_source_entries(source))
     if path not in entries:
@@ -1476,6 +1590,145 @@ def download_source_version(
     _workspace, source = _owned_source_version(db, current_user.id, source_version_id)
     filename = source.filename if source.source_kind == "markdown" else "paper-source.zip"
     return _storage().download(source.object_key), filename
+
+
+def restore_source_version(
+    db: Session,
+    current_user: models.User,
+    source_version_id: uuid.UUID,
+    *,
+    expected_source_version_id: uuid.UUID | None,
+    expected_content_hash: str | None = None,
+) -> models.PaperSourceVersion:
+    """Restore historical bytes as a new version without reactivating history.
+
+    Args:
+        db: Active database session.
+        current_user: Owner requesting the restore.
+        source_version_id: Historical source to copy.
+        expected_source_version_id: Active revision observed by the author.
+        expected_content_hash: Optional active revision content guard.
+
+    Returns:
+        A new active version linked to the previously active source.
+
+    Raises:
+        HTTPException: If ownership or the active revision changed.
+    """
+    workspace, historical = _owned_source_version(db, current_user.id, source_version_id)
+    if workspace.active_source_version_id != expected_source_version_id:
+        raise HTTPException(status_code=409, detail="Research source changed; reload before restoring")
+    _ensure_paper_workspace_source_mutable(db, workspace.id, allow_versioned=True)
+    parent = db.get(models.PaperSourceVersion, expected_source_version_id) if expected_source_version_id else None
+    _guard_source_publication(db, workspace, parent, expected_content_hash=expected_content_hash)
+    for stage in paper_workflow.get_research_workflow(workspace.mode).stages:
+        _stale_proposal_stages(workspace, stage)
+    restored = _create_source_version(
+        db,
+        workspace,
+        _source_entries(historical),
+        parent=parent,
+        expected_content_hash=expected_content_hash,
+        change_summary=f"Restored source version {historical.version}",
+        commit=False,
+    )
+    if parent is None:
+        restored.parent_version_id = historical.id
+        _rebase_source_associations(db, workspace, historical, restored)
+    try:
+        db.add(restored)
+        from app.services.paper_revision_history import capture_revision
+
+        capture_revision(db, workspace, origin="restore", summary=f"Restored source version {historical.version}")
+        db.commit()
+    except Exception:
+        db.rollback()
+        _storage().delete(restored.object_key)
+        raise
+    _sync_paper_workspace_source_best_effort(workspace, restored)
+    return restored
+
+
+def _proposal_changes_need_approval(
+    workspace: models.PaperWorkspace,
+    previous_entries: list[tuple[str, bytes]],
+    entries: list[tuple[str, bytes]],
+) -> bool:
+    """Require consent before an agent replaces existing non-template content."""
+    previous, current = dict(previous_entries), dict(entries)
+    templates = {path: data.encode() for path, data in _PROPOSAL_SECTION_SOURCES.items()}
+    templates[_PROPOSAL_STYLE_PATH] = _PROPOSAL_STYLE_SOURCE
+    if workspace.proposal_entry_path and workspace.proposal_entry_path.endswith((".md", ".markdown")):
+        from app.services.paper_rendering import default_markdown_proposal
+
+        templates.update(dict(default_markdown_proposal(workspace.title, workspace.description)))
+    elif workspace.proposal_entry_path:
+        templates[workspace.proposal_entry_path] = dict(
+            ensure_proposal_assembly(
+                [
+                    (workspace.proposal_entry_path, _default_proposal_source(workspace.title, workspace.description)),
+                    (_PROPOSAL_STYLE_PATH, _PROPOSAL_STYLE_SOURCE),
+                ],
+                workspace.proposal_entry_path,
+            )
+        )[workspace.proposal_entry_path]
+    return any(previous[path] != current.get(path) and previous[path] != templates.get(path) for path in previous)
+
+
+def _create_source_revision_candidate(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    parent: models.PaperSourceVersion,
+    entries: list[tuple[str, bytes]],
+    *,
+    title: str,
+    summary: str,
+    publication: dict[str, Any],
+    run_id: uuid.UUID,
+) -> models.PaperRevisionCandidate:
+    """Stage a complete file diff for explicit approval within the transaction."""
+    _guard_source_publication(db, workspace, parent)
+    validate_paper_source_batch(entries)
+    previous, current = dict(_source_entries(parent)), dict(entries)
+    files = []
+    for path in sorted(previous.keys() | current.keys()):
+        if previous.get(path) == current.get(path):
+            continue
+        file_diff = {
+            "path": path,
+            "original": base64.b64encode(previous[path]).decode() if path in previous else None,
+            "replacement": base64.b64encode(current[path]).decode() if path in current else None,
+        }
+        try:
+            file_diff["original_text"] = previous[path].decode("utf-8") if path in previous else None
+            file_diff["replacement_text"] = current[path].decode("utf-8") if path in current else None
+        except UnicodeDecodeError:
+            file_diff.pop("original_text", None)
+        files.append(file_diff)
+    candidate = models.PaperRevisionCandidate(
+        workspace_id=workspace.id,
+        source_version_id=parent.id,
+        run_id=run_id,
+        title=title[:255],
+        summary=summary,
+        patch_object_key="pending",
+    )
+    candidate.patch_object_key = f"paper/{workspace.user_id}/{workspace.id}/candidates/{candidate.id}.json"
+    payload = {
+        "schema_version": "paper-source-diff-v1",
+        "source_version_id": str(parent.id),
+        "content_hash": parent.content_hash,
+        "files": files,
+        "publication": publication,
+    }
+    _storage().upload(
+        candidate.patch_object_key,
+        json.dumps(payload, ensure_ascii=False, indent=2).encode(),
+        content_type="application/json",
+    )
+    db.add(candidate)
+    db.flush()
+    return candidate
 
 
 def update_model_binding(
@@ -1549,6 +1802,10 @@ def attach_reviewer_feedback(
     review.baseline_dimensions = [item.model_dump() for item in drafts]
     _storage().upload(review.object_key, content_bytes, content_type="text/markdown; charset=utf-8")
     try:
+        if workspace.mode == "manuscript":
+            from app.services.paper_revision_history import capture_revision
+
+            capture_revision(db, workspace, origin="checkpoint", summary="Before adding reviewer feedback")
         db.add(review)
         db.flush()
         if workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
@@ -1562,6 +1819,10 @@ def attach_reviewer_feedback(
                     review_id=review.id,
                     **draft.model_dump(),
                 )
+            )
+        if workspace.mode == "manuscript":
+            capture_revision(
+                db, workspace, origin="author", summary=f"Added reviewer feedback: {review.reviewer_label}"
             )
         db.commit()
         db.refresh(review)
@@ -1598,7 +1859,9 @@ def update_reviewer_feedback(
     review_id: uuid.UUID,
     request: schemas.PaperReviewUpdate,
 ) -> models.PaperReview:
-    """Replace reviewer Markdown and atomically refresh dependent metrics."""
+    """Archive reviewer originals and atomically refresh dependent metrics."""
+    from app.services import paper_regions
+
     review = db.exec(
         select(models.PaperReview)
         .join(models.PaperWorkspace, models.PaperWorkspace.id == models.PaperReview.workspace_id)
@@ -1606,13 +1869,15 @@ def update_reviewer_feedback(
     ).first()
     if review is None:
         raise HTTPException(status_code=404, detail="Reviewer feedback not found")
-    workspace = db.get(models.PaperWorkspace, review.workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="Research workspace not found")
+    workspace = paper_regions._lock(db, current_user, review.workspace_id)
+    db.refresh(review)
+    region_state = paper_regions._load(workspace)
+    paper_regions._archive_review(workspace, region_state, review)
     content = request.content.strip()
     content_bytes = content.encode("utf-8")
     storage = _storage()
-    previous_content = storage.download(review.object_key)
+    content_hash = hashlib.sha256(content_bytes).hexdigest()
+    content_key = f"paper/{workspace.user_id}/{workspace.id}/regions/reviews/{review.id}/{content_hash}.md"
     drafts = derive_reviewer_baseline_metrics(
         content,
         reviewer_label=request.reviewer_label.strip(),
@@ -1623,13 +1888,15 @@ def update_reviewer_feedback(
     previous_metrics = list(
         db.exec(select(models.PaperEvaluationMetric).where(models.PaperEvaluationMetric.review_id == review.id)).all()
     )
-    storage.upload(review.object_key, content_bytes, content_type="text/markdown; charset=utf-8")
+    storage.upload(content_key, content_bytes, content_type="text/markdown; charset=utf-8")
     try:
         for metric in previous_metrics:
             db.delete(metric)
         review.reviewer_label = request.reviewer_label.strip()
         review.title = request.title.strip() if request.title else None
-        review.content_hash = hashlib.sha256(content_bytes).hexdigest()
+        review.content_hash = content_hash
+        review.object_key = content_key
+        region_state["review_versions"].setdefault(str(review.id), {})[content_hash] = {"object_key": content_key}
         review.baseline_dimensions = [item.model_dump() for item in drafts]
         db.add(review)
         if workspace.mode == models.ResearchWorkspaceMode.MANUSCRIPT.value:
@@ -1644,16 +1911,12 @@ def update_reviewer_feedback(
                     **draft.model_dump(),
                 )
             )
-        db.commit()
+        paper_regions._save(db, workspace, region_state)
         db.refresh(review)
     except Exception:
         db.rollback()
-        storage.upload(
-            review.object_key,
-            previous_content,
-            content_type="text/markdown; charset=utf-8",
-        )
         raise
+    paper_regions.sync_manuscript_context_best_effort(db, workspace)
     return review
 
 
@@ -2011,9 +2274,7 @@ def _validated_proposal_package(
             section["provider_model"] = ""
     config["providers"] = []
     config = _disable_memory_for_local_paper_task(config)
-    package_name = PurePosixPath(
-        str((proposal.validation_report or {}).get("project_name") or proposal.title)
-    ).name
+    package_name = PurePosixPath(str((proposal.validation_report or {}).get("project_name") or proposal.title)).name
     package_name = re.sub(r"[^A-Za-z0-9_-]+", "-", package_name).strip("-_") or "algorithm-task"
     return entries, config, package_name
 
@@ -2159,6 +2420,8 @@ def accept_revision_candidate(
             models.PaperRevisionCandidate.id == candidate_id,
             models.PaperWorkspace.user_id == current_user.id,
         )
+        .with_for_update(of=models.PaperRevisionCandidate)
+        .execution_options(populate_existing=True)
     ).first()
     if candidate is None:
         raise HTTPException(status_code=404, detail="Paper revision candidate not found")
@@ -2167,13 +2430,24 @@ def accept_revision_candidate(
         if accepted is None:
             raise HTTPException(status_code=409, detail="Accepted source version no longer exists")
         return schemas.PaperRevisionApplyResponse(candidate_id=candidate.id, source_version=accepted)
+    if candidate.status not in {"draft", "pending"}:
+        raise HTTPException(status_code=409, detail="Only pending revision candidates can be accepted")
     workspace = _owned_workspace(db, current_user.id, candidate.workspace_id)
-    _ensure_paper_workspace_source_mutable(db, workspace.id)
+    _ensure_paper_workspace_source_mutable(db, workspace.id, allow_versioned=True)
     source = db.get(models.PaperSourceVersion, candidate.source_version_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Candidate source version not found")
     try:
         payload = json.loads(_storage().download(candidate.patch_object_key).decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid revision payload")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=409, detail="Revision candidate artifact is invalid") from exc
+    if workspace.mode in {"proposal", "manuscript"}:
+        _guard_source_publication(db, workspace, source, expected_content_hash=payload.get("content_hash"))
+    if payload.get("schema_version") == "paper-source-diff-v1":
+        return _accept_source_revision_candidate(db, workspace, source, candidate, payload)
+    try:
         source_path = _validate_zip_path(str(payload["source_path"])).as_posix()
         original_text = str(payload["original_text"])
         replacement_text = str(payload["replacement_text"])
@@ -2199,12 +2473,15 @@ def accept_revision_candidate(
         replaced = True
     if not replaced:
         raise HTTPException(status_code=404, detail="Revision target path not found")
+    if workspace.mode == "manuscript":
+        _stale_proposal_stages(workspace, "rebuttal_baseline")
     accepted = _persist_source_entries(
         db,
         workspace,
         source,
         rewritten,
         change_summary=f"Accepted revision: {candidate.title}",
+        commit=workspace.mode not in {"proposal", "manuscript"},
     )
     accepted_entries = dict(_source_entries(accepted))
     remaining_targets = db.exec(
@@ -2231,7 +2508,106 @@ def accept_revision_candidate(
             target.status = "completed"
             db.add(target)
     db.add(candidate)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        if workspace.mode in {"proposal", "manuscript"}:
+            _storage().delete(accepted.object_key)
+        raise
+    if workspace.mode in {"proposal", "manuscript"}:
+        _sync_paper_workspace_source_best_effort(workspace, accepted)
+    return schemas.PaperRevisionApplyResponse(candidate_id=candidate.id, source_version=accepted)
+
+
+def _accept_source_revision_candidate(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    source: models.PaperSourceVersion,
+    candidate: models.PaperRevisionCandidate,
+    payload: dict[str, Any],
+) -> schemas.PaperRevisionApplyResponse:
+    """Apply a guarded, explicitly approved file diff as one new source version."""
+    entries = dict(_source_entries(source))
+    try:
+        if payload["source_version_id"] != str(source.id) or payload["content_hash"] != source.content_hash:
+            raise ValueError("Candidate source guard does not match")
+        files = payload["files"]
+        if not isinstance(files, list) or not files:
+            raise ValueError("Candidate file diff is empty")
+        seen = set()
+        for item in files:
+            path = _validate_zip_path(item["path"]).as_posix()
+            if path in seen:
+                raise ValueError("Duplicate candidate path")
+            seen.add(path)
+            original = base64.b64decode(item["original"], validate=True) if item["original"] is not None else None
+            replacement = (
+                base64.b64decode(item["replacement"], validate=True) if item["replacement"] is not None else None
+            )
+            if entries.get(path) != original:
+                raise ValueError("Original source file no longer matches")
+            if replacement is None:
+                entries.pop(path, None)
+            else:
+                entries[path] = replacement
+        publication = payload["publication"]
+        from app.tasks.paper_agent import _merge_proposal_context, _update_proposal_stage_state
+
+        context = _merge_proposal_context(
+            workspace.proposal_foundation, schemas.ProposalContextPatch.model_validate(publication["context_patch"])
+        )
+        validate_paper_source_batch(list(entries.items()))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="Revision candidate no longer matches the source") from exc
+    accepted = _persist_source_entries(
+        db,
+        workspace,
+        source,
+        list(entries.items()),
+        change_summary=f"Accepted revision: {candidate.title}",
+        expected_content_hash=payload["content_hash"],
+        commit=False,
+    )
+    workspace.proposal_foundation = context.model_dump(mode="json")
+    if publication.get("entry_path"):
+        workspace.proposal_entry_path = publication["entry_path"]
+    approved_run = models.PaperAgentRun(
+        workspace_id=workspace.id,
+        source_version_id=accepted.id,
+        run_kind=publication["run_kind"],
+        artifact_object_key=publication["artifact_object_key"],
+        status="ready",
+        progress=100,
+        stage="completed",
+        message="Author approved proposal changes",
+        request_payload={"accepted_candidate_id": str(candidate.id)},
+    )
+    _update_proposal_stage_state(
+        workspace,
+        approved_run,
+        accepted.id,
+        summary=candidate.summary,
+        status=publication.get("status", "ready"),
+        findings=publication.get("findings", []),
+    )
+    candidate.status = "accepted"
+    candidate.accepted_source_version_id = accepted.id
+    db.add(approved_run)
+    db.add(candidate)
+    db.add(workspace)
+    try:
+        from app.services.paper_revision_history import capture_revision
+
+        capture_revision(
+            db, workspace, origin="author", summary=f"Accepted revision: {candidate.title}", run_id=approved_run.id
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        _storage().delete(accepted.object_key)
+        raise
+    _sync_paper_workspace_source_best_effort(workspace, accepted)
     return schemas.PaperRevisionApplyResponse(candidate_id=candidate.id, source_version=accepted)
 
 
@@ -2281,12 +2657,15 @@ def get_stage_artifact(
     if not isinstance(artifact, dict):
         raise HTTPException(status_code=503, detail="Research stage artifact is invalid")
     status = str(stage_state.get("status") or "superseded") if str(run.id) == current_run_id else "superseded"
-    if run.source_version_id != workspace.active_source_version_id and status == "ready":
+    source_version_id = run.source_version_id
+    if run_id is None and str(run.id) == current_run_id and stage_state.get("source_version_id"):
+        source_version_id = uuid.UUID(str(stage_state["source_version_id"]))
+    if source_version_id != workspace.active_source_version_id and status == "ready":
         status = "stale"
     return schemas.PaperStageArtifactResponse(
         workflow_stage=stage,
         run_id=run.id,
-        source_version_id=run.source_version_id,
+        source_version_id=source_version_id,
         status=status,
         artifact=artifact,
     )
@@ -2310,6 +2689,13 @@ def get_workspace_detail(
         ).all()
     )
     active_source_id = workspace.active_source_version_id
+    proposal_chapters = []
+    if workspace.mode == models.ResearchWorkspaceMode.PROPOSAL.value and active_source_id is not None:
+        from app.services.paper_proposal import source_chapter_index
+
+        active_source = next((source for source in sources if source.id == active_source_id), None)
+        if active_source is not None:
+            proposal_chapters = source_chapter_index(active_source, workspace.proposal_entry_path)
     reviews: list[models.PaperReview] = []
     metrics: list[models.PaperEvaluationMetric] = []
     boundary = None
@@ -2466,6 +2852,7 @@ def get_workspace_detail(
     return schemas.PaperWorkspaceDetail(
         **schemas.PaperWorkspaceSummary.model_validate(workspace).model_dump(),
         source_versions=sources,
+        proposal_chapters=proposal_chapters,
         reviews=reviews,
         boundary=boundary,
         targets=target_payloads,

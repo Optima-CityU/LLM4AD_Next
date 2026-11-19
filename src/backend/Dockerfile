@@ -26,6 +26,44 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 # ---------- 安装依赖（不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
 ARG GITHUB_PROXY_URL=""
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s@deb.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources && \
+      sed -i "s@security.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+# Install the pinned offline Markdown converter and network sandbox library.
+ARG PANDOC_VERSION="3.10.2"
+ARG PANDOC_SHA256=""
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates libseccomp2 fontconfig \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$(dpkg --print-architecture)" in \
+      amd64) pandoc_arch=amd64; pandoc_sha=c7edd535941c48be6a362081a748272837de81ae11777202d9c341d3d8261c9a ;; \
+      arm64) pandoc_arch=arm64; pandoc_sha=1c4d69f2a092bd47cb180e58a4aab7b9637101ced928252458c7d41a7f7fa71d ;; \
+      *) echo "Unsupported Pandoc architecture" >&2; exit 1 ;; \
+    esac \
+    && if [ "$PANDOC_VERSION" != "3.10.2" ] && [ -z "$PANDOC_SHA256" ]; then \
+      echo "Set PANDOC_SHA256 when overriding the pinned Pandoc version" >&2; exit 1; \
+    fi \
+    && pandoc_url="https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-${pandoc_arch}.tar.gz" \
+    && if [ -n "$GITHUB_PROXY_URL" ]; then pandoc_url="${GITHUB_PROXY_URL%/}/${pandoc_url}"; fi \
+    && curl -fsSL --retry 3 --max-time 180 "$pandoc_url" -o /tmp/pandoc.tar.gz \
+    && echo "${PANDOC_SHA256:-$pandoc_sha}  /tmp/pandoc.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/pandoc.tar.gz -C /usr/local/bin --strip-components=2 "pandoc-${PANDOC_VERSION}/bin/pandoc" \
+    && rm /tmp/pandoc.tar.gz \
+    && pandoc --version
+
+# Reuse the exact pinned browser fonts, including CJK and mathematical faces.
+COPY src/frontend/scripts/fetch-typst-fonts.sh /opt/llm4ad-render/scripts/fetch-typst-fonts.sh
+RUN --mount=type=cache,id=llm4ad-typst-fonts,sharing=locked,target=/var/cache/llm4ad/typst-fonts \
+    TYPST_FONT_CACHE_DIR=/var/cache/llm4ad/typst-fonts \
+    bash /opt/llm4ad-render/scripts/fetch-typst-fonts.sh \
+    && mkdir -p /usr/local/share/fonts/llm4ad \
+    && cp -a /opt/llm4ad-render/public/typst-fonts/. /usr/local/share/fonts/llm4ad/ \
+    && ln -s /usr/local/share/fonts/llm4ad /app/typst-fonts \
+    && fc-cache -f /usr/local/share/fonts/llm4ad \
+    && rm -rf /opt/llm4ad-render
+ENV TYPST_FONT_DIR=/app/typst-fonts
+
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-backend,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \

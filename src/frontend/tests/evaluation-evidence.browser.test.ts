@@ -35,8 +35,11 @@ const gateway = (
   last_seen: "2026-11-13",
   ...overrides,
 })
-const first = gateway("static-a")
+const first = gateway("static-a", {
+  name: "Local lab / Static images",
+})
 const changed = gateway("static-v2", {
+  name: "Local lab / Static images",
   contract: { ...contract, version: "2" },
   contract_key: "static-v2",
 })
@@ -116,7 +119,7 @@ before(async () => {
         resolveId: (id) => (id === "\0fixture-auth" ? id : undefined),
         load: (id) =>
           id === "\0fixture-auth"
-            ? "export default () => ({user: null})"
+            ? 'export default () => ({user: {id: "fixture-user-id"}})'
             : undefined,
         configureServer(devServer) {
           devServer.middlewares.use(
@@ -151,6 +154,7 @@ async function openFixture(
   comparisons: unknown = manifest,
   available = files.map((file) => file.id),
   resultOverrides: Record<string, unknown> = {},
+  imageFiles = files,
 ) {
   await page.addInitScript(() => {
     localStorage.setItem("llm4ad-language", "en")
@@ -207,7 +211,7 @@ async function openFixture(
               ...resultOverrides,
             },
             artifacts: [
-              ...files,
+              ...imageFiles,
               {
                 id: "report",
                 name: "report.txt",
@@ -223,8 +227,8 @@ async function openFixture(
   })
   await page.goto(`${origin}__evaluation_evidence__`)
   await expect(
-    page.getByRole("combobox", { name: "Evaluator kind" }),
-  ).toBeEnabled()
+    page.getByRole("radiogroup", { name: "Online gateways" }),
+  ).toBeVisible({ timeout: 15000 })
   return {
     artifactRequests,
     replaceGateways: (next: GatewayView[]) => {
@@ -233,81 +237,121 @@ async function openFixture(
   }
 }
 
-async function chooseEvaluator(page: Page, name: string | RegExp) {
-  await page
-    .getByRole("combobox", { name: /Evaluator kind|评估器类型/ })
-    .click()
-  await page.getByRole("option", { name }).click()
-}
-
-test("picker requires explicit groups, pins contracts through gateway loss, and clears stale IDs on group change", async () => {
+test("the task form selects a registered gateway card and displays its live evaluator", async () => {
   const page = await browser.newPage()
   try {
     const fixture = await openFixture(page)
-    await expect(page.getByRole("checkbox")).toHaveCount(0)
-    await expect(
-      page.getByRole("combobox", { name: "Device pool", exact: true }),
-    ).toContainText("Automatic pool")
-    await page
-      .getByRole("combobox", { name: "Device pool", exact: true })
-      .click()
-    await page.getByRole("option", { name: "Selected gateways" }).click()
-    await chooseEvaluator(page, /Static images/)
-    await expect(page.getByRole("checkbox")).toHaveCount(2)
-    await page.getByRole("checkbox", { name: /static-a/ }).check()
-    await expect(
-      page.getByRole("checkbox", { name: /static-v2/ }),
-    ).toBeDisabled()
-    fixture.replaceGateways([changed, game, custom])
-    await page.getByRole("button", { name: "Refresh gateways" }).click()
-    await expect(page.getByRole("alert")).toContainText("no longer available")
-    await expect(
-      page.getByRole("checkbox", { name: /static-v2/ }),
-    ).toBeDisabled()
-    await page
-      .getByRole("button", { name: "Remove unavailable gateways" })
-      .click()
-    await expect(page.locator("[data-pool-state]")).toContainText(
-      '"gateway_ids":[]',
-    )
-    await expect(
-      page.getByRole("checkbox", { name: /static-v2/ }),
-    ).toBeDisabled()
-    await chooseEvaluator(
-      page,
-      "HGamey · Genshin super-resolution · Real-game A/B",
-    )
-    await expect(page.getByRole("checkbox")).toHaveCount(1)
-    await expect(
-      page.getByRole("checkbox", { name: /game-a/ }),
-    ).not.toBeChecked()
-    await expect(page.locator("[data-pool-state]")).toContainText(
-      `"contract":${JSON.stringify(game.contract)}`,
-    )
-    await expect(page.locator("[data-pool-state]")).toContainText(
-      '"gateway_ids":[]',
-    )
-    await page.getByRole("checkbox", { name: /game-a/ }).check()
-    await chooseEvaluator(page, "research/custom.v2")
-    await expect(
-      page.getByRole("checkbox", { name: /custom-a/ }),
-    ).not.toBeChecked()
-    await page.getByRole("checkbox", { name: /custom-a/ }).check()
-    await page.getByRole("button", { name: "Switch language" }).click()
-    await expect(
-      page.getByRole("combobox", { name: "评估器类型" }),
-    ).toContainText("research/custom.v2")
-    await chooseEvaluator(page, "HGamey · 原神超分辨率 · 实机 A/B")
-    await expect(
-      page.getByRole("checkbox", { name: /game-a/ }),
-    ).not.toBeChecked()
-    await chooseEvaluator(page, /静态图像/)
-    await expect(page.locator("[data-pool-state]")).toContainText(
-      '"gateway_ids":[]',
-    )
-    await expect(page.getByRole("option", { name: /elite|精英/i })).toHaveCount(
+    const cards = page.getByRole("radiogroup", { name: "Online gateways" })
+    const saved = page.locator("[data-evaluator-state]")
+    const staticCard = cards.getByRole("radio", {
+      name: /Local lab.*Static images.*Version 1/i,
+    })
+    await expect(cards.getByRole("radio")).toHaveCount(4)
+    await expect(cards.getByRole("radio", { checked: true })).toHaveCount(0)
+    await expect(saved).not.toContainText("gateway_id")
+    await expect(page.getByRole("combobox", { name: /gateway/i })).toHaveCount(
       0,
     )
+    await expect(page.getByText("Connect a local gateway")).toBeVisible()
+    await expect(
+      page.getByText("llm4ad evaluator-gateway start", { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByText("fixture-user-id", { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Copy user ID" }),
+    ).toBeEnabled()
+    await page
+      .getByRole("spinbutton", { name: "Timeout (seconds)" })
+      .fill("240.5")
+    await page.getByRole("spinbutton", { name: "Batch size" }).fill("4")
+    await expect(
+      page.getByText("Candidate file patterns", { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.getByText("Evaluator parameters", { exact: true }),
+    ).toBeVisible()
+    await staticCard.check()
+    await expect(saved).toContainText('"gateway_id":"static-a"')
+    await expect(saved).not.toContainText('"contract"')
+    await expect(saved).toContainText('"candidate_paths":["shader.comp"]')
+    await expect(saved).toContainText('"timeout":240.5')
+    await expect(saved).toContainText('"batch_size":4')
+    await expect(page.getByText("Connect a local gateway")).toBeVisible()
+
+    fixture.replaceGateways([
+      { ...first, online: false },
+      changed,
+      game,
+      custom,
+    ])
+    await page.getByRole("button", { name: "Refresh gateways" }).click()
+    await expect(
+      page.getByText("The selected gateway is offline.", { exact: false }),
+    ).toBeVisible()
+    await expect(staticCard).toHaveCount(0)
+    await expect(saved).toContainText('"gateway_id":"static-a"')
+    const updated = {
+      ...first.contract,
+      evaluator_id: "updated-static",
+      data_version: "images-2",
+    }
+    fixture.replaceGateways([
+      { ...first, contract: updated },
+      changed,
+      game,
+      custom,
+    ])
+    await page.getByRole("button", { name: "Refresh gateways" }).click()
+    await expect(
+      cards.getByRole("radio", { name: /updated-static.*images-2/i }),
+    ).toBeChecked()
+    await expect(saved).toContainText('"gateway_id":"static-a"')
+    await expect(saved).not.toContainText('"contract"')
+    await cards.getByRole("radio", { name: /custom-a/ }).check()
+    await expect(saved).toContainText('"gateway_id":"custom-a"')
+    await expect(saved).toContainText('"timeout":240.5')
+    await expect(saved).not.toContainText(
+      /gateway_ids|selection_mode|max_attempts|lease_timeout/,
+    )
+    await expect(page.getByText("Device pool", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Lease timeout", { exact: true })).toHaveCount(
+      0,
+    )
+    await page.getByRole("button", { name: "Switch language" }).click()
+    await expect(
+      page
+        .getByRole("radiogroup", { name: "在线网关" })
+        .getByRole("radio", { name: /custom-a/ }),
+    ).toBeChecked()
+  } finally {
+    await page.close()
+  }
+})
+
+test("a newly connected gateway appears automatically in the fallback task form", async () => {
+  const page = await browser.newPage()
+  try {
+    const fixture = await openFixture(page)
+    fixture.replaceGateways([])
+    await page.goto(`${origin}__evaluation_evidence__?fallback`)
+    await expect(page.getByRole("radio")).toHaveCount(0)
+    await expect(
+      page.getByText("No authorized gateways are online."),
+    ).toBeVisible()
+    await expect(page.getByText("Connect a local gateway")).toBeVisible()
+    await page.getByRole("spinbutton", { name: "Timeout (s)" }).fill("90")
+    const saved = page.locator("[data-evaluator-state]")
+    await expect(saved).toContainText('"timeout":"90"')
+    fixture.replaceGateways([custom])
+    const card = page.getByRole("radio", { name: /custom-a/ })
+    await expect(card).toBeVisible({ timeout: 10000 })
+    await expect(card).not.toBeChecked()
+    await expect(saved).not.toContainText("gateway_id")
+    await card.check()
+    await expect(saved).toContainText('"gateway_id":"custom-a"')
+    await expect(saved).toContainText('"timeout":"90"')
   } finally {
     await page.close()
   }
@@ -385,6 +429,44 @@ test("comparisons load authenticated originals above raw data, switch rounds, en
         () => document.documentElement.scrollWidth <= window.innerWidth,
       ),
       true,
+    )
+  } finally {
+    await page.close()
+  }
+})
+
+test("paired static evaluation shows exactly the two dataset collages", async () => {
+  const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+  try {
+    const datasets = ["QRISP", "GameIR-SR"]
+    const collages = datasets.map((name) => ({
+      ...imageFile(name),
+      name: `static/collages/${name}.png`,
+    }))
+    const { artifactRequests } = await openFixture(
+      page,
+      [],
+      datasets,
+      {},
+      collages,
+    )
+    const gallery = page.getByRole("region", {
+      name: "Image evidence",
+      exact: true,
+    })
+    await expect(gallery.getByRole("img")).toHaveCount(2)
+    for (const name of datasets) {
+      await expect(
+        gallery.getByText(`${name}.png`, { exact: true }),
+      ).toBeVisible()
+    }
+    await gallery
+      .getByRole("button", { name: "Preview static/collages/QRISP.png" })
+      .click()
+    await expect(page.getByRole("dialog").getByRole("img")).toBeVisible()
+    assert.deepEqual(
+      [...new Set(artifactRequests.map(({ id }) => id))].sort(),
+      datasets.sort(),
     )
   } finally {
     await page.close()

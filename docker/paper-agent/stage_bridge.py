@@ -22,11 +22,13 @@ import re
 import shutil
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import typst
 from mcp.server.fastmcp import FastMCP
+
+from app.schemas.paper_publication import ResearchRevisionArtifact
 
 mcp = FastMCP("llm4ad-stage")
 
@@ -55,8 +57,10 @@ def _compile_check() -> dict[str, Any]:
     """
     root = _WORKSPACE_SOURCE_ROOT
     entry = root / _PROPOSAL_ENTRY
+    font_directory = Path(os.environ.get("TYPST_FONT_DIR", "/app/typst-fonts"))
+    font_options = {"font_paths": [font_directory]} if font_directory.is_dir() else {}
     try:
-        typst.compile(str(entry), root=root)
+        typst.compile(str(entry), root=root, **font_options)
     except typst.TypstError as exc:
         return {
             "ok": False,
@@ -76,7 +80,7 @@ def _compile_check() -> dict[str, Any]:
             "errors": [{"message": f"compile failed: {exc}"}],
         }
     try:
-        _document, warnings = typst.compile_with_warnings(str(entry), root=root)
+        _document, warnings = typst.compile_with_warnings(str(entry), root=root, **font_options)
     except Exception:  # noqa: BLE001
         warnings = []
     return {
@@ -244,6 +248,48 @@ async def build_algorithm_task(
     except Exception:
         shutil.rmtree(build_root, ignore_errors=True)
         raise
+
+
+async def _region_call(operation: str, **values: Any) -> dict[str, Any]:
+    """Send one scoped request using the existing workspace service credentials."""
+    if os.environ.get("LLM4AD_AUTO_WORKFLOW") != "true":
+        raise RuntimeError("Regional editing requires a continuous research session")
+    payload = {
+        "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+        "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+        "operation": operation,
+        **values,
+    }
+    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+        response = await client.post(
+            _required_environment("LLM4AD_REGION_URL"), json=payload,
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+        )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail", "Regional operation failed")
+        except (ValueError, AttributeError):
+            detail = "Regional operation failed"
+        raise RuntimeError(f"Regional operation HTTP {response.status_code}: {detail}")
+    return response.json()
+
+
+@mcp.tool()
+async def get_region_context() -> dict[str, Any]:
+    """Read current author edits, original evidence and pending scoped requests."""
+    return await _region_call("context")
+
+
+@mcp.tool()
+async def read_region_request(request_id: str) -> dict[str, Any]:
+    """Read and claim one author request with its exact target and necessary evidence."""
+    return await _region_call("read", request_id=request_id)
+
+
+@mcp.tool()
+async def propose_region_change(request_id: str, replacement_text: str, reason: str = "") -> dict[str, Any]:
+    """Save a replacement for author approval without applying or rewriting other regions."""
+    return await _region_call("propose", request_id=request_id, replacement_text=replacement_text, reason=reason)
 
 
 @mcp.tool()
@@ -416,11 +462,125 @@ async def get_workflow_context() -> dict[str, Any]:
 
 
 @mcp.tool()
-async def publish_stage_result(artifact: dict[str, Any], idempotency_key: str, workflow_stage: str | None = None) -> dict[str, Any]:
+async def report_workflow_step(
+    step_id: str,
+    title: str,
+    status: Literal["running", "waiting", "completed", "failed", "interrupted"],
+    goal: str = "",
+    approach: str = "",
+    summary: str = "",
+    stage: str = "",
+    output_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    """Describe one research step for the author's right-side progress panel.
+
+    Args:
+        step_id: Stable logical identity, reused when updating this research step.
+        title: Author-facing research title, never a tool or model invocation.
+        status: running, waiting, completed, failed, or interrupted.
+        goal: The research question or decision this step addresses.
+        approach: Project-specific reasoning, method or design being applied.
+        summary: Current conclusion, result, or precise author input needed.
+        stage: Optional existing workflow adapter for opening a published result.
+        output_paths: Optional files produced by this step, relative to the source root.
+
+    Returns:
+        The stored logical step. This does not publish or validate an artifact.
+    """
+    if os.environ.get("LLM4AD_AUTO_WORKFLOW") != "true":
+        raise ValueError("Workflow progress belongs to the research coordinator")
+    payload: dict[str, Any] = {"id": step_id, "title": title, "status": status}
+    payload.update({key: value for key, value in {
+        "goal": goal, "approach": approach, "summary": summary, "stage": stage,
+    }.items() if value})
+    if output_paths is not None:
+        payload["outputPaths"] = output_paths
+    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+        response = await client.post(
+            _required_environment("LLM4AD_WORKFLOW_STEP_URL"),
+            params={"workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+                    "run_id": _required_environment("LLM4AD_STAGE_RUN_ID")},
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+            json=payload,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+@mcp.tool()
+async def record_reviewer_feedback(reviewer_label: str, content: str, title: str | None = None) -> dict[str, Any]:
+    """Retain an author's pasted original report in the right-side review panel.
+
+    Store the complete report, without dropping reviewer details or replacing
+    it with your analysis. Call once per distinct reviewer not already indexed.
+    Identical retries reuse the existing review. Use the returned UUIDs in the
+    baseline and refresh get_workflow_context before drafting a new revision.
+    Existing reports are edited by the author through the review panel.
+    """
+    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        response = await client.post(
+            _required_environment("LLM4AD_REVIEW_RECORD_URL"),
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+            json={"workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+                  "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+                  "reviewer_label": reviewer_label, "content": content, "title": title},
+        )
+    if not response.is_success:
+        raise RuntimeError(f"Reviewer feedback could not be saved (HTTP {response.status_code})")
+    return response.json()
+
+
+@mcp.tool()
+async def publish_research_revision(
+    summary: str,
+    idempotency_key: str,
+    base_revision: str,
+    artifact: ResearchRevisionArtifact | None = None,
+) -> dict[str, Any]:
+    """Save current proposal files or one rebuttal artifact without stage switching.
+
+    Read get_workflow_context before editing and retain its revision as
+    base_revision. The platform discovers changed files automatically; no
+    source_paths list or Typst compilation is required to save a draft.
+    Artifact types baseline, rebuttal and ac_summary are independent outputs.
+    Reuse an idempotency key only for an identical retry. A changed base or
+    content needs a new key. If requires_author_approval is true, the source
+    change remains a candidate for the author to review.
+    """
+    payload = {
+        "workspace_id": _required_environment("LLM4AD_STAGE_WORKSPACE_ID"),
+        "run_id": _required_environment("LLM4AD_STAGE_RUN_ID"),
+        "summary": summary, "idempotency_key": idempotency_key,
+        "base_revision": base_revision,
+        "artifact": artifact.model_dump(mode="json") if artifact else None,
+    }
+    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        response = await client.post(
+            _required_environment("LLM4AD_REVISION_PUBLISH_URL"),
+            headers={"x-llm4ad-runtime-token": _required_environment("LLM4AD_STAGE_RUNTIME_TOKEN")},
+            json=payload,
+        )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        raise RuntimeError(json.dumps(detail, ensure_ascii=False) if detail else f"Revision save failed with HTTP {response.status_code}")
+    return response.json()
+
+
+@mcp.tool()
+async def publish_stage_result(
+    artifact: dict[str, Any], idempotency_key: str, workflow_stage: str | None = None,
+    base_source_version_id: str | None = None, base_content_hash: str | None = None,
+) -> dict[str, Any]:
     """Publish the completed stage artifact after all stage work is final.
 
     Proposal stages refuse publication while Typst does not compile. Read-only
     workflows publish structured artifacts without a document compile gate.
+    Preserve source_version_id and source_content_hash from get_workflow_context
+    before preparing a change, and pass them as base_source_version_id and
+    base_content_hash. A stale source requires a fresh comparison, not rebasing.
     """
     if os.environ.get("LLM4AD_STAGE_REQUIRES_TYPST", "true").lower() == "true":
         check = await asyncio.to_thread(_compile_check)
@@ -436,6 +596,8 @@ async def publish_stage_result(artifact: dict[str, Any], idempotency_key: str, w
         "workflow_stage": workflow_stage,
         "idempotency_key": idempotency_key,
         "artifact": artifact,
+        "base_source_version_id": base_source_version_id,
+        "base_content_hash": base_content_hash,
     }
     async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
         response = await client.post(

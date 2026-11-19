@@ -10,6 +10,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
 from llm4ad.evaluator.base import Metric, MetricType
@@ -17,6 +19,9 @@ from llm4ad.gateway.examples.hgamey.compilation.native import build_game_layer
 from llm4ad.gateway.examples.hgamey.compilation.shader import compile_shader, validate_interface
 from llm4ad.gateway.sdk.contracts import EvaluationContract
 from llm4ad.gateway.sdk.retention import owned_path
+
+from .execution.static_measurement import STATIC_QUALITY_SCORE_CAP
+from .static_dataset import SCHEMA, validate_samples
 
 COMPILER_LOG_NAMES = (
     "candidate.tool-0.log",
@@ -112,7 +117,12 @@ class Benchmark:
         if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ValueError("executor_url must be an HTTP(S) service URL without credentials")
         self.inputs = self.local_path(settings["inputs_root"])
-        reference = self.local_path(settings["reference_path"]) if self.evaluation_mode != "game" else None
+        dataset_path = settings.get("static_dataset_manifest") if self.evaluation_mode == "static" else None
+        self.static_dataset = self.load_static_dataset(self.local_path(dataset_path)) if dataset_path else None
+        reference = (
+            self.local_path(settings["reference_path"])
+            if self.evaluation_mode != "game" and self.static_dataset is None else None
+        )
         if reference is None:
             frames = []
         elif reference.is_file():
@@ -123,7 +133,7 @@ class Benchmark:
             )
         if len(frames) > 32:
             frames = [frames[(index * (len(frames) - 1) + 15) // 31] for index in range(32)]
-        if self.evaluation_mode != "game" and (
+        if reference is not None and (
             not frames or any(path.suffix.lower() not in {".png", ".jpg", ".jpeg"} for path in frames)
         ):
             raise ValueError("Provide Genshin reference PNG/JPEG frames (up to 32 evenly sampled sorted frames)")
@@ -140,7 +150,9 @@ class Benchmark:
             raise ValueError("This first example uses the headless super-resolution operator benchmark")
         if self.request.get("protocol", {}).get("stage") != "full":
             raise ValueError("Use full A/B measurement; screen results do not establish improvement")
-        if any(key in self.request.get("payload", {}) for key in ("shader_path", "spirv_path", "quality_reference")):
+        if any(key in self.request.get("payload", {}) for key in (
+            "shader_path", "spirv_path", "quality_reference", "quality_input", "static_pairs",
+        )):
             raise ValueError("Candidate and reference paths are owned by the adapter")
         self.evaluation_profiles = self.load_profiles() if self.evaluation_mode is None else None
         self.score_mode = settings.get("score_mode", "latency")
@@ -187,6 +199,16 @@ class Benchmark:
                 self.game_scoring = normalize_game_scoring(settings.get("game_scoring"))
                 self.manifest["game_scoring"] = self.game_scoring
                 self.manifest["score_definition"] = "weighted_game_baseline_relative_components"
+        if self.static_dataset is not None:
+            if self.score_mode != "relative_latency" or "quality_reference" in self.request.get("conditions", {}):
+                raise ValueError("Static dataset mode requires relative_latency and owns both image paths")
+            self.manifest.update(
+                adapter_version="6", static_dataset=self.static_dataset,
+                score_definition="paired_relative_gpu_gain_with_per_dataset_quality_penalty",
+                static_quality_score_cap=STATIC_QUALITY_SCORE_CAP,
+            )
+            native_manifest = Path(__file__).parent / "native" / "source-manifest.json"
+            self.manifest["native_sha256"] = digest(native_manifest.read_bytes())
         self.local_binding = {
             "device_id": settings["device_id"],
             "expected_serial": settings["expected_serial"],
@@ -198,15 +220,19 @@ class Benchmark:
             "game_check": copy.deepcopy(self.game_check),
         }
         self.version = digest(canonical(self.manifest))
+        if self.static_dataset is not None:
+            metrics = [Metric(name="static_score", type=MetricType.MAXIMIZE)]
+        elif self.evaluation_mode == "game":
+            metrics = [Metric(name="game_score", type=MetricType.MAXIMIZE)]
+        elif self.score_mode == "relative_latency":
+            metrics = [Metric(name="operator_improvement_pct", type=MetricType.MAXIMIZE)]
+        else:
+            metrics = [Metric(name="operator_latency_ms", type=MetricType.MINIMIZE)]
         self.contract = EvaluationContract(
             evaluator_id=f"hgamey-genshin-sr-{self.evaluation_mode}" if self.evaluation_mode else "hgamey-genshin-sr-headless",
             version="1",
             data_version=self.version,
-            metrics=[Metric(name="game_score", type=MetricType.MAXIMIZE)] if self.evaluation_mode == "game" else [
-                Metric(name="operator_improvement_pct", type=MetricType.MAXIMIZE)
-                if self.score_mode == "relative_latency"
-                else Metric(name="operator_latency_ms", type=MetricType.MINIMIZE)
-            ],
+            metrics=metrics,
         )
         profile_name = profile_key(self.filename, self.evaluation_mode)
         self.profile = self.inputs / "llm4ad-hgamey" / profile_name
@@ -238,6 +264,38 @@ class Benchmark:
                 shutil.copyfile(frame, target)
             if digest(target.read_bytes()) != facts["sha256"]:
                 raise ValueError("Frozen reference frame changed; restore the original benchmark files")
+        self.static_pairs = self.stage_static_dataset(self.local_path(dataset_path)) if dataset_path else []
+
+    @staticmethod
+    def load_static_dataset(path: Path) -> dict:
+        """Read the offline importer manifest and validate its complete sample set."""
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        if manifest.get("schema") != SCHEMA or manifest.get("split") not in {"train", "test"}:
+            raise ValueError("Invalid static benchmark dataset manifest")
+        validate_samples(manifest["samples"])
+        return manifest
+
+    def stage_static_dataset(self, path: Path) -> list[dict]:
+        """Stage checksum-bound LR/HR files and return the executor's paths."""
+        pairs = copy.deepcopy(self.static_dataset["samples"])
+        for index, pair in enumerate(pairs):
+            for role in ("lr", "hr"):
+                file = pair[role]
+                source = owned_path(path.parent / file["path"], path.parent)
+                content = source.read_bytes()
+                if digest(content) != file["sha256"]:
+                    raise ValueError(f"Static benchmark {role} checksum mismatch for {pair['id']}")
+                target = self.references / f"{index:02d}-{role}.png"
+                if not target.exists():
+                    with tempfile.NamedTemporaryFile(dir=target.parent) as temporary:
+                        temporary.write(content)
+                        temporary.flush()
+                        with suppress(FileExistsError):
+                            os.link(temporary.name, target)
+                if digest(target.read_bytes()) != file["sha256"]:
+                    raise ValueError(f"Frozen static benchmark {role} changed for {pair['id']}")
+                file["path"] = self.container_path(target)
+        return pairs
 
     def local_path(self, value: str) -> Path:
         """Resolve a local operator path relative to the settings file."""

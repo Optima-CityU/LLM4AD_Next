@@ -26,6 +26,8 @@ from app.services import remote_evaluation as service
 
 router = APIRouter(prefix="/evaluation-gateways", tags=["llm4ad.evaluation-gateways"])
 _NOTIFICATION_INTERVAL = 10
+_ATTEMPT_LIMIT = 3
+_LEASE_SECONDS = 60
 
 
 class GatewayView(BaseModel):
@@ -51,6 +53,7 @@ class JobView(BaseModel):
     state: str
     gateway_id: uuid.UUID | None
     gateway_name: str | None
+    evaluator_id: str | None = None
     gateway_online: bool
     report: dict
     updated_at: datetime
@@ -83,11 +86,10 @@ class JobSubmission(BaseModel):
     """One candidate submitted through its task-scoped runtime channel."""
 
     id: uuid.UUID
+    gateway_id: uuid.UUID | None = None
     gateway_ids: list[uuid.UUID] = Field(default_factory=list)
     dispatch_version: Literal[1, 2] = 1
     selection_mode: Literal["auto", "selected"] = "selected"
-    max_attempts: int = Field(default=3, ge=1)
-    lease_timeout: float = Field(default=60, gt=0, allow_inf_nan=False)
     contract: EvaluationContract
     timeout: float = Field(gt=0)
     evaluation_profile: Literal["standard", "elite"] = "standard"
@@ -117,12 +119,17 @@ def token(authorization: str) -> str:
 
 @router.get("", response_model=list[GatewayView])
 def list_gateways(db: SessionDep, current_user: CurrentUser):
-    """List only gateways explicitly shared with the signed-in user."""
+    """List current gateway registrations shared with the signed-in user."""
+    cutoff = datetime.now(UTC) - service.GATEWAY_HEARTBEAT_WINDOW
+    gateways = [
+        gateway for gateway in db.exec(select(EvaluationGateway).where(EvaluationGateway.last_seen >= cutoff))
+        if str(current_user.id) in gateway.allowed_user_ids
+    ]
+    if not gateways:
+        return []
     result = []
     jobs = db.exec(select(RemoteEvaluationJob).where(RemoteEvaluationJob.state.not_in(service.TERMINAL))).all()
-    for gateway in db.exec(select(EvaluationGateway)):
-        if str(current_user.id) not in gateway.allowed_user_ids:
-            continue
+    for gateway in gateways:
         result.append(
             GatewayView(
                 id=gateway.id,
@@ -130,10 +137,10 @@ def list_gateways(db: SessionDep, current_user: CurrentUser):
                 contract=gateway.contract,
                 contract_key=gateway.contract_key,
                 capacity=gateway.capacity,
-                online=(datetime.now(UTC) - gateway.last_seen.replace(tzinfo=UTC)).total_seconds() <= 30,
+                online=True,
                 last_seen=gateway.last_seen,
                 running=sum(j.gateway_id == gateway.id for j in jobs),
-                queued=sum(service.eligible(j, gateway, online=False) and j.state == "queued" for j in jobs),
+                queued=sum(j.state == "queued" and service.eligible(j, gateway) for j in jobs),
                 protocol_version=gateway.protocol_version,
                 ready=gateway.ready,
             )
@@ -251,7 +258,7 @@ def report(gateway_id: uuid.UUID, job_id: uuid.UUID, body: JobReport, db: Sessio
         service.finish_attempt(db, job, {
             "metrics": {}, **body.report,
             "error_message": body.report.get("error_message") or body.report.get("message")
-            or "Device cleanup is unconfirmed; its resource remains quarantined",
+            or "Gateway reported unconfirmed cleanup",
         }, "infrastructure")
         db.commit()
         return {"ack": body.sequence, "state": job.state}
@@ -431,26 +438,15 @@ def submit(task_id: uuid.UUID, body: JobSubmission, db: SessionDep, authorizatio
             raise HTTPException(403, "Job belongs to another task")
         return service.job_payload(job, include_result=True)
     configured = (task.input_args or {}).get("evaluator", {})
-    mode = service.selection_mode(configured)
-    if body.dispatch_version == 1 and any(key in configured for key in ("selection_mode", "max_attempts", "lease_timeout")):
-        raise HTTPException(422, "The task's device-pool policy requires dispatch protocol v2")
-    if (configured.get("type") != "remote" or body.selection_mode != mode
-        or mode == "selected" and set(configured.get("gateway_ids", [])) != {str(g) for g in body.gateway_ids}):
+    if configured.get("type") != "remote":
         raise HTTPException(422, "Gateway selection differs from the active task configuration")
     owner = service.task_owner(db, task)
-    contract = service.validate_pool(
-        db,
-        owner,
-        {"gateway_ids": [str(g) for g in body.gateway_ids], "contract": body.contract.model_dump(mode="json"),
-         "selection_mode": mode},
-    )
-    if configured.get("contract") and service.contract_key(configured["contract"]) != service.contract_key(contract):
+    gateway = service.validate_target(db, owner, configured)
+    if service.target_id(body.model_dump()) != gateway.id:
+        raise HTTPException(422, "Gateway selection differs from the active task configuration")
+    if service.contract_key(body.contract.model_dump(mode="json")) != gateway.contract_key:
         raise HTTPException(422, "Evaluation benchmark differs from the active task configuration")
-    if body.dispatch_version >= 2:
-        if body.max_attempts != configured.get("max_attempts", 3) or body.lease_timeout != configured.get("lease_timeout", 60):
-            raise HTTPException(422, "Attempt policy differs from the active task configuration")
-        if mode == "selected" and any(db.get(EvaluationGateway, g).protocol_version < 2 for g in body.gateway_ids):
-            raise HTTPException(422, "Upgrade selected gateways to protocol v2 for leased device attempts")
+    managed = body.dispatch_version >= 2 and gateway.protocol_version >= 2
     try:
         candidate = base64.b64decode(body.bundle, validate=True)
     except binascii.Error as exc:
@@ -461,10 +457,10 @@ def submit(task_id: uuid.UUID, body: JobSubmission, db: SessionDep, authorizatio
         id=body.id,
         task_id=task_id,
         user_id=owner,
-        selected_gateway_ids=[str(g) for g in body.gateway_ids],
-        selection_mode=mode,
-        max_attempts=body.max_attempts if body.dispatch_version >= 2 else 1,
-        contract_key=service.contract_key(contract),
+        selected_gateway_ids=[str(gateway.id)],
+        selection_mode="selected",
+        max_attempts=_ATTEMPT_LIMIT if managed else 1,
+        contract_key=gateway.contract_key,
         object_key=key,
         request={
             "timeout": body.timeout,
@@ -476,7 +472,7 @@ def submit(task_id: uuid.UUID, body: JobSubmission, db: SessionDep, authorizatio
             "source_fingerprint": body.source_fingerprint,
             "execution_id": body.execution_id,
             "instance_id": body.instance_id,
-            **({"managed_attempt": True, "lease_timeout": body.lease_timeout} if body.dispatch_version >= 2 else {}),
+            **({"managed_attempt": True, "lease_timeout": _LEASE_SECONDS} if managed else {}),
         },
     )
     db.add(job)
@@ -518,10 +514,13 @@ def task_jobs(task_id: uuid.UUID, db: SessionDep, current_user: CurrentUser):
     """Expose remote progress in the existing task workbench."""
     from app.services.task_service.auth import get_task_with_auth
 
-    get_task_with_auth(db, task_id, current_user)
+    task = get_task_with_auth(db, task_id, current_user)
+    config = (task.input_args or {}).get("evaluator") or {}
+    contract = config.get("contract") or {}
+    evaluator_id = contract.get("evaluator_id")
     service.expire_leases(db, task_id=task_id)
     db.commit()
-    gateways = {gateway.id: gateway for gateway in db.exec(select(EvaluationGateway))}
+    gateways: dict[uuid.UUID, EvaluationGateway | None] = {}
     result = []
     jobs = db.exec(
         select(RemoteEvaluationJob)
@@ -530,18 +529,23 @@ def task_jobs(task_id: uuid.UUID, db: SessionDep, current_user: CurrentUser):
         .limit(100)
     ).all()
     for job in jobs:
-        gateway = gateways.get(job.gateway_id)
+        binding_id = job.gateway_id
+        if binding_id is None and job.selection_mode == "selected" and len(job.selected_gateway_ids) == 1:
+            binding_id = uuid.UUID(job.selected_gateway_ids[0])
+        if binding_id is not None and binding_id not in gateways:
+            gateways[binding_id] = db.get(EvaluationGateway, binding_id)
+        gateway = gateways.get(binding_id) if binding_id is not None else None
         online = gateway is not None and service.is_online(gateway)
-        waiting = job.state == "queued" and not any(
-            service.eligible(job, g)
-            for g in gateways.values()
-        )
+        waiting = job.state == "queued" and (gateway is None or not service.eligible(job, gateway))
         result.append(
             JobView(
                 id=job.id,
                 state="waiting_gateway" if waiting else job.state,
-                gateway_id=job.gateway_id,
+                gateway_id=binding_id,
                 gateway_name=gateway.name if gateway else None,
+                evaluator_id=evaluator_id or (
+                    gateway.contract.get("evaluator_id") if gateway and gateway.contract_key == job.contract_key else None
+                ),
                 gateway_online=online,
                 report=service.job_payload(job)["report"],
                 updated_at=job.updated_at,

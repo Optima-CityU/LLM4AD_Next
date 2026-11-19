@@ -1,0 +1,63 @@
+# Compatibility entry point using published images and the standard service definitions.
+# Explicit extends also supports compose.remote-evaluation.yml's worker inheritance.
+name: ${PROJECT_NAME}
+
+x-cloud-env: &cloud-env
+  TASK_RUNNER_IMAGE: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_TASK_RUNNER:-llm4ad-task-runner}:${TAG-latest}"
+
+x-cloud-backend: &cloud-backend
+  image: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_BACKEND:-backend}:${TAG-latest}"
+  pull_policy: always
+  build: !reset null
+  environment:
+    <<: *cloud-env
+
+services:
+  db:
+    extends: {file: compose.yml, service: db}
+  redis:
+    extends: {file: compose.yml, service: redis}
+  searxng:
+    extends: {file: compose.yml, service: searxng}
+  rustfs-permission-init:
+    extends: {file: compose.yml, service: rustfs-permission-init}
+  rustfs:
+    extends: {file: compose.yml, service: rustfs}
+  adminer:
+    extends: {file: compose.yml, service: adminer}
+  mailcatcher:
+    extends: {file: compose.yml, service: mailcatcher}
+  prestart:
+    <<: *cloud-backend
+    extends: {file: compose.yml, service: prestart}
+  backend:
+    <<: *cloud-backend
+    extends: {file: compose.yml, service: backend}
+  worker:
+    <<: *cloud-backend
+    extends: {file: compose.yml, service: worker}
+  remote-evaluation-worker:
+    <<: *cloud-backend
+    extends: {file: compose.yml, service: remote-evaluation-worker}
+  research-worker:
+    <<: *cloud-backend
+    extends: {file: compose.yml, service: research-worker}
+  flower:
+    <<: *cloud-backend
+    extends: {file: compose.yml, service: flower}
+  task-runner:
+    extends: {file: compose.yml, service: task-runner}
+    image: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_TASK_RUNNER:-llm4ad-task-runner}:${TAG-latest}"
+    pull_policy: always
+    build: !reset null
+  arl-worker:
+    extends: {file: compose.yml, service: arl-worker}
+  arl-validator:
+    extends: {file: compose.yml, service: arl-validator}
+  code_server_proxy:
+    extends: {file: compose.yml, service: code_server_proxy}
+  frontend:
+    extends: {file: compose.yml, service: frontend}
+    image: "${SWR_REGISTRY:-docker.io/noah2012}/${SWR_IMAGE_FRONTEND:-frontend}:${TAG-latest}"
+    pull_policy: always
+    build: !reset null

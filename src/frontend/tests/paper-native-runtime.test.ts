@@ -1,10 +1,9 @@
-import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "../src/lib/researchModels"
 import { expect, test } from "bun:test"
-
 import {
   cssColorToHslChannels,
   observeEmbeddedTheme,
 } from "../src/lib/embeddedAppearance"
+import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "../src/lib/researchModels"
 import { parseResearchWorkspaceMode } from "../src/lib/researchWorkspace"
 
 const sidebarSource = await Bun.file(
@@ -283,7 +282,7 @@ test("autorebuttal presents the published concern baseline as a separate readabl
 
 test("AC message is a separate third stage with a copy-ready result", () => {
   expect(workflowSource).toContain(
-    '"ac_summary": ("ac-summary", _REVISION_PUBLICATION_SKILL)',
+    '"ac_summary": ("autorebuttal-workflow", _REVISION_PUBLICATION_SKILL)',
   )
   expect(paperRouteSource).toContain("chairMessage={workspace.chair_message}")
   expect(rebuttalPanelSource).toContain('data-testid="rebuttal-chair-message"')
@@ -340,51 +339,38 @@ test("the top workflow navigator hosts one native CloudCLI session", () => {
   expect(nativeRuntimeSource).toContain("artifactPaths")
 })
 
-test("proposal stage navigation stays in the left pane and the right panel switches views", () => {
-  const splitLayout = paperRouteSource.indexOf(
-    'className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-',
-  )
-  const leftPane = paperRouteSource.indexOf(
-    '<section className="flex h-full min-w-0 flex-col overflow-hidden bg-muted/[0.07]">',
-    splitLayout,
-  )
-  expect(splitLayout).toBeLessThan(leftPane)
-  expect(leftPane).toBeLessThan(
-    paperRouteSource.indexOf("<PaperWorkflowStepper", leftPane),
-  )
+test("proposal navigation stays visible without workflow stage controls", () => {
   expect(paperRouteSource).toContain("<ProposalResultsDock")
-  expect(paperRouteSource).toContain("stage={proposalResultStage}")
-  expect(proposalResultsDockSource).not.toContain("stages.map(")
-  expect(proposalResultsDockSource).toContain('<TabsTrigger value="result">')
-  expect(proposalResultsDockSource).toContain('<TabsTrigger value="editor">')
-  expect(paperRouteSource).toContain("proposalEditorOpen")
-  expect(paperRouteSource).toContain("setProposalEditorOpen(true)")
-  expect(paperRouteSource).toMatch(
-    /setProposalEditorState\(\{\s+workspaceId,\s+stage,\s+open: false/,
+  expect(paperRouteSource).toContain("<ProposalDocumentPreview")
+  expect(paperRouteSource).toContain("chapters={visibleProposalChapters}")
+  expect(paperRouteSource).toContain("<ProposalStartGuide")
+  expect(paperRouteSource).toContain("hasDraft={hasProposalDraft}")
+  expect(paperRouteSource).toContain("<ProposalToolbar")
+  expect(proposalResultsDockSource).toContain("<ResearchWorkbenchTabsHeader")
+  expect(proposalResultsDockSource).toContain(
+    'label={t("paper.proposalDocument.navigation")}',
   )
-  expect(proposalResultsDockSource).toContain("onEditorOpenChange(true)")
-  expect(proposalResultsDockSource).toContain("stage.summary")
-  expect(proposalResultsDockSource).toContain("stage.files.map")
+  expect(proposalResultsDockSource).not.toContain("<DropdownMenuItem")
+  expect(proposalResultsDockSource).not.toContain("stages.map(")
+  expect(proposalResultsDockSource).not.toContain("StageResultContent")
 })
 
-test("proposal onboarding saves author basics for later stage prompts", () => {
-  expect(paperRouteSource).toContain("paper.source.basicsTitle")
-  expect(paperRouteSource).toContain("serializeProposalBasics(proposalBasics)")
-  expect(paperRouteSource).toContain("updateWorkspace.mutateAsync")
-  expect(paperRouteSource).toContain("void openInitialUpload()")
-  expect(paperRouteSource).toContain("onEditBasics=")
+test("proposal onboarding uses conversation and carries saved project briefs into the runtime", () => {
   expect(paperRouteSource).toMatch(
     /workspace\.mode === "proposal"\s*\? workspace\.description/,
   )
   expect(runtimeApiSource).toContain("Author-supplied proposal brief")
   expect(runtimeApiSource).toContain("project_context/")
-  expect(paperRouteSource).toContain("projectContextUploads(pendingFiles)")
+  expect(paperRouteSource).toContain("purpose: uploadPurpose")
   expect(paperRouteSource).toContain(
-    "showProjectContextPrompt={showProjectContextPrompt}",
+    'conversationFirst={workspace.mode === "proposal"}',
   )
   expect(nativeRuntimeSource).toContain("paper.source.projectContext.title")
-  expect(proposalResultsDockSource).toContain("onUploadProjectContext")
-  expect(proposalResultsDockSource).toContain("{editorOpen &&")
+  expect(paperRouteSource).toContain(
+    "onUploadReferences={openProjectContextUpload}",
+  )
+  expect(paperRouteSource).toContain("references={")
+  expect(proposalResultsDockSource).toContain("references")
 })
 
 test("stage blockers stay compact and use stage-specific guidance", () => {
@@ -542,23 +528,20 @@ test("stage profiles use official Skills, MCP tools, and native questions", () =
   expect(runtimeApiSource).toContain("workflow.skills_by_run_kind")
   expect(runtimeApiSource).toContain("contextWindowTokens")
   expect(workflowSource).toContain("skills_by_run_kind")
-  expect(workflowSource).toContain('"proposal-literature-evidence"')
+  expect(workflowSource).toContain('"openair-proposal"')
   expect(workflowSource).toContain('"research-stage-publication"')
-  expect(stagePublicationSkill).toContain(
-    "edits and replaces an earlier conversation turn",
+  expect(runtimeApiSource).toContain(
+    "mcp__llm4ad_stage__publish_research_revision",
   )
-  expect(stagePublicationSkill).toContain("call `publish_stage_result` once")
+  expect(stagePublicationSkill).toContain("publication_schemas")
+  expect(stagePublicationSkill).toContain("base_revision")
+  expect(stagePublicationSkill).toContain("exact retry")
 })
 
 test("the formatting stage loads the vendored Typst skill and its doc mirror", () => {
-  // The stage needs both: `typst-author` owns Typst syntax and ships the local
-  // docs mirror, while `proposal-foundation-layout` owns the proposal-specific
-  // foundation and write boundary. Dropping the first silently restores the
-  // failure it was added for — a stage inventing syntax such as
-  // `#numbered-list` (the real function is `enum`) because nothing told it to
-  // read the language instead of recalling it.
+  // The unified proposal method and vendored Typst syntax guide are both needed.
   expect(workflowSource).toContain('"typst-author"')
-  expect(workflowSource).toContain('"proposal-foundation-layout"')
+  expect(workflowSource).toContain('"openair-proposal"')
 })
 
 test("the vendored Typst skill ships its documentation and attribution", () => {
@@ -578,27 +561,23 @@ test("the vendored Typst skill ships its documentation and attribution", () => {
   expect(vendoredTypstSyntaxDoc).toContain("enum")
 })
 
-test("proposal skills are grouped and retain OpenAIR_proposal attribution", () => {
+test("proposal methods share one installed Skill and retain OpenAIR_proposal attribution", () => {
   expect(openAirProposalAttribution).toContain(
     "https://github.com/Maxine-1520/OpenAIR_proposal",
   )
   expect(openAirProposalAttribution).toContain("write-key-problems")
   expect(taskDockerfileSource).toContain(
-    "skills/openair-proposal/proposal-innovation-plan",
+    "skills/openair-proposal                               /app/skills/openair-proposal",
   )
-  expect(taskDockerfileSource).toContain(
-    "skills/openair-proposal/proposal-foundation-feasibility",
-  )
+  expect(taskDockerfileSource).toContain("/app/skills/autorebuttal-workflow")
   expect(workflowSource).toContain('"proposal_innovation_plan"')
   expect(workflowSource).toContain('"proposal_foundation_feasibility"')
 })
 
 test("autorebuttal accepts complete review text without artificial limits", () => {
-  expect(rebuttalBaselineSkill).toContain(
-    "Only set `ready_for_generation` false",
-  )
-  expect(rebuttalInputContract).toContain("Default to `per_reviewer`")
-  expect(rebuttalInputContract).toContain("Default to `markdown`")
+  expect(rebuttalBaselineSkill).toContain("not automatic generation blockers")
+  expect(rebuttalBaselineSkill).toContain("not a prerequisite")
+  expect(rebuttalInputContract).toContain("Markdown")
   expect(rebuttalInputContract).toContain("numeric limit")
   expect(rebuttalBaselineSkill).not.toContain("truncated")
   expect(rebuttalInputContract).not.toContain("truncated")
@@ -606,10 +585,10 @@ test("autorebuttal accepts complete review text without artificial limits", () =
 })
 
 test("autorebuttal publishes useful author guidance instead of compliance logs", () => {
-  expect(autoRebuttalSkill).toContain("author-facing guidance")
+  expect(autoRebuttalSkill).toContain("open_placeholders")
   expect(rebuttalDraftingGuide).toContain("internal audit log")
-  expect(rebuttalArtifactContracts).toContain("concrete next step")
-  expect(rebuttalArtifactContracts).toContain("specific author input")
+  expect(rebuttalArtifactContracts).toContain("practical")
+  expect(rebuttalArtifactContracts).toContain("specific author facts")
 })
 
 test("blocking final review returns to the owning stage without failing publication", () => {
@@ -647,9 +626,12 @@ test("rebuttal intake guides pasted text or saved manual review without a browse
   expect(zh.paper.rebuttal.noReviewsDescription).toContain("右侧")
   expect(en.paper.workflow.stage.rebuttal_baselineHint).toContain("Paste")
   expect(en.paper.rebuttal.noReviewsDescription).toContain("panel")
-  expect(rebuttalBaselineSkill).toContain("review text the author pasted")
+  expect(rebuttalBaselineSkill).toContain("chat-pasted report")
   expect(rebuttalBaselineSkill).not.toContain("openreview.get_forum")
-  expect(rebuttalInputContract).toContain('source_system: "conversation"')
+  expect(rebuttalInputContract).toContain("record_reviewer_feedback")
+  expect(runtimeApiSource).toContain(
+    "mcp__llm4ad_stage__record_reviewer_feedback",
+  )
   expect(cloudCliEmptyStateSource).toContain("<textarea")
   expect(cloudCliEmptyStateSource).toContain("reviewPastePrompt")
   expect(cloudCliEmptyStateSource).not.toContain('type="url"')
@@ -693,7 +675,7 @@ const openAirProposalAttribution = await Bun.file(
 ).text()
 const rebuttalBaselineSkill = await Bun.file(
   new URL(
-    "../../../skills/autorebuttal/rebuttal-baseline/SKILL.md",
+    "../../../skills/autorebuttal/references/rebuttal-baseline.md",
     import.meta.url,
   ),
 ).text()
@@ -705,7 +687,7 @@ const rebuttalInputContract = await Bun.file(
 ).text()
 const autoRebuttalSkill = await Bun.file(
   new URL(
-    "../../../skills/autorebuttal/autorebuttal/SKILL.md",
+    "../../../skills/autorebuttal/references/autorebuttal.md",
     import.meta.url,
   ),
 ).text()

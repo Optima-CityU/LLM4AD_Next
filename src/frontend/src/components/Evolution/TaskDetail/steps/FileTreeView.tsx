@@ -61,6 +61,11 @@ interface FileTreeViewProps {
   canDeletePath?: (path: string, isDirectory: boolean) => boolean
   /** 文件相对路径 -> 字节数，用于在文件节点后显示大小 */
   sizeMap?: Record<string, number>
+  /** Optional read-only status decoration used by workspace history comparisons. */
+  fileStatuses?: Record<
+    string,
+    { label: string; marker: string; className?: string }
+  >
 }
 
 export default function FileTreeView({
@@ -79,6 +84,7 @@ export default function FileTreeView({
   confirmDelete = true,
   canDeletePath,
   sizeMap,
+  fileStatuses,
 }: FileTreeViewProps) {
   const { t } = useTranslation()
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -142,6 +148,7 @@ export default function FileTreeView({
           protectTopLevelDirectories={protectTopLevelDirectories}
           canDeletePath={canDeletePath}
           sizeMap={sizeMap}
+          fileStatuses={fileStatuses}
         />
       ))}
 
@@ -208,6 +215,7 @@ function TreeNode({
   protectTopLevelDirectories,
   canDeletePath,
   sizeMap,
+  fileStatuses,
 }: {
   node: FileTreeNode
   depth: number
@@ -222,9 +230,11 @@ function TreeNode({
   protectTopLevelDirectories: boolean
   canDeletePath?: (path: string, isDirectory: boolean) => boolean
   sizeMap?: Record<string, number>
+  fileStatuses?: FileTreeViewProps["fileStatuses"]
 }) {
   const [expanded, setExpanded] = useState(depth < 2)
   const isDir = node.type === "directory"
+  const status = !isDir ? fileStatuses?.[node.path] : undefined
   const isTopLevelDir = isDir && !node.path.includes("/")
   const deletionAllowed =
     !protectTopLevelDirectories || !isTopLevelDir
@@ -283,6 +293,21 @@ function TreeNode({
           isSelected &&
             "bg-primary/10 text-primary font-medium hover:bg-primary/15 before:absolute before:inset-y-0.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary",
         )}
+        role={fileStatuses ? "button" : undefined}
+        tabIndex={fileStatuses ? 0 : undefined}
+        aria-label={fileStatuses ? node.path : undefined}
+        aria-expanded={fileStatuses && isDir ? expanded : undefined}
+        aria-pressed={fileStatuses && !isDir ? isSelected : undefined}
+        data-history-status={status?.label}
+        onKeyDown={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            ["Enter", " "].includes(event.key)
+          ) {
+            event.preventDefault()
+            handleClick()
+          }
+        }}
         style={{ paddingLeft: `${depth * 16 + 4}px` }}
         onClick={handleClick}
       >
@@ -322,8 +347,23 @@ function TreeNode({
             onBlur={(e) => commitRename(e.target.value)}
           />
         ) : (
-          <span className="flex-1 truncate text-xs ml-1" title={node.name}>
+          <span
+            className={cn("flex-1 truncate text-xs ml-1", status?.className)}
+            title={node.name}
+          >
             {node.name}
+          </span>
+        )}
+        {status && (
+          <span
+            className={cn(
+              "shrink-0 px-1 font-mono text-[11px] font-semibold",
+              status.className,
+            )}
+            title={status.label}
+            aria-label={status.label}
+          >
+            {status.marker}
           </span>
         )}
         {badgeCounts && !isDir && (badgeCounts[node.path] ?? 0) > 0 && (
@@ -386,6 +426,7 @@ function TreeNode({
               protectTopLevelDirectories={protectTopLevelDirectories}
               canDeletePath={canDeletePath}
               sizeMap={sizeMap}
+              fileStatuses={fileStatuses}
             />
           ))}
         </div>

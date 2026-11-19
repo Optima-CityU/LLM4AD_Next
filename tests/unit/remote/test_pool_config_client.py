@@ -4,7 +4,6 @@ import copy
 import uuid
 
 import pytest
-from pydantic import ValidationError
 
 from llm4ad.config.evaluator import EvalContext, RemoteEvaluatorConfig
 from llm4ad.gateway.sdk import client
@@ -12,29 +11,17 @@ from llm4ad.gateway.sdk import client
 pytestmark = pytest.mark.unit
 
 
-def test_auto_defaults_and_legacy_selection_do_not_mutate_raw_configuration():
-    """Legacy IDs select a fixed pool while new empty configurations use auto."""
-    config = RemoteEvaluatorConfig()
-    assert config.selection_mode == "auto" and config.gateway_ids == []
-    assert config.max_attempts == 3 and config.lease_timeout == 60
-    raw = {"gateway_ids": [str(uuid.uuid4())]}
-    original = copy.deepcopy(raw)
-    selected = RemoteEvaluatorConfig.model_validate(raw)
-    assert selected.selection_mode == "selected" and raw == original
-    assert RemoteEvaluatorConfig(**raw, selection_mode="auto").selection_mode == "auto"
-    assert RemoteEvaluatorConfig(gateway_ids=[]).selection_mode == "auto"
-    assert RemoteEvaluatorConfig.model_validate(selected.model_dump()).selection_mode == "selected"
-
-
-@pytest.mark.parametrize("values", [
-    {"selection_mode": "selected"}, {"selection_mode": "selected", "gateway_ids": []},
-    {"selection_mode": "unknown"}, {"max_attempts": 0}, {"max_attempts": -1},
-    {"lease_timeout": 0}, {"lease_timeout": -1}, {"lease_timeout": float("inf")},
-])
-def test_pool_configuration_rejects_invalid_admission_and_budgets(values):
-    """Invalid pool selection or limits fail before any submission."""
-    with pytest.raises(ValidationError):
-        RemoteEvaluatorConfig(**values)
+def test_normalizes_only_an_unambiguous_legacy_target():
+    """Keep one explicit legacy target and discard case-specific dispatch settings."""
+    gateway_id = str(uuid.uuid4())
+    raw = {"gateway_ids": [gateway_id], "lease_timeout": 10, "max_attempts": 2}
+    config = RemoteEvaluatorConfig.model_validate(raw)
+    assert config.gateway_id == gateway_id
+    assert config.model_dump().keys().isdisjoint(raw)
+    assert raw["gateway_ids"] == [gateway_id]
+    assert RemoteEvaluatorConfig(**raw, selection_mode="auto").gateway_id is None
+    assert RemoteEvaluatorConfig(gateway_ids=[gateway_id, str(uuid.uuid4())]).gateway_id is None
+    assert RemoteEvaluatorConfig().gateway_id is None
 
 
 class Response:
@@ -88,7 +75,7 @@ async def test_malformed_failure_category_does_not_interrupt_remote_result(tmp_p
                    "metadata": {"failure_category": category}},
     }])
     monkeypatch.setattr(client.aiohttp, "ClientSession", lambda **kwargs: session)
-    result = await client.evaluate_remote(RemoteEvaluatorConfig(), EvalContext(project_root=str(tmp_path)))
+    result = await client.evaluate_remote(RemoteEvaluatorConfig(gateway_id=str(uuid.uuid4())), EvalContext(project_root=str(tmp_path)))
     assert result.success is False
     assert result.error_message == "evaluation failed"
     assert result.metadata["failure_category"] == category
@@ -96,7 +83,7 @@ async def test_malformed_failure_category_does_not_interrupt_remote_result(tmp_p
 
 
 @pytest.mark.parametrize("category", ["candidate", "infrastructure", "evaluator", "configuration"])
-async def test_client_sends_v2_pool_budget_and_keeps_truthful_final_failure(tmp_path, monkeypatch, category):
+async def test_client_sends_an_exact_target_and_keeps_truthful_final_failure(tmp_path, monkeypatch, category):
     """Server retries consume one submission; terminal noncandidate metrics stay empty."""
     (tmp_path / "solution.py").write_text("pass\n")
     monkeypatch.setenv("LLM4AD_REMOTE_URL", "http://offline-fixture")
@@ -115,7 +102,7 @@ async def test_client_sends_v2_pool_budget_and_keeps_truthful_final_failure(tmp_
         """Keep this transport-only test deterministic."""
 
     monkeypatch.setattr(client.asyncio, "sleep", no_wait)
-    config = RemoteEvaluatorConfig(max_attempts=4, lease_timeout=12)
+    config = RemoteEvaluatorConfig(gateway_id=str(uuid.uuid4()))
     result = await client.evaluate_remote(config, EvalContext(project_root=str(tmp_path)))
     assert result.success is False
     assert result.metrics == ({"quality": 7} if category == "candidate" else {})
@@ -125,9 +112,8 @@ async def test_client_sends_v2_pool_budget_and_keeps_truthful_final_failure(tmp_
     assert result.metadata["attempt_history"] == report["metadata"]["attempt_history"]
     assert result.metadata["remote_attempt_id"] == "attempt-3"
     body = session.requests[0][2]["json"]
-    assert {key: body[key] for key in ("selection_mode", "gateway_ids", "dispatch_version", "max_attempts", "lease_timeout")} == {
-        "selection_mode": "auto", "gateway_ids": [], "dispatch_version": 2, "max_attempts": 4, "lease_timeout": 12,
-    }
+    assert body["gateway_id"] == config.gateway_id and body["dispatch_version"] == 2
+    assert body.keys().isdisjoint({"gateway_ids", "selection_mode", "max_attempts", "lease_timeout"})
     assert [request[0] for request in session.requests] == ["POST", "GET", "GET", "GET"]
     assert all(request[1].endswith(body["id"]) for request in session.requests[1:])
     assert not list((tmp_path / ".remote-evaluation").iterdir())

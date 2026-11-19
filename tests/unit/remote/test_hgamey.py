@@ -417,19 +417,19 @@ def test_tampered_staging_cannot_be_recovered_as_the_original_job(local):
         asyncio.run(operate(adapter, job, reporter, "recover"))
 
 
-def test_example_uses_an_automatic_pool_without_invented_device_identity(local):
+def test_example_requires_a_gateway_selection_without_physical_device_identity(local):
     """Select a real benchmark without requiring physical IDs in the task template."""
     import yaml
 
     data = yaml.safe_load((TEMPLATE / "config.yaml").read_text())
-    assert data["evaluator"]["gateway_ids"] == []
+    assert data["evaluator"]["gateway_id"] is None
     assert (TEMPLATE / data["version_control"]["local_path"] / "shader.comp").is_file()
     draft = AppConfig.model_validate(data)
-    assert draft.evaluator.selection_mode == "auto" and draft.evaluator.contract == {}
+    assert draft.evaluator.gateway_id is None and draft.evaluator.contract == {}
     data["evaluator"]["contract"] = local.adapter().contract.model_dump(mode="json")
     config = AppConfig.model_validate(data)
     assert config.evaluator.type == "remote" and config.coder.context_max_tokens >= 24000
-    assert config.evaluator.gateway_ids == [] and config.evaluator.batch_size > 1
+    assert config.evaluator.gateway_id is None and config.evaluator.batch_size > 1
 
 
 def test_real_glsl_compilation_and_spirv_validation(tmp_path, monkeypatch):

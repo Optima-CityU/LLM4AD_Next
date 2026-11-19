@@ -2,13 +2,22 @@ import type { AxiosResponse } from "axios"
 import axios from "axios"
 
 import { OpenAPI } from "@/client"
-import { handleUnauthorized } from "./auth"
+import {
+  clearAuthAndRedirect,
+  ensureAccessToken,
+  handleUnauthorized,
+} from "./auth"
+import { startAuthSessionLifecycle } from "./authLifecycle"
 import { showMaintenanceOverlay } from "./maintenance"
 
+let lifecycleCleanup: (() => void) | undefined
+
 export const initOpenApi = () => {
+  lifecycleCleanup?.()
+  lifecycleCleanup = startAuthSessionLifecycle()
   OpenAPI.BASE = import.meta.env.VITE_API_URL || ""
   OpenAPI.TOKEN = async () => {
-    return localStorage.getItem("access_token") || ""
+    return (await ensureAccessToken()) || ""
   }
 
   // The legacy generated axios client needs a binary response mode for files.
@@ -32,14 +41,25 @@ export const initOpenApi = () => {
       if (originalRequest.url?.includes("/login/refresh-token")) {
         return response
       }
-      try {
-        const newToken = await handleUnauthorized()
-        originalRequest.headers.Authorization = `Bearer ${newToken}`
-        const retryResponse = await axios.request(originalRequest)
-        return retryResponse
-      } catch {
-        return response
+      if (originalRequest.url?.includes("/login/access-token")) return response
+      const authorization = originalRequest.headers.Authorization
+      const failedToken =
+        typeof authorization === "string"
+          ? authorization.replace(/^Bearer /i, "")
+          : null
+      const newToken = await handleUnauthorized(failedToken)
+      originalRequest.headers.Authorization = `Bearer ${newToken}`
+      const retryResponse = await axios.request({
+        ...originalRequest,
+        validateStatus: () => true,
+      })
+      if (
+        retryResponse.status === 401 &&
+        localStorage.getItem("access_token") === newToken
+      ) {
+        clearAuthAndRedirect()
       }
+      return retryResponse
     }
     return response
   })

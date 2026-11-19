@@ -155,6 +155,10 @@ def execute_on_device(folder):
                 "--json",
             ]
         write_json(folder / "backend-command.json", argv)
+        if body["operation"] == "eval" and request.get("payload", {}).get("static_pairs"):
+            from .static_measurement import execute_static
+
+            return execute_static(folder, request, argv, command)
         with (folder / "backend.stdout").open("x") as out, (folder / "backend.stderr").open("x") as err:
             done = command(argv, pf=True, stdout=out, stderr=err)
         if body["operation"] == "game-ab":

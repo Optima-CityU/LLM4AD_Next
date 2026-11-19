@@ -190,8 +190,11 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         request["payload"].update(
             shader_path=self.benchmark.container_path(source),
             spirv_path=self.benchmark.container_path(folder / "candidate.spv"),
-            quality_reference=self.benchmark.container_path(self.benchmark.references),
         )
+        if self.benchmark.static_pairs:
+            request["payload"]["static_pairs"] = self.benchmark.static_pairs
+        else:
+            request["payload"]["quality_reference"] = self.benchmark.container_path(self.benchmark.references)
         body = {
             "idempotency_key": key,
             "device_id": self.benchmark.settings["device_id"],
@@ -732,8 +735,19 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         result.evolution_feedback["game_validation"] = {"status": "PASS", "can_claim_game_improvement": False}
         return result
 
-    def convert_report(self, report: dict, state: dict) -> EvaluationResult | None:
-        """Preserve HGamey validity and provenance while exposing platform metrics."""
+    def convert_report(
+        self, report: dict, state: dict, *, score_quality_rejection: bool = False
+    ) -> EvaluationResult | None:
+        """Preserve HGamey validity and provenance while exposing platform metrics.
+
+        Args:
+            report: Native renderer measurements.
+            state: Accepted attempt and its frozen input provenance.
+            score_quality_rejection: Allow a measured quality regression to receive case-specific fitness.
+
+        Returns:
+            A valid result or None if the measurement and restoration could not be verified.
+        """
         preparation = self.preparation_failure(report, state)
         if preparation is not None:
             return preparation
@@ -782,7 +796,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             "data_version": self.benchmark.version,
         }
         metadata["evaluation_summary"] = summary
-        if status in {"CRASH", "SLOW", "POOR_QUALITY"}:
+        if status in {"CRASH", "SLOW", "POOR_QUALITY"} and not (score_quality_rejection and status == "POOR_QUALITY"):
             metadata["candidate_failure"] = True
             feedback = {"status": status, "verdict": report.get("verdict"), "metrics": metrics}
             error_message = f"HGamey candidate verdict: {status}"
@@ -826,7 +840,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                 metadata=metadata,
                 evolution_feedback=feedback,
             )
-        if status not in {"PASS", "REJECT"}:
+        if status not in {"PASS", "REJECT", "POOR_QUALITY"}:
             raise RuntimeError(f"Unknown measurement status: {status}")
         if metrics.get("operator_latency_ms", 0) <= 0 or "psnr_db" not in metrics:
             return None

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, Field, model_validator
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app import models
 from app.core.db import get_db_session
@@ -111,6 +111,7 @@ class ProposalFormattingArtifact(BaseModel):
     """Validated Typst result and its durable project-level foundation."""
 
     source_path: str = Field(min_length=1, max_length=1_024)
+    source_paths: list[str] = Field(default_factory=list)
     summary: str = Field(min_length=1, max_length=20_000)
     context_patch: paper_schemas.ProposalContextPatch
 
@@ -118,16 +119,17 @@ class ProposalFormattingArtifact(BaseModel):
 class ProposalSectionArtifact(BaseModel):
     """Validated result produced by one proposal writing stage."""
 
-    source_paths: list[str] = Field(min_length=1, max_length=10)
+    source_paths: list[str] = Field(min_length=1)
     summary: str = Field(min_length=1, max_length=20_000)
     citations: list[str] = Field(default_factory=list, max_length=500)
     context_patch: paper_schemas.ProposalContextPatch
 
 
 class ProposalFinalReviewArtifact(BaseModel):
-    """Read-only whole-proposal review produced before PDF export."""
+    """Editorial proposal advice independent of the Typst export check."""
 
     entry_path: str = Field(min_length=1, max_length=1_024)
+    source_paths: list[str] = Field(default_factory=list)
     summary: str = Field(min_length=1, max_length=20_000)
     findings: list[str] = Field(default_factory=list, max_length=200)
     ready_for_export: bool
@@ -135,7 +137,7 @@ class ProposalFinalReviewArtifact(BaseModel):
 
     @model_validator(mode="after")
     def require_blocking_findings(self) -> ProposalFinalReviewArtifact:
-        """Require an actionable explanation when export remains blocked."""
+        """Require an actionable explanation for an editorial revision request."""
         if not self.ready_for_export and not self.findings:
             raise ValueError("A review that requires revision must include at least one finding")
         return self
@@ -324,8 +326,6 @@ def _merge_proposal_context(
     merged = {block.key: block for block in blocks if block.key not in removed}
     for block in patch.upsert:
         merged[block.key] = block
-    if not merged:
-        raise ValueError("Proposal context must contain at least one block")
     return paper_schemas.ProposalFoundation(blocks=list(merged.values()))
 
 
@@ -379,13 +379,17 @@ def _source_path_allowed(path: str, allowed_paths: Iterable[str]) -> bool:
 def _validate_proposal_source_changes(
     previous_entries: Iterable[tuple[str, bytes]],
     current_entries: Iterable[tuple[str, bytes]],
-    allowed_paths: list[str],
+    allowed_paths: list[str] | None,
 ) -> set[str]:
-    """Reject source edits outside the current proposal stage boundary."""
+    """Report actual changes, enforcing legacy ownership only when requested."""
     previous = dict(previous_entries)
     current = dict(current_entries)
     changed = {path for path in previous.keys() | current.keys() if previous.get(path) != current.get(path)}
-    forbidden = sorted(path for path in changed if not _source_path_allowed(path, allowed_paths))
+    for path in changed:
+        paper_service._validate_zip_path(path)
+    forbidden = sorted(
+        path for path in changed if allowed_paths is not None and not _source_path_allowed(path, allowed_paths)
+    )
     if forbidden:
         raise ValueError(f"Proposal stage modified source outside its boundary: {', '.join(forbidden[:10])}")
     return changed
@@ -453,6 +457,8 @@ def _supersede_boundary_targets(
 
 def _workspace_source_entries(source_root: Path) -> list[tuple[str, bytes]]:
     """Collect a validated, symlink-free project tree after an agent edit."""
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise ValueError("Paper workspace source must be a real directory")
     entries: list[tuple[str, bytes]] = []
     for path in sorted(source_root.rglob("*")):
         if path.is_symlink():
@@ -464,6 +470,86 @@ def _workspace_source_entries(source_root: Path) -> list[tuple[str, bytes]]:
         entries.append((relative, path.read_bytes()))
     paper_service.validate_paper_source_batch(entries)
     return entries
+
+
+def _publish_proposal_source(
+    db: Session,
+    workspace: models.PaperWorkspace,
+    run: models.PaperAgentRun,
+    source: models.PaperSourceVersion,
+    entries: list[tuple[str, bytes]],
+    *,
+    artifact_key: str,
+    summary: str,
+    context_patch: paper_schemas.ProposalContextPatch,
+    entry_path: str | None = None,
+    status: str = "ready",
+    findings: list[str] | None = None,
+    approval_required: bool | None = None,
+) -> bool:
+    """Publish first writes or stage existing author content for approval.
+
+    Args:
+        db: Session owning the source publication transaction.
+        workspace: Proposal workspace receiving the result.
+        run: Agent run whose artifact describes the changes.
+        source: Original active source used by the agent.
+        entries: Validated complete source tree after the agent's edits.
+        artifact_key: Immutable structured result object for this publication.
+        summary: Author-facing description of the changes.
+        context_patch: Shared research context changes applied on publication.
+        entry_path: Optional new Typst entry path.
+        status: Editorial outcome of the result.
+        findings: Editorial findings retained alongside the artifact.
+        approval_required: Optional decision based on manual edits since the last publication.
+
+    Returns:
+        Whether the source is published, rather than awaiting approval.
+    """
+    foundation = _merge_proposal_context(workspace.proposal_foundation, context_patch)
+    previous = paper_service._source_entries(source)
+    needs_approval = (
+        approval_required
+        if approval_required is not None
+        else paper_service._proposal_changes_need_approval(workspace, previous, entries)
+    )
+    if needs_approval:
+        stage = paper_workflow.get_research_workflow(workspace.mode).stage_for_run_kind(run.run_kind)
+        candidate = paper_service._create_source_revision_candidate(
+            db,
+            workspace,
+            source,
+            entries,
+            title=f"Review proposal {stage} changes",
+            summary=summary,
+            run_id=run.id,
+            publication={
+                "run_kind": run.run_kind,
+                "artifact_object_key": artifact_key,
+                "context_patch": context_patch.model_dump(mode="json"),
+                "entry_path": entry_path,
+                "status": status,
+                "findings": findings or [],
+            },
+        )
+        run.request_payload = {**(run.request_payload or {}), "pending_candidate_id": str(candidate.id)}
+        return False
+    if dict(previous) != dict(entries):
+        source = paper_service._persist_source_entries(
+            db,
+            workspace,
+            source,
+            entries,
+            change_summary=summary,
+            commit=False,
+        )
+    workspace.proposal_foundation = foundation.model_dump(mode="json")
+    if entry_path:
+        workspace.proposal_entry_path = entry_path
+    run.source_version_id = source.id
+    _update_proposal_stage_state(workspace, run, source.id, status=status, summary=summary, findings=findings)
+    db.add(workspace)
+    return True
 
 
 def _persist_discovery_package(
@@ -509,16 +595,11 @@ def _persist_discovery_package(
     evaluator_file = metadata.get("evaluator_file_name")
     algorithm_dir = metadata.get("algorithm_dir_name")
     algorithm_file = metadata.get("algorithm_file_name")
-    if not all(
-        isinstance(value, str) and value
-        for value in (evaluator_file, algorithm_dir, algorithm_file)
-    ):
+    if not all(isinstance(value, str) and value for value in (evaluator_file, algorithm_dir, algorithm_file)):
         raise ValueError("AutoDiscovery task package metadata is incomplete")
     dynamic_missing = sorted({evaluator_file, f"{algorithm_dir}/{algorithm_file}"}.difference(manifest))
     if dynamic_missing:
-        raise ValueError(
-            f"AutoDiscovery task package is incomplete: {', '.join(dynamic_missing)}"
-        )
+        raise ValueError(f"AutoDiscovery task package is incomplete: {', '.join(dynamic_missing)}")
     validation_report = dict(reported_validation)
     validation_report.update(
         {
@@ -550,6 +631,7 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
     result_path = work_dir / "output" / "result.json"
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     source_committed = False
+    pending_source_approval = False
     with get_db_session() as db:
         run = db.get(models.PaperAgentRun, run_id)
         if run is None or run.status == models.PaperAgentRunStatus.CANCELLED.value:
@@ -557,7 +639,17 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
         workspace = db.get(models.PaperWorkspace, run.workspace_id)
         if workspace is None or workspace.user_id != user_id:
             raise RuntimeError("Paper run owner changed")
-        artifact_key = f"paper/{user_id}/{workspace.id}/runs/{run.id}/result.json"
+        continuous = bool((run.request_payload or {}).get("auto_workflow"))
+        if workspace.mode in {"proposal", "manuscript"}:
+            parent = db.get(models.PaperSourceVersion, run.source_version_id) if run.source_version_id else None
+            paper_service._guard_source_publication(
+                db,
+                workspace,
+                parent,
+                expected_content_hash=(run.request_payload or {}).get("source_content_hash"),
+            )
+            db.refresh(workspace)
+        artifact_key = f"paper/{user_id}/{workspace.id}/runs/{run.id}/{uuid.uuid4()}/result.json"
         storage.upload(artifact_key, result_path.read_bytes(), content_type="application/json")
 
         if run.run_kind == models.PaperAgentRunKind.PROPOSAL_FORMATTING.value:
@@ -579,32 +671,29 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
             source_path = _canonical_source_reference(artifact.source_path, current_manifest)
             if source_path != requested_path or PurePosixPath(source_path).suffix.lower() != ".typ":
                 raise ValueError("Proposal formatting result does not match the requested Typst source")
-            allowed_paths = list((run.request_payload or {}).get("writable_paths") or [])
-            _validate_proposal_source_changes(paper_service._source_entries(source), entries, allowed_paths)
+            allowed_paths = None if continuous else list((run.request_payload or {}).get("writable_paths") or [])
+            changed_paths = _validate_proposal_source_changes(
+                paper_service._source_entries(source), entries, allowed_paths
+            )
+            if continuous:
+                artifact.source_paths = sorted(changed_paths)
             entries = paper_service.ensure_proposal_assembly(entries, source_path)
             entry_map = dict(entries)
             formatted = entry_map.get(source_path, b"")
             if not formatted.strip() or len(formatted) > 5 * 1024 * 1024:
                 raise ValueError("Formatted Typst source is empty or too large")
-            workspace.proposal_foundation = _merge_proposal_context(
-                workspace.proposal_foundation,
-                artifact.context_patch,
-            ).model_dump(mode="json")
-            workspace.proposal_entry_path = source_path
-            paper_service._persist_source_entries(
+            source_committed = _publish_proposal_source(
                 db,
                 workspace,
+                run,
                 source,
                 entries,
-                change_summary=artifact.summary,
-            )
-            _update_proposal_stage_state(
-                workspace,
-                run,
-                source.id,
+                artifact_key=artifact_key,
                 summary=artifact.summary,
+                context_patch=artifact.context_patch,
+                entry_path=source_path,
             )
-            source_committed = True
+            pending_source_approval = not source_committed
         elif run.run_kind in {
             models.PaperAgentRunKind.PROPOSAL_LITERATURE.value,
             models.PaperAgentRunKind.PROPOSAL_RATIONALE.value,
@@ -619,7 +708,7 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
                 raise RuntimeError("Paper source is missing")
             source_root = paper_service.paper_workspace_source_dir(user_id, workspace.id)
             entries = _workspace_source_entries(source_root)
-            allowed_paths = list((run.request_payload or {}).get("writable_paths") or [])
+            allowed_paths = None if continuous else list((run.request_payload or {}).get("writable_paths") or [])
             changed_paths = _validate_proposal_source_changes(
                 paper_service._source_entries(source),
                 entries,
@@ -627,34 +716,36 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
             )
             if not workspace.proposal_entry_path:
                 raise ValueError("Proposal entry document is missing")
+            current_manifest = [path for path, _data in entries]
+            reported_paths = (
+                changed_paths
+                if continuous
+                else {
+                    _canonical_source_reference(path, set(source.manifest) | set(current_manifest))
+                    for path in artifact.source_paths
+                }
+            )
+            if not continuous and (not changed_paths or not changed_paths.issubset(reported_paths)):
+                raise ValueError("Proposal stage result does not describe every modified source file")
+            if allowed_paths is not None and any(
+                not _source_path_allowed(path, allowed_paths) for path in reported_paths
+            ):
+                raise ValueError("Proposal stage result contains a source path owned by another stage")
             entries = paper_service.ensure_proposal_assembly(
                 entries,
                 workspace.proposal_entry_path,
             )
-            current_manifest = [path for path, _data in entries]
-            reported_paths = {_canonical_source_reference(path, current_manifest) for path in artifact.source_paths}
-            if not changed_paths or not changed_paths.issubset(reported_paths):
-                raise ValueError("Proposal stage result does not describe every modified source file")
-            if any(not _source_path_allowed(path, allowed_paths) for path in reported_paths):
-                raise ValueError("Proposal stage result contains a source path owned by another stage")
-            paper_service._persist_source_entries(
+            source_committed = _publish_proposal_source(
                 db,
                 workspace,
+                run,
                 source,
                 entries,
-                change_summary=artifact.summary,
-            )
-            workspace.proposal_foundation = _merge_proposal_context(
-                workspace.proposal_foundation,
-                artifact.context_patch,
-            ).model_dump(mode="json")
-            _update_proposal_stage_state(
-                workspace,
-                run,
-                source.id,
+                artifact_key=artifact_key,
                 summary=artifact.summary,
+                context_patch=artifact.context_patch,
             )
-            source_committed = True
+            pending_source_approval = not source_committed
         elif run.run_kind == models.PaperAgentRunKind.PROPOSAL_FINAL_REVIEW.value:
             artifact = ProposalFinalReviewArtifact.model_validate(payload)
             source = db.get(models.PaperSourceVersion, run.source_version_id)
@@ -662,7 +753,7 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
                 raise RuntimeError("Paper source is missing")
             source_root = paper_service.paper_workspace_source_dir(user_id, workspace.id)
             entries = _workspace_source_entries(source_root)
-            allowed_paths = list((run.request_payload or {}).get("writable_paths") or [])
+            allowed_paths = None if continuous else list((run.request_payload or {}).get("writable_paths") or [])
             changed_paths = _validate_proposal_source_changes(
                 paper_service._source_entries(source),
                 entries,
@@ -670,29 +761,27 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
             )
             current_manifest = [path for path, _data in entries]
             entry_path = _canonical_source_reference(artifact.entry_path, current_manifest)
-            if entry_path != workspace.proposal_entry_path or changed_paths.difference({entry_path}):
+            if entry_path != workspace.proposal_entry_path or (
+                not continuous and changed_paths.difference({entry_path})
+            ):
                 raise ValueError("Final review may only update the proposal entry document")
             entries = paper_service.ensure_proposal_assembly(entries, entry_path)
-            paper_service._persist_source_entries(
+            if continuous:
+                artifact.source_paths = sorted(changed_paths)
+            source_committed = _publish_proposal_source(
                 db,
                 workspace,
+                run,
                 source,
                 entries,
-                change_summary=artifact.summary,
-            )
-            workspace.proposal_foundation = _merge_proposal_context(
-                workspace.proposal_foundation,
-                artifact.context_patch,
-            ).model_dump(mode="json")
-            _update_proposal_stage_state(
-                workspace,
-                run,
-                source.id,
+                artifact_key=artifact_key,
                 status=("ready" if artifact.ready_for_export else "needs_revision"),
                 summary=artifact.summary,
+                context_patch=artifact.context_patch,
+                entry_path=entry_path,
                 findings=artifact.findings,
             )
-            source_committed = True
+            pending_source_approval = not source_committed
         elif run.run_kind == models.PaperAgentRunKind.REBUTTAL_BASELINE.value:
             artifact = RebuttalBaselineArtifact.model_validate(payload)
             context = dict(workspace.rebuttal_context or {})
@@ -1039,7 +1128,9 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
         run.status = models.PaperAgentRunStatus.READY.value
         run.progress = 100
         run.stage = "completed"
-        if (
+        if pending_source_approval:
+            run.message = "Proposal changes await author approval"
+        elif (
             run.run_kind == models.PaperAgentRunKind.PROPOSAL_FINAL_REVIEW.value
             and isinstance(artifact, ProposalFinalReviewArtifact)
             and not artifact.ready_for_export
@@ -1065,4 +1156,8 @@ def _persist_output(run_id: uuid.UUID, user_id: uuid.UUID, work_dir: Path) -> bo
         run.updated_time = datetime.now(UTC)
         db.add(run)
         db.commit()
+        if workspace.mode == "proposal":
+            active_source = db.get(models.PaperSourceVersion, workspace.active_source_version_id)
+            if active_source is not None:
+                paper_service._sync_paper_workspace_source_best_effort(workspace, active_source)
     return source_committed

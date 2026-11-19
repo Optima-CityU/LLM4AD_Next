@@ -71,7 +71,7 @@ ENV ADB_BIN=/usr/bin/adb ADB_VENDOR_KEYS=/run/adb-identity \
 FROM ${HGAMEY_NATIVE_IMAGE} AS gateway
 USER root
 ARG LLM4AD_PACKAGE=llm4ad-next
-ARG LLM4AD_EXTRAS=""
+ARG LLM4AD_EXTRAS=gateway-ui
 ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY deployment/wheels/ /wheels/
 RUN extras=""; \
@@ -93,6 +93,6 @@ USER hgamey
 WORKDIR /data
 EXPOSE 8768
 ENTRYPOINT ["python3", "-m", "llm4ad.gateway"]
-CMD ["start", "--no-ui"]
+CMD ["start", "--no-open-browser"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15m --retries=3 \
   CMD ["python3", "-m", "llm4ad.gateway", "health", "--state-dir", "/data/gateway"]

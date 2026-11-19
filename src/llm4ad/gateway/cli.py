@@ -80,7 +80,7 @@ def start(
         typer.Option(exists=True, dir_okay=False, help="Optional JSON environment settings"),
     ] = None,
     ui: Annotated[
-        bool | None, typer.Option("--ui/--no-ui", help="Optional browser control panel")
+        bool | None, typer.Option("--ui/--no-ui", help="Start the browser control panel by default")
     ] = None,
     open_browser: Annotated[bool | None, typer.Option("--open-browser/--no-open-browser")] = None,
     ui_host: str | None = None,
@@ -129,7 +129,7 @@ def start(
             },
         )
         available = importlib.util.find_spec("nicegui") is not None
-        enabled = ui if ui is not None else flag(environment, "LLM4AD_GATEWAY_UI", available)
+        enabled = ui if ui is not None else flag(environment, "LLM4AD_GATEWAY_UI", True)
         if enabled:
             if not available:
                 raise ValueError(

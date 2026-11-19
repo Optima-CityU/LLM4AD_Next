@@ -1,7 +1,7 @@
 ARG GATEWAY_BASE_IMAGE=python:3.12-slim
 FROM ${GATEWAY_BASE_IMAGE}
 ARG LLM4AD_PACKAGE=llm4ad-next
-ARG LLM4AD_EXTRAS=""
+ARG LLM4AD_EXTRAS=gateway-ui
 ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY wheels/ /wheels/
 RUN extras=""; \
@@ -18,10 +18,10 @@ RUN extras=""; \
       fi; \
       python -m pip install --no-cache-dir "$package"; \
     fi
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 LLM4AD_GATEWAY_UI_HOST=0.0.0.0
 WORKDIR /data
 EXPOSE 8768
 ENTRYPOINT ["python", "-m", "llm4ad.gateway"]
-CMD ["start", "--no-ui"]
+CMD ["start", "--no-open-browser"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["python", "-m", "llm4ad.gateway", "health", "--state-dir", "/data/gateway"]

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import GatewayPoolPicker from "@/components/EvaluationGateway/GatewayPoolPicker"
+import GatewayPicker from "@/components/EvaluationGateway/GatewayPicker"
 import {
   Select,
   SelectContent,
@@ -7,7 +7,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { normalizeGatewayPool } from "@/lib/gatewayPool"
 import DiverseIslandStrategyPreview from "./DiverseIslandStrategyPreview"
 import FieldLabel from "./FieldLabel"
 import type { JsonSchema } from "./resolveSchema"
@@ -75,14 +74,15 @@ export default function SchemaDiscriminatedField({
       | Record<string, unknown>
       | undefined
     const next = { ...defaults, [info.propertyName]: newType }
-    onChange(newType === "remote" ? normalizeGatewayPool(next) : next)
+    onChange(next)
   }
 
+  const isRemote = selectedOption.value === "remote"
   const filteredProperties = { ...selectedOption.schema.properties }
   delete filteredProperties[info.propertyName]
-  const isRemote = selectedOption.value === "remote"
   if (isRemote) {
     for (const key of [
+      "gateway_id",
       "gateway_ids",
       "contract",
       "selection_mode",
@@ -174,7 +174,7 @@ export default function SchemaDiscriminatedField({
       </div>
 
       {isRemote && (
-        <GatewayPoolPicker
+        <GatewayPicker
           value={value ?? { type: "remote" }}
           onChange={onChange}
         />

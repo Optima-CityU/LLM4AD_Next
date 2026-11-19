@@ -7,13 +7,17 @@ random_seed: 42
 base_dir: ./runs
 
 background: |
-  Evolve shader.comp for single-frame super-resolution of Genshin Impact
-  screenshots on an authorized remote GPU. The original seed is a bilinear
+  Evolve shader.comp for single-frame super-resolution on an authorized
+  remote GPU. The original seed is a bilinear
   upscaler with half-pixel-centered coordinates and clamped border sampling.
   Choose one evaluator in the wizard. The static evaluator measures GPU
   operator_latency_ms and psnr_db against fixed reference images, automatically
   enforces the fixed PSNR constraints and scores same-run baseline-relative
   latency improvement (%). It never launches Genshin.
+  The paired static dataset profile uses native 2x RGB pairs from QRISP and
+  GameIR-SR, requires nonnegative mean PSNR change in both datasets, and scores
+  their equally weighted per-frame latency improvements. Its image attachments
+  contain one representative comparison collage per dataset.
   The game evaluator injects the compiled layer into Genshin and scores a
   frozen weighted combination of A/B FPS, frame presentation P95, GPU activity
   per presented frame and official quality penalties, with default weights
@@ -57,13 +61,12 @@ background: |
   writes. A smaller local_size with unchanged global-ID indexing leaves
   holes and is invalid. Avoid barriers after nonuniform early returns.
 
-  The immutable bilinear baseline, private Genshin reference frames,
+  The immutable bilinear baseline, benchmark image inputs,
   input/output sizes, quality thresholds, compiler, device profile, timing
   protocol and dispatch grid belong to the gateway, outside this candidate.
   Do not tune measurement conditions or hardcode reference image contents.
   Compilation and SPIR-V validation occur on the gateway before submission.
-  This case covers Genshin only; retain the benchmark's limits
-  when interpreting measured latency and quality.
+  Interpret measured latency and quality within the selected benchmark's scope.
 
 # The existing wizard binds a configured provider; no credentials are packaged.
 providers: []
@@ -98,15 +101,12 @@ planner:
 
 evaluator:
   type: remote
-  # Choose a comparable benchmark; authorized devices join its pool dynamically.
-  selection_mode: auto
-  gateway_ids: []
+  # Select a connected gateway and evaluator before launching the task.
+  gateway_id: null
   contract: {}
-  max_attempts: 3
-  lease_timeout: 60.0
   parameters: {}
   candidate_paths: [shader.comp]
-  # Active budget covers compilation, measurement and cleanup, excluding pool waiting.
+  # Active budget covers compilation, measurement and cleanup, excluding platform queue time.
   timeout: 7200.0
   max_retries: 1
   parallel: true

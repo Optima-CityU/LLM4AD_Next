@@ -47,6 +47,8 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
     task_id = os.environ.get("LLM4AD_REMOTE_TASK_ID", "")
     if not url or not token or not task_id:
         raise RuntimeError("Remote evaluation requires a platform task runtime")
+    if not config.gateway_id:
+        raise ValueError("Choose one gateway and evaluator before running this task")
     bundle = pack_candidate(cfg.project_root, config.candidate_paths)
     key = hashlib.sha256(
         bundle
@@ -80,10 +82,7 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
     temporary.replace(pending)
     body = {
         "id": request_id,
-        "gateway_ids": config.gateway_ids,
-        "selection_mode": config.selection_mode,
-        "max_attempts": config.max_attempts,
-        "lease_timeout": config.lease_timeout,
+        "gateway_id": config.gateway_id,
         "dispatch_version": 2,
         "contract": config.contract,
         "timeout": cfg.timeout,

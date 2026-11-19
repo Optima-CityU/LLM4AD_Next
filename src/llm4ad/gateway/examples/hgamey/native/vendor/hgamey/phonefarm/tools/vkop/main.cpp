@@ -20,10 +20,11 @@
 // 用法:
 //   vkop_runner --shader <spv> --track sr|frame_gen [--seconds N] [--iterations N]
 //               [--in-width W --in-height H] [--out-width W --out-height H]
-//               [--reference <rgba8 raw>] [--output-rgba <new file>] [--json]
+//               [--reference <rgba8 raw>] [--input-rgba <rgba8 raw>] [--output-rgba <new file>] [--json]
 
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -77,6 +78,7 @@ struct Args {
   std::string shader;
   std::string track = "sr";
   std::string reference;
+  std::string input_rgba;
   std::string output_rgba;  // Optional raw readback evidence, outside GPU timing.
   int seconds = 0;        // >0 时按时长跑, 否则按 iterations
   int iterations = 200;
@@ -98,6 +100,7 @@ bool parse_args(int argc, char **argv, Args &a) {
     if (k == "--shader") { const char *v = next("--shader"); if (!v) return false; a.shader = v; }
     else if (k == "--track") { const char *v = next("--track"); if (!v) return false; a.track = v; }
     else if (k == "--reference") { const char *v = next("--reference"); if (!v) return false; a.reference = v; }
+    else if (k == "--input-rgba") { const char *v = next("--input-rgba"); if (!v) return false; a.input_rgba = v; }
     else if (k == "--output-rgba") { const char *v = next("--output-rgba"); if (!v) return false; a.output_rgba = v; }
     else if (k == "--seconds") { const char *v = next("--seconds"); if (!v) return false; a.seconds = atoi(v); }
     else if (k == "--iterations") { const char *v = next("--iterations"); if (!v) return false; a.iterations = atoi(v); }
@@ -112,7 +115,52 @@ bool parse_args(int argc, char **argv, Args &a) {
   if (a.shader.empty()) { g_error = "缺少 --shader"; return false; }
   if (a.track != "sr" && a.track != "frame_gen") { g_error = "--track 只能是 sr 或 frame_gen"; return false; }
   if (a.in_w <= 0 || a.in_h <= 0 || a.out_w <= 0 || a.out_h <= 0) { g_error = "分辨率必须为正"; return false; }
+  if (!a.input_rgba.empty() && (a.track != "sr" || a.reference.empty())) {
+    g_error = "An explicit LR input requires the SR track and an HR reference";
+    return false;
+  }
   return true;
+}
+
+// Read an exact RGBA8 image. Extra or missing pixels are input errors.
+bool load_rgba(const std::string &path, int width, int height, std::vector<uint8_t> &pixels) {
+  FILE *file = fopen(path.c_str(), "rb");
+  if (!file) { g_error = "Cannot open RGBA input " + path; return false; }
+  pixels.resize(static_cast<size_t>(width) * height * 4);
+  const bool complete = fread(pixels.data(), 1, pixels.size(), file) == pixels.size()
+      && fgetc(file) == EOF && feof(file) && !ferror(file);
+  fclose(file);
+  if (!complete) g_error = "Invalid RGBA input size for " + path;
+  return complete;
+}
+
+// Mean luminance SSIM over 8-by-8 windows, including partial edge windows.
+double ssim_luma(const std::vector<uint8_t> &image, const std::vector<uint8_t> &truth,
+                 int width, int height) {
+  constexpr double c1 = 6.5025, c2 = 58.5225;
+  double sum = 0.0;
+  int windows = 0;
+  const auto luma = [](const uint8_t *p) { return 0.299*p[0] + 0.587*p[1] + 0.114*p[2]; };
+  for (int y0 = 0; y0 < height; y0 += 8) {
+    for (int x0 = 0; x0 < width; x0 += 8) {
+      double x_sum = 0, y_sum = 0, xx_sum = 0, yy_sum = 0, xy_sum = 0;
+      int count = 0;
+      for (int y = y0; y < std::min(y0 + 8, height); ++y) {
+        for (int x = x0; x < std::min(x0 + 8, width); ++x) {
+          size_t offset = (static_cast<size_t>(y) * width + x) * 4;
+          double a = luma(image.data() + offset), b = luma(truth.data() + offset);
+          x_sum += a; y_sum += b; xx_sum += a*a; yy_sum += b*b; xy_sum += a*b;
+          ++count;
+        }
+      }
+      const double mx = x_sum / count, my = y_sum / count;
+      const double vx = xx_sum / count - mx*mx, vy = yy_sum / count - my*my;
+      const double covariance = xy_sum / count - mx*my;
+      sum += ((2*mx*my + c1)*(2*covariance + c2)) / ((mx*mx + my*my + c1)*(vx + vy + c2));
+      ++windows;
+    }
+  }
+  return sum / windows;
 }
 
 // ── 参考图: 高分辨率真值 ──
@@ -702,21 +750,7 @@ int main(int argc, char **argv) {
   int ref_w = a.out_w, ref_h = a.out_h;
   std::vector<uint8_t> reference;
   if (!a.reference.empty()) {
-    FILE *f = fopen(a.reference.c_str(), "rb");
-    if (!f) { emit_failure("打不开参考图 " + a.reference); return 2; }
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    size_t want = static_cast<size_t>(ref_w) * ref_h * 4;
-    if (static_cast<size_t>(sz) != want) {
-      fclose(f);
-      emit_failure("参考图尺寸不符: 需要 RGBA8 " + std::to_string(want) + " 字节");
-      return 2;
-    }
-    reference.resize(want);
-    size_t got = fread(reference.data(), 1, want, f);
-    fclose(f);
-    if (got != want) { emit_failure("参考图读取不全"); return 2; }
+    if (!load_rgba(a.reference, ref_w, ref_h, reference)) { emit_failure(g_error); return 2; }
   } else {
     reference = make_reference(ref_w, ref_h);
   }
@@ -724,7 +758,13 @@ int main(int argc, char **argv) {
   std::vector<uint8_t> prev_frame, curr_frame, truth_frame;
 
   if (a.track == "sr") {
-    std::vector<uint8_t> lowres = downsample(reference, ref_w, ref_h, a.in_w, a.in_h);
+    std::vector<uint8_t> lowres;
+    if (a.input_rgba.empty()) {
+      lowres = downsample(reference, ref_w, ref_h, a.in_w, a.in_h);
+    } else if (!load_rgba(a.input_rgba, a.in_w, a.in_h, lowres)) {
+      emit_failure(g_error);
+      return 2;
+    }
     if (!upload(c, c.images[0], lowres)) { emit_failure(g_error); return 2; }
     // 输出图也要先过一次 layout 转换, 否则首次 dispatch 的写入 layout 非法
     std::vector<uint8_t> zero(static_cast<size_t>(a.out_w) * a.out_h * 4, 0);
@@ -800,8 +840,7 @@ int main(int argc, char **argv) {
   std::vector<uint8_t> produced;
   if (!readback(c, c.images[out_idx], produced)) { emit_failure(g_error); return 2; }
   if (!a.output_rgba.empty() && !save_readback(a.output_rgba, produced)) {
-    emit_failure(g_error);
-    return 2;
+    if (a.input_rgba.empty()) { emit_failure(g_error); return 2; }
   }
 
   // 画质: SR 比参考图, 插帧比**真值中间帧**
@@ -889,6 +928,9 @@ int main(int argc, char **argv) {
   }
   printf("],\"count\":%zu,\"emitted_stride\":%zu,\"median\":%.3f},\"psnr_db\":%.4f,",
          samples.size(), stride, median, q);
+  if (!a.input_rgba.empty()) {
+    printf("\"ssim\":%.8f,\"input_source\":\"paired_rgba8\",", ssim_luma(produced, truth, a.out_w, a.out_h));
+  }
   if (a.track == "frame_gen") {
     printf("\"artifacts\":{\"hud_ghost_db\":%.4f,\"stretch_pct\":%.4f},",
            hud_ghost_db, stretch_pct);

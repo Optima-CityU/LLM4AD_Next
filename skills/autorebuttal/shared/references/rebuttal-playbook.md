@@ -1,7 +1,7 @@
 # Rebuttal Playbook
 
 Adapted without workflow compression from AutoRebuttal's rebuttal playbook.
-See `/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+See [the adaptation attribution](../../ATTRIBUTION.md).
 
 ## Concern Extraction
 

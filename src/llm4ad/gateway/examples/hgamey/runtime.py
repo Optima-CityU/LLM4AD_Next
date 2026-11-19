@@ -11,7 +11,7 @@ import uuid
 from contextlib import suppress
 from pathlib import Path
 
-from llm4ad.gateway.sdk.contracts import RemoteJob
+from llm4ad.gateway.sdk.contracts import RemoteJob, load_evaluator
 from llm4ad.gateway.sdk.executions import Executions
 from llm4ad.gateway.sdk.journal import Journal, Reporter
 from llm4ad.gateway.sdk.lifecycle import run_operation
@@ -22,6 +22,7 @@ from llm4ad.gateway.sdk.storage import persist
 from .benchmark import canonical, compiler_logs, digest, profile_key
 from .configuration import configure
 from .evidence import HGameyEvidencePolicy
+from .pool import HGameyPoolEvaluator
 
 
 def run_startup_operation(filename, mode, payload, journal_path, operation, seconds, rounds):
@@ -94,6 +95,10 @@ class HGameyRuntime(GatewayRuntime):
         self.evaluator, self.engine = evaluator, None
         self.platform_directory = self.options["root"] / "platforms" / uuid.uuid5(uuid.NAMESPACE_URL, self.options["server"]).hex
         self.legacy = None
+        self.pool_log_profiles = []
+        self.device_checks = {}
+        self.pool_checks = {}
+        self.device_check_locks = {}
 
     def lease_directories(self) -> list[Path]:
         """Preserve backend/profile ownership and existing persisted gateway identities."""
@@ -112,30 +117,109 @@ class HGameyRuntime(GatewayRuntime):
         )
 
     def bindings(self) -> list[GatewayBinding]:
-        """Bind each physical device to its immutable profile and separate SDK state."""
-        bindings = []
+        """Advertise one evaluator per comparison contract."""
+        groups = {}
         for profile in self.options["profiles"]:
-            device = profile["device"]
+            device_id = profile["device"]["id"]
             directory = (
-                self.platform_directory if device["id"] == self.legacy else self.platform_directory / "devices" / device["id"]
+                self.platform_directory if device_id == self.legacy
+                else self.platform_directory / "devices" / device_id
             )
-            mode = profile.get("mode", "legacy")
-            key = device["id"]
+            mode = profile["mode"]
+            key = device_id
             if mode != "legacy":
                 directory = directory / "evaluators" / mode
                 key += f"--{mode}"
             persist(profile["settings_path"], profile["settings"])
-            bindings.append(
-                GatewayBinding(
-                    key,
-                    profile["name"],
-                    self.configured_adapter(profile),
-                    directory,
-                    metadata={"endpoint": device["endpoint"], "device_id": device["id"], "evaluation_mode": mode},
-                    resource_key=device["id"],
-                )
+            spec = self.configured_adapter(profile)
+            contract = load_evaluator(spec).contract.model_dump(mode="json")
+            contract["metrics"].sort(key=lambda metric: metric["name"])
+            binding = GatewayBinding(
+                key, profile["name"], spec, directory,
+                metadata={"endpoint": profile["device"]["endpoint"], "device_id": device_id, "evaluation_mode": mode},
+                resource_key=device_id,
             )
+            groups.setdefault(digest(canonical(contract)), []).append((profile, binding))
+
+        registry = self.platform_directory / "evaluators"
+        anchors = {
+            Path(json.loads(path.read_text())["directory"]) for path in registry.glob("*/pool-anchor.json")
+        }
+        bindings = []
+        for key, profiles in groups.items():
+            scope = registry / key
+            if len(profiles) == 1 and not (scope / "pool-anchor.json").is_file() and profiles[0][1].directory not in anchors:
+                bindings.append(profiles[0][1])
+            else:
+                bindings.append(self.pool_binding(key, scope, profiles, anchors))
         return bindings
+
+    def pool_binding(self, key, scope, profiles, anchors):
+        """Build the local pool while preserving one drained gateway identity."""
+        anchor_path = scope / "pool-anchor.json"
+        if anchor_path.is_file():
+            directory = Path(json.loads(anchor_path.read_text())["directory"])
+        else:
+            previous = [binding.directory for _, binding in profiles if binding.directory not in anchors]
+            for base in previous:
+                for name in ("jobs.sqlite3", "startup.sqlite3"):
+                    journal_path = base / name
+                    if journal_path.is_file():
+                        journal = Journal(journal_path)
+                        Executions(journal)
+                        if any(row["state"] not in {"completed", "failed", "cancelled"} for row in journal.rows()):
+                            raise RuntimeError("Drain HGamey evaluator and readiness work before pooling devices")
+                        with journal.connect() as db:
+                            if db.execute("SELECT 1 FROM cleanup_debts LIMIT 1").fetchone():
+                                raise RuntimeError("Resolve HGamey restoration obligations before pooling devices")
+            # Keep one exact legacy registration when combining previously independent bindings.
+            directory = next((path for path in previous if (path / "identity.json").is_file()), scope)
+            persist(anchor_path, {"directory": str(directory)})
+            anchors.add(directory)
+
+        members = {}
+        readiness = {}
+        for profile, original in profiles:
+            device_id = profile["device"]["id"]
+            settings_path = profile["settings_path"]
+            pooled = {
+                **profile,
+                "settings": {**profile["settings"], "execution_backend": "http"},
+                "settings_path": settings_path.with_name(settings_path.stem + "-pool.json"),
+            }
+            persist(pooled["settings_path"], pooled["settings"])
+            members[device_id] = self.configured_adapter(pooled)
+            readiness[device_id] = (load_evaluator(original.evaluator), original.directory)
+            self.pool_log_profiles.append(pooled)
+
+        ready_path = scope / "ready.json"
+        config_path = scope / "members.json"
+        persist(ready_path, {"devices": []})
+        persist(config_path, {
+            "members": members,
+            "startup_members": {profile["device"]["id"]: original.evaluator for profile, original in profiles},
+            "key": key,
+            "database": str(self.options["executor_data"].absolute() / "assignments.sqlite3"),
+            "ready": str(ready_path),
+        })
+        spec = scope / "evaluator.py"
+        source = (
+            '"""Locally generated HGamey pool binding."""\n'
+            "from llm4ad.gateway.examples.hgamey.pool import HGameyPoolEvaluator\n"
+            "class PooledEvaluator(HGameyPoolEvaluator):\n"
+            '    """Use the local registry for this comparison contract."""\n'
+            "    def __init__(self):\n"
+            f"        super().__init__({str(config_path)!r})\n"
+        )
+        spec.write_text(source, encoding="utf-8")
+        self.device_checks[key] = readiness
+        first_profile, first_binding = profiles[0]
+        return GatewayBinding(
+            key, first_binding.name, f"{spec}:PooledEvaluator", directory,
+            capacity=len(members),
+            metadata={"evaluation_mode": first_profile["mode"], "pool_status": str(ready_path)},
+            fixed_capacity=True,
+        )
 
     def api_handler(self):
         """Provide the private device-job API to the SDK-owned local server."""
@@ -150,16 +234,60 @@ class HGameyRuntime(GatewayRuntime):
         Returns:
             The already constructed SDK executor for this physical resource.
         """
-        return self.engine.executors[binding.metadata["device_id"]] if self.engine else None
+        device_id = binding.metadata.get("device_id")
+        return self.engine.executors[device_id] if self.engine and device_id else None
 
     async def check(self, gateway) -> None:
-        """Run or recover the case-specific readiness-only baseline once."""
-        device_id = gateway.adapter.benchmark.settings["device_id"]
-        await self.restore_startup_packets(gateway.adapter, device_id)
-        self.engine.activate()
-        if self.engine.health()["devices"][device_id]["status"] != "ok":
-            raise RuntimeError(f"Device {device_id} has an unconfirmed restoration obligation")
-        await self.startup_check(gateway.adapter, gateway.root)
+        """Verify local phones independently for each declared benchmark."""
+        if not isinstance(gateway.adapter, HGameyPoolEvaluator):
+            await self.check_device(gateway.adapter, gateway.root)
+            return
+        key = gateway.adapter.config["key"]
+        if key not in self.pool_checks:
+            started = asyncio.get_running_loop().create_future()
+            self.pool_checks[key] = asyncio.create_task(self.verify_pool(key, gateway.adapter, started))
+            done, _ = await asyncio.wait((started, self.pool_checks[key]), return_when=asyncio.FIRST_COMPLETED)
+            if self.pool_checks[key] in done:
+                self.pool_checks[key].result()
+        if not gateway.adapter.verified():
+            raise RuntimeError("No HGamey phone has passed readiness checks")
+
+    async def verify_pool(self, key, adapter, started):
+        """Retry unready members locally so healthy peers can still run."""
+        pending = self.device_checks[key].copy()
+        verified = set()
+
+        async def verify(device_id, member, directory):
+            try:
+                await asyncio.wait_for(self.check_device(member, directory), self.options["startup_timeout"])
+            except Exception as error:
+                print(f"HGamey phone {device_id} failed readiness: {error}", flush=True)
+                return
+            verified.add(device_id)
+            pending.pop(device_id)
+            persist(adapter.ready_path, {"devices": sorted(verified)})
+            if not started.done():
+                started.set_result(None)
+
+        while pending:
+            await asyncio.gather(*(verify(device, *entry) for device, entry in list(pending.items())))
+            if not started.done():
+                started.set_result(None)
+            if pending:
+                await asyncio.sleep(15)
+
+    async def check_device(self, adapter, directory):
+        """Serialize startup restoration and readiness per physical phone."""
+        device_id = adapter.benchmark.settings["device_id"]
+        lock = self.device_check_locks.setdefault(device_id, asyncio.Lock())
+        async with lock:
+            await self.restore_startup_packets(adapter, device_id)
+            self.engine.executors[device_id].release("sdk-restoration")
+            self.engine.activate()
+            if self.engine.health()["devices"][device_id]["status"] != "ok":
+                raise RuntimeError(f"Device {device_id} has an unconfirmed restoration obligation")
+            directory.mkdir(parents=True, exist_ok=True)
+            await self.startup_check(adapter, directory)
 
     async def restore_startup_packets(self, adapter, device_id):
         """Retire interrupted readiness work before any recovered slot dispatch.
@@ -203,8 +331,16 @@ class HGameyRuntime(GatewayRuntime):
         """Pause only the evaluator bindings whose phone requires restoration."""
         if not self.engine:
             return False
-        device = self.engine.health()["devices"].get(binding.metadata["device_id"], {})
-        return device.get("status") == "ok" and device.get("worker_alive", False)
+        health = self.engine.health()["devices"]
+        if status := binding.metadata.get("pool_status"):
+            device_ids = json.loads(Path(status).read_text())["devices"]
+        else:
+            device_ids = [binding.metadata["device_id"]]
+        return any(
+            health.get(device, {}).get("status") == "ok"
+            and health[device].get("worker_alive", False)
+            for device in device_ids
+        )
 
     def evidence_policy(self, gateway):
         """Declare HGamey restoration and evidence ownership checks to the SDK collector."""
@@ -226,7 +362,7 @@ class HGameyRuntime(GatewayRuntime):
         if saved_state and (saved_state.get("remote_job_id") != job.id or saved_state.get("remote_attempt_id") != job.attempt_id):
             raise ValueError("Log state belongs to another accepted attempt")
         logs, accepted_key = {}, None
-        for profile in self.options["profiles"]:
+        for profile in [*self.options["profiles"], *getattr(self, "pool_log_profiles", ())]:
             settings = profile["settings"]
             if saved_state and saved_state.get("evaluation_mode") != settings.get("evaluation_mode"):
                 continue
@@ -249,12 +385,11 @@ class HGameyRuntime(GatewayRuntime):
                 identity["evaluation_profile"] = job.evaluation_profile
             key = digest(canonical(identity))
             stage = owned_path(directory / "jobs" / key, root)
-            if saved_state and (
-                saved_state.get("idempotency_key") != key
-                or Path(saved_state["evidence_directory"]) != stage
-                or saved_state.get("data_version") != version
-            ):
-                raise ValueError("Log staging identity differs from the accepted attempt")
+            if saved_state:
+                if Path(saved_state["evidence_directory"]) != stage:
+                    continue
+                if saved_state.get("idempotency_key") != key or saved_state.get("data_version") != version:
+                    raise ValueError("Log staging identity differs from the accepted attempt")
             if not (stage / "owner.json").is_file():
                 continue
             logs.update(compiler_logs(stage, job, version))
@@ -306,6 +441,9 @@ class HGameyRuntime(GatewayRuntime):
 
     async def close(self) -> None:
         """Wait for the device worker's existing cleanup before releasing ownership."""
+        for task in self.pool_checks.values():
+            task.cancel()
+        await asyncio.gather(*self.pool_checks.values(), return_exceptions=True)
         if self.engine:
             await asyncio.to_thread(self.engine.close)
 
@@ -449,7 +587,9 @@ class HGameyRuntime(GatewayRuntime):
         if not devices and len(configured_devices) == 1:
             devices.update(configured_devices)
         if len(devices) != 1:
-            raise RuntimeError("Cannot identify legacy device; start once with its HGAMEY_DEVICE_ID before enabling all devices")
+            raise RuntimeError(
+                "Cannot identify the legacy device. Restore its original enabled-device configuration and restart."
+            )
         device_id = devices.pop()
         persist(binding, {"device_id": device_id})
         return device_id

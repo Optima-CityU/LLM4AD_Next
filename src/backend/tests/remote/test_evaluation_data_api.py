@@ -519,19 +519,19 @@ def test_terminal_gateway_result_retains_files_and_candidate_references(platform
     assert platform.client.get(url(platform) + f"/{job['attempt_id']}/artifacts/{artifact_id}").content == data
 
 
-def test_pool_retry_evidence_defaults_to_latest_success_and_preserves_failure(platform):
-    """Order device attempts chronologically even when their UUID order disagrees."""
-    from test_gateway_api import claim, pool_result, register_pool_member, report, submit_pool
+def test_retry_evidence_defaults_to_latest_success_and_preserves_failure(platform):
+    """Order execution attempts chronologically even when their UUID order disagrees."""
+    from test_gateway_api import claim, fixed_result, register_v2, report, submit_fixed
 
-    first, second = register_pool_member(platform), register_pool_member(platform)
-    job = submit_pool(platform)[0]
+    gateway = register_v2(platform)
+    job = submit_fixed(platform, gateway)[0]
     identities = [
         uuid.UUID("ffffffff-ffff-4fff-bfff-ffffffffffff"),
         uuid.UUID("00000000-0000-4000-8000-000000000001"),
     ]
     created_at = datetime(2026, 1, 1, tzinfo=UTC)
     starts = [created_at + timedelta(minutes=1), created_at + timedelta(minutes=2)]
-    for index, gateway in enumerate((first, second)):
+    for index in range(2):
         with Session(platform.engine) as db:
             row = db.get(RemoteEvaluationJob, uuid.UUID(job["id"]))
             row.attempt_id = identities[index]
@@ -558,7 +558,7 @@ def test_pool_retry_evidence_defaults_to_latest_success_and_preserves_failure(pl
         assert response.status_code == 200, response.text
         assert response.json()["state"] == ("queued" if index == 0 else "completed")
 
-    final = pool_result(platform, job)
+    final = fixed_result(platform, job)
     assert final["state"] == "completed" and final["report"]["score"] == 7
     listed = platform.client.get(url(platform), params={"algorithm_id": "retry-node"}).json()
     assert listed["count"] == 2

@@ -1,6 +1,7 @@
-"""Contracts for coordinator delegation and stage-scoped publication."""
+"""Contracts for optional helpers, revision context and legacy publication."""
 
 import uuid
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException, Request
@@ -13,29 +14,123 @@ from app.services import paper_workflow_coordinator as coordinator
 from app.tasks import paper_agent
 
 
-def test_workers_load_their_own_skills_and_inherit_the_bound_model():
-    """Stage methods and author preferences reach workers explicitly."""
+def test_optional_helpers_load_domain_skills_and_inherit_the_bound_model():
+    """Helpers receive explicit methods and context without stage assignment."""
     workspace = models.PaperWorkspace(
         user_id=uuid.uuid4(), title="Proposal", mode="proposal", proposal_entry_path="main.typ"
     )
     agents = coordinator.coordinator_agents(workspace, "\nExplain findings in Chinese.")
     workflow = paper_workflow.get_research_workflow("proposal")
-    assert list(agents) == [stage.replace("_", "-") for stage in workflow.stages]
-    assert agents["formatting"]["skills"] == list(workflow.skills_by_run_kind["proposal_formatting"])
-    assert agents["formatting"]["model"] == "inherit"
-    assert "main.typ" in agents["formatting"]["prompt"]
-    assert "Explain findings in Chinese" in agents["methods"]["prompt"]
-    assert "mcp__llm4ad_stage__publish_stage_result" not in agents["methods"]["tools"]
+    assert set(agents) == {"analysis", "reference-check"}
+    for helper in agents.values():
+        assert helper["skills"] == ["openair-proposal"]
+        assert helper["model"] == "inherit"
+        assert "main.typ" in helper["prompt"]
+        assert "Explain findings in Chinese" in helper["prompt"]
+        assert "final text response" in helper["prompt"]
+        assert not {"Write", "Edit", "Bash", "Agent", "Task"}.intersection(helper["tools"])
+        assert not any("publish" in tool or "propose_region_change" in tool for tool in helper["tools"])
     assert coordinator.COORDINATOR_SKILL in coordinator.coordinator_skills(workflow)
 
 
-def test_rebuttal_workers_keep_existing_read_only_methods():
-    """Do not give paper-writing tools to the rebuttal stage workers."""
+def test_rebuttal_helpers_keep_sources_read_only_and_search_available():
+    """Both helper roles can check references without receiving mutating tools."""
     workspace = models.PaperWorkspace(user_id=uuid.uuid4(), title="Rebuttal", mode="manuscript")
-    workers = coordinator.coordinator_agents(workspace, "")
-    assert list(workers) == ["rebuttal-baseline", "autorebuttal", "ac-summary"]
-    assert workers["autorebuttal"]["skills"] == ["autorebuttal", "research-stage-publication"]
-    assert not set(workers["autorebuttal"]["tools"]) & {"Write", "Edit", "Bash"}
+    references = ["mcp__arxiv__search_papers", "mcp__research_search__search", "mcp__research_search__read_webpage"]
+    helpers = coordinator.coordinator_agents(
+        workspace, "", [*references, "Write", "Edit", "Bash", "mcp__llm4ad_stage__publish_research_revision"]
+    )
+    for helper in helpers.values():
+        assert helper["skills"] == ["autorebuttal-workflow"]
+        assert set(references).issubset(helper["tools"])
+        assert set(helper["tools"]) == {
+            "Read",
+            "Glob",
+            "Grep",
+            "mcp__llm4ad_stage__get_workflow_context",
+            "mcp__llm4ad_stage__get_region_context",
+            *references,
+        }
+        assert "Shared documents under /workspace/source are read-only" in helper["prompt"]
+        assert "author approves the targeted diff" in helper["prompt"]
+
+
+@pytest.mark.parametrize("entry", [None, "proposal.md", "目录/申请书.MD"])
+def test_markdown_proposals_do_not_load_typst_authoring(entry):
+    """The default proposal never injects legacy authoring or fixed Typst files."""
+    workflow = paper_workflow.get_research_workflow("proposal")
+    assert "typst-author" not in coordinator.coordinator_skills(workflow, entry)
+    paths = coordinator.workflow_paths(workflow, entry or "proposal.md")
+    assert (entry or "proposal.md") in paths
+    assert "sections/" in paths and "references.bib" in paths
+    assert not any(path.endswith(".typ") for path in paths)
+    assert all(coordinator.stage_paths(workflow, stage, entry or "proposal.md") == paths for stage in workflow.stages)
+
+
+def test_legacy_typst_entry_can_retain_authoring_skill():
+    """An explicit existing Typst entry keeps compatibility without changing defaults."""
+    workflow = paper_workflow.get_research_workflow("proposal")
+    assert "typst-author" in coordinator.coordinator_skills(workflow, "legacy/Main.TYP")
+
+
+@pytest.mark.parametrize("mode", ["algorithm", "autodesign"])
+def test_nonunified_workflows_retain_original_stage_workers(mode):
+    """Discovery and design keep their stage-specific methods and capabilities."""
+    workspace = models.PaperWorkspace(user_id=uuid.uuid4(), title="Existing workflow", mode=mode)
+    workflow = paper_workflow.get_research_workflow(mode)
+    workers = coordinator.coordinator_agents(workspace, "Preserve these author preferences.")
+    assert list(workers) == [stage.replace("_", "-") for stage in workflow.stages]
+    for stage in workflow.stages:
+        worker = workers[stage.replace("_", "-")]
+        paths = coordinator.stage_paths(workflow, stage, "proposal.typ")
+        assert worker["model"] == "inherit"
+        assert worker["skills"] == list(workflow.skills_by_run_kind[workflow.run_kind_by_stage[stage]])
+        expected_tools = ["Read", "Glob", "Grep", "mcp__llm4ad_stage__get_workflow_context"]
+        if paths:
+            expected_tools.extend(["Write", "Edit", "mcp__llm4ad_stage__check_typst"])
+        assert worker["tools"] == expected_tools
+        assert f"You are the {stage} stage worker" in worker["prompt"]
+        assert f"Edit only these stage-owned paths: {paths}" in worker["prompt"]
+        assert "publish_stage_result" in worker["prompt"]
+        assert "publish_research_revision" not in worker["prompt"]
+        assert "Preserve these author preferences" in worker["prompt"]
+
+
+@pytest.mark.parametrize("mode", ["algorithm", "autodesign"])
+def test_nonunified_context_requires_no_revision_or_reviewer_tables(mode, monkeypatch):
+    """Legacy context stays usable without proposal/rebuttal publication services."""
+    from app.schemas import paper_publication
+    from app.services import paper_revision_history
+
+    state_hash = Mock(side_effect=AssertionError("Unified revision service must not run"))
+    schemas = Mock(side_effect=AssertionError("Unified publication schemas must not load"))
+    monkeypatch.setattr(paper_revision_history, "current_state_hash", state_hash)
+    monkeypatch.setattr(paper_publication, "publication_schemas", schemas)
+    engine = create_engine("sqlite://")
+    models.PaperAgentRun.__table__.create(engine)
+    workspace = models.PaperWorkspace(user_id=uuid.uuid4(), title="Existing workflow", mode=mode)
+    workflow = paper_workflow.get_research_workflow(mode)
+    with Session(engine) as db:
+        context = coordinator.workflow_context(db, workspace)
+        assert context["publication_tool"] == "publish_stage_result"
+        assert not {"revision", "publication_schemas", "optional_helpers", "source_writes"}.intersection(context)
+        assert context["stage_keys_are_artifact_adapters"] is False
+        assert context["progress"] is None
+        for item, stage in zip(context["stages"], workflow.stages, strict=True):
+            kind = workflow.run_kind_by_stage[stage]
+            assert item["agent"] == stage.replace("_", "-")
+            assert item["skills"] == list(workflow.skills_by_run_kind[kind])
+            assert item["prerequisites"] == list(workflow.prerequisites_by_run_kind.get(kind, ()))
+            assert item["writable_paths"] == coordinator.stage_paths(workflow, stage, "proposal.typ")
+        if mode == "algorithm":
+            assert context["stages"][0]["prerequisites_satisfied"] is True
+            assert all(not item["prerequisites_satisfied"] for item in context["stages"][1:])
+            workspace.proposal_stage_states = {"discovery_baseline": {"status": "ready"}}
+            refreshed = coordinator.workflow_context(db, workspace)
+            assert refreshed["stages"][1]["prerequisites_satisfied"] is True
+            assert refreshed["stages"][2]["prerequisites_satisfied"] is False
+    state_hash.assert_not_called()
+    schemas.assert_not_called()
 
 
 @pytest.fixture
@@ -51,6 +146,7 @@ def coordinator_db(monkeypatch):
                 models.LLMProvider,
                 models.PaperWorkspace,
                 models.PaperSourceVersion,
+                models.PaperReview,
                 models.PaperAgentRun,
             )
         ],
@@ -88,10 +184,11 @@ def coordinator_db(monkeypatch):
 def test_publication_uses_existing_stage_identity_and_rejects_foreign_stages(coordinator_db):
     """The coordinator delegates persistence without changing artifact contracts."""
     db, workspace, main = coordinator_db
-    stage = coordinator.publication_run(db, workspace, main, "autorebuttal")
-    assert stage.id == paper_runtime._native_run_id(workspace.id, "autorebuttal")
+    stage = coordinator.publication_run(db, workspace, main, "autorebuttal", "revision-1")
+    assert stage.id == uuid.uuid5(main.id, "publication:autorebuttal:revision-1")
     assert stage.run_kind == "autorebuttal" and stage.id != main.id
-    assert coordinator.publication_run(db, workspace, main, "autorebuttal").id == stage.id
+    assert coordinator.publication_run(db, workspace, main, "autorebuttal", "revision-1").id == stage.id
+    assert coordinator.publication_run(db, workspace, main, "autorebuttal", "revision-2").id != stage.id
     with pytest.raises(HTTPException) as error:
         coordinator.publication_run(db, workspace, main, "methods")
     assert error.value.status_code == 422
@@ -103,7 +200,32 @@ def test_workflow_context_restores_current_state_without_guessing(coordinator_db
     result = coordinator.workflow_context(db, workspace)
     assert [stage["stage"] for stage in result["stages"]] == ["rebuttal_baseline", "autorebuttal", "ac_summary"]
     assert all(stage["status"] == "pending" for stage in result["stages"])
-    assert result["stages"][1]["prerequisites"] == ["rebuttal_baseline"]
+    assert all(stage["prerequisites"] == [] for stage in result["stages"])
+    assert all("agent" not in stage and "writable_paths" not in stage for stage in result["stages"])
+
+
+def test_context_discloses_exact_publication_schema_and_fresh_state_hash(coordinator_db, monkeypatch):
+    """A context refresh reads the authoritative state rather than a cached source hash."""
+    from app.schemas.paper_publication import publication_schemas
+    from app.services import paper_revision_history
+
+    db, workspace, _main = coordinator_db
+    revision_api = Mock(wraps=paper_revision_history.current_state_hash)
+    monkeypatch.setattr(paper_revision_history, "current_state_hash", revision_api)
+    first = coordinator.workflow_context(db, workspace)
+    revision_api.assert_called_once_with(db, workspace)
+    assert len(first["revision"]) == 64
+    assert first["publication_tool"] == "publish_research_revision"
+    assert first["publication_schemas"] == publication_schemas()
+    assert first["publication_schemas"]["properties"]["base_revision"]["type"] == "string"
+    assert first["regional_edits_authoritative"] is True
+    assert "worker_draft_root" not in first
+    original_revision = first["revision"]
+    workspace.rebuttal_entries = [{"id": "response-1", "response": "Current author correction."}]
+    second = coordinator.workflow_context(db, workspace)
+    assert second["revision"] != original_revision
+    assert first["revision"] == original_revision
+    assert second["source_content_hash"] == first["source_content_hash"] == "source"
 
 
 @pytest.mark.asyncio
@@ -148,7 +270,7 @@ async def test_coordinator_routes_each_publication_to_the_real_stage(coordinator
             ),
             request,
         )
-        assert response["run_id"] == str(paper_runtime._native_run_id(workspace.id, stage))
+        assert response["run_id"] == str(uuid.uuid5(main.id, f"publication:{stage}:same-key"))
     assert called == ["rebuttal_baseline", "autorebuttal"]
 
 
@@ -159,7 +281,10 @@ def test_proposal_publication_preserves_the_requested_entry_and_stage_paths(coor
     workspace.proposal_entry_path = "main.typ"
     run = coordinator.publication_run(db, workspace, main, "formatting")
     assert run.request_payload["source_path"] == "main.typ"
-    assert run.request_payload["writable_paths"] == ["main.typ", "styles/", "assets/"]
+    assert run.request_payload["writable_paths"] == coordinator.workflow_paths(
+        paper_workflow.get_research_workflow("proposal"), "main.typ"
+    )
+    assert run.request_payload["auto_workflow"] is True
 
 
 def test_chair_stage_can_follow_a_published_draft_with_author_actions(coordinator_db):

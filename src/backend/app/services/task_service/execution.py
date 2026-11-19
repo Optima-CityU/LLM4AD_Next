@@ -449,9 +449,17 @@ def run_task(
     # 解析供应商列表及 evolution 中的供应商引用
     input_args = deepcopy(task.input_args) if task.input_args else {}
     remote = input_args.get("evaluator", {}).get("type") == "remote"
+    remote_evaluator = None
     if remote:
-        from app.services.remote_evaluation import validate_pool
-        input_args["evaluator"]["contract"] = validate_pool(db, current_user.id, input_args["evaluator"])
+        from app.services.remote_evaluation import validate_target
+
+        evaluator = input_args["evaluator"]
+        evaluator.pop("contract", None)
+        gateway = validate_target(db, current_user.id, evaluator)
+        evaluator.update(gateway_id=str(gateway.id), contract=gateway.contract)
+        for key in ("gateway_ids", "selection_mode", "max_attempts", "lease_timeout"):
+            evaluator.pop(key, None)
+        remote_evaluator = deepcopy(evaluator)
     input_args = _resolve_providers(db, input_args, current_user, access_token, task_id=task_id)
 
     # 准备运行参数
@@ -516,6 +524,8 @@ def run_task(
 
     db.exec(delete(TaskLog).where(TaskLog.task_id == task.id))
     task.status = TaskStatus.PENDING
+    if remote_evaluator is not None:
+        task.input_args = {**(task.input_args or {}), "evaluator": remote_evaluator}
     # 清空上一次运行残留的报告与结果渲染缓存，避免与新一轮的产物错配
     task.reports = None
     task.result_render = None

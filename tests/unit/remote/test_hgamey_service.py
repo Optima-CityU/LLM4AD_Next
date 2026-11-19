@@ -437,8 +437,59 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(service.health()["ready"])
         self.assertEqual(set(service.health()["gateways"]), {"phone-a", "phone-b"})
 
-    async def test_device_selection_and_disabled_devices(self):
-        """An optional ID selects one device; disabled entries are never advertised."""
+    async def test_compatible_devices_share_one_binding_and_restore_owned_assignments(self):
+        """Execute through the private queue and prefer another phone after confirmed cleanup."""
+        from llm4ad.gateway.sdk.contracts import RemoteJob
+        from llm4ad.gateway.sdk.journal import Journal, Reporter
+        from llm4ad.gateway.sdk.lifecycle import run_operation
+
+        devices = self.multiple_devices()
+        devices[1]["device_profile"] = devices[0]["device_profile"]
+        self.environment["HGAMEY_DEVICES_JSON"] = json.dumps(devices)
+        self.environment["HGAMEY_EVALUATOR_MODES"] = "static"
+        service, _ = self.launch()
+        await self.until(lambda: GatewayFixture.registrations == 1)
+        gateway = next(iter(service.gateways.values()))
+        await self.until(lambda: len(gateway.adapter.verified()) == 2)
+        self.assertEqual(service.bound[0].capacity, 2)
+        self.assertEqual(set(gateway.adapter.members), {"phone-a", "phone-b"})
+
+        journal = Journal(self.root / "pool-fixture.sqlite3")
+        work = self.root / "shader"
+        work.mkdir()
+        (work / "shader.comp").write_text("synthetic shader")
+        job = RemoteJob(
+            id=str(uuid.uuid4()), attempt_id=str(uuid.uuid4()), task_id=str(uuid.uuid4()),
+            project_root=str(work), timeout=10,
+        )
+        journal.accept(job.model_dump(mode="json"))
+        reporter = Reporter(journal, job.id, job.attempt_id)
+        result = await run_operation(gateway.adapter, "evaluate", job, reporter, lambda: gateway.adapter.evaluate(job, reporter))
+        self.assertTrue(result.success)
+        assigned = gateway.adapter.assignment(job)
+        self.assertIsNotNone(assigned)
+        self.assertEqual(assigned[0], reporter.saved_state["request"]["device_id"])
+        self.assertEqual(assigned[2], 1)
+        restored = type(gateway.adapter)()
+        self.assertEqual(restored.assignment(job), assigned)
+        second = job.model_copy(update={"id": str(uuid.uuid4())})
+        self.assertTrue(restored.reserve(second, restored.verified()))
+        self.assertNotEqual(restored.assignment(second)[0], assigned[0])
+        blocked = job.model_copy(update={"id": str(uuid.uuid4())})
+        self.assertFalse(restored.reserve(blocked, restored.verified()))
+        with self.assertRaises(RuntimeError):
+            await restored.cancel(job, {**reporter.saved_state, "idempotency_key": "wrong"})
+        self.assertEqual(restored.assignment(job)[2], 1)
+        self.assertTrue(await restored.cancel(second, {}))
+        self.assertTrue(await restored.cancel(job, reporter.saved_state))
+        self.assertEqual(restored.assignment(job)[2], 0)
+        retry = job.model_copy(update={"attempt_id": str(uuid.uuid4())})
+        self.assertTrue(restored.reserve(retry, restored.verified()))
+        self.assertNotEqual(restored.assignment(retry)[0], assigned[0])
+        self.assertTrue(await restored.cancel(retry, {}))
+
+    async def test_disabled_devices_are_excluded(self):
+        """Advertise only enabled phones even when legacy device naming is present."""
         devices = self.multiple_devices()
         devices[1]["enabled"] = False
         self.environment["HGAMEY_DEVICES_JSON"] = json.dumps(devices)
@@ -447,8 +498,8 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(service.gateways), ["phone-a"])
         self.assertEqual([call["device_id"] for call in self.calls], ["phone-a"])
         self.environment["HGAMEY_DEVICE_ID"] = "phone-b"
-        with self.assertRaisesRegex(ValueError, "enabled"):
-            configure(self.environment, executor, Path(self.environment["HGAMEY_ADAPTER_DIR"]))
+        configured = configure(self.environment, executor, Path(self.environment["HGAMEY_ADAPTER_DIR"]))
+        self.assertEqual([item["device"]["id"] for item in configured["profiles"]], ["phone-a"])
 
     def test_improvement_threshold_configuration(self):
         """Freeze the default or stricter gain threshold before any phone work."""
@@ -487,7 +538,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(self.calls, [])
 
-    def test_existing_device_file_supports_multiple_devices_and_selection(self):
+    def test_existing_device_file_supports_multiple_devices(self):
         """Keep the original executor JSON format usable without JSON env input."""
         devices = self.multiple_devices()
         self.environment.pop("HGAMEY_DEVICES_JSON")
@@ -517,7 +568,7 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(options["profiles"]), 2)
         self.environment["HGAMEY_DEVICE_ID"] = "phone-b"
         selected = configure(self.environment, executor, Path(self.environment["HGAMEY_ADAPTER_DIR"]))
-        self.assertEqual([profile["device"]["id"] for profile in selected["profiles"]], ["phone-b"])
+        self.assertEqual([profile["device"]["id"] for profile in selected["profiles"]], ["phone-a", "phone-b"])
         self.assertEqual(filename.read_bytes(), original)
 
     async def test_expanding_legacy_single_device_preserves_its_journal(self):
@@ -693,7 +744,7 @@ class Evaluator(HGameyShaderEvaluator):
             service, _ = self.launch(ObservedGateway)
             await self.until(lambda: bool(registrations))
             self.assertEqual(len(self.calls), 1)
-            self.assertEqual(registrations[0]["name"], "fixture-gateway")
+            self.assertEqual(registrations[0]["name"], "fixture-gateway / Shader")
             self.assertEqual(registrations[0]["allowed_user_ids"], [self.environment["LLM4AD_ALLOWED_USER_IDS"]])
             await runner.cleanup()
             service.gateway.wakeup.set()

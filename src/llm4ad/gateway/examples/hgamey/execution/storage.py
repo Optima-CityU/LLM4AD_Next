@@ -105,6 +105,19 @@ def freeze_shader_inputs(folder, frozen):
     references = [
         section["quality_reference"] for section in (payload, conditions) if section.get("quality_reference") is not None
     ]
+    if "static_pairs" in payload:
+        from ..static_dataset import validate_samples
+
+        if references or payload.get("quality_input") is not None:
+            raise ValueError("Static pairs already own both input and reference paths")
+        pairs = payload["static_pairs"]
+        validate_samples(pairs)
+        for index, pair in enumerate(pairs):
+            for role in ("lr", "hr"):
+                file = pair[role]
+                file["path"] = snapshot(file["path"], folder / "inputs" / "static" / f"{index:02d}-{role}.png")
+                if manifest[-1]["sha256"] != file["sha256"]:
+                    raise ValueError(f"Static {role} image changed: {pair['id']}")
     if references:
         if any(value != references[0] for value in references):
             raise ValueError("quality_reference conflicting payload/conditions")

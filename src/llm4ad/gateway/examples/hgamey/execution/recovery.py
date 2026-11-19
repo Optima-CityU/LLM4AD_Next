@@ -193,7 +193,10 @@ def restore_on_device(folder):
             checks.append(scripts)
     replay_intents = list((folder / "evidence/quality/replay").glob("frame-*/replay-intent.json"))
     if frozen["submission"]["operation"] == "eval" or replay_intents:
-        result = command(["phonefarm", "gpu-op", "--serial", endpoint, "--unlock", "--out", str(folder / "evidence"), "--json"],
+        from .static_measurement import recovery_directory
+
+        evidence = recovery_directory(folder)
+        result = command(["phonefarm", "gpu-op", "--serial", endpoint, "--unlock", "--out", str(evidence), "--json"],
                          capture_output=True, text=True, timeout=60, pf=True)
         proof = json.loads(result.stdout)
         if result.returncode or proof.get("restored") is not True:

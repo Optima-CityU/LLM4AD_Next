@@ -125,6 +125,10 @@ pub fn build(
         return Err("quality_reference conflicting payload/conditions".into());
     }
     let reference = qpayload.or(qcondition);
+    let quality_input = opt_str(&p["quality_input"], "payload.quality_input")?;
+    if quality_input.is_some() && (carrier != "headless" || p["track"] != "sr" || reference.is_none()) {
+        return Err("quality_input requires headless SR and a matching HR reference".into());
+    }
     let script = opt_str(&w["script"], "workload.script")?.unwrap_or("");
     let (seconds, frames, intensity) = if carrier == "headless" {
         if !w["frames"].is_null() || !w["intensity"].is_null() {
@@ -194,7 +198,7 @@ pub fn build(
     let request = json!({"version":1,"candidate_id":req["candidate_id"],"track":p["track"],
         "serial":serial,"package":req["package"],"replay_script":script,"shader_path":p["shader_path"],
         "spirv_path":p["spirv_path"],"budget_ms":p["budget_ms"],"quality_baseline_db":qbase,
-        "incumbent_latency_ms":p["incumbent_latency_ms"],"quality_reference":reference,
+        "incumbent_latency_ms":p["incumbent_latency_ms"],"quality_reference":reference,"quality_input":quality_input,
         // replay_seconds has no consumer on refbench; explicitly recorded null in resolved_config.
         "protocol":{"cool_c":cool,"replay_seconds":seconds.unwrap_or(1),"rounds":req["protocol"]["rounds"],
             "alternating":req["protocol"]["alternating"],"p_threshold":req["protocol"]["p_threshold"]},
@@ -322,6 +326,18 @@ mod tests {
             p.request["v2_context"]["conditions_requested"],
             r["conditions"]
         );
+    }
+    #[test]
+    fn paired_lr_is_forwarded_only_for_headless_sr() {
+        let mut request = req();
+        request["payload"]["quality_input"] = json!("lr.png");
+        assert!(build(&request, None, None).is_err());
+        request["workload"] = json!({"carrier":"headless","seconds":1});
+        let plan = build(&request, None, None).unwrap();
+        assert_eq!(plan.request["quality_input"], "lr.png");
+        assert_eq!(plan.request["quality_reference"], "ref");
+        request["conditions"]["quality_reference"] = Value::Null;
+        assert!(build(&request, None, None).is_err());
     }
     #[test]
     fn typed_gol_native_route_does_not_turn_unknown_fan_into_observation() {

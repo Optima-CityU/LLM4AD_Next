@@ -11,10 +11,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  type PoolJob,
+  type RemoteEvaluationJob,
   remoteAttemptHistory,
   remoteFailureCategory,
-} from "@/lib/gatewayPool"
+} from "@/lib/remoteEvaluation"
 
 export default function RemoteEvaluationProgress({
   taskId,
@@ -61,7 +61,7 @@ export default function RemoteEvaluationProgress({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {query.data?.map((job: PoolJob) => {
+            {query.data?.map((job: RemoteEvaluationJob) => {
               const completed = job.report.completed
               const total = job.report.total
               const known =
@@ -89,6 +89,19 @@ export default function RemoteEvaluationProgress({
                     <span className="break-words">
                       {job.gateway_name ?? "—"}
                     </span>
+                    {job.gateway_id && (
+                      <code
+                        className="ml-2 text-xs text-muted-foreground"
+                        title={job.gateway_id}
+                      >
+                        {job.gateway_id.slice(0, 8)}
+                      </code>
+                    )}
+                    {job.evaluator_id && (
+                      <p className="break-words text-xs text-muted-foreground">
+                        {job.evaluator_id}
+                      </p>
+                    )}
                     {job.gateway_name && !job.gateway_online && (
                       <span className="ml-2 text-xs text-muted-foreground">
                         {t("remoteEvaluation.offline")}

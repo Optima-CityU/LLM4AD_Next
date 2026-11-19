@@ -1,6 +1,6 @@
 # 远程评估网关
 
-网关在自己的工作站、集群或实验室设备上评估平台生成的算法，通过 HTTPS/SSE 主动连接平台。SDK 负责排队、并发、进度、恢复、取消和结果回传；自定义评估器负责编译、执行与评分。
+评估网关通过 HTTPS/SSE 主动连接平台，在网关侧运行候选代码。平台把评估任务发给用户选中的网关注册项。网关 SDK 负责本地排队、并发、进度、恢复、取消和结果回传。评估器定义数据、执行方法和评分规则。
 
 ## 快速开始
 
@@ -11,7 +11,7 @@ pip install -U 'llm4ad-next[gateway-ui]'
 llm4ad evaluator-gateway start
 ```
 
-打开 `http://127.0.0.1:8768`，填写网关名称、允许的用户 UUID 和评估器。默认连接 `https://llm4ad-next.cn`。内置 `example` 在五组固定输入上评估 `solve(x)` 与 `x²` 的均方误差，`hgamey` 用于原神设备评估。
+网关默认启动管理面板。打开 `http://127.0.0.1:8768`，填写平台地址、网关名称和允许的用户 UUID。默认平台地址为 `https://llm4ad-next.cn`。首次试用可在面板中选择内置的 `example` 并启动连接。它对应 `basic` 案例，注册的评估器标识为 `square-error-example`，用五组固定输入计算 `solve(x)` 与 `x²` 的均方误差。
 
 已有评估器时可直接无界面启动，基础安装无需 UI 依赖：
 
@@ -33,22 +33,32 @@ docker compose up -d --build
 
 修改 `evaluator.py` 实现评估，额外依赖写入 `requirements.txt`。Compose 默认提供同一网关的管理面板，状态保存在 `./state`。安装包尚未发布时，可将构建的 `llm4ad_next-*.whl` 放入 `wheels/`。
 
-## 任务设备池
+## 在平台中使用
 
-新任务选择评估方法和基准后，自动使用向该用户授权的兼容设备；新设备上线即可领取后续候选，无需绑定手机编号。每次 A/B 比较在同一台设备上完成。没有可用设备、全部忙碌或离线时等待，不计为失败，也不消耗尝试次数。
+打开任务配置，选择 **远程评估器**。表单提供本地网关的连接步骤和「我的用户 ID」。将该 ID 加入网关的授权列表后，网关注册成功就会出现在 **在线网关** 中。
 
-| 任务评估器配置 | 默认值 | 用途 |
-| --- | --- | --- |
-| `selection_mode` | `auto` | 自动匹配兼容设备；`selected` 仅使用指定网关 |
-| `contract` | 需选择 | 固定评估方法、数据版本及评分规则 |
-| `gateway_ids` | `[]` | 仅手动选择时必填；旧配置已有编号时保留手动模式 |
-| `max_attempts` | `3` | 单个候选跨设备的总尝试次数，不与网关本地次数相乘 |
-| `lease_timeout` | `60` 秒 | 已领取尝试的续租期限；不是设备排队超时 |
-| `batch_size` | `10` | 可同时提交的候选数；设为 `1` 会限制设备池并行利用 |
+选择一个网关卡片，再设置评估超时时间和候选并行设置。卡片的名称、评估器标识和版本均来自网关的当前注册。任务启动时固定所选注册的 UUID 和评估契约，后续候选使用这两项确认评估目标。
 
-候选代码错误直接结束该评估。设备断连、租约过期或评估器故障优先换另一台兼容设备重试；旧尝试失去结果发布权限，未确认清理完成的原设备继续隔离。尝试耗尽只让当前评估失败，整轮演化继续；节点及任务进度保留失败类型和换机记录，不把基础设施问题当成代码修复建议。
+选择列表只展示当前在线且对你授权的注册。所选网关忙碌时等待空闲容量，离线时等待同一注册恢复连接。平台排队和离线等待不计入执行超时，连接中断不消耗评估重试次数。重跑未明确绑定唯一注册的旧任务时，需重新选择网关卡片。
 
-自动调度需要平台及网关均支持协议 v2。升级 HGamey 后须用新生成的设备配置注册新评测契约，再为新任务选择；既有任务不会被静默切换评测口径。设备地址、序列号和安装路径仅用于本地执行绑定，不参与比较契约；实际影响结果的设备能力配置、数据和评分规则仍需兼容。
+```yaml
+evaluator:
+  type: remote
+  gateway_id: YOUR_EVALUATOR_REGISTRATION_UUID
+  timeout: 300
+  parallel: true
+  batch_size: 4
+```
+
+| 任务配置 | 含义 |
+| --- | --- |
+| `gateway_id` | 所选网关与评估器对应的唯一注册 UUID |
+| `timeout` | 单候选执行超时，单位为秒 |
+| `parallel` / `batch_size` | 控制平台提交候选的并发，实际执行受网关可用容量限制 |
+| `candidate_paths` | YAML 可选项，指定额外候选文件的相对 glob。默认传输识别到的源码和构建清单 |
+| `parameters` | YAML 可选项，显式传给自定义评估器的参数，对应 `job.parameters` |
+
+平台发送候选源码和构建文件，评估数据和依赖留在网关。默认排除 `config.yaml`、`.env*`、运行状态及数据目录。远程任务由平台运行时发起。
 
 ## 自定义配置
 
@@ -61,10 +71,10 @@ docker compose up -d --build
 | `LLM4AD_SERVER_URL` | `--server` | `https://llm4ad-next.cn`，平台地址 |
 | `LLM4AD_GATEWAY_NAME` | `--name` | `local-evaluator`，显示名称 |
 | `LLM4AD_ALLOWED_USER_IDS` | `--allow-user` | 必填，逗号分隔 UUID；CLI 可重复传入 |
-| `LLM4AD_GATEWAY_ADAPTER` | `--adapter` | `custom`；内置可选 `example`、`hgamey` |
+| `LLM4AD_GATEWAY_ADAPTER` | `--adapter` | 默认 `custom`。试用平方误差案例可设为 `example` |
 | `LLM4AD_EVALUATOR` | `--evaluator` | 自定义评估器必填，`FILE.py:Class` 或 `package.module:Class` |
 | `LLM4AD_GATEWAY_STATE_DIR` | `--state-dir` | `.llm4ad-gateway`，身份、队列和恢复记录 |
-| `LLM4AD_GATEWAY_CONCURRENCY` | `--concurrency` | `1`，并行评估数；HGamey 每台设备固定为 1 |
+| `LLM4AD_GATEWAY_CONCURRENCY` | `--concurrency` | `1`，通用网关的并行评估数 |
 
 重启时保留完整状态目录，每个实例独占自己的目录。网关自动创建恢复密钥，无需配置平台账号密码；仅向可信用户授权，评估代码以本地账号权限运行。
 
@@ -72,7 +82,7 @@ docker compose up -d --build
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `LLM4AD_GATEWAY_UI` | 安装 UI 依赖后自动启用 | `false` 或 `--no-ui` 关闭面板 |
+| `LLM4AD_GATEWAY_UI` | `true` | `false` 或 `--no-ui` 关闭面板 |
 | `LLM4AD_GATEWAY_UI_HOST` | `127.0.0.1` | 监听地址，对应 `--ui-host` |
 | `LLM4AD_GATEWAY_UI_PORT` | `8768` | 面板端口，对应 `--ui-port` |
 | `LLM4AD_GATEWAY_UI_PASSWORD` | 未设置 | 独立面板密码；远程访问时必填 |
@@ -98,55 +108,31 @@ docker compose up -d --build
 
 直接使用 basic 案例时，在其 `deployment/` 目录复制 `env.example` 为 `.env`，填写授权用户、环境文件及持久化目录路径，再执行 `docker compose --env-file .env up -d --build`。
 
-basic/自定义模板使用 bridge 网络，面板地址变量控制宿主端口映射；HGamey 使用 host 网络，同名变量直接控制监听地址。容器默认启用面板且不自动打开浏览器，面板密码通过运行时环境传入。
-
-## 在平台中使用
-
-新建任务时选择「远程评估器」，勾选授权给自己的网关。多个网关须具有相同评估契约，每个候选只分配给其中一个；离线时任务可等待网关上线。
-
-```yaml
-evaluator:
-  type: remote
-  gateway_ids: [YOUR_GATEWAY_UUID]
-  timeout: 300
-  parallel: true
-  batch_size: 4
-  candidate_paths: ["solution.py"]
-  parameters: {}
-```
-
-| 任务配置 | 含义 |
-| --- | --- |
-| `timeout` | 单候选执行超时，秒；等待网关或容量不计入 |
-| `parallel` / `batch_size` | 平台候选并发；实际执行仍受网关容量限制 |
-| `candidate_paths` | 额外候选文件的相对 glob；默认传输源码和构建清单 |
-| `parameters` | 显式传给评估器的自定义参数，对应 `job.parameters` |
-
-候选源码及 EVOLVE 标记保留在平台，数据集和评估依赖保留在网关。默认排除 `config.yaml`、`.env*`、运行状态及数据目录。远程任务依赖平台运行环境，单独执行 `llm4ad run` 不会创建平台远程任务。
+基础案例和自定义模板使用 bridge 网络，面板地址变量控制宿主端口映射。容器默认启动面板，`--no-open-browser` 控制浏览器自动打开。面板密码通过运行时环境传入。
 
 ## 实现自定义评估器
 
-继承 [GatewayEvaluator 基类](../../../src/llm4ad/gateway/sdk/contracts.py)，声明 `EvaluationContract` 并实现 `async evaluate(job, reporter)`。参见[完整基础示例](../../../src/llm4ad/gateway/examples/basic/evaluator.py)，其得分为负均方误差。平台聚合 `score` 越大越好，各指标方向由契约指定。
+继承 `GatewayEvaluator`，声明 `EvaluationContract` 并实现 `async evaluate(job, reporter)`。平台聚合 `score` 越大越好，各指标方向由契约指定。基础案例的得分为负均方误差。[SDK 接口源码](https://github.com/Optima-CityU/LLM4AD_Next/blob/main/src/llm4ad/gateway/sdk/contracts.py) · [基础评估器源码](https://github.com/Optima-CityU/LLM4AD_Next/blob/main/src/llm4ad/gateway/examples/basic/evaluator.py)
 
 | 接口 | 用途 |
 | --- | --- |
 | `contract` | `evaluator_id` 标识实现，`version` / `data_version` 标识评估逻辑及本地数据版本，`metrics` 声明指标方向 |
 | `job.project_root` / `timeout` / `evaluation_profile` | 候选目录、执行预算及 `standard` / `elite` 档位 |
-| `job.parameters` | 网页任务显式传入的自定义参数；basic 案例未使用此项 |
+| `job.parameters` | 通过任务配置显式传入的自定义参数 |
 | `reporter.progress(...)` / `message(...)` | 上报进度和状态事件 |
 | `reporter.metadata(dict)` | 保存额外 JSON 信息 |
 | `reporter.artifact(name, path, media_type)` | 声明需上传的报告、图片或 Trace |
 | `reporter.local_log(name, description=...)` | 登记仅供网关面板查看的本地日志 |
 | `EvaluationResult` | 返回 `score`、`metrics`、`monitor_metrics`、`metadata`、`evolution_feedback`、`duration_ms`、`artifacts` |
 | `EvaluationError` | 已知评估失败，可携带反馈、元数据和附件 |
-| `EvaluationConfigurationError` | 参数或评估器配置错误，直接失败，不进行换机重试 |
+| `EvaluationConfigurationError` | 参数或评估器配置错误，直接结束当前评估 |
 | `EvaluationUnavailableError` | 瞬时基础设施故障，在原执行预算内自动重试 |
 | `EvaluationPreparationError` | 确认未下发外部任务的准备失败，直接返回失败而非无限等待恢复 |
 | `TaskCheckpoints(job, directory, inputs=..., context=...)` | SDK 冻结输入并保存本地编译、预处理步骤的检查点 |
 
 评估工作在独立进程中执行。本地数据和工具通过 `__file__` 或绝对路径定位；工作目录是候选目录。
 
-候选代码或输出错误使用 `EvaluationError(..., metadata={"failure_category": "candidate"})`；临时设备故障使用 `EvaluationUnavailableError`。未分类的评估器异常按 `evaluator` 处理并计入换机预算，避免误判为候选代码问题。
+候选代码或输出错误使用 `EvaluationError(..., metadata={"failure_category": "candidate"})`。临时基础设施故障使用 `EvaluationUnavailableError`。未分类的评估器异常按 `evaluator` 处理。
 
 以下扩展均可选，普通评估器无需实现调度、恢复或取消：
 
@@ -158,7 +144,7 @@ evaluator:
 | `recover(job, reporter)` | 保留的兼容接口；有限次数的新执行由 SDK 管理 |
 | `cancel(job, saved_state)` | 仅在确认外部执行停止后返回 `True` |
 | `cleanup_timeout` | 正有限数值，清理超时秒数；默认 `30`，应覆盖钩子与外部资源恢复 |
-| `create_runtime()` / `runtime.local_logs(...)` | 接入持久化设备资源、自测及已有外部日志 |
+| `create_runtime()` / `runtime.local_logs(...)` | 自定义运行时、就绪检查及外部日志 |
 
 `operation` 为 `evaluate` 或 `cancel`；`recover` 保留兼容。外部提交使用 `job.id` / `attempt_id` 加 `job.execution_id` 区分每次本地执行，并在等待前保存执行句柄。SDK 负责终止本地进程，`cancel` 负责恢复已修改的外部资源。
 
@@ -172,7 +158,7 @@ steps.run("compile", lambda: compile_source(steps.path("source.cpp"), build_dir 
           outputs=["binary", "compiler.log"], required=["binary"])
 ```
 
-检查点仅用于可重复执行的本地准备；外部设备任务仍按原幂等标识接续，不能放入可重跑的步骤。
+检查点用于可重复执行的本地准备。已提交的外部任务按原幂等标识接续。
 
 ## 日志、附件与恢复
 
@@ -183,21 +169,21 @@ steps.run("compile", lambda: compile_source(steps.path("source.cpp"), build_dir 
 | 明确声明的附件 | 点击演化节点，在右侧「节点信息」查看 metadata 和附件；图片缩略图可点击放大，其他文件以紧凑列表展示并支持预览、下载 |
 | 生命周期计时 | 面板展示真实开始、结束及含前后处理的总耗时；`duration_ms` 保留评估器原值 |
 
-本地评估器在 `cfg.artifact_dir` 写文件，并通过 `EvaluationResult.artifacts` 声明；远程评估器可使用 `reporter.artifact()` 或 `job.artifact_dir`。文件保存在 RustFS/S3，只收集明确声明的附件和返回的行为可视化数据，示例见 [evaluation_artifacts](../../../examples/evaluation_artifacts/)。
+本地评估器在 `cfg.artifact_dir` 写文件，并通过 `EvaluationResult.artifacts` 声明。远程评估器可在 `job.artifact_dir` 写文件，使用 `reporter.artifact()` 或结果对象声明。RustFS/S3 保存已声明的附件和返回的行为可视化数据。[附件示例源码](https://github.com/Optima-CityU/LLM4AD_Next/tree/main/examples/evaluation_artifacts)
 
-上传失败只重传文件。网关收到文件及结果确认、且外部设备恢复完成后才清理证据；本地日志独立保留。平台资料随任务保留，删除任务时清理。
+上传失败时重传相应文件。网关收到文件和结果确认，并完成评估器所需的外部资源恢复后，才清理证据。本地日志独立保留。平台资料随任务保留，删除任务时清理。
 
 | 情况 | 行为 |
 | --- | --- |
-| 网络中断 | 本地评估继续，恢复连接后补报；SSE 自动重连，HTTP 心跳继续同步 |
-| 网关重启 | 使用原状态目录，自动核对旧进程归属并清理设备，然后重试未完成的执行 |
-| 瞬时基础设施故障 | 协议 v2 设备池统一使用平台的 `max_attempts` 预算，每次领取只执行一次。旧协议任务最多在本地执行 3 次，计数跨重启保留，并在原有效执行预算内按 1、2 秒退避 |
+| 网络中断 | SSE 自动重连，网关通过心跳核对执行状态，并继续回传待确认的进度和结果 |
+| 网关重启 | 使用原状态目录核对未完成的执行及清理状态，恢复可继续的工作 |
+| 瞬时基础设施故障 | 平台在有限重试预算内将候选重新排队，目标仍为原注册 |
 | 读取失败 | 无副作用的读取可使用 `retry_read(...)`，最多调用 3 次；无效候选不重试 |
 | 本地准备中断 | SDK 检查点保存准备产物；每次新执行使用独立目录 |
-| 执行超时 / 平台停止 | 停止指定进程池槽，恢复外部资源并保存终态 |
-| 资源清理失败 | 清理连续失败 3 次后明确返回基础设施失败；继续自动探测，仅该资源恢复前不可用，其他资源继续工作 |
+| 执行超时 / 平台停止 | 网关终止对应的本地执行，调用已配置的清理逻辑并保存状态 |
+| 资源清理失败 | 网关保留待清理记录，后续领取受清理状态约束 |
 
-控制器使用 `transitions`、`persist-queue.SQLiteAckQueue` 和公开的 `loky.ProcessPoolExecutor`。每个资源槽最多提交一个 Future；先保存结果，再确认队列收据，文件和结果重传不会重跑实机评估。不需要额外消息服务。旧的恢复记录自动迁移，日常运行无需手动 `resolve`。
+SDK 先持久化结果，再确认本地队列收据。结果和附件可从已保存的记录重新传输。
 
 ```bash
 llm4ad evaluator-gateway health --state-dir ./.llm4ad-gateway
@@ -206,73 +192,13 @@ llm4ad evaluator-gateway status --state-dir ./.llm4ad-gateway
 
 ## HGamey 原神示例
 
-[案例源码](../../../src/llm4ad/gateway/examples/hgamey/)包含编译、设备执行器、无线 ADB 和部署文件。网页选择 `hgamey_shader` 示例，绑定模型与网关；使用 `llm4ad evaluator-gateway source --adapter hgamey` 定位安装目录。
-
-| 环境 | 要求 |
-| --- | --- |
-| 主机 | 当前验证范围为 Linux amd64，Compose 使用 host 网络；持久化目录可由 UID 1000 写入 |
-| 构建 | Rust 1.99、OpenJDK 17、C++、Android NDK r27d、SDK API 35 / build-tools 35.0.0；Dockerfile 自动准备 |
-| 执行工具 | phonefarm、ADB 36.0.2、GLSL/SPIR-V 工具、FFmpeg、NumPy、Pillow、Perfetto Python 0.59.1 与 Trace Processor；容器提供 |
-| 手机 | 已 Root 的 Android 11+ ARM64，授权无线 ADB，Vulkan 1.1 compute、GPU 时间戳及可读写的 KGSL/GED 频率接口 |
-| 材料 | 静态模式需要真实参考帧；游戏模式需要已安装并登录的原神及可重复场景。两者均需设备序列号和本地 ADB 身份，私有材料不随 SDK 分发 |
-
-容器从附带源码构建运行器、Vulkan 层和 refbench APK；使用 refbench 载体时需手动安装该测试 APK。游戏评估需进入可重复场景，并按设备调整 `config/game-check.json` 的分辨率、等待时间和 `enter_script`。直接系统运行需自行准备与容器一致的工具。
-
-在案例 `deployment/` 中按 [env.example](../../../src/llm4ad/gateway/examples/hgamey/deployment/env.example) 创建本地 `.env`，填写下表配置，再执行 `docker compose up -d --build`。
-
-| 自定义配置 | 默认值 / 用途 |
-| --- | --- |
-| `HGAMEY_DEVICES_JSON` | 设备数组，每项填写 `id`、`host`、`port`、`expected_serial`、`device_profile`；连接端口默认 `5555` |
-| `HGAMEY_REFERENCE_PATH` | `/inputs/genshin`，仅静态评估器需要真实参考帧 |
-| `HGAMEY_DATA_DIR` / `HGAMEY_PHONEFARM_DIR` | 必填，网关/执行器状态和设备锁的宿主目录 |
-| `HGAMEY_INPUTS_DIR` / `HGAMEY_CONFIG_DIR` | 参考帧宿主目录（默认 `./inputs`，仅游戏模式时可为空）与必填的配置目录 |
-| `ADB_IDENTITY_FILE` / `ADB_STATE_DIR` | 必填，已授权 ADB 私钥及配对状态 |
-| `ADB_BIN` / `ANDROID_ADB_SERVER_PORT` | `/usr/bin/adb` / `5039`，容器 ADB 路径及 ADB 服务端口，区别于手机连接端口 |
-| `HGAMEY_STARTUP_CHECK` | `true`，启动时执行一次就绪自测 |
-| `HGAMEY_EVALUATOR_MODES` | 部署示例为 `static,game`，可选择一种或同时发布两个独立评估器 |
-| `HGAMEY_GAME_CHECK_CONFIG` | `game` 必填，设备与场景配置，示例为 `/config/game-check.json` |
-| `HGAMEY_GAME_SCORING_JSON` | 可选 JSON，覆盖下表权重、尺度、指标来源或 `quality_gap_score`；固定在游戏评估契约中 |
-| `HGAMEY_EVAL_SECONDS` / `HGAMEY_EVAL_ROUNDS` | `5` / `8`，静态每臂秒数和 A/B 轮数；游戏使用 JSON 中的 `window` / `rounds` |
-| `HGAMEY_MIN_OPERATOR_IMPROVEMENT_PCT` | `1`，确认改善所需的最低百分比，取值 `[1, 100)`；未确认改善记为 `no_advantage`，仍是有效评估，不改变原始得分 |
-| `HGAMEY_COMPILE_TIMEOUT` / `HGAMEY_POLL_INTERVAL` | `60` / `2` 秒，编译超时和结果轮询间隔 |
-| `RUST_IMAGE` / `PYTHON_IMAGE` | `rust:1.99-slim-bookworm` / `python:3.13.16-slim-bookworm`，构建基础镜像 |
-| `HGAMEY_NATIVE_IMAGE` | `native-runtime`，默认从本案例源码构建；可指定已验证的原生运行时镜像 |
-| `APT_MIRROR` / `CARGO_REGISTRY_MIRROR` | 可选系统包和 Rust 构建镜像 |
-| `ANDROID_REPOSITORY_BASE` / `PIP_INDEX_URL` / `TRACE_PROCESSOR_URL` | 可选工具链、Python 包和 Trace Processor 下载源 |
-
-先在远程评估器中选择「固定图片 GPU」或「原神游戏 A/B」，再选择兼容网关。两者是独立评估器，不是前后阶段；每个候选只执行所选实验，案例关闭精英复评。同一设备的两个绑定共享执行队列和设备锁，不会同时操作手机。不同手机各有一个执行槽，可以并行；某台手机恢复未确认时，仅暂停该手机的后续评估。
-
-正常停止网关会等待正在执行的设备实验完成恢复，并保留排队任务和身份记录。平台任务保留等待，使用原数据目录重启网关后继续；排队和正常停机的等待时间不占执行超时，已消耗的执行时间不会清零，取消请求也不会被恢复操作覆盖。强制终止时，无法确认设备恢复的实验仍需核实恢复状态，不会盲目重跑。
-
-| 评估器 | 指标与得分 | 节点图片 |
-| --- | --- | --- |
-| 静态（`hgamey-genshin-sr-static`） | 测量原生 GPU 算子耗时及 PSNR，自动应用固定 reference 的 PSNR 约束，按本轮相对基线耗时改善率评分。使用第一张固定参考图的 1920×1080 中心裁剪，不启动原神 | GPU 画质测试实际使用的参考、baseline 和候选图；读回及 PNG 导出在计时之外 |
-| 游戏（`hgamey-genshin-sr-game`） | 编译两套层，注入原神并测量成对 A/B 性能窗口；窗口结束后将采集的真实游戏帧分别交给基准和候选算子在手机 GPU 上回放，以官方 IQ 计算画质。画质未验证或退化时自动给低分，无需固定参考帧目录 | 同帧输入、基准与候选的真实 GPU 输出、逐帧 IQ 报告，以及原始游戏截图和 trace |
-
-两个评估器均全自动运行。游戏加权分是平台适配方案，不是上游 HGamey 的现成总分，也不是显著性检验。各项归一化后使用下表固定权重。静态画质测量、固定 reference 的 PSNR 自动约束与评分保持不变。
-
-| 分项 | 默认权重 | 加权前贡献 |
-| --- | --- | --- |
-| FPS | 0.25 | `100 × (候选 / baseline − 1) / 10` |
-| 呈现帧间隔 P95 | 0.35 | `100 × (1 − 候选 / baseline) / 10`；默认 `display_frame_p95_upper_ms` 是直方图上界 |
-| 每呈现帧 GPU 活跃时间 | 0.20 | `100 × (1 − 候选 / baseline) / 10`；每帧毫秒 = `10 × gpu_uid_active_pct / display_fps`，表示应用 UID 的 GPU 活跃时间，并非单独的 shader 耗时 |
-| 画质 | 0.20 | 超出官方 `iq-judge` 自噪声参考线的退化取负均值；PSNR、`1−SSIM`、detail log2 分别按 1 dB、0.001、0.15 归一化，不因单纯锐化加分 |
-
-非负权重在配置时归一化，连同来源与尺度固定进契约，不会按候选临时重配。`quality_gap_score` 是独立的有限严格负数策略值，默认 `-100.0`，不参与权重归一化。任何有效官方画质指标超出参考线时，总分取 `min(unpenalized_score, quality_gap_score)`。画质缺失、不完整、非有限、计算溢出、状态非 `measured` 或存在 `not_computed` 诊断时，标记 `unverified`；所需性能完整即可得到 `quality_gap_score`。这些低分属于有效完成，自动流水线继续运行，无需人工审核，也不记为基础设施失败。
-
-任何正权重性能数据缺失时仍返回 `score=None`，不会伪造设备性能。画质缺失保留不可用的分项贡献、`unpenalized_score=None` 和 `missing` 诊断，不补零、不重新分配权重。显式将画质权重设为零时，跳过 IQ 评估及自动惩罚。`quality_assessment` 提供 `status`（`within_reference`、`beyond_reference`、`unverified` 或 `not_scored`）、`penalized`、固定的 `penalty_score` 和 `reasons`，用于展示自动低分原因。参与评分的输入全部有效时，`unpenalized_score` 保留原始加权和。功耗不参与评分；更换 P95 来源需事先显式修改配置并产生新契约。
-
-游戏 JSON 默认 `quality_samples=3`、`pan=false`。每个 A/B 对选择一张本次运行采集的真实基准帧，按现有 GPU 工具的规则中心裁剪为 1920×1080，再分别执行三次基准和三次候选计算。上传的 PNG 是这些独立 GPU 调用的实际读回结果；相同算子可以产生相同哈希。每张输入单独运行官方 `iq-judge`，保留逐帧原始指标及参考线，再平均各帧的归一化罚分。所需帧缺失时继续按原规则给低分，不挑选最好的一帧，也不混合不同输入计算自噪声。
-
-回放在游戏性能窗口和恢复之后执行，其耗时不进入 FPS、P95 或游戏 GPU 活跃时间。报告中的 `same-input-gpu-replay@1` 表示截图输入的算子画质评估；原始 A/B 游戏截图用于查看场景和执行状态。该结果不等同于对原神实际送显链路逐帧捕获的端到端画质结论。可选 pan 仍是不计分探针。正常取消会先排空当前回放、确认恢复，再停止后续帧。
-
-点击演化节点，「节点信息」优先展示图片对照，可切换轮次、点击放大，其余附件在下方列表中查看。图片传输失败会记录诊断，不丢弃其他有效测量。上传重试不会补拍或生成图片。可用的 trace 沿用附件列表，录屏不自动上传。设备配置、ADB 密钥和输入帧目录保留本地；静态对照 PNG 会上传，请使用不含敏感内容的测试画面。
-
-已有固定的旧版串联任务可显式选择 `legacy` 绑定继续处理，新任务使用 `static` 和／或 `game`。
+[HGamey 原神示例](../examples/hgamey-remote-evaluation.md)
 
 ## 平台部署配置
 
-升级时同步更新后端、worker、task-runner、前端和网关 SDK，并应用 Alembic 迁移。标准 `docker/compose.yml` 已包含 `remote-evaluation-worker`；使用生产基础文件时保留原有覆盖配置，并添加：
+评估器或数据变更由网关发布。使用新评估契约时，重新注册并为新任务选择该网关卡片。升级远程评估协议时，同步更新后端、worker、task-runner、前端和网关 SDK，并应用 Alembic 迁移。
+
+标准 `docker/compose.yml` 已包含 `remote-evaluation-worker`。生产部署可在原有 Compose 文件和覆盖配置上加用 `compose.remote-evaluation.yml`。
 
 ```bash
 cd docker

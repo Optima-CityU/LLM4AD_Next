@@ -43,6 +43,7 @@ class GatewayBinding:
     capacity: int = 1
     metadata: dict = field(default_factory=dict)
     resource_key: str | None = None
+    fixed_capacity: bool = False
 
 
 class GatewayRuntime:

@@ -28,6 +28,9 @@ from app.api.llm4ad import evaluation_gateways, evaluations
 from app.api.llm4ad import knowledge as llm4ad_knowledge
 from app.api.llm4ad import llm_proxy as llm4ad_llm_proxy
 from app.api.llm4ad import memory as llm4ad_memory
+from app.api.llm4ad import paper_history as llm4ad_paper_history
+from app.api.llm4ad import paper_regions as llm4ad_paper_regions
+from app.api.llm4ad import paper_rendering as llm4ad_paper_rendering
 from app.api.llm4ad import paper_runtime as llm4ad_paper_runtime
 from app.api.llm4ad import papers as llm4ad_papers
 from app.api.llm4ad import projects as llm4ad_projects
@@ -64,6 +67,9 @@ api_router.include_router(llm4ad_llm_proxy.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_knowledge.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_memory.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_papers.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_paper_history.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_paper_regions.router, prefix="/llm4ad")
+api_router.include_router(llm4ad_paper_rendering.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_paper_runtime.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_research.router, prefix="/llm4ad")
 api_router.include_router(llm4ad_arl_ws.router, prefix="/llm4ad")

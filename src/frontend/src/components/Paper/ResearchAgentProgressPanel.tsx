@@ -1,10 +1,9 @@
 import {
-  Bot,
   Check,
   ChevronRight,
   Circle,
   CircleAlert,
-  GitBranch,
+  Lightbulb,
   Loader2,
 } from "lucide-react"
 import { Collapsible } from "radix-ui"
@@ -12,103 +11,65 @@ import { useTranslation } from "react-i18next"
 import type { ProposalStageState } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import type { ResearchAgentProgress } from "@/lib/researchAgentProgress"
+import {
+  isPublishedResearchStage,
+  isResearchStepActive,
+  type ResearchAgentProgress,
+  researchProgressSteps,
+} from "@/lib/researchAgentProgress"
 import { cn } from "@/lib/utils"
 
 type Props = {
-  stages: string[]
+  stages?: string[]
   stageStates: Record<string, ProposalStageState>
   progress: ResearchAgentProgress | null
+  emptyMessage?: string
   onOpenStage: (stage: string) => void
 }
 
-/** Shared execution timeline for the proposal and rebuttal coordinators. */
+/** Present research goals, design reasoning and outcomes as stable logical stages. */
 export default function ResearchAgentProgressPanel({
-  stages,
   stageStates,
   progress,
+  emptyMessage,
   onOpenStage,
 }: Props) {
   const { t } = useTranslation()
-  const completed = stages.filter(
-    (stage) => stageStates[stage]?.status === "ready",
-  ).length
-  const status =
-    completed === stages.length &&
-    stages.length > 0 &&
-    progress?.status !== "running" &&
-    progress?.status !== "waiting" &&
-    progress?.status !== "interrupted"
-      ? "completed"
-      : (progress?.status ?? "ready")
-  const running = status === "running" || status === "waiting"
-  const toolLabel = (name: string) =>
-    t(`paper.agentProgress.tools.${name}`, {
-      defaultValue: t("paper.agentProgress.tools.other"),
-    })
-
-  const renderWorker = (agent: ResearchAgentProgress["agents"][number]) => (
-    <Collapsible.Root
-      key={agent.id}
-      className="mt-3 rounded-lg border bg-muted/15"
-    >
-      <Collapsible.Trigger className="group flex w-full items-start gap-2 p-3 text-left text-sm hover:bg-muted/30">
-        <GitBranch
-          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-          aria-hidden="true"
-        />
-        <span className="min-w-0 flex-1 break-words leading-5">
-          {agent.description || t("paper.agentProgress.worker")}
-        </span>
-        <ChevronRight
-          className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 motion-reduce:transition-none"
-          aria-hidden="true"
-        />
-      </Collapsible.Trigger>
-      <Collapsible.Content className="border-t px-3 pb-3">
-        <p className="pt-3 text-xs text-muted-foreground">
-          {t("paper.agentProgress.toolCount", {
-            count: agent.toolCount,
-          })}
-        </p>
-        <ul className="mt-2 flex flex-col gap-2">
-          {agent.tools.map((tool, i) => (
-            <li
-              key={`${i}-${tool.name}`}
-              className="flex items-center gap-2 text-sm"
-            >
-              {tool.failed ? (
-                <CircleAlert className="size-3.5 text-destructive" />
-              ) : tool.done ? (
-                <Check className="size-3.5 text-primary" />
-              ) : agent.status === "running" ? (
-                <Loader2 className="size-3.5 motion-safe:animate-spin" />
-              ) : (
-                <Circle className="size-3.5 text-muted-foreground" />
-              )}
-              {toolLabel(tool.name)}
-            </li>
-          ))}
-        </ul>
-      </Collapsible.Content>
-    </Collapsible.Root>
+  const steps = researchProgressSteps(progress, stageStates)
+  const rawStatus = progress?.status ?? "ready"
+  const activeIndex = steps.reduce(
+    (latest, step, index) => (isResearchStepActive(step) ? index : latest),
+    -1,
   )
+  const currentIndex =
+    activeIndex >= 0
+      ? activeIndex
+      : ["failed", "interrupted"].includes(
+            steps[steps.length - 1]?.status ?? "",
+          )
+        ? steps.length - 1
+        : -1
+  const status =
+    rawStatus === "failed" || rawStatus === "interrupted" || activeIndex < 0
+      ? rawStatus
+      : steps[activeIndex].status
+  const running = status === "running" || status === "waiting"
 
   return (
     <div
       data-testid="research-agent-progress"
       className="h-full overflow-y-auto overscroll-contain px-4 py-5 sm:px-6"
     >
-      <div className="mb-6 flex items-start gap-3 border-b pb-5">
-        <div className="grid size-10 shrink-0 place-items-center rounded-xl border bg-primary/5 text-primary">
-          <Bot className="size-5" aria-hidden="true" />
-        </div>
+      <header className="mb-6 flex items-start gap-3 border-b pb-5">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl border bg-primary/5 text-primary">
+          <Lightbulb className="size-5" aria-hidden="true" />
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="font-serif text-lg font-semibold">
-              {t("paper.agentProgress.coordinator")}
+            <h2 className="font-serif text-xl font-semibold">
+              {t("paper.agentProgress.title")}
             </h2>
-            <Badge variant="secondary" className="gap-1.5">
+            <Badge variant="secondary" className="gap-1.5 text-sm">
               {running && (
                 <span className="size-1.5 rounded-full bg-primary motion-safe:animate-pulse" />
               )}
@@ -116,55 +77,64 @@ export default function ResearchAgentProgressPanel({
             </Badge>
           </div>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {progress?.currentTool && running
-              ? toolLabel(progress.currentTool)
-              : t("paper.agentProgress.description")}
-          </p>
-          <p className="mt-2 text-xs tabular-nums text-muted-foreground">
-            {t("paper.agentProgress.published", {
-              count: completed,
-              total: stages.length,
-            })}
+            {t("paper.agentProgress.description")}
           </p>
         </div>
-      </div>
+      </header>
       <ol
         className="flex flex-col"
         aria-label={t("paper.agentProgress.timeline")}
       >
-        {stages.map((stage, index) => {
-          const workers =
-            progress?.agents.filter((agent) => agent.stage === stage) ?? []
-          const worker = workers[workers.length - 1]
-          const state = stageStates[stage]
-          const published = state?.status === "ready"
-          const active = worker?.status === "running"
-          const failed = worker?.status === "failed"
-          const stageStatus = active
-            ? "running"
-            : published
-              ? "completed"
-              : state?.status === "needs_revision"
-                ? "needsInput"
-                : failed
-                  ? "failed"
-                  : worker?.status === "interrupted"
-                    ? "interrupted"
-                    : state?.status === "stale"
-                      ? "stale"
-                      : worker?.status === "completed"
-                        ? "reviewing"
-                        : "pending"
-          const Icon = active
-            ? Loader2
-            : published
-              ? Check
-              : failed
-                ? CircleAlert
-                : Circle
+        {steps.map((step, index) => {
+          const active = isResearchStepActive(step)
+          const current = index === currentIndex
+          const canOpen =
+            step.status === "completed" &&
+            isPublishedResearchStage(stageStates[step.stage])
+          const title =
+            step.title.trim() ||
+            t(`paper.workflow.stage.${step.stage}`, {
+              defaultValue: t("paper.agentProgress.logicalStep"),
+            })
+          const goal =
+            step.goal.trim() ||
+            t(`paper.agentProgress.guidance.${step.stage}.goal`, {
+              defaultValue: t("paper.agentProgress.defaultGoal"),
+            })
+          const approach =
+            step.approach.trim() ||
+            t(`paper.agentProgress.guidance.${step.stage}.approach`, {
+              defaultValue: t(`paper.workflow.stage.${step.stage}Hint`, {
+                defaultValue: t("paper.agentProgress.defaultApproach"),
+              }),
+            })
+          const outcome =
+            step.summary.trim() ||
+            t(
+              step.status === "completed"
+                ? "paper.agentProgress.outcomeCompleted"
+                : step.status === "waiting"
+                  ? "paper.agentProgress.outcomeWaiting"
+                  : step.status === "failed" || step.status === "interrupted"
+                    ? "paper.agentProgress.outcomeInterrupted"
+                    : "paper.agentProgress.outcomePending",
+            )
+          const Icon =
+            step.status === "running"
+              ? Loader2
+              : step.status === "completed"
+                ? Check
+                : step.status === "failed" || step.status === "interrupted"
+                  ? CircleAlert
+                  : Circle
           return (
-            <li key={stage} className="relative flex gap-3 pb-6 last:pb-0">
-              {index < stages.length - 1 && (
+            <li
+              key={step.id}
+              data-step-id={step.id}
+              data-step-status={step.status}
+              className="relative flex gap-3 pb-6 last:pb-0"
+            >
+              {index < steps.length - 1 && (
                 <span
                   aria-hidden="true"
                   className="absolute left-[13px] top-8 bottom-0 w-px bg-border"
@@ -174,65 +144,82 @@ export default function ResearchAgentProgressPanel({
                 className={cn(
                   "relative z-0 mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border bg-background",
                   active && "border-primary text-primary",
-                  published && "text-primary",
-                  failed && "text-destructive",
+                  step.status === "completed" && "text-primary",
+                  ["failed", "interrupted"].includes(step.status) &&
+                    "text-destructive",
                 )}
               >
                 <Icon
-                  className={cn(
-                    "size-3.5",
-                    active && "motion-safe:animate-spin",
-                  )}
                   aria-hidden="true"
+                  className={cn(
+                    "size-4",
+                    step.status === "running" && "motion-safe:animate-spin",
+                  )}
                 />
               </span>
-              <div className="min-w-0 flex-1 pt-0.5">
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <h3 className="text-base font-medium">
-                    {t(`paper.workflow.stage.${stage}`)}
-                  </h3>
+              <Collapsible.Root
+                key={`${step.id}:${current}:${step.status}`}
+                defaultOpen={current}
+                className="min-w-0 flex-1 overflow-hidden rounded-lg border bg-card"
+              >
+                <Collapsible.Trigger className="group flex w-full items-start gap-3 px-4 py-4 text-left hover:bg-muted/25 focus-visible:outline-2 focus-visible:outline-ring">
+                  <span className="min-w-0 flex-1 break-words font-serif text-lg font-semibold leading-7">
+                    {title}
+                  </span>
                   <span
                     className={cn(
-                      "text-xs text-muted-foreground",
+                      "mt-1 shrink-0 text-sm text-muted-foreground",
                       active && "text-primary",
                     )}
                   >
-                    {t(`paper.agentProgress.status.${stageStatus}`)}
+                    {t(`paper.agentProgress.status.${step.status}`)}
                   </span>
-                </div>
-                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-                  {t(`paper.workflow.stage.${stage}Hint`)}
-                </p>
-                {workers.map(renderWorker)}
-                {state && state.status !== "stale" && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="link"
-                    className="mt-2 h-auto px-0"
-                    onClick={() => onOpenStage(stage)}
-                  >
-                    {t("paper.agentProgress.openResult")}
-                    <ChevronRight data-icon="inline-end" />
-                  </Button>
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="mt-1.5 size-4 shrink-0 text-muted-foreground group-data-[state=open]:rotate-90"
+                  />
+                </Collapsible.Trigger>
+                <Collapsible.Content className="border-t px-4 py-4">
+                  <dl className="space-y-5">
+                    {[
+                      [t("paper.agentProgress.goal"), goal],
+                      [t("paper.agentProgress.approach"), approach],
+                      [t("paper.agentProgress.outcome"), outcome],
+                    ].map(([label, value]) => (
+                      <div key={label}>
+                        <dt className="mb-1 text-sm font-semibold text-foreground">
+                          {label}
+                        </dt>
+                        <dd className="whitespace-pre-wrap break-words text-[15px] leading-7 text-foreground/85">
+                          {value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </Collapsible.Content>
+                {canOpen && (
+                  <div className="border-t px-4 py-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="h-auto px-0 text-sm"
+                      onClick={() => onOpenStage(step.stage)}
+                    >
+                      {t("paper.agentProgress.openResult")}
+                      <ChevronRight data-icon="inline-end" />
+                    </Button>
+                  </div>
                 )}
-              </div>
+              </Collapsible.Root>
             </li>
           )
         })}
       </ol>
-      {progress?.agents.some((agent) => !stages.includes(agent.stage)) && (
-        <section
-          className="mt-6 border-t pt-5"
-          aria-label={t("paper.agentProgress.helpers")}
-        >
-          <h3 className="text-base font-medium">
-            {t("paper.agentProgress.helpers")}
-          </h3>
-          {progress.agents
-            .filter((agent) => !stages.includes(agent.stage))
-            .map(renderWorker)}
-        </section>
+      {steps.length === 0 && (
+        <p className="text-[15px] leading-7 text-muted-foreground">
+          {emptyMessage ?? t("paper.agentProgress.empty")}
+        </p>
       )}
       <p role="status" aria-live="polite" className="sr-only">
         {t(`paper.agentProgress.status.${status}`)}

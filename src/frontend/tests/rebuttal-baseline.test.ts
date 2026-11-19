@@ -4,6 +4,18 @@ import { parseRebuttalBaseline } from "../src/lib/rebuttalBaseline"
 
 const REVIEW_ID = "4e543020-7f38-407b-a941-78b44c39b94a"
 
+test("optional severity metadata does not hide an otherwise valid concern", () => {
+  const baseline = parseRebuttalBaseline({
+    baseline: { summary: "A saved concern without a priority estimate." },
+    intake: {},
+    analysis: {
+      concerns: [{ id: "w1", reviewer_id: REVIEW_ID, label: "W", concern: "Explain the comparison." }],
+    },
+  })
+  expect(baseline?.concerns).toHaveLength(1)
+  expect(baseline?.concerns[0].severity).toBe("unknown")
+})
+
 test("published rebuttal baseline is converted into a presentable view", () => {
   const baseline = parseRebuttalBaseline({
     baseline: {

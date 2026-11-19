@@ -101,16 +101,17 @@ class GatewayService:
             self.options["local_log_keep_seconds"] = local_log_keep_seconds
         for binding in self.bound:
             binding.name = name + binding.name[len(previous_name) :] if binding.name.startswith(previous_name) else name
-            binding.capacity = concurrency
+            if not binding.fixed_capacity:
+                binding.capacity = concurrency
             gateway = self.gateways[binding.key]
             gateway.name, gateway.allowed_users, gateway.capacity = (
                 binding.name,
                 list(allowed_users),
-                concurrency,
+                binding.capacity,
             )
             executor = getattr(gateway, "executor", None)
             if executor is not None:
-                executor.concurrency = concurrency
+                executor.concurrency = binding.capacity
             if wakeup := getattr(gateway, "wakeup", None):
                 wakeup.set()
         self.retention_status["enabled"] = cleanup_enabled

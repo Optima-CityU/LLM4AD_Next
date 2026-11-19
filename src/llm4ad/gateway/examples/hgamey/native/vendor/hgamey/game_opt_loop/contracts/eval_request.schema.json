@@ -121,7 +121,8 @@
     "budget_ms": { "type": "number", "exclusiveMinimum": 0, "description": "v1 扁平字段" },
     "quality_baseline_db": { "type": "number", "description": "v1 扁平字段" },
     "incumbent_latency_ms": { "type": ["number", "null"], "description": "v1 扁平字段" },
-    "quality_reference": { "type": ["string", "null"], "description": "v1 扁平字段" }
+    "quality_reference": { "type": ["string", "null"], "description": "v1 扁平字段" },
+    "quality_input": { "type": ["string", "null"], "description": "Native LR PNG for headless SR with a single paired HR reference." }
   },
 
   "allOf": [
@@ -154,6 +155,7 @@
               "quality_baseline_db": { "type": ["number", "null"], "description": "画质地板的兜底值。接收端**优先用本场基线臂的实测画质**当地板 —— 绝对 dB 不可跨参考图比较, 拿别处搬来的常数当地板会得出荒谬结论。" },
               "incumbent_latency_ms": { "type": ["number", "null"], "description": "在位冠军算子的实测耗时; null = 还没有冠军。refbench 载体的 A 臂不挂算子 (耗时按定义为 0), 接收端必须拿这个值判候选是否比现任更便宜, 否则该判断恒假。" },
               "quality_reference": { "type": ["string", "null"], "description": "画质真值: 一张 PNG, 或一整个装着真机截帧的目录 (目录里的图全部参与, 逐帧 PSNR 取均值)。null = 接收端退回 runner 内置程序化图案 —— 同一算子在两者上的绝对 dB 差约 11 dB, 不可互相比较。" },
+              "quality_input": { "type": ["string", "null"], "description": "Native 960x540 LR PNG for headless SR with a matching 1920x1080 HR reference." },
               "inject": {
                 "type": ["object", "null"],
                 "description": "黑盒游戏上怎么把算子挂进去。null = 白盒载体自己挂 (refbench 的 postfx 队列)。黑盒时走灰档 Vulkan layer, 与 kind=gray 同一套注入机制。",

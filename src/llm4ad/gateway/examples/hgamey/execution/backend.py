@@ -83,7 +83,12 @@ def run_backend(folder):
     try:
         verify_frozen_inputs(folder, frozen)
         if body["operation"] == "eval":
-            write_json(folder / "eval-request.json", body["request"])
+            request = body["request"]
+            if pairs := request.get("payload", {}).get("static_pairs"):
+                from .static_measurement import pair_request
+
+                request = pair_request(request, pairs[0])
+            write_json(folder / "eval-request.json", request)
             check = command(
                 ["phonefarm", "eval", "--request", str(folder / "eval-request.json"), "--validate-only", "--json"],
                 capture_output=True,

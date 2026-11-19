@@ -13,6 +13,7 @@ from llm4ad.evaluator.models import EvaluationResult
 
 from .benchmark import canonical, digest
 from .evaluator import HGameyShaderEvaluator
+from .execution.static_measurement import COLLAGE_NAMES, REPORT_SCHEMA, score_static_dataset
 
 
 class IndependentEvaluator(HGameyShaderEvaluator):
@@ -78,7 +79,10 @@ class HGameyStaticEvaluator(IndependentEvaluator):
 
     def convert_report(self, report: dict, state: dict) -> EvaluationResult | None:
         """Keep official static measurements and associate actual GPU image evidence."""
-        result = super().convert_report(report, state)
+        paired = bool(getattr(self.benchmark, "static_pairs", []))
+        if paired and report.get("schema") != REPORT_SCHEMA and not report.get("preparation_failure_verified"):
+            return None
+        result = super().convert_report(report, state, score_quality_rejection=paired)
         if result is not None:
             result.metadata.update(evaluation_mode="static", evidence_comparisons=self.comparisons(report))
             if report.get("artifact_errors"):
@@ -86,7 +90,34 @@ class HGameyStaticEvaluator(IndependentEvaluator):
             baseline = report.get("baseline_metrics", {})
             if isinstance(baseline, dict) and isinstance(baseline.get("psnr_db"), (int, float)):
                 result.monitor_metrics["baseline_psnr_db"] = baseline["psnr_db"]
+            if paired and result.success:
+                scored = score_static_dataset(report)
+                if scored is None:
+                    return None
+                result.score, quality = scored
+                gain = float(report["operator_improvement_pct"])
+                result.metrics.update(static_score=result.score, operator_improvement_pct=gain)
+                result.metadata.update(static_datasets=report["static_datasets"], quality_assessment=quality)
+                summary = result.metadata["evaluation_summary"]
+                summary["operator_improvement_threshold_met"] = (
+                    gain > 0 and gain >= self.benchmark.min_operator_improvement_pct
+                )
+                if quality["penalized"]:
+                    summary["comparison_outcome"] = "quality_penalty"
+                result.evolution_feedback.update(
+                    metrics=result.metrics, assessment=dict(summary), quality_assessment=quality
+                )
         return result
+
+    async def retain_game_artifacts(self, session, reporter, state: dict, report: dict) -> list[str]:
+        """Apply the two-image upload allowlist to paired static evaluations."""
+        if getattr(self.benchmark, "static_pairs", []):
+            images = {}
+            for item in report.get("artifacts", []):
+                if item.get("name") in COLLAGE_NAMES and item.get("media_type") == "image/png":
+                    images.setdefault(item["name"], item)
+            report = report | {"artifacts": list(images.values())}
+        return await super().retain_game_artifacts(session, reporter, state, report)
 
 
 class HGameyGameEvaluator(IndependentEvaluator):
