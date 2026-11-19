@@ -7,9 +7,12 @@ import sys
 from pathlib import Path
 
 
-def main():
+def main() -> None:
     """Load the candidate and return actual per-case measurements as JSON."""
-    spec = importlib.util.spec_from_file_location("candidate", Path(sys.argv[1]))
+    candidate = Path(sys.argv[1])
+    spec = importlib.util.spec_from_file_location("candidate", candidate)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load candidate module from {candidate}")
     module = importlib.util.module_from_spec(spec)
     with contextlib.redirect_stdout(sys.stderr):
         spec.loader.exec_module(module)

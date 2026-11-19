@@ -78,7 +78,8 @@ def is_loopback(host: str) -> bool:
         return True
     try:
         address = ipaddress.ip_address(host)
-        return address.is_loopback or bool(getattr(address, "ipv4_mapped", None) and address.ipv4_mapped.is_loopback)
+        mapped = address.ipv4_mapped if isinstance(address, ipaddress.IPv6Address) else None
+        return address.is_loopback or (mapped is not None and mapped.is_loopback)
     except ValueError:
         return False
 
@@ -220,7 +221,8 @@ def pretty_json(value: Any) -> str:
 
 def job_identity(job: Mapping[str, Any]) -> tuple[str, str, str]:
     """Extract the binding, job and attempt identifiers from a controller row."""
-    inner = job.get("job") if isinstance(job.get("job"), Mapping) else {}
+    payload = job.get("job")
+    inner = payload if isinstance(payload, Mapping) else {}
     return (
         str(job.get("binding", job.get("binding_key", ""))),
         str(job.get("job_id", job.get("id", inner.get("id", "")))),

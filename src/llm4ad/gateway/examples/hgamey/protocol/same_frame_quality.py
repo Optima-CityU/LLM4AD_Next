@@ -61,9 +61,10 @@ def measure(folder: Path, frozen: dict, *, deadline: float, phonefarm: str) -> d
 
     for pair in range(1, options["rounds"] + 1):
         frame_id = f"frame-{pair:02}"
-        record = {"frame_id": frame_id, "status": "not_measured", "metrics": [], "not_computed": []}
+        reasons: list[str] = []
+        record = {"frame_id": frame_id, "status": "not_measured", "metrics": [], "not_computed": reasons}
         if not cleanup_confirmed:
-            record["not_computed"].append("Prior replay restoration is unconfirmed")
+            reasons.append("Prior replay restoration is unconfirmed")
             frames.append(record)
             continue
         external_pending = False
@@ -108,7 +109,7 @@ def measure(folder: Path, frozen: dict, *, deadline: float, phonefarm: str) -> d
         except Exception as error:
             if external_pending:
                 cleanup_confirmed = False
-            record["not_computed"].append(f"{type(error).__name__}: {error}")
+            reasons.append(f"{type(error).__name__}: {error}")
             frames.append(record)
     quality = game_quality.judge_replay(evidence, frames, phonefarm)
     print(f"Official per-frame IQ: {quality['status']}", flush=True)

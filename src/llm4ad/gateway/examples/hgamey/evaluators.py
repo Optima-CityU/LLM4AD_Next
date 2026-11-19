@@ -77,12 +77,14 @@ class HGameyStaticEvaluator(IndependentEvaluator):
 
     evaluation_mode = "static"
 
-    def convert_report(self, report: dict, state: dict) -> EvaluationResult | None:
+    def convert_report(
+        self, report: dict, state: dict, *, score_quality_rejection: bool = False
+    ) -> EvaluationResult | None:
         """Keep official static measurements and associate actual GPU image evidence."""
         paired = bool(getattr(self.benchmark, "static_pairs", []))
         if paired and report.get("schema") != REPORT_SCHEMA and not report.get("preparation_failure_verified"):
             return None
-        result = super().convert_report(report, state, score_quality_rejection=paired)
+        result = super().convert_report(report, state, score_quality_rejection=paired or score_quality_rejection)
         if result is not None:
             result.metadata.update(evaluation_mode="static", evidence_comparisons=self.comparisons(report))
             if report.get("artifact_errors"):
@@ -112,7 +114,7 @@ class HGameyStaticEvaluator(IndependentEvaluator):
     async def retain_game_artifacts(self, session, reporter, state: dict, report: dict) -> list[str]:
         """Apply the two-image upload allowlist to paired static evaluations."""
         if getattr(self.benchmark, "static_pairs", []):
-            images = {}
+            images: dict[str, dict] = {}
             for item in report.get("artifacts", []):
                 if item.get("name") in COLLAGE_NAMES and item.get("media_type") == "image/png":
                     images.setdefault(item["name"], item)
@@ -139,8 +141,8 @@ class HGameyGameEvaluator(IndependentEvaluator):
         """Follow the original game job and derive fitness from its own measurements."""
         self.validate_frozen(state)
         if self.direct_store() is not None:
-            report = await self.follow_direct(state, reporter)
-            return self.require_result(self.convert_report(report, state), state)
+            direct_report = await self.follow_direct(state, reporter)
+            return self.require_result(self.convert_report(direct_report, state), state)
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             await self.check_executor(session, reporter, game_required=True)
             report = await self.follow_job(session, reporter, state)
@@ -148,7 +150,9 @@ class HGameyGameEvaluator(IndependentEvaluator):
             return self.require_result(None, state)
         return self.require_result(self.convert_report(report, state), state)
 
-    def convert_report(self, report: dict, state: dict) -> EvaluationResult | None:
+    def convert_report(
+        self, report: dict, state: dict, *, score_quality_rejection: bool = False
+    ) -> EvaluationResult | None:
         """Expose weighted real-game fitness and each measured contribution."""
         from .scoring import score_game
 
@@ -187,7 +191,7 @@ class HGameyGameEvaluator(IndependentEvaluator):
             if type(value) in (int, float) and math.isfinite(value)
         }
         unpenalized = scored.get("unpenalized_score")
-        if type(unpenalized) in (int, float) and math.isfinite(unpenalized):
+        if (type(unpenalized) is int or type(unpenalized) is float) and math.isfinite(unpenalized):
             metrics["game_unpenalized_score"] = float(unpenalized)
         for name, component in scored["components"].items():
             for field in ("gain", "contribution"):

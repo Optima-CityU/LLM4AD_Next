@@ -5,8 +5,9 @@ import os
 import shutil
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-if __package__:
+if TYPE_CHECKING or __package__:
     from .toolchain import download
 else:
     from toolchain import download

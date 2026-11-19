@@ -200,7 +200,7 @@ def collect_journal(
                         raise ValueError("Invalid evidence outbox identity")
                     if Path(item["path"]).absolute() != owned_path(spool / item["sha256"], gateway.root):
                         raise ValueError("Evidence outbox belongs to another attempt")
-                work = owned_path(gateway.root / "work" / job["id"] / job["attempt_id"], gateway.root)
+                work: Path | None = owned_path(gateway.root / "work" / job["id"] / job["attempt_id"], gateway.root)
                 generations = []
                 if job.get("execution_id"):
                     uuid.UUID(job["execution_id"])

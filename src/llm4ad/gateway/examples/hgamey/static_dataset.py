@@ -58,7 +58,7 @@ def matching_pairs(root: Path, dataset: str, split: str):
 
 def _sample(root: Path, dataset: str, split: str):
     """Select across locations and then across sequences with stable ordering."""
-    locations = defaultdict(lambda: defaultdict(list))
+    locations: defaultdict[str, defaultdict[str, list[tuple[str, Path, Path]]]] = defaultdict(lambda: defaultdict(list))
     ids = set()
     for group, sample, lr, hr in matching_pairs(root, dataset, split):
         if sample in ids:
@@ -99,8 +99,8 @@ def _prepare_image(source: Path, target: Path, size: tuple[int, int], source_siz
         if image.size != source_size:
             raise ValueError(f"Unexpected image dimensions at {source}: {image.size}")
         x, y = (image.width - size[0]) // 2, (image.height - size[1]) // 2
-        image = image.crop((x, y, x + size[0], y + size[1])).convert("RGBA")
-        image.save(target, format="PNG")
+        cropped = image.crop((x, y, x + size[0], y + size[1])).convert("RGBA")
+        cropped.save(target, format="PNG")
     return {
         "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
         "source_sha256": hashlib.sha256(content).hexdigest(),
@@ -131,10 +131,10 @@ def prepare_dataset(output: Path, qrisp: Path, gameir: Path, revisions: tuple[st
     with tempfile.TemporaryDirectory(prefix=".hgamey-dataset-", dir=output.parent) as temporary:
         stage = Path(temporary) / "dataset"
         stage.mkdir()
-        samples = []
+        samples: list[dict] = []
         for dataset, root, revision in zip(DATASETS, (qrisp, gameir), revisions, strict=True):
             for sample_id, lr, hr in _sample(root, dataset, split):
-                sample = {"dataset": dataset, "id": sample_id, "revision": revision}
+                sample: dict[str, str | dict] = {"dataset": dataset, "id": sample_id, "revision": revision}
                 for role, source, size in (("lr", lr, LR_SIZE), ("hr", hr, HR_SIZE)):
                     filename = f"{len(samples):02d}-{role}.png"
                     source_size = (size[0], (720 if role == "lr" else 1440)) if dataset == "GameIR-SR" else size

@@ -97,8 +97,8 @@ class Evaluator(GatewayEvaluator):
         if operation == "cancel":
             return
         if error is not None:
-            with self.diagnostic_path(job, reporter, "operation-error.log").open("a", encoding="utf-8") as output:
-                output.write(str(error) + "\n")
+            with self.diagnostic_path(job, reporter, "operation-error.log").open("a", encoding="utf-8") as log:
+                log.write(str(error) + "\n")
             if isinstance(error, EvaluationError) and error.metadata.get("stage") == "execution":
                 output = Path(job.artifact_dir)
                 output.mkdir(exist_ok=True)

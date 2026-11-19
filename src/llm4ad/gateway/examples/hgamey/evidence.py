@@ -8,10 +8,12 @@ import os
 import re
 import sqlite3
 import stat
+import sys
 import tempfile
 import threading
 from contextlib import closing
 from pathlib import Path, PurePosixPath
+from typing import TypeGuard, cast
 
 from llm4ad.gateway.sdk.contracts import RemoteJob
 from llm4ad.gateway.sdk.retention import CleanupPlan, CleanupTarget, EvidencePolicy, owned_path
@@ -76,7 +78,7 @@ def _read_owned(path: Path, root: Path, limit: int = _MAX_ARTIFACT_BYTES) -> byt
     return content
 
 
-def _valid_artifacts(artifacts) -> bool:
+def _valid_artifacts(artifacts: object) -> TypeGuard[list[dict]]:
     """Validate optional manifest structure before using file names or identities."""
     if not isinstance(artifacts, list):
         return False
@@ -113,7 +115,7 @@ def _verify_artifact(content: bytes, item: dict) -> None:
         raise EvidenceChangedError("Evidence changed")
 
 
-def measurement_screenshots(evidence: Path, options: dict, arms: list[dict]) -> list[dict]:
+def measurement_screenshots(evidence: Path, options: object, arms: list[dict]) -> list[dict]:
     """Declare original game screenshots from the first two measurement pairs.
 
     Args:
@@ -176,27 +178,28 @@ def _snapshot_manifest(folder: Path) -> list[dict]:
     """Read only owned, checksum-verified PNGs from a complete published snapshot."""
     snapshot = owned_path(folder / _SCREENSHOT_DIRECTORY, folder)
     manifest = json.loads(_read_owned(snapshot / "manifest.json", folder, 65536))
+    artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema") != _SCREENSHOT_SCHEMA
         or manifest.get("job_id") != folder.name
-        or not _valid_artifacts(manifest.get("artifacts"))
-        or not 1 <= len(manifest["artifacts"]) <= 4
+        or not _valid_artifacts(artifacts)
+        or not 1 <= len(artifacts) <= 4
     ):
         raise ValueError("Invalid screenshot snapshot manifest")
-    for item in manifest["artifacts"]:
+    for item in artifacts:
         if not _SCREENSHOT_NAME.fullmatch(item["name"]) or item.get("media_type") != "image/png":
             raise ValueError("Invalid screenshot snapshot entry")
         content = _read_owned(snapshot / item["sha256"], folder)
         _verify_artifact(content, item)
         if len(content) <= 8 or not content.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("Invalid screenshot snapshot PNG")
-    return manifest["artifacts"]
+    return artifacts
 
 
 def _sync_directory(path: Path) -> None:
     """Persist snapshot directory entries on the executor's POSIX filesystem."""
-    if os.name == "posix":
+    if sys.platform != "win32" and os.name == "posix":
         descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(descriptor)
@@ -283,7 +286,7 @@ def exported_result(folder: Path) -> dict:
     folder = owned_path(folder, folder.parent)
     report = json.loads(owned_path(folder / "result.json", folder).read_text())
     if not isinstance(report, dict) or not _valid_artifacts(report.get("artifacts", [])):
-        return report
+        return cast(dict, report)
     try:
         images = _screenshot_snapshot(folder, report.get("artifacts", []))
     except (OSError, RuntimeError, ValueError, KeyError, TypeError):

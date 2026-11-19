@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, stop_before_delay, wait_exponential
@@ -60,7 +60,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
 
         return JobStore(self.benchmark.settings["executor_data"], self.benchmark.settings["executor_config"])
 
-    def require_result(self, result, state):
+    def require_result(self, result: EvaluationResult | None, state: dict) -> EvaluationResult:
         """Expose infrastructure failures to the SDK retry controller.
 
         Args:
@@ -74,7 +74,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             EvaluationUnavailableError: Measurement or restoration is unavailable.
         """
         if result is None or result.metadata.get("infrastructure_failure") is True:
-            message = result.error_message if result is not None else "HGamey measurement or restoration is unavailable"
+            message = str(result.error_message) if result is not None else "HGamey measurement or restoration is unavailable"
             raise EvaluationUnavailableError(message, metadata={
                 "infrastructure_failure": True, "stage": "native_evaluation",
                 "external_job_id": state.get("external_job_id"),
@@ -157,7 +157,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             raise RuntimeError("Staging directory belongs to another evaluation attempt")
         write_json(ownership, owner)
         if (folder / "submission.json").exists():
-            state = json.loads((folder / "submission.json").read_text(encoding="utf-8"))
+            state: dict = json.loads((folder / "submission.json").read_text(encoding="utf-8"))
             self.validate_prepared(job, state)
             return state
         if game_required:
@@ -238,12 +238,13 @@ class HGameyShaderEvaluator(GatewayEvaluator):
             for path in (baseline_layer, candidate_layer):
                 state["files"][path.relative_to(folder).as_posix()] = digest(path.read_bytes())
             game_key = digest(canonical({"candidate_id": key, "operation": "game-ab"}))
+            options = cast(dict, self.benchmark.game_check)["options"]
             game_body = {
                 "idempotency_key": game_key,
                 "device_id": self.benchmark.settings["device_id"],
                 "operation": "game-ab",
                 "options": {
-                    **self.benchmark.game_check["options"],
+                    **options,
                     "baseline_layer_path": self.benchmark.container_path(baseline_layer),
                     "layer_path": self.benchmark.container_path(candidate_layer),
                     "candidate_id": key,
@@ -257,7 +258,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                         },
                         **{name.replace(".", "_") + "_sha256": state["files"][name]
                            for name in ("candidate.comp", "baseline.comp", "candidate.spv", "baseline.spv")},
-                    } if self.benchmark.game_check["options"].get("quality_samples", 0) else None,
+                    } if options.get("quality_samples", 0) else None,
                 },
             }
             state["game"] = {
@@ -396,11 +397,11 @@ class HGameyShaderEvaluator(GatewayEvaluator):
         self.validate_frozen(state)
         game_required = state.get("game_required", self.benchmark.game_check is not None)
         if self.direct_store() is not None:
-            report = await self.follow_direct(state, reporter)
-            result = self.require_result(self.convert_report(report, state), state)
+            direct_report = await self.follow_direct(state, reporter)
+            result = self.require_result(self.convert_report(direct_report, state), state)
             if game_required and result.success:
-                game_report = await self.follow_direct(state, reporter, game=True)
-                result = self.require_result(self.combine_game_report(result, game_report, state), state)
+                direct_game_report = await self.follow_direct(state, reporter, game=True)
+                result = self.require_result(self.combine_game_report(result, direct_game_report, state), state)
             return result
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             await self.check_executor(session, reporter, game_required=game_required)
@@ -697,7 +698,7 @@ class HGameyShaderEvaluator(GatewayEvaluator):
                 return None
             if game and phase != "completed":
                 return None
-            return report
+            return cast(dict, report)
 
     def combine_game_report(self, result: EvaluationResult, report: dict | None, state: dict) -> EvaluationResult | None:
         """Require applied, restored game evidence without using FPS as fitness."""

@@ -39,7 +39,8 @@ def _image(path: Path) -> bytes:
         raise ValueError("Screenshot changed during read")
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("Screenshot must be a PNG")
-    offset, chunks, compressed, header = 8, [], bytearray(), None
+    chunks: list[bytes] = []
+    offset, compressed, header = 8, bytearray(), None
     while offset + 12 <= len(data):
         length = struct.unpack_from(">I", data, offset)[0]
         end = offset + 12 + length
@@ -132,7 +133,7 @@ def screenshot_artifacts(evidence: Path, options: dict, arms: list[dict]) -> tup
     """
     artifacts, comparisons = [], []
     for pair in range(1, options["rounds"] + 1):
-        available = {}
+        available: dict[int, list[dict[str, str]]] = {}
         for side in "AB":
             label = f"{side}{pair}"
             records = [arm for arm in arms if arm.get("arm") == label and arm.get("side") == side and arm.get("pair") == pair]
@@ -270,7 +271,9 @@ def _asset(evidence: Path, item: object, require_size: bool) -> tuple[dict, tupl
     )
 
 
-def _claim(frame: dict, asset: dict, identity: tuple[int, int], owners: dict) -> None:
+def _claim(
+    frame: dict, asset: dict, identity: tuple[int, int], owners: dict[str | tuple[int, int], dict]
+) -> None:
     """Reject reused source/readback paths or file identities before running any judge."""
     for key in (asset["artifact"], identity):
         previous = owners.get(key)
@@ -285,7 +288,7 @@ def _claim(frame: dict, asset: dict, identity: tuple[int, int], owners: dict) ->
 def _finite(value: object) -> bool:
     """Exclude booleans, nonfinite floats and integers outside finite float range."""
     try:
-        return type(value) in (int, float) and math.isfinite(value)
+        return (type(value) is int or type(value) is float) and math.isfinite(value)
     except OverflowError:
         return False
 
@@ -445,11 +448,11 @@ def _finish(
     if protocol is not None:
         result["protocol"] = provenance["protocol"] = protocol
     if not frames and not reasons:
-        result["not_computed"].append("No quality frames were provided")
+        reasons.append("No quality frames were provided")
     title = (
         "Game IQ per-frame reports" if status == "measured" else "Game IQ unavailable or incomplete"
     )
-    lines = [f"# {title}", "", comparison, "", *result["not_computed"]]
+    lines = [f"# {title}", "", comparison, "", *reasons]
     lines.extend(
         f"- {frame['frame_id']}: {frame['status']} — {frame['provenance']['markdown_artifact']}"
         for frame in frames
@@ -460,7 +463,7 @@ def _finish(
         _write_report(output / "iq-judge.json", json.dumps(result, indent=2, allow_nan=False))
     except (OSError, ValueError) as exc:
         result["status"] = "error"
-        result["not_computed"].append(f"Quality summary unavailable: {exc}")
+        reasons.append(f"Quality summary unavailable: {exc}")
     return result
 
 
@@ -480,21 +483,22 @@ def judge_replay(evidence: Path, frames: list[dict], phonefarm: str) -> dict:
         per-frame quality penalties rather than raw measurements or references.
     """
     evidence = Path(evidence).absolute()
-    measured, owners, identifiers = [], {}, {}
-    missing = []
+    measured: list[dict] = []
+    owners: dict[str | tuple[int, int], dict] = {}
+    identifiers: dict[str, dict] = {}
+    missing: list[str] = []
     if not isinstance(frames, list):
         missing.append("Replay frames must be a list")
         frames = []
     for index, entry in enumerate(frames, 1):
         entry = entry if isinstance(entry, dict) else {}
         identifier = entry.get("frame_id")
-        valid_id = (type(identifier) is int and identifier >= 0) or (
-            isinstance(identifier, str)
-            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", identifier)
-        )
-        frame = _frame(
-            identifier if valid_id else f"invalid-{index}", f"quality/frames/{index:04d}"
-        )
+        frame_id: str | int | None = None
+        if (type(identifier) is int and identifier >= 0) or (
+            isinstance(identifier, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", identifier)
+        ):
+            frame_id = identifier
+        frame = _frame(frame_id if frame_id is not None else f"invalid-{index}", f"quality/frames/{index:04d}")
         frame["provenance"]["protocol"] = REPLAY_PROTOCOL
         measured.append(frame)
         recorded_reasons = entry.get("not_computed", [])
@@ -506,7 +510,7 @@ def judge_replay(evidence: Path, frames: list[dict], phonefarm: str) -> dict:
             frame["not_computed"].append(entry["error"])
         if "cleanup_confirmed" in entry and entry["cleanup_confirmed"] is not True:
             frame["not_computed"].append("Replay cleanup was not confirmed")
-        if not valid_id:
+        if frame_id is None:
             frame["not_computed"].append(
                 "Replay frame_id must be a unique safe name or nonnegative integer"
             )
@@ -574,7 +578,8 @@ def measure_quality(evidence: Path, options: dict, arms: list[dict], phonefarm: 
     evidence = Path(evidence).absolute()
     artifacts, _ = screenshot_artifacts(evidence, options, arms)
     by_name = {item["name"]: item for item in artifacts}
-    frames, owners = [], {}
+    frames: list[dict] = []
+    owners: dict[str | tuple[int, int], dict] = {}
     for pair in range(1, options["rounds"] + 1):
         frame = _frame(f"round-{pair}", f"quality/rounds/{pair:04d}")
         frame["pair"] = pair

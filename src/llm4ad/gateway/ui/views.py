@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .helpers import job_identity, value_text
+
+if TYPE_CHECKING:
+    from llm4ad.gateway.sdk.controller import GatewayController
 
 
 @dataclass(frozen=True)
@@ -38,7 +41,7 @@ class DialogScope:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pending: set[asyncio.Task] = field(default_factory=set, repr=False)
 
-    async def query(self, operation: Callable) -> Any:
+    async def query[T](self, operation: Callable[[], Awaitable[T]]) -> T | None:
         """Track only an in-flight view query so closing can cancel its wait."""
         if self.closed:
             return None
@@ -66,7 +69,7 @@ class DialogScope:
 class ReportingFeed:
     """Read platform reporting records by sequence, independently of local log files."""
 
-    def __init__(self, controller: Any, reference: TaskReference):
+    def __init__(self, controller: GatewayController, reference: TaskReference):
         """Bind one immutable attempt and an initially empty reporting window."""
         self.controller, self.reference = controller, reference
         self.scope = DialogScope()
@@ -119,7 +122,7 @@ class ReportingFeed:
 class LocalLogFeed:
     """Read local stdout/stderr by byte offsets without using reporting messages."""
 
-    def __init__(self, controller: Any, reference: TaskReference):
+    def __init__(self, controller: GatewayController, reference: TaskReference):
         """Bind a task or startup check to a selected local log source."""
         self.controller, self.reference = controller, reference
         self.scope = DialogScope()
@@ -140,8 +143,12 @@ class LocalLogFeed:
         async with self.scope.lock:
             if self.scope.closed or self.source is None:
                 return {}
-            offset = max(0, self.first_offset - 65536) if older and self.first_offset is not None else self.next_offset
-            limit = self.first_offset - offset if older and self.first_offset is not None else 65536
+            offset: int | None
+            if older and self.first_offset is not None:
+                offset = max(0, self.first_offset - 65536)
+                limit = self.first_offset - offset
+            else:
+                offset, limit = self.next_offset, 65536
             if limit <= 0:
                 return {}
             generation, source = self.generation, self.source

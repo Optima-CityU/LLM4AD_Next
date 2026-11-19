@@ -211,7 +211,7 @@ def execute_static(folder: Path, request: dict, argv: list[str], command) -> int
     Returns:
         Executor status code for the published measurement report.
     """
-    frames = []
+    frames: list[dict] = []
     summary = {
         "schema": REPORT_SCHEMA,
         "source": "phonefarm",

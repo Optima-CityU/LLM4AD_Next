@@ -1,13 +1,18 @@
 """Explicit local execution transitions, independent of transport and persistence."""
 
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 from transitions import Machine, MachineError
+
+if TYPE_CHECKING:
+    from transitions.core import TransitionConfigDict
 
 STATES = ("accepted", "running", "retrying", "cancelling", "completed", "failed", "cancelled")
 TERMINAL_STATES = frozenset({"completed", "failed", "cancelled"})
 _LEGACY = {"interrupted": "retrying", "recovery_required": "retrying"}
-_TRANSITIONS = [
+_TRANSITIONS: list["TransitionConfigDict"] = [
     {"trigger": "launch", "source": ["accepted", "retrying"], "dest": "running"},
     {"trigger": "retry", "source": ["accepted", "running", "retrying"], "dest": "retrying"},
     {"trigger": "cancel", "source": ["accepted", "running", "retrying"], "dest": "cancelling"},
@@ -15,6 +20,13 @@ _TRANSITIONS = [
     {"trigger": "fail", "source": ["accepted", "running", "retrying", "cancelling"], "dest": "failed"},
     {"trigger": "finish_cancel", "source": "cancelling", "dest": "cancelled"},
 ]
+
+
+class _ExecutionModel(SimpleNamespace):
+    """Describe the state and trigger installed by the transition machine."""
+
+    state: str
+    trigger: Callable[[str], bool]
 
 
 def normalize_state(state: str) -> str:
@@ -51,7 +63,7 @@ def transition(state: str, event: str) -> str:
     current = normalize_state(state)
     if event not in {item["trigger"] for item in _TRANSITIONS} or current in TERMINAL_STATES:
         raise ValueError(f"Invalid execution transition: {state!r} / {event!r}")
-    model = SimpleNamespace()
+    model = _ExecutionModel()
     Machine(model=model, states=list(STATES), transitions=_TRANSITIONS, initial=current, auto_transitions=False)
     try:
         model.trigger(event)

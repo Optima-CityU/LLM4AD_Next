@@ -100,7 +100,9 @@ def check_evaluator(
                     gateway.enforce_deadlines()
                     await gateway.probe_cleanup()
                     await gateway.reconcile(None, payload)
-                    if journal.get(identity)["state"] in {"completed", "failed", "cancelled"}:
+                    row = journal.get(identity)
+                    assert row is not None
+                    if row["state"] in {"completed", "failed", "cancelled"}:
                         return
                     await asyncio.sleep(0.05)
             finally:
@@ -108,6 +110,7 @@ def check_evaluator(
 
         asyncio.run(run_check())
         row = journal.get(identity)
+        assert row is not None
         result = Reporter(journal, identity, job.attempt_id).enrich(json.loads(row["report"]))
         descriptions = result.get("metadata", {}).get("artifact_descriptions", {})
         return {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import shutil
@@ -10,7 +11,9 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
+from typing import Any, TypedDict
 
 from loky import ProcessPoolExecutor
 from persistqueue import Empty, SQLiteAckQueue
@@ -39,7 +42,16 @@ def _resolve(target: str):
     return value
 
 
-def _execute_packet(packet: dict):
+class _Packet(TypedDict):
+    """Describe the fields required by a persisted delivery."""
+
+    key: str
+    target: str
+    args: list[Any]
+    kwargs: dict[str, Any]
+
+
+def _execute_packet(packet: _Packet):
     return _resolve(packet["target"])(*packet["args"], **packet["kwargs"])
 
 
@@ -74,6 +86,13 @@ class DurableExecutor:
     is deliberately separate from execution, retries and network result delivery.
     """
 
+    # Gateways attach resource-specific state when they bind to the executor.
+    resource_exclusive: bool
+    claimed_attempts: set[tuple[str, str, str]]
+    cleanup_debts: set[str]
+    cleanup_lock: asyncio.Lock
+    claim_lock: asyncio.Lock
+
     def __init__(self, directory: str | Path, concurrency: int = 1):
         """Reconcile old process owners before resuming unacknowledged deliveries.
 
@@ -93,14 +112,14 @@ class DurableExecutor:
         self._lock = threading.RLock()
         self._manual_paused = False
         self._holds: set[str] = set()
-        self._entries: dict[str, dict] = {}
+        self._entries: dict[str, _Packet] = {}
         self._receipts: dict[str, int] = {}
         self._futures: dict[str, Future] = {}
         self._slots: dict[str, _Slot] = {}
         self._owners: dict[str, set[Path]] = {}
         self._cancelling: set[str] = set()
         self._closed = False
-        self._queue = None
+        self._queue: SQLiteAckQueue | None = None
         self._completions = ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="llm4ad-slot-cleanup")
         self._lease = gateway_lease(self.directory / "controller")
         self._lease.__enter__()
@@ -116,11 +135,13 @@ class DurableExecutor:
                 key = json.loads(owner.read_text(encoding="utf-8"))["key"]
                 self._owners.setdefault(key, set()).add(owner.parent)
             self._queue.resume_unack_tasks()
-            acknowledged = set()
+            acknowledged: set[str] = set()
             for item in self._queue.queue():
                 if str(item["status"]) not in {"0", "1", "2"}:
                     if str(item["status"]) in {"5", "9"} and isinstance(item["data"], dict):
-                        acknowledged.add(item["data"].get("key"))
+                        acknowledged_key = item["data"].get("key")
+                        if isinstance(acknowledged_key, str):
+                            acknowledged.add(acknowledged_key)
                     continue
                 packet = self._validate_packet(item["data"])
                 key = packet["key"]
@@ -184,7 +205,7 @@ class DurableExecutor:
             return tuple(self._slots)
 
     @staticmethod
-    def _validate_packet(packet: dict) -> dict:
+    def _validate_packet(packet: object) -> _Packet:
         if (
             not isinstance(packet, dict)
             or not isinstance(packet.get("key"), str)
@@ -194,7 +215,8 @@ class DurableExecutor:
             or not isinstance(packet.get("kwargs"), dict)
         ):
             raise ValueError("Invalid durable execution packet")
-        return json.loads(json.dumps(packet, allow_nan=False))
+        normalized: _Packet = json.loads(json.dumps(packet, allow_nan=False))
+        return normalized
 
     def submit(self, key: str, target, args: tuple = (), kwargs: dict | None = None) -> Future:
         """Persist or deduplicate a delivery without launching a worker.
@@ -232,7 +254,10 @@ class DurableExecutor:
                 if self._entries[key] != packet:
                     raise ValueError(f"Conflicting durable delivery key: {key}")
                 return self._futures[key]
-            receipt = self._queue.put(packet)
+            queue = self._queue
+            assert queue is not None
+            receipt = queue.put(packet)
+            assert receipt is not None
             self._entries[key] = packet
             self._receipts[key] = receipt
             self._futures[key] = _DeliveryFuture(self, key)
@@ -247,6 +272,8 @@ class DurableExecutor:
         with self._lock:
             if self._closed or self.paused or len(self._slots) >= self.concurrency:
                 return
+            queue = self._queue
+            assert queue is not None
             occupied = {slot.index for slot in self._slots.values()}
             for index in range(self.concurrency):
                 if len(self._slots) >= self.concurrency:
@@ -254,7 +281,7 @@ class DurableExecutor:
                 if index in occupied:
                     continue
                 try:
-                    item = self._queue.get(block=False, raw=True)
+                    item = queue.get(block=False, raw=True)
                 except Empty:
                     break
                 packet = self._validate_packet(item["data"])
@@ -274,7 +301,7 @@ class DurableExecutor:
                         env=owner_environment(owner),
                     )
                     slot.inner = slot.pool.submit(_execute_packet, packet)
-                    slot.inner.add_done_callback(lambda completed, current=slot: self._completed(current, completed))
+                    slot.inner.add_done_callback(partial(self._completed, slot))
                 except BaseException as failure:
                     error = failure
                     try:
@@ -342,7 +369,9 @@ class DurableExecutor:
             if not future.done():
                 self._cancelling.add(key)
             if slot is None and not future.done():
-                self._queue.get(id=self._receipts[key], block=False, raw=True)
+                queue = self._queue
+                assert queue is not None
+                queue.get(id=self._receipts[key], block=False, raw=True)
         if slot is not None:
             self._stop_slot(slot)
         with self._lock:
@@ -372,7 +401,9 @@ class DurableExecutor:
                     raise ProcessOwnershipError(f"Slot cleanup remains unconfirmed: {key}") from slot.error
                 if not future.done():
                     raise RuntimeError("Cancel active work before acknowledging its delivery")
-            self._queue.ack(id=self._receipts[key])
+            queue = self._queue
+            assert queue is not None
+            queue.ack(id=self._receipts[key])
             Future.cancel(future)
             self._slots.pop(key, None)
             self._entries.pop(key)
@@ -402,14 +433,15 @@ class DurableExecutor:
         """
         self.ack(key)
 
-    def entries(self) -> dict[str, dict]:
+    def entries(self) -> dict[str, _Packet]:
         """Return independent JSON packets for every retained unacknowledged key.
 
         Returns:
             Delivery keys mapped to target, args, kwargs and key packets.
         """
         with self._lock:
-            return json.loads(json.dumps(self._entries))
+            entries: dict[str, _Packet] = json.loads(json.dumps(self._entries))
+            return entries
 
     def future(self, key: str) -> Future | None:
         """Look up a local Future without implicitly admitting or executing work.

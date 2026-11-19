@@ -22,6 +22,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
+from typing import TypeGuard, cast
 
 UPSTREAM = Path(__file__).with_name("upstream")
 SCRIPT = UPSTREAM / "selfsr/selfsr_ab.py"
@@ -76,7 +78,8 @@ def validate_options(options):
         if arm.startswith("sr:") and any(not 64 <= int(value) <= 4096 for value in arm.split(":")[2].split("x")):
             raise ValueError("SR output extent must be within 64..4096 pixels")
     for key, low, high in (("rounds", 1, 12), ("window", 1, 120), ("timeout_seconds", 30, 14400)):
-        if type(result[key]) is not int or not low <= result[key] <= high:
+        amount = result[key]
+        if type(amount) is not int or not low <= amount <= high:
             raise ValueError(f"{key} must be an integer within {low}..{high}")
     if type(result["quality_samples"]) is not int or result["quality_samples"] < 0:
         raise ValueError("quality_samples must be a nonnegative integer")
@@ -106,17 +109,20 @@ def validate_options(options):
         not isinstance(result["baseline_layer_path"], str) or not Path(result["baseline_layer_path"]).is_absolute()
     ):
         raise ValueError("baseline_layer_path must be an absolute local path")
+    baseline_arm = result["a"]
     if result["candidate_id"] is not None and (
         not isinstance(result["candidate_id"], str)
         or not re.fullmatch(r"[a-f0-9]{64}", result["candidate_id"])
         or not result["baseline_layer_path"]
-        or result["a"] != result["b"]
-        or not result["a"].startswith("sr:")
+        or baseline_arm != result["b"]
+        or not isinstance(baseline_arm, str)
+        or not baseline_arm.startswith("sr:")
     ):
         raise ValueError("Candidate game checks require paired SR arms with identical settings and a fixed baseline layer")
     if result["candidate_id"] is not None:
         for key in ("candidate_source_sha256", "baseline_source_sha256"):
-            if not isinstance(result[key], str) or not re.fullmatch(r"[a-f0-9]{64}", result[key]):
+            checksum = result[key]
+            if not isinstance(checksum, str) or not re.fullmatch(r"[a-f0-9]{64}", checksum):
                 raise ValueError(f"Candidate game checks require {key}")
     replay = result["quality_replay"]
     if replay is not None:
@@ -151,6 +157,8 @@ def freeze_inputs(folder, frozen):
 
 def freeze_replay(folder: Path, frozen: dict) -> None:
     """Snapshot the exact compute programs used for same-input quality replay."""
+    if sys.platform == "win32":
+        raise OSError("HGamey replay snapshots require POSIX file descriptors")
     replay = frozen["submission"]["options"]["quality_replay"]
     directory = folder / "inputs/replay"
     directory.mkdir(parents=True, exist_ok=True)
@@ -201,20 +209,24 @@ def freeze_layer(folder, frozen, key):
     )
 
 
-def load_upstream():
+def _load_module(name: str, path: Path) -> ModuleType:
+    """Load a protocol script through its file-backed module loader."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load the HGamey protocol module at {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_upstream() -> ModuleType:
     """Import the pinned upstream helpers without running their CLI."""
-    spec = importlib.util.spec_from_file_location("hgamey_upstream_selfsr", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _load_module("hgamey_upstream_selfsr", SCRIPT)
 
 
-def load_quality():
+def load_quality() -> ModuleType:
     """Load local IQ helpers when invoked as an isolated executor script."""
-    spec = importlib.util.spec_from_file_location("hgamey_game_quality", Path(__file__).with_name("game_quality.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return _load_module("hgamey_game_quality", Path(__file__).with_name("game_quality.py"))
 
 
 def properties(dev):
@@ -446,10 +458,10 @@ def restore_settings(folder):
     )
 
 
-def finite_number(value):
+def finite_number(value: object) -> TypeGuard[int | float]:
     """Exclude booleans and nonfinite values from reported measurements."""
     try:
-        return type(value) in (int, float) and math.isfinite(value)
+        return (type(value) is int or type(value) is float) and math.isfinite(value)
     except OverflowError:
         return False
 
@@ -638,7 +650,7 @@ def summarize(evidence, options, restored, exit_code, identities=None):
             len(values) == options["rounds"]
             and all(finite_number(value) for value in values)
             and finite_number(aggregate)
-            and not math.isclose(sum(values) / len(values), aggregate, abs_tol=0.0001)
+            and not math.isclose(sum(cast(list[float], values)) / len(values), aggregate, abs_tol=0.0001)
         ):
             errors.append(f"{side}: aggregate display FPS differs from its arm measurements")
     if restored is not True:
@@ -797,14 +809,14 @@ def run(folder):
     finally:
         try:
             # Capture, collector and layer owners must finish before any outer write.
-            safe = (
+            if (
                 original is not None
                 and (child is None or child.poll() is not None)
                 and (child is None or upstream_cleanup_confirmed(evidence))
                 and captures_confirmed(evidence)
                 and sessions_confirmed(evidence)
-            )
-            if safe and dev.shell("cat /proc/sys/kernel/random/boot_id").strip() == original["boot_id"]:
+                and dev.shell("cat /proc/sys/kernel/random/boot_id").strip() == original["boot_id"]
+            ):
                 layer_absent, _ = upstream.layer_absent(dev, options["package"])
                 if layer_absent:
                     current = properties(dev)

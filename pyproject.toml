@@ -179,7 +179,13 @@ multi_line_output = 3
 
 [tool.mypy]
 python_version = "3.12"
-exclude = '^src/llm4ad/agent/skills/.*/reference/templates/'
+# Keep copied upstream sources intact and check the first-party gateway code.
+exclude = [
+    '^src/llm4ad/agent/skills/.*/reference/templates/',
+    '^src/llm4ad/gateway/examples/hgamey/protocol/upstream/',
+    '^src/llm4ad/gateway/examples/hgamey/compilation/game_layer[.]py$',
+    '^src/llm4ad/gateway/examples/hgamey/native/vendor/',
+]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

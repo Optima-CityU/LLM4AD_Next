@@ -11,8 +11,10 @@ import secrets
 import time
 import uuid
 import zipfile
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 import aiohttp
 
@@ -31,6 +33,16 @@ from llm4ad.gateway.sdk.lifecycle import (
 )
 from llm4ad.gateway.sdk.local_logs import capture_worker_logs
 from llm4ad.gateway.sdk.reporting import classify_report, exception_report, prepare_result
+
+if TYPE_CHECKING:
+    from llm4ad.gateway.sdk.scheduling import DurableExecutor
+
+
+class _TransportError(TypedDict):
+    """Expose a transport error without sensitive request data."""
+
+    type: str
+    status: NotRequired[int]
 
 
 class AttemptLeaseExpiredError(Exception):
@@ -148,6 +160,9 @@ def _execute_owned(journal, spec: str, payload: dict, recovery: bool = False):
 class Gateway:
     """Own transport and local execution while adapters own evaluation logic."""
 
+    cleanup_managed: bool
+    local_log_sources: Callable[[dict, dict], dict[str, Path]]
+
     def __init__(
         self,
         server: str,
@@ -188,15 +203,15 @@ class Gateway:
         self.journal = Journal(self.root / "jobs.sqlite3")
         self.processes: dict[str, PoolHandle] = {}
         self.executions = Executions(self.journal)
-        self.executor = None
+        self.executor: DurableExecutor | None = None
         self.executor_owned = True
         self.restart_jobs = {
             r["id"] for r in self.journal.rows(pending_only=True) if r["state"] not in {"completed", "failed", "cancelled"}
         }
         self.wakeup = asyncio.Event()
         self._lease_wakeup = asyncio.Event()
-        self.last_contact = None
-        self.last_error = None
+        self.last_contact: float | None = None
+        self.last_error: str | None = None
         self.admission_paused = False
         self.registration_last_success = None
         self.registration_last_error = None
@@ -204,13 +219,15 @@ class Gateway:
         self.heartbeat_last_error = None
         self.notifications_connected = False
         self.notifications_reconnecting = False
-        self.notifications_last_error = None
-        self._job_locks = {}
-        self._cancellations = {}
+        self.notifications_last_error: _TransportError | None = None
+        self._job_locks: dict[str, asyncio.Lock] = {}
+        self._cancellations: dict[tuple[str, str], asyncio.Task[None]] = {}
 
-    def _cancel_task(self, cache_name, key, operation):
+    def _cancel_task[K, T](
+        self, cache_name: str, key: K, operation: Callable[[], Coroutine[Any, Any, T]]
+    ) -> asyncio.Task[T]:
         """Share in-flight cancellation work even when one waiting caller leaves."""
-        cache = getattr(self, cache_name, None)
+        cache: dict[K, asyncio.Task[T]] | None = getattr(self, cache_name, None)
         if cache is None:
             cache = {}
             setattr(self, cache_name, cache)
@@ -219,7 +236,7 @@ class Gateway:
             task = asyncio.create_task(operation())
             cache[key] = task
 
-            def finished(completed):
+            def finished(completed: asyncio.Task[T]) -> None:
                 if cache.get(key) is completed:
                     cache.pop(key, None)
                 if not completed.cancelled():
@@ -296,9 +313,9 @@ class Gateway:
         return self.transport_snapshot()
 
     @staticmethod
-    def _transport_error(error: Exception) -> dict:
+    def _transport_error(error: Exception) -> _TransportError:
         """Keep exception types and HTTP status without URLs, headers or bodies."""
-        value = {"type": type(error).__name__}
+        value: _TransportError = {"type": type(error).__name__}
         if isinstance(error, aiohttp.ClientResponseError):
             value["status"] = error.status
         return value
@@ -373,7 +390,7 @@ class Gateway:
             raise ValueError("Evaluator cleanup_timeout must be a positive finite number")
         return float(timeout)
 
-    def _executor(self):
+    def _executor(self) -> DurableExecutor:
         """Lazily open the SDK queue; services share it across resource bindings."""
         if self.executor is None:
             from .scheduling import DurableExecutor
@@ -436,7 +453,7 @@ class Gateway:
         executor.paused = bool(executor.cleanup_debts)
 
     @staticmethod
-    def execution_key(payload):
+    def execution_key(payload: dict) -> str:
         """Keep queue identity distinct from remote attempt identity."""
         return f"{payload['id']}:{payload['attempt_id']}:{payload.get('execution_id', '')}"
 
@@ -446,6 +463,7 @@ class Gateway:
         if not self.has_execution_slot(payload["id"]):
             return
         row = self.journal.get(payload["id"])
+        assert row is not None
         record = self.executions.ensure(payload, row)
         if self.journal.lease_remaining(payload) == 0 or record["executions"] >= self.execution_limit(payload):
             return
@@ -631,6 +649,7 @@ class Gateway:
                 remaining = self.journal.lease_remaining(job)
                 if remaining == 0:
                     raise AttemptLeaseExpiredError
+                assert remaining is not None
                 await asyncio.wait({operation}, timeout=min(remaining, 0.2))
             if self.journal.lease_remaining(job) == 0:
                 raise AttemptLeaseExpiredError
@@ -648,13 +667,13 @@ class Gateway:
             self.journal.renew_lease(payload, received_at=received_at)
         return remote
 
-    async def reconcile(self, session, payload: dict, fresh: bool = False):
+    async def reconcile(self, session, payload: dict, fresh: bool = False) -> None:
         """Serialize same-job transitions and share concurrent cancellation hooks."""
         job_id, attempt_id = payload["id"], payload["attempt_id"]
         control = execution_control(self.journal, job_id, attempt_id)
         cancelling = payload.get("state") == "cancel_requested" or control.get("stop_requested") == "cancel"
 
-        async def serialized():
+        async def serialized() -> None:
             async with self._job_lock(job_id):
                 if cancelling:
                     current = self.journal.get(job_id)
@@ -663,11 +682,12 @@ class Gateway:
                 await self._reconcile(session, payload, fresh)
 
         if not cancelling:
-            return await serialized()
-        key = (job_id, attempt_id)
-        return await asyncio.shield(self._cancel_task("_cancellations", key, serialized))
+            await serialized()
+        else:
+            key = (job_id, attempt_id)
+            await asyncio.shield(self._cancel_task("_cancellations", key, serialized))
 
-    async def _reconcile(self, session, payload: dict, fresh: bool = False):
+    async def _reconcile(self, session, payload: dict, fresh: bool = False) -> None:
         """Reconcile remote identity, then advance the SDK's durable local state."""
         job_id, attempt_id = payload["id"], payload["attempt_id"]
         local = self.journal.get(job_id)
@@ -687,6 +707,7 @@ class Gateway:
             candidate = self.root / "candidates" / job_id / attempt_id
             self.journal.accept({**payload, "project_root": str(candidate)})
             local = self.journal.get(job_id)
+        assert local is not None
         job = json.loads(local["job"])
         job.setdefault("project_root", str(self.root / "candidates" / job_id / attempt_id))
         if local["state"] not in TERMINAL:
@@ -702,7 +723,9 @@ class Gateway:
                 if not await self._cleanup(job):
                     return
                 # Expired local results are retained for diagnostics, never delivered.
-                self.journal.acknowledge(job_id, self.journal.get(job_id)["seq"])
+                current = self.journal.get(job_id)
+                assert current is not None
+                self.journal.acknowledge(job_id, current["seq"])
             self._ack_execution(job)
             return
         if payload.get("state") == "cancel_requested" or control.get("stop_requested") in {"cancel", "timeout", "superseded"}:
@@ -717,11 +740,12 @@ class Gateway:
                 failed = reason == "timeout" or lease_expired
                 events.append("fail" if failed else "finish_cancel")
                 state = "failed" if failed else "cancelled"
+                metadata: dict[str, bool | str] = {"external_cleanup_confirmed": True}
                 report = {
                     "success": False,
                     "metrics": {},
                     "message": "Execution timed out" if reason == "timeout" else "Cancellation confirmed",
-                    "metadata": {"external_cleanup_confirmed": True},
+                    "metadata": metadata,
                 }
                 if reason == "timeout":
                     report.update(error_message=report["message"], error_type="ExecutionTimeout")
@@ -729,11 +753,13 @@ class Gateway:
                 if lease_expired:
                     report.update(message="Platform attempt lease expired", error_type="AttemptLeaseExpired")
                     report["error_message"] = report["message"]
-                    report["metadata"].update(failure_category="infrastructure", infrastructure_failure=True)
+                    metadata.update(failure_category="infrastructure", infrastructure_failure=True)
                 self.executions.commit(job, events, state, report, allow_stopped=True)
                 self._ack_execution(job)
                 if lease_expired:
-                    self.journal.acknowledge(job_id, self.journal.get(job_id)["seq"])
+                    current = self.journal.get(job_id)
+                    assert current is not None
+                    self.journal.acknowledge(job_id, current["seq"])
             else:
                 self._fail_cleanup(job)
             return
@@ -761,6 +787,7 @@ class Gateway:
                 return
             self._ack_execution(job)
             local = self.journal.get(job_id)
+            assert local is not None
             if local["state"] in TERMINAL:
                 return
             record = self.executions.get(job_id, attempt_id)
@@ -836,12 +863,12 @@ class Gateway:
         """Namespace a cleanup obligation shared across evaluator bindings."""
         return str(self.root) + ":" + self.execution_key(payload)
 
-    async def _cleanup(self, payload):
+    async def _cleanup(self, payload: dict) -> bool:
         """Share one resource cleanup operation across browser and transport stops."""
         key = self.execution_key(payload)
         return await asyncio.shield(self._cancel_task("_cleanup_operations", key, lambda: self._cleanup_resource(payload)))
 
-    async def _cleanup_resource(self, payload):
+    async def _cleanup_resource(self, payload: dict) -> bool:
         """Fence physical restoration and queue dispatch across all resource bindings."""
         executor = self._executor()
         if not getattr(executor, "resource_exclusive", executor.concurrency == 1):
@@ -856,7 +883,7 @@ class Gateway:
         finally:
             executor.release(reason)
 
-    async def _cleanup_owned(self, payload):
+    async def _cleanup_owned(self, payload: dict) -> bool:
         """Terminate pool work and invoke optional resource restoration hooks."""
         executor = self._executor()
         key, debt_key = self.execution_key(payload), self._debt_key(payload)
@@ -884,12 +911,12 @@ class Gateway:
             assigned = key in executor.active_keys()
             # loky owns process-tree termination; adapters restore external resources.
             await asyncio.to_thread(executor.cancel, key)
-            other = (
+            other_futures = (
                 [executor.future(active) for active in executor.active_keys() if active != key]
                 if getattr(executor, "resource_exclusive", executor.concurrency == 1)
                 else []
             )
-            other = [future for future in other if future is not None and not future.done()]
+            other = [future for future in other_futures if future is not None and not future.done()]
             if other and not assigned and not saved:
                 # A queued job never used the device; its stop must not disturb its owner.
                 confirmed = True
@@ -963,7 +990,7 @@ class Gateway:
                     allow_stopped=True,
                 )
 
-    async def probe_cleanup(self):
+    async def probe_cleanup(self) -> None:
         """Recheck resource cleanup independently of platform/network availability."""
         with self.journal.connect() as db:
             debts = db.execute("SELECT payload FROM cleanup_debts").fetchall()
@@ -1019,6 +1046,7 @@ class Gateway:
                     request_stop(self.journal, row["id"], job["attempt_id"], "superseded")
                     if await self._cleanup(job):
                         current = self.journal.get(row["id"])
+                        assert current is not None
                         if current["state"] not in TERMINAL:
                             record = self.executions.get(job["id"], job["attempt_id"])
                             events = [] if record["state"] == "cancelling" else ["cancel"]
@@ -1033,6 +1061,7 @@ class Gateway:
                     else:
                         self._fail_cleanup(job)
                     current = self.journal.get(row["id"])
+                    assert current is not None
                     self.journal.acknowledge(row["id"], current["seq"])
                     continue
                 if response["state"] == "queued":
@@ -1116,16 +1145,16 @@ class Gateway:
                 self.notifications_reconnecting = False
                 raise
 
-    async def run(self):
+    async def run(self) -> None:
         """Keep local execution and durable results alive through network outages."""
         self._executor()
         await self.probe_cleanup()
         headers = {"Authorization": "Bearer " + self.identity["secret"]}
         async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as session:
 
-            async def monitor():
-                operations = {}
-                probe = None
+            async def monitor() -> None:
+                operations: dict[tuple[str, str], asyncio.Task[None]] = {}
+                probe: asyncio.Task[None] | None = None
                 try:
                     while True:
                         self.enforce_deadlines()

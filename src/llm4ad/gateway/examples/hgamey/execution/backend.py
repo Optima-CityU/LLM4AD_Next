@@ -5,7 +5,7 @@ import sys
 
 from .contracts import BackendNotStartedError
 from .process import command
-from .storage import read_json, verify_frozen_inputs, write_json
+from .storage import lock_exclusive, read_json, verify_frozen_inputs, write_json
 
 
 def start_runtime(data, config):
@@ -35,8 +35,6 @@ def sync_registry(device, folder):
         device: Frozen device with both physical and wireless aliases.
         folder: Owned job directory below the shared executor jobs directory.
     """
-    import fcntl
-
     desired = {
         "device_id": device["id"],
         "label": device["label"],
@@ -44,7 +42,7 @@ def sync_registry(device, folder):
         "enabled": True,
     }
     with (folder.parent.parent / "phonefarm-registry.lock").open("a") as guard:
-        fcntl.flock(guard, fcntl.LOCK_EX)
+        lock_exclusive(guard)
         for attempt in range(3):
             current = command(["phonefarm", "lease", "devices", "--json"], capture_output=True, text=True, timeout=15)
             if current.returncode:

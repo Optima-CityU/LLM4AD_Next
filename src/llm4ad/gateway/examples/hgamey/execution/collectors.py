@@ -10,7 +10,9 @@ import re
 import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .process import inherited_fds
 
@@ -54,12 +56,12 @@ def _inventory(folder: Path) -> list[tuple[str, Path, dict | None]]:
             arm = json.loads(line)
             if not isinstance(arm, dict):
                 raise RuntimeError("Collector arm declaration is invalid")
-            for field, kind in (("perfetto", "perfetto"), ("mali_telemetry", "mali")):
+            for field, collector in (("perfetto", "perfetto"), ("mali_telemetry", "mali")):
                 if arm.get(field) is not None:
                     label = arm.get("arm")
                     if not isinstance(label, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", label):
                         raise RuntimeError("Collector arm identity is invalid")
-                    declared.add(traces / f"{label}_{kind}")
+                    declared.add(traces / f"{label}_{collector}")
     found = []
     for directory in sorted(traces.iterdir()) if traces.exists() else []:
         kind = next(
@@ -89,7 +91,7 @@ def _inventory(folder: Path) -> list[tuple[str, Path, dict | None]]:
     return found
 
 
-def _runtime(endpoint: str):
+def _runtime(endpoint: str) -> tuple[Any, Callable[[Any, Path], dict]]:
     """Reuse the pinned upstream transport and identity-bound Perfetto API."""
     from ..protocol.game_ab import load_upstream
 
@@ -273,9 +275,10 @@ def restore_collectors(folder: str | Path, endpoint: str) -> list[dict]:
                 else None
             )
             plans.append((kind, directory, action, digest))
-        dev = reconcile = None
+        runtime = None
         if any(action for _, _, action, _ in plans):
-            dev, reconcile = _runtime(endpoint)
+            runtime = _runtime(endpoint)
+            dev, _ = runtime
             if dev.shell("getprop ro.serialno").strip() != device["expected_serial"]:
                 raise RuntimeError("Collector device identity changed; cleanup unconfirmed")
             if dev.shell("cat /proc/sys/kernel/random/boot_id").strip() != boot:
@@ -283,7 +286,9 @@ def restore_collectors(folder: str | Path, endpoint: str) -> list[dict]:
         proofs = []
         for kind, directory, action, digest in plans:
             recovery, method = {}, "no_device_mutations"
-            if action and kind == "perfetto":
+            if action is True:
+                assert runtime is not None
+                dev, reconcile = runtime
                 recovery = reconcile(dev, directory)
                 if (
                     recovery.get("cleanup_confirmed") is not True
@@ -295,7 +300,9 @@ def restore_collectors(folder: str | Path, endpoint: str) -> list[dict]:
                         f"Perfetto cleanup unconfirmed for {directory.name}: {detail}"
                     )
                 method = "native_reconcile"
-            elif action:
+            elif isinstance(action, dict):
+                assert runtime is not None
+                dev, _ = runtime
                 script = (
                     'set -eu\n[ "$(id -u)" = 0 ]\n'
                     "for p in /sys/kernel/tracing/instances /data/local/tmp; do\n"

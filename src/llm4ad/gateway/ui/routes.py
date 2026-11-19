@@ -89,9 +89,9 @@ def register_routes(app: FastAPI, controller: GatewayController, auth: Dashboard
         now = time.monotonic()
         recent = [stamp for stamp in failures.get(client, []) if now - stamp < 60]
         if len(recent) >= 5:
-            response = login_html(request, "Try again shortly", 429)
-            response.headers["Retry-After"] = "60"
-            return response
+            limited = login_html(request, "Try again shortly", 429)
+            limited.headers["Retry-After"] = "60"
+            return limited
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)

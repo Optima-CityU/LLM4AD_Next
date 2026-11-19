@@ -6,8 +6,10 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from .storage import persist
@@ -16,11 +18,21 @@ from .storage import persist
 class HealthServer:
     """Serve SDK health alongside an optional local backend API."""
 
-    def __init__(self, root: Path, callback, *, port: int = 0, handler=None):
+    def __init__(
+        self,
+        root: Path,
+        callback: Callable[[], dict],
+        *,
+        port: int = 0,
+        handler: type[BaseHTTPRequestHandler] | None = None,
+    ):
         """Bind a loopback listener and publish its address under the owned state root."""
-        base = handler or BaseHTTPRequestHandler
+        if TYPE_CHECKING:
+            from http.server import BaseHTTPRequestHandler as HandlerBase
+        else:
+            HandlerBase = handler or BaseHTTPRequestHandler  # noqa: N806
 
-        class Handler(base):
+        class Handler(HandlerBase):
             """Preserve optional backend endpoints while sharing the health contract."""
 
             def do_GET(self):  # noqa: N802
@@ -66,8 +78,9 @@ def probe(root: Path) -> dict:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
             with opener.open(endpoint, timeout=4) as response:
-                return json.load(response)
+                data: dict = json.load(response)
         except urllib.error.HTTPError as error:
-            return json.load(error)
+            data = json.load(error)
+        return data
     except (OSError, ValueError, KeyError, TypeError) as error:
         return {"ready": False, "error": str(error)}

@@ -7,37 +7,70 @@ import hashlib
 import os
 import signal
 import time
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack, suppress
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 from .contracts import load_evaluator_class
 from .gateway import Gateway
 from .health import HealthServer
 from .journal import gateway_lease
 from .retention import collect_finished, collect_local_logs
-from .runtime import GatewayRuntime
+from .runtime import GatewayBinding, GatewayRuntime
+
+if TYPE_CHECKING:
+    from .scheduling import DurableExecutor
+
+type _GatewayFactory = Callable[[str, str, list[str], str, Path, int], Gateway]
+type _RetentionCounter = Literal["cleaned", "removed_bytes", "errors"]
+_RETENTION_COUNTERS: tuple[_RetentionCounter, ...] = ("cleaned", "removed_bytes", "errors")
+
+
+class _LocalLogRetention(TypedDict):
+    """Track local log collection counts and the latest error type."""
+
+    cleaned: int
+    removed_bytes: int
+    errors: int
+    error_type: NotRequired[str]
+
+
+class _EvidenceRetention(_LocalLogRetention):
+    """Track the evidence collection schedule alongside its outcomes."""
+
+    enabled: bool
+    last_run: NotRequired[float]
 
 
 class GatewayService:
     """Run ordinary evaluators and optional local backends with the same lifecycle."""
 
-    def __init__(self, runtime: GatewayRuntime, gateway_factory=None):
+    def __init__(self, runtime: GatewayRuntime, gateway_factory: _GatewayFactory | None = None):
         """Keep backend-specific resources behind runtime hooks."""
         self.runtime = runtime
         self.options = runtime.options
         self.gateway_factory = gateway_factory or Gateway
         self.stop = asyncio.Event()
-        self.gateways, self.gateway_tasks, self.binding_status = {}, {}, {}
-        self.binding_errors = {}
-        self.binding_available = {}
-        self.executors = {}
-        self.cleanup_probe_tasks = {}
-        self.bound = []
-        self.gateway = self.gateway_task = self.startup_task = self.retention_task = self.health_server = None
-        self.readiness, self.error = "starting", None
+        self.gateways: dict[str, Gateway] = {}
+        self.gateway_tasks: dict[str, asyncio.Task[None]] = {}
+        self.binding_status: dict[str, str] = {}
+        self.binding_errors: dict[str, str] = {}
+        self.binding_available: dict[str, bool] = {}
+        self.executors: dict[str, DurableExecutor] = {}
+        self.cleanup_probe_tasks: dict[str, asyncio.Task[None]] = {}
+        self.bound: list[GatewayBinding] = []
+        self.gateway: Gateway | None = None
+        self.gateway_task: asyncio.Task[None] | None = None
+        self.startup_task: asyncio.Task[None] | None = None
+        self.retention_task: asyncio.Task[None] | None = None
+        self.health_server: HealthServer | None = None
+        self.readiness = "starting"
+        self.error: str | None = None
         self.admission_paused = False
-        self.local_log_retention_task = None
-        self.local_log_retention_status = {"cleaned": 0, "errors": 0, "removed_bytes": 0}
-        self.retention_status = {
+        self.local_log_retention_task: asyncio.Task[None] | None = None
+        self.local_log_retention_status: _LocalLogRetention = {"cleaned": 0, "errors": 0, "removed_bytes": 0}
+        self.retention_status: _EvidenceRetention = {
             "enabled": self.options["cleanup_enabled"],
             "cleaned": 0,
             "removed_bytes": 0,
@@ -162,18 +195,18 @@ class GatewayService:
             "gateway": next(iter(gateways.values()), None),
         }
 
-    async def check_bindings(self, bindings=None) -> None:
+    async def check_bindings(self, bindings: Sequence[GatewayBinding] | None = None) -> None:
         """Verify selected resources without discarding interrupted startup receipts.
 
         Args:
             bindings: Bindings to verify, or all bindings during initial startup.
         """
         errors = []
-        groups = {}
+        groups: dict[str, list[GatewayBinding]] = {}
         for binding in self.bound if bindings is None else bindings:
             groups.setdefault(binding.resource_key or binding.key, []).append(binding)
 
-        async def check_group(bindings):
+        async def check_group(bindings: list[GatewayBinding]) -> None:
             verified = []
             for binding in bindings:
                 self.binding_status[binding.key] = "checking"
@@ -225,14 +258,15 @@ class GatewayService:
                 )
                 try:
                     values = await asyncio.shield(work)
-                    self.retention_status.update(last_run=time.time())
-                    for key in ("cleaned", "removed_bytes", "errors"):
+                    self.retention_status["last_run"] = time.time()
+                    for key in _RETENTION_COUNTERS:
                         self.retention_status[key] += values[key]
                 except asyncio.CancelledError:
                     await work
                     raise
                 except Exception as error:
-                    self.retention_status.update(last_run=time.time(), error_type=type(error).__name__)
+                    self.retention_status["last_run"] = time.time()
+                    self.retention_status["error_type"] = type(error).__name__
             with suppress(TimeoutError):
                 await asyncio.wait_for(self.stop.wait(), timeout=self.options["cleanup_interval"])
 
@@ -262,8 +296,8 @@ class GatewayService:
                     work = asyncio.create_task(asyncio.to_thread(collect))
                     try:
                         values = await asyncio.shield(work)
-                        for key, value in values.items():
-                            self.local_log_retention_status[key] += value
+                        for key in _RETENTION_COUNTERS:
+                            self.local_log_retention_status[key] += values[key]
                     except asyncio.CancelledError:
                         await work
                         raise
@@ -283,7 +317,7 @@ class GatewayService:
             if task.done():
                 self.cleanup_probe_tasks.pop(resource)
                 await task
-        groups = {}
+        groups: dict[str, list[GatewayBinding]] = {}
         for binding in self.bound:
             groups.setdefault(binding.resource_key or binding.key, []).append(binding)
         checking = self._checking_resources()
@@ -299,7 +333,7 @@ class GatewayService:
             if not any(getattr(gateway.executor, "cleanup_debts", set()) for gateway in gateways):
                 continue
 
-            async def probe_group(gateways=gateways):
+            async def probe_group(gateways: list[Gateway] = gateways) -> None:
                 """Serialize restoration for evaluator bindings sharing a resource."""
                 for gateway in gateways:
                     await gateway.probe_cleanup()
@@ -314,7 +348,7 @@ class GatewayService:
             and health shutdown, in the order they were observed.
         """
         self.readiness = "draining"
-        failures = []
+        failures: list[BaseException] = []
         try:
             self.runtime.stop_accepting()
         except BaseException as error:
@@ -375,7 +409,8 @@ class GatewayService:
         """Own leases, readiness, transports, backend draining and local health."""
         options = self.options
         result_code = 0
-        run_error = handled_error = None
+        run_error: BaseException | None = None
+        handled_error: Exception | None = None
         with ExitStack() as leases:
             held = set()
             for directory in self.runtime.lease_directories():
@@ -421,11 +456,12 @@ class GatewayService:
                         gateway.executor.resource_exclusive = binding.resource_key is not None
                         gateway.executor_owned = False
 
-                    def local_sources(job, saved, runtime=self.runtime):
+                    def local_sources(job: dict, saved: dict, runtime: GatewayRuntime = self.runtime) -> dict[str, Path]:
                         from .contracts import RemoteJob
 
                         hook = getattr(runtime, "local_logs", None)
-                        return hook(RemoteJob.model_validate(job), saved) if hook else {}
+                        sources: dict[str, Path] = hook(RemoteJob.model_validate(job), saved) if hook else {}
+                        return sources
 
                     gateway.local_log_sources = local_sources
                     if self.admission_paused and (pause := getattr(gateway, "pause_accepting", None)):
@@ -435,11 +471,11 @@ class GatewayService:
                 for gateway in self.gateways.values():
                     if isinstance(gateway, Gateway):
                         gateway.restore_pending()
-                groups = {}
+                groups: dict[str, list[Gateway]] = {}
                 for binding in self.bound:
                     groups.setdefault(binding.resource_key or binding.key, []).append(self.gateways[binding.key])
 
-                async def restore_group(gateways):
+                async def restore_group(gateways: list[Gateway]) -> None:
                     for gateway in gateways:
                         if isinstance(gateway, Gateway):
                             await gateway.probe_cleanup()
@@ -513,7 +549,7 @@ class GatewayService:
                 raise
             finally:
                 shutdown = asyncio.create_task(self._shutdown())
-                interruptions = []
+                interruptions: list[BaseException] = []
                 while True:
                     try:
                         failures = await asyncio.shield(shutdown)
@@ -540,7 +576,7 @@ class GatewayService:
         return result_code
 
 
-def create_service(environment: dict, evaluator: str, gateway_factory=None) -> GatewayService:
+def create_service(environment: dict, evaluator: str, gateway_factory: _GatewayFactory | None = None) -> GatewayService:
     """Select optional backend hooks through the evaluator interface for every entrypoint."""
     evaluator_class = load_evaluator_class(evaluator)
     factory = getattr(evaluator_class, "create_runtime", None)
@@ -569,7 +605,9 @@ async def serve(gateway):
     installed = False
     try:
         if os.name != "nt":
-            loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+            task = asyncio.current_task()
+            assert task is not None
+            loop.add_signal_handler(signal.SIGTERM, task.cancel)
             installed = True
         await gateway.run()
     finally:

@@ -245,4 +245,4 @@ class Executions:
         if not row or row["state"] in TERMINAL:
             return False
         live = json.loads(row["job"])
-        return live["attempt_id"] == job["attempt_id"] and live.get("execution_id", "") == job.get("execution_id", "")
+        return bool(live["attempt_id"] == job["attempt_id"] and live.get("execution_id", "") == job.get("execution_id", ""))

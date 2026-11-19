@@ -7,11 +7,15 @@ import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import aiohttp
 
 from llm4ad.gateway.sdk.contracts import GatewayEvaluator, load_evaluator
 from llm4ad.gateway.sdk.errors import EvaluationUnavailableError
+
+if TYPE_CHECKING:
+    from .evaluator import HGameyShaderEvaluator
 
 
 class HGameyPoolEvaluator(GatewayEvaluator):
@@ -116,7 +120,7 @@ class HGameyPoolEvaluator(GatewayEvaluator):
         if operation == "evaluate" and owned is None:
             reporter.progress("Waiting for an idle compatible HGamey phone")
             stop = asyncio.get_running_loop().time() + job.timeout
-            probe = next(iter(self.members.values()))
+            probe = cast("HGameyShaderEvaluator", next(iter(self.members.values())))
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
                 while True:
                     health = await probe.rpc(session, "GET", "/v1/health")

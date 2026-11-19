@@ -6,15 +6,15 @@ import asyncio
 import json
 import os
 import signal
-from collections.abc import Mapping
-from contextlib import contextmanager, suppress
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
 
 from llm4ad.gateway.settings import COLD_SETTINGS, LISTENER_SETTINGS, GatewaySettings, SettingsStore
 
 from .journal import Journal, gateway_lease
 from .runtime import platform_directory
-from .service import create_service
+from .service import GatewayService, create_service
 
 
 @contextmanager
@@ -38,7 +38,7 @@ class GatewayController:
         bootstrap_root: Path,
         *,
         environment=None,
-        service_factory=None,
+        service_factory: Callable[[dict[str, str], str], GatewayService] | None = None,
     ):
         """Bind the stable configuration root separately from editable execution storage."""
         self.settings = settings
@@ -73,15 +73,18 @@ class GatewayController:
         self.paused = bool(saved.get("paused", False))
         self.environment = dict(os.environ if environment is None else environment)
         self.service_factory = service_factory or create_service
-        self.service = self.service_task = self.monitor_task = None
-        self.status, self.error = "configuration_required", None
-        self.pending_error = saved.get("pending_error")
+        self.service: GatewayService | None = None
+        self.service_task: asyncio.Task[None] | None = None
+        self.monitor_task: asyncio.Task[None] | None = None
+        self.status = "configuration_required"
+        self.error: str | None = None
+        self.pending_error: str | None = saved.get("pending_error")
         self._previous = None
-        self._rollback = None
+        self._rollback: GatewaySettings | None = None
         self._listener = {key: getattr(settings, key) for key in LISTENER_SETTINGS}
         self._lock = asyncio.Lock()
         self._stop = asyncio.Event()
-        self._lease = None
+        self._lease: AbstractContextManager[None] | None = None
 
     def _persist(self):
         self.store.write(self.settings, self.pending_settings, self.paused, self.pending_error)
@@ -104,7 +107,7 @@ class GatewayController:
         self.status, self.error = "starting", None
         settings = self.settings
 
-        async def run():
+        async def run() -> None:
             try:
                 settings.require_ready()
                 with runtime_environment(settings.environment(self.environment)):
@@ -125,7 +128,8 @@ class GatewayController:
             service.stop.set()
         if task:
             await asyncio.gather(task, return_exceptions=True)
-        self.service = self.service_task = None
+        self.service = None
+        self.service_task = None
 
     def _sources(self, binding=None):
         if self.service and self.service.bound:
@@ -268,7 +272,7 @@ class GatewayController:
                 return False
         return True
 
-    async def _monitor(self):
+    async def _monitor(self) -> None:
         while not self._stop.is_set():
             try:
                 async with self._lock:
@@ -281,7 +285,7 @@ class GatewayController:
                             self._rollback = None
                         elif self.service.error:
                             self.error, self.status = self.service.error, "unready"
-                        elif self.service_task.done():
+                        elif self.service_task is not None and self.service_task.done():
                             self.error, self.status = "Gateway service stopped", "unready"
                     if self._rollback and (self.error or (self.service and self.service.error)):
                         failed = self.settings
@@ -299,6 +303,7 @@ class GatewayController:
 
     async def _switch(self):
         previous, desired = self.settings, self.pending_settings
+        assert desired is not None
         await self._stop_service()
         self.settings, self.pending_settings = desired, None
         self._rollback = previous
@@ -430,7 +435,7 @@ class GatewayController:
                 for field in totals:
                     totals[field] += counts.get(field, 0)
                 gateway = service.gateways.get(key) if service else None
-                transport = getattr(gateway, "transport", {}) if gateway else {}
+                transport: dict = getattr(gateway, "transport", {}) if gateway else {}
                 bindings.append(
                     {
                         "key": key,
@@ -443,7 +448,7 @@ class GatewayController:
             return totals, bindings
 
         totals, bindings = await asyncio.to_thread(inspect)
-        health = self.service.health() if self.service else {}
+        health: dict = self.service.health() if self.service else {}
         # State directories belong to the operator but recovery handles never belong in the UI.
         return {
             "status": self.status,

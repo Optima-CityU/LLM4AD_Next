@@ -8,12 +8,19 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
+from typing import TypedDict
 
 import aiohttp
 from loguru import logger
 
 from llm4ad.evaluator.models import EvaluationResult
 from llm4ad.gateway.sdk.bundles import pack_candidate
+
+
+class _RequestBody(TypedDict, total=False):
+    """Carry the optional JSON argument for submitting a remote job."""
+
+    json: dict
 
 
 async def configuration_error_detail(response: aiohttp.ClientResponse) -> str:
@@ -101,10 +108,11 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
     async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as session:
         while True:
             try:
+                request_body: _RequestBody = {} if submitted else {"json": body}
                 async with session.request(
                     "GET" if submitted else "POST",
                     f"{url}/tasks/{task_id}/jobs" + (f"/{request_id}" if submitted else ""),
-                    **({} if submitted else {"json": body}),
+                    **request_body,
                 ) as response:
                     if response.status == 409:
                         raise asyncio.CancelledError("Platform task is no longer active")

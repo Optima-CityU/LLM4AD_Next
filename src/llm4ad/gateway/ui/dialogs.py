@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from .helpers import (
     artifact_url,
@@ -20,6 +20,21 @@ from .helpers import (
 from .presentation import CANCELLATION_WARNING
 from .preview import can_preview, read_preview
 from .views import DialogScope, LocalLogFeed, ReportingFeed, TaskReference, metric_rows
+
+if TYPE_CHECKING:
+    from nicegui.elements.button import Button
+    from nicegui.elements.dialog import Dialog
+    from nicegui.elements.timer import Timer
+
+
+class _DialogState(TypedDict):
+    """Keep the dialog and the resources released when it closes."""
+
+    dialog: Dialog
+    scope: DialogScope
+    timers: list[Timer]
+    cleanup: list[Callable[[], None]]
+
 
 DIALOG_TITLES = {
     "records": "Platform reporting records",
@@ -54,9 +69,9 @@ class TaskDialogs:
         """Keep dialog state local to the browser page that owns its action icons."""
         self.controller, self.ui, self.tr = controller, ui, tr
         self.on_state = on_state
-        self.current: Any = None
+        self.current: _DialogState | None = None
 
-    def _poll(self, state: dict, action: Callable, error: Any, loading: Any) -> Callable:
+    def _poll(self, state: _DialogState, action: Callable, error: Any, loading: Any) -> Callable:
         async def refresh() -> None:
             scope = state["scope"]
             if scope.closed or scope.lock.locked():
@@ -83,9 +98,8 @@ class TaskDialogs:
         if self.current:
             self.current["dialog"].close()
         ui, tr = self.ui, self.tr
-        state = {"scope": DialogScope(), "timers": [], "cleanup": []}
         dialog = ui.dialog()
-        state["dialog"] = dialog
+        state: _DialogState = {"scope": DialogScope(), "timers": [], "cleanup": [], "dialog": dialog}
         self.current = state
 
         def closed(event) -> None:
@@ -152,10 +166,11 @@ class TaskDialogs:
         dialog.open()
 
     async def _scroll_snapshot(self, area: Any) -> dict:
-        return await self.ui.run_javascript(
+        snapshot: dict = await self.ui.run_javascript(
             "const e=document.getElementById(" + json.dumps(area.html_id) + ").querySelector('.q-scrollarea__container');"
             "return e ? {top:e.scrollTop,height:e.scrollHeight} : {top:0,height:0};"
         )
+        return snapshot
 
     def _restore_scroll(self, area: Any, before: dict) -> None:
         self.ui.run_javascript(
@@ -198,7 +213,7 @@ class TaskDialogs:
             js_handler=("e=>{if(e.target.closest('.q-scrollarea__thumb,.q-scrollarea__bar'))emit();}"),
         )
 
-    def _records(self, reference: TaskReference, state: dict, error: Any, loading: Any) -> None:
+    def _records(self, reference: TaskReference, state: _DialogState, error: Any, loading: Any) -> None:
         ui, tr = self.ui, self.tr
         feed = ReportingFeed(self.controller, reference)
         state["cleanup"].append(feed.scope.close)
@@ -237,7 +252,9 @@ class TaskDialogs:
         self._scroll_intent(area, intent)
         empty = ui.label(tr("No messages recorded")).classes("lab-muted")
         with ui.row().classes("lab-row lab-between"):
-            older = ui.button(tr("Load older records"), on_click=lambda: run_busy(older, load_older, error)).props("outline")
+            older: Button = ui.button(
+                tr("Load older records"), on_click=lambda: run_busy(older, load_older, error)
+            ).props("outline")
             count = ui.label().classes("lab-muted")
 
         async def update(direction: str = "newer") -> None:
@@ -292,7 +309,7 @@ class TaskDialogs:
         follow.on_value_change(following_changed)
         self._poll(state, update, error, loading)
 
-    def _local(self, reference: TaskReference, state: dict, error: Any, loading: Any) -> None:
+    def _local(self, reference: TaskReference, state: _DialogState, error: Any, loading: Any) -> None:
         ui, tr = self.ui, self.tr
         feed = LocalLogFeed(self.controller, reference)
         state["cleanup"].append(feed.scope.close)
@@ -322,7 +339,9 @@ class TaskDialogs:
             text = ui.label().classes("lab-code").style("padding:12px 14px")
         self._scroll_intent(area, intent)
         with ui.row().classes("lab-row lab-between"):
-            older = ui.button(tr("Load earlier output"), on_click=lambda: run_busy(older, load_older, error)).props("outline")
+            older: Button = ui.button(
+                tr("Load earlier output"), on_click=lambda: run_busy(older, load_older, error)
+            ).props("outline")
             size = ui.label().classes("lab-muted")
         content = ""
 
@@ -397,7 +416,7 @@ class TaskDialogs:
         follow.on_value_change(following_changed)
         self._poll(state, update, error, loading)
 
-    def _files(self, reference: TaskReference, state: dict, error: Any, loading: Any) -> None:
+    def _files(self, reference: TaskReference, state: _DialogState, error: Any, loading: Any) -> None:
         ui, tr = self.ui, self.tr
         table = ui.table(
             columns=[
@@ -493,7 +512,7 @@ class TaskDialogs:
 
         self._poll(state, update, error, loading)
 
-    def _detail(self, reference: TaskReference, kind: str, state: dict, error: Any, loading: Any) -> None:
+    def _detail(self, reference: TaskReference, kind: str, state: _DialogState, error: Any, loading: Any) -> None:
         ui, tr = self.ui, self.tr
         if kind == "metrics":
             table = ui.table(

@@ -338,9 +338,9 @@ def job_messages(
         }
 
 
-def _spool_path(journal, job_id, attempt_id, artifact) -> Path:
+def _spool_path(journal: Journal, job_id: str, attempt_id: str, artifact: dict) -> Path:
     """Validate an exact immutable spool location without following any symlink."""
-    digest = artifact["sha256"]
+    digest: str = artifact["sha256"]
     if not re.fullmatch(r"[a-f0-9]{64}", digest):
         raise ValueError("Invalid artifact hash")
     root = Path(journal.path).absolute().parent

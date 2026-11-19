@@ -78,11 +78,11 @@ def ensure(root):
     base = os.environ.get("ANDROID_REPOSITORY_BASE", "https://dl.google.com/android/repository")
     if not (ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++").is_file():
         unpack(download(base, NDK_ARCHIVE, NDK_SHA1, "sha1", cache), ndk)
-    missing = [
+    packages = [
         ("build-tools;35.0.0", sdk / "build-tools/35.0.0", "aapt2"),
         ("platforms;android-35", sdk / "platforms/android-35", "android.jar"),
     ]
-    missing = [(package, target) for package, target, marker in missing if not (target / marker).is_file()]
+    missing = [(package, target) for package, target, marker in packages if not (target / marker).is_file()]
     if missing:
         opener = urllib.request.build_opener()
         with opener.open(base.rstrip("/") + "/repository2-3.xml", timeout=60) as stream:

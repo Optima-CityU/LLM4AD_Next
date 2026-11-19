@@ -10,8 +10,9 @@ import shutil
 import uuid
 from contextlib import suppress
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
-from llm4ad.gateway.sdk.contracts import RemoteJob, load_evaluator
+from llm4ad.gateway.sdk.contracts import GatewayEvaluator, RemoteJob, load_evaluator
 from llm4ad.gateway.sdk.executions import Executions
 from llm4ad.gateway.sdk.journal import Journal, Reporter
 from llm4ad.gateway.sdk.lifecycle import run_operation
@@ -23,6 +24,9 @@ from .benchmark import canonical, compiler_logs, digest, profile_key
 from .configuration import configure
 from .evidence import HGameyEvidencePolicy
 from .pool import HGameyPoolEvaluator
+
+if TYPE_CHECKING:
+    from .execution import Engine
 
 
 def run_startup_operation(filename, mode, payload, journal_path, operation, seconds, rounds):
@@ -92,13 +96,14 @@ class HGameyRuntime(GatewayRuntime):
         self.executor_module = executor_module
         self.adapter_directory = Path(environment.get("HGAMEY_ADAPTER_DIR", str(Path(__file__).parent))).resolve()
         self.options = configure(environment, executor_module, self.adapter_directory)
-        self.evaluator, self.engine = evaluator, None
+        self.evaluator = evaluator
+        self.engine: Engine | None = None
         self.platform_directory = self.options["root"] / "platforms" / uuid.uuid5(uuid.NAMESPACE_URL, self.options["server"]).hex
-        self.legacy = None
-        self.pool_log_profiles = []
-        self.device_checks = {}
-        self.pool_checks = {}
-        self.device_check_locks = {}
+        self.legacy: str | None = None
+        self.pool_log_profiles: list[dict] = []
+        self.device_checks: dict[str, dict[str, tuple[GatewayEvaluator, Path]]] = {}
+        self.pool_checks: dict[str, asyncio.Task[None]] = {}
+        self.device_check_locks: dict[str, asyncio.Lock] = {}
 
     def lease_directories(self) -> list[Path]:
         """Preserve backend/profile ownership and existing persisted gateway identities."""
@@ -118,7 +123,7 @@ class HGameyRuntime(GatewayRuntime):
 
     def bindings(self) -> list[GatewayBinding]:
         """Advertise one evaluator per comparison contract."""
-        groups = {}
+        groups: dict[str, list[tuple[dict, GatewayBinding]]] = {}
         for profile in self.options["profiles"]:
             device_id = profile["device"]["id"]
             directory = (
@@ -225,6 +230,12 @@ class HGameyRuntime(GatewayRuntime):
         """Provide the private device-job API to the SDK-owned local server."""
         return self.executor_module.make_handler(self.engine)
 
+    def _require_engine(self) -> Engine:
+        """Get the running backend for operations that require an executor."""
+        if self.engine is None:
+            raise RuntimeError("HGamey device executor has not started")
+        return self.engine
+
     def executor_for(self, binding: GatewayBinding):
         """Share one SDK delivery slot across native API and evaluator bindings.
 
@@ -252,7 +263,7 @@ class HGameyRuntime(GatewayRuntime):
         if not gateway.adapter.verified():
             raise RuntimeError("No HGamey phone has passed readiness checks")
 
-    async def verify_pool(self, key, adapter, started):
+    async def verify_pool(self, key, adapter, started) -> None:
         """Retry unready members locally so healthy peers can still run."""
         pending = self.device_checks[key].copy()
         verified = set()
@@ -282,9 +293,10 @@ class HGameyRuntime(GatewayRuntime):
         lock = self.device_check_locks.setdefault(device_id, asyncio.Lock())
         async with lock:
             await self.restore_startup_packets(adapter, device_id)
-            self.engine.executors[device_id].release("sdk-restoration")
-            self.engine.activate()
-            if self.engine.health()["devices"][device_id]["status"] != "ok":
+            engine = self._require_engine()
+            engine.executors[device_id].release("sdk-restoration")
+            engine.activate()
+            if engine.health()["devices"][device_id]["status"] != "ok":
                 raise RuntimeError(f"Device {device_id} has an unconfirmed restoration obligation")
             directory.mkdir(parents=True, exist_ok=True)
             await self.startup_check(adapter, directory)
@@ -296,7 +308,7 @@ class HGameyRuntime(GatewayRuntime):
             adapter: Current adapter used only for persisted native cleanup.
             device_id: Exact physical SDK resource whose queue is reconciled.
         """
-        executor = self.engine.executors[device_id]
+        executor = self._require_engine().executors[device_id]
         target = __name__ + ":run_startup_operation"
         for key, packet in executor.entries().items():
             if packet.get("target") != target:
@@ -489,7 +501,7 @@ class HGameyRuntime(GatewayRuntime):
             operation = "evaluate"
 
         reporter.metadata({"purpose": "startup_readiness_only"})
-        executor = self.engine.executors[adapter.benchmark.settings["device_id"]]
+        executor = self._require_engine().executors[adapter.benchmark.settings["device_id"]]
         key = f"startup:{job.id}:{job.execution_id}"
 
         try:
@@ -571,10 +583,10 @@ class HGameyRuntime(GatewayRuntime):
         """
         binding = directory / "legacy-device.json"
         if binding.exists():
-            return json.loads(binding.read_text())["device_id"]
+            return cast(str, json.loads(binding.read_text())["device_id"])
         if not any((directory / name).exists() for name in ("identity.json", "jobs.sqlite3", "startup.sqlite3")):
             return None
-        devices = set()
+        devices: set[str] = set()
         for name in ("startup.sqlite3", "jobs.sqlite3"):
             path = directory / name
             if path.exists():

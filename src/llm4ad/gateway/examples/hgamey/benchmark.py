@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
+from typing import Any, cast
 
 from llm4ad.evaluator.base import Metric, MetricType
 from llm4ad.gateway.examples.hgamey.compilation.native import build_game_layer
@@ -143,7 +144,7 @@ class Benchmark:
         self.compiler = settings.get("compiler", "glslangValidator")
         self.validator = settings.get("spirv_validator", "spirv-val")
         self.tools = {"compiler": self.tool_version(self.compiler), "validator": self.tool_version(self.validator)}
-        self.request = settings["request"]
+        self.request: dict = settings["request"]
         if self.request.get("version") != 2 or self.request.get("kind") != "shader":
             raise ValueError("Configure a version 2 kind=shader request")
         if self.request.get("workload", {}).get("carrier") != "headless" or self.request.get("payload", {}).get("track") != "sr":
@@ -269,7 +270,7 @@ class Benchmark:
     @staticmethod
     def load_static_dataset(path: Path) -> dict:
         """Read the offline importer manifest and validate its complete sample set."""
-        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest: dict = json.loads(path.read_text(encoding="utf-8"))
         if manifest.get("schema") != SCHEMA or manifest.get("split") not in {"train", "test"}:
             raise ValueError("Invalid static benchmark dataset manifest")
         validate_samples(manifest["samples"])
@@ -277,7 +278,8 @@ class Benchmark:
 
     def stage_static_dataset(self, path: Path) -> list[dict]:
         """Stage checksum-bound LR/HR files and return the executor's paths."""
-        pairs = copy.deepcopy(self.static_dataset["samples"])
+        dataset = cast(dict, self.static_dataset)
+        pairs: list[dict] = copy.deepcopy(dataset["samples"])
         for index, pair in enumerate(pairs):
             for role in ("lr", "hr"):
                 file = pair[role]
@@ -366,7 +368,7 @@ class Benchmark:
         if not phonefarm:
             raise ValueError("game_check requires phonefarm on PATH")
         config["phonefarm"] = str(Path(phonefarm).resolve())
-        defaults = {
+        defaults: dict[str, Any] = {
             "package": "com.miHoYo.Yuanshen",
             "a": "sr:1:2800x1272:0",
             "b": "sr:1:2800x1272:0",
@@ -434,7 +436,7 @@ class Benchmark:
         Returns:
             Semantic game inputs shared by compatible device pool members.
         """
-        config = self.game_check
+        config = cast(dict, self.game_check)
         ndk = Path(config["ndk_path"])
         native = Path(config["phonefarm_root"]) / "knobs/gray"
         paths = {
@@ -458,7 +460,7 @@ class Benchmark:
             "upstream/gfrc/gfrc_ab.py",
         ):
             paths[f"protocol/{name}"] = adapter / "protocol" / name
-        if self.evaluation_mode == "game" or self.game_check["options"].get("quality_samples", 0):
+        if self.evaluation_mode == "game" or config["options"].get("quality_samples", 0):
             paths["protocol/game_quality.py"] = adapter / "protocol/game_quality.py"
             paths["protocol/quality_replay.py"] = adapter / "protocol/quality_replay.py"
             paths["protocol/same_frame_quality.py"] = adapter / "protocol/same_frame_quality.py"
@@ -480,7 +482,7 @@ class Benchmark:
         for name, path in (paths | native_files).items():
             with path.open("rb") as stream:
                 hashes[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-        return json.loads(canonical({"options": config["options"], "mode": "resize", "files": hashes}))
+        return cast(dict, json.loads(canonical({"options": config["options"], "mode": "resize", "files": hashes})))
 
     def check_game_identity(self) -> None:
         """Refuse to build under an identity that changed after registration."""
@@ -493,7 +495,7 @@ class Benchmark:
 
     def build_game_layer(self, source: Path, output: Path, kind: str) -> Path:
         """Build the exact shader with the case-native layer compiler."""
-        return build_game_layer(self.game_check, source, output, kind)
+        return build_game_layer(cast(dict, self.game_check), source, output, kind)
 
     def positive(self, key: str, default: float) -> float:
         """Read a finite positive duration from local settings."""

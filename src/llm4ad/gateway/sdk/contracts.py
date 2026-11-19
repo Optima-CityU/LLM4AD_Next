@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,7 @@ from llm4ad.evaluator.models import EvaluationResult, Metric
 
 if TYPE_CHECKING:
     from .journal import Reporter
+    from .runtime import GatewayRuntime
 
 
 class EvaluationContract(BaseModel):
@@ -60,7 +61,7 @@ class GatewayEvaluator:
     cleanup_timeout: float = 30.0
 
     @classmethod
-    def create_runtime(cls, environment: dict, evaluator: str):
+    def create_runtime(cls, environment: dict, evaluator: str) -> GatewayRuntime | None:
         """Optionally supply local backend hooks; normal evaluators require none."""
         return None
 
@@ -109,7 +110,7 @@ def normalize_spec(spec: str) -> str:
     return spec
 
 
-def load_evaluator_class(spec: str):
+def load_evaluator_class(spec: str) -> type[GatewayEvaluator]:
     """Load an evaluator class without constructing device-dependent instances."""
     import hashlib
     import importlib
@@ -129,7 +130,7 @@ def load_evaluator_class(spec: str):
         sys.path.insert(0, str(path.parent))
         sys.modules[module_spec.name] = module
         module_spec.loader.exec_module(module)
-    return getattr(module, name)
+    return cast(type[GatewayEvaluator], getattr(module, name))
 
 
 def load_evaluator(spec: str) -> GatewayEvaluator:

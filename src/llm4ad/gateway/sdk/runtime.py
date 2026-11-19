@@ -6,8 +6,15 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from llm4ad.gateway.configuration import flag, number, user_ids, validate_server
+
+if TYPE_CHECKING:
+    from http.server import BaseHTTPRequestHandler
+
+    from .retention import EvidencePolicy
+    from .scheduling import DurableExecutor
 
 
 def platform_directory(root: Path, server: str) -> Path:
@@ -86,11 +93,11 @@ class GatewayRuntime:
             )
         ]
 
-    def api_handler(self):
+    def api_handler(self) -> type[BaseHTTPRequestHandler] | None:
         """Optionally extend the common local health server with a backend API."""
         return None
 
-    def executor_for(self, binding: GatewayBinding):
+    def executor_for(self, binding: GatewayBinding) -> DurableExecutor | None:
         """Optionally share SDK resource pools with a private executor facade."""
         return None
 
@@ -117,7 +124,7 @@ class GatewayRuntime:
         """Allow resource-specific admission without interrupting accepted work."""
         return True
 
-    def evidence_policy(self, gateway):
+    def evidence_policy(self, gateway) -> EvidencePolicy | None:
         """Optionally guard external evidence cleanup after SDK upload acknowledgement."""
         return None
 

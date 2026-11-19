@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 import aiohttp
 from pydantic import ValidationError
@@ -27,7 +27,7 @@ def failure_category(
     """
     explicit = metadata.get("failure_category")
     if isinstance(explicit, str) and explicit in {"candidate", "infrastructure", "evaluator", "configuration"}:
-        return explicit
+        return cast(FailureCategory, explicit)
     if metadata.get("candidate_failure") is True:
         return "candidate"
     if metadata.get("infrastructure_failure") is True:

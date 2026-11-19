@@ -9,14 +9,17 @@ import os
 import secrets
 import stat
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from .helpers import is_loopback
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 COOKIE_NAME = "llm4ad_ui_session"
 SESSION_SECONDS = 12 * 60 * 60
@@ -192,11 +195,11 @@ def same_origin(headers: dict[str, str]) -> bool:
 class DashboardAuthMiddleware:
     """Guard the entire NiceGUI mount, including Socket.IO and downloads."""
 
-    def __init__(self, app: Callable, *, auth: DashboardAuth):
+    def __init__(self, app: ASGIApp, *, auth: DashboardAuth):
         """Wrap the parent ASGI application with UI session enforcement."""
         self.app, self.auth = app, auth
 
-    async def __call__(self, scope: dict, receive: Callable[..., Awaitable], send: Callable[..., Awaitable]) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Authenticate HTTP requests and every incoming WebSocket control frame."""
         if scope["type"] not in {"http", "websocket"}:
             await self.app(scope, receive, send)
@@ -229,7 +232,7 @@ class DashboardAuthMiddleware:
                 await send({"type": "http.response.body", "body": b"Dashboard authentication required"})
             return
 
-        async def protected_receive() -> dict[str, Any]:
+        async def protected_receive() -> Message:
             message = await receive()
             if websocket and message["type"] != "websocket.disconnect" and needs_session and not self.auth.valid_session(token):
                 await send({"type": "websocket.close", "code": 1008})

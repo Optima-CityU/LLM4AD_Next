@@ -65,7 +65,8 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
         entries = json.loads(environment["HGAMEY_DEVICES_JSON"])
         if not isinstance(entries, list) or not entries:
             raise ValueError("HGAMEY_DEVICES_JSON must be a nonempty device array")
-        generated_devices = {"version": 1, "devices": []}
+        devices: list[dict] = []
+        generated_devices = {"version": 1, "devices": devices}
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ValueError("Every HGAMEY_DEVICES_JSON entry must be an object")
@@ -74,7 +75,7 @@ def configure(environment: dict, executor, adapter_directory: Path) -> dict:
             item.setdefault("label", item.get("id"))
             item.setdefault("port", 5555)
             item.setdefault("enabled", True)
-            generated_devices["devices"].append(item)
+            devices.append(item)
             if profile is not None:
                 if not isinstance(profile, str) or not profile.strip():
                     raise ValueError("device_profile must be a nonempty string")

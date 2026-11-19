@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import threading
 import time
@@ -10,7 +9,7 @@ import time
 from .backend import run_backend
 from .contracts import FEATURES, SubmissionConflictError
 from .jobs import JobStore
-from .storage import write_json
+from .storage import lock_exclusive, write_json
 
 logger = logging.getLogger(__name__)
 NATIVE_TARGET = "llm4ad.gateway.examples.hgamey.execution.jobs:"
@@ -41,7 +40,7 @@ class Engine:
             raise ValueError("executor requires at least one enabled device")
         self.guard = (self.data / "service.lock").open("a+")
         try:
-            fcntl.flock(self.guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(self.guard, nonblocking=True)
         except BlockingIOError:
             self.guard.close()
             raise RuntimeError("another executor already owns this data directory") from None

@@ -41,7 +41,8 @@ def validate_interface(binary: bytes) -> None:
         binary: A module already accepted by spirv-val.
     """
     words = struct.unpack(f"<{len(binary) // 4}I", binary)
-    decorations, pointers, images, variables = {}, {}, {}, []
+    decorations: dict[int, dict[int, tuple[int, ...]]] = {}
+    pointers, images, variables = {}, {}, []
     index = 5
     while index < len(words):
         length, opcode = words[index] >> 16, words[index] & 0xFFFF

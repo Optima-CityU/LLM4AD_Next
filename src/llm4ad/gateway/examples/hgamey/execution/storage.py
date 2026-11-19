@@ -4,8 +4,10 @@ import hashlib
 import json
 import os
 import stat
+import sys
 import uuid
 from pathlib import Path
+from typing import IO
 
 from .contracts import BackendNotStartedError
 
@@ -15,12 +17,29 @@ def read_json(path):
     return json.loads(Path(path).read_text())
 
 
+def lock_exclusive(file: IO[str], *, nonblocking: bool = False) -> None:
+    """Acquire the executor's POSIX lock for the lifetime of the open file.
+
+    Args:
+        file: Open lock file owned by the caller.
+        nonblocking: Raise BlockingIOError if another process holds the lock.
+    """
+    if sys.platform == "win32":
+        raise OSError("HGamey executor locks require POSIX file descriptors")
+    import fcntl
+
+    flags = fcntl.LOCK_EX | fcntl.LOCK_NB if nonblocking else fcntl.LOCK_EX
+    fcntl.flock(file, flags)
+
+
 def sync_directory(path):
     """Persist directory entries after an atomic metadata publication.
 
     Args:
         path: Directory containing the newly published entries.
     """
+    if sys.platform == "win32":
+        raise OSError("HGamey directory synchronization requires POSIX file descriptors")
     directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(directory)
@@ -61,9 +80,11 @@ def freeze_shader_inputs(folder, frozen):
     conditions = request.get("conditions", {})
     if not isinstance(payload, dict) or not isinstance(conditions, dict):
         raise ValueError("shader payload and conditions must be objects")
-    manifest = []
+    manifest: list[dict] = []
 
     def snapshot(source, destination):
+        if sys.platform == "win32":
+            raise OSError("HGamey shader snapshots require POSIX file descriptors")
         source = Path(source)
         destination.parent.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256()

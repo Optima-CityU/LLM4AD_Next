@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import fcntl
 import hashlib
 import importlib
 import json
@@ -16,7 +15,7 @@ from .backend import run_backend
 from .contracts import IDEMPOTENCY_KEY, JOB_ID, BackendNotStartedError, SubmissionConflictError
 from .device import cleanup_completed
 from .devices import load_devices, prepare_submission
-from .storage import freeze_shader_inputs, read_json, sync_directory, write_json
+from .storage import freeze_shader_inputs, lock_exclusive, read_json, sync_directory, write_json
 
 
 class JobStore:
@@ -37,7 +36,7 @@ class JobStore:
     def transaction(self):
         """Serialize receipt publication across SDK workers and HTTP clients."""
         with (self.data / "receipts.lock").open("a+") as guard:
-            fcntl.flock(guard, fcntl.LOCK_EX)
+            lock_exclusive(guard)
             yield
 
     def records(self):
@@ -135,7 +134,7 @@ def execute_job(folder, runner=None):
     folder = Path(folder)
     with (folder / "execution.lock").open("a+") as guard:
         try:
-            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(guard, nonblocking=True)
         except BlockingIOError:
             return read_json(folder / "job.json")
         return _execute_job(folder, runner)

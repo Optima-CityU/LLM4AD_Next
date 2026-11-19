@@ -33,7 +33,7 @@ def main():
         except Exception as error:
             folder = Path(sys.argv[2])
             error_file = "worker-error.json" if (folder / "result.json").exists() else "result.json"
-            report = {"status": "ERROR", "error": str(error)}
+            report: dict[str, str | dict | bool] = {"status": "ERROR", "error": str(error)}
             if preparation_not_started(folder):
                 report.update(preparation=read_json(folder / "device-preparation.json"), external_cleanup_confirmed=True)
             write_json(folder / error_file, report)

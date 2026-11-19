@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from .game_quality import _image, _reject_constant
 
@@ -210,7 +211,7 @@ def replay_frame(
         retains inherited lease FDs and an unconfirmed receipt for quarantine.
     """
     folder = Path(folder).absolute()
-    result = {
+    result: dict[str, Any] = {
         "frame_id": folder.name, "source": {}, "baseline": [], "candidate": [], "artifacts": [],
         "evidence_comparisons": [], "report": {}, "cleanup_confirmed": True, "status": "not_measured", "error": None,
     }

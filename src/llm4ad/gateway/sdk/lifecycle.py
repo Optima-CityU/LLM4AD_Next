@@ -124,7 +124,7 @@ def reserve_local_recovery(journal, job_id: str, attempt_id: str, limit: int = 3
             return None
         prior = db.execute("SELECT metadata FROM observations WHERE job_id=? AND attempt_id=?", (job_id, attempt_id)).fetchone()
         metadata = json.loads(prior[0]) if prior else {}
-        count = metadata.get("local_recovery", {}).get("attempts", 0)
+        count: int = metadata.get("local_recovery", {}).get("attempts", 0)
         if count >= limit:
             return 0
         count += 1

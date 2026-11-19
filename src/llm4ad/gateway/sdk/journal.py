@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import tempfile
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,7 +20,7 @@ def sqlite_contention(error: sqlite3.OperationalError) -> bool:
 
 
 @contextmanager
-def gateway_lease(directory: Path):
+def gateway_lease(directory: Path) -> Iterator[None]:
     """Hold an OS-released SQLite lease for one gateway instance per directory."""
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     connection = sqlite3.connect(directory / "gateway.lock.sqlite3", timeout=0, check_same_thread=False)
@@ -287,7 +288,7 @@ class Journal:
                 )
             ]
 
-    def observations(self, job_id: str, attempt_id: str) -> tuple[dict, list[dict]]:
+    def observations(self, job_id: str, attempt_id: str | None) -> tuple[dict, list[dict]]:
         """Read durable extra metadata and ordered messages for exactly one attempt."""
         with self.connect() as db:
             row = db.execute(
@@ -394,7 +395,7 @@ class Reporter:
         """Bind progress and recovery operations to one durable job."""
         self.journal, self.job_id = journal, job_id
         row = journal.get(job_id)
-        self.attempt_id = attempt_id or (json.loads(row["job"])["attempt_id"] if row else None)
+        self.attempt_id: str | None = attempt_id or (json.loads(row["job"])["attempt_id"] if row else None)
         self.execution_id = execution_id
 
     def _current(self, payload: str) -> bool:

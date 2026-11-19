@@ -14,6 +14,7 @@ import tempfile
 import time
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path, PurePosixPath
+from typing import Protocol, cast
 
 from .storage import persist
 
@@ -45,7 +46,7 @@ class LocalLogStore:
         self.journal = journal
         self.root = Path(journal.path).absolute().parent / "local-logs" / Path(journal.path).stem
 
-    def directory(self, job_id: str, attempt_id: str) -> Path:
+    def directory(self, job_id: str, attempt_id: str | None) -> Path:
         """Address one execution without putting caller-controlled IDs into paths."""
         identity = hashlib.sha256(f"{job_id}|{attempt_id}".encode()).hexdigest()
         return self.root / identity
@@ -103,7 +104,7 @@ class LocalLogStore:
             raise ValueError("Local log name must be a relative source name")
         return str(PurePosixPath(name))
 
-    def create(self, job_id: str, attempt_id: str, name: str, description: str = "") -> Path:
+    def create(self, job_id: str, attempt_id: str | None, name: str, description: str = "") -> Path:
         """Create an appendable managed log path, including initially empty files."""
         name = self._name(name)
         path = self.directory(job_id, attempt_id) / "files" / name
@@ -409,7 +410,7 @@ class LocalLogStore:
 
 def _windows_stdio() -> None:
     """Expose redirected CRT descriptors to child process standard handles."""
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
         import msvcrt
         from ctypes import wintypes
@@ -419,6 +420,18 @@ def _windows_stdio() -> None:
         setter.restype = wintypes.BOOL
         setter(-11, msvcrt.get_osfhandle(1))
         setter(-12, msvcrt.get_osfhandle(2))
+
+
+class _ReconfigurableStream(Protocol):
+    """Describe buffering settings on streams that support reconfiguration."""
+
+    @property
+    def line_buffering(self) -> bool: ...
+
+    @property
+    def write_through(self) -> bool: ...
+
+    def reconfigure(self, *, line_buffering: bool, write_through: bool) -> None: ...
 
 
 @contextmanager
@@ -440,8 +453,9 @@ def capture_worker_logs(journal, payload):
         _windows_stdio()
         for stream in (sys.stdout, sys.stderr):
             if hasattr(stream, "reconfigure"):
-                stream_settings.append((stream, stream.line_buffering, stream.write_through))
-                stream.reconfigure(line_buffering=True, write_through=True)
+                configurable = cast(_ReconfigurableStream, stream)
+                stream_settings.append((configurable, configurable.line_buffering, configurable.write_through))
+                configurable.reconfigure(line_buffering=True, write_through=True)
     except (OSError, ValueError, TypeError, LookupError, sqlite3.Error):
         for descriptor, original in saved.items():
             os.dup2(original, descriptor)
@@ -458,6 +472,6 @@ def capture_worker_logs(journal, payload):
         _windows_stdio()
         for handle in handles:
             os.close(handle)
-        for stream, line_buffering, write_through in stream_settings:
+        for configurable, line_buffering, write_through in stream_settings:
             with suppress(OSError, ValueError, TypeError):
-                stream.reconfigure(line_buffering=line_buffering, write_through=write_through)
+                configurable.reconfigure(line_buffering=line_buffering, write_through=write_through)

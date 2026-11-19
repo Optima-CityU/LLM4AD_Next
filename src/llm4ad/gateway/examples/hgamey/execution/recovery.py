@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import shlex
 import sys
@@ -16,7 +15,7 @@ from .collectors import restore_collectors
 from .device import cleanup_completed, preparation_not_started
 from .process import command, inherited_fds
 from .retry import retry_read
-from .storage import read_json, write_json
+from .storage import lock_exclusive, read_json, write_json
 
 
 def restore_device_scripts(endpoint, request):
@@ -65,7 +64,7 @@ def restore_job(folder):
     folder = Path(folder)
     with (folder / "execution.lock").open("a+") as guard:
         try:
-            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(guard, nonblocking=True)
         except BlockingIOError:
             return False
         job = read_json(folder / "job.json")

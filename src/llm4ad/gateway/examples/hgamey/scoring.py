@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import copy
 import math
+from typing import Any, TypeGuard, cast
 
-DEFAULT_GAME_SCORING = {
+DEFAULT_GAME_SCORING: dict[str, Any] = {
     "schema": "llm4ad/hgamey-game-scoring@1",
     "weights": {"fps": 0.25, "frame_p95": 0.35, "gpu_per_frame": 0.20, "quality": 0.20},
     "quality_gap_score": -100.0,
@@ -22,10 +23,10 @@ _DIRECTIONS = {"stable_psnr_db": "higher", "stable_dssim": "lower", "detail_log2
 _FRAME_QUALITY_PROTOCOL = "same-input-gpu-replay@1"
 
 
-def _finite(value: object) -> bool:
+def _finite(value: object) -> TypeGuard[int | float]:
     """Identify finite real measurements, excluding boolean values."""
     try:
-        return type(value) in (int, float) and math.isfinite(value)
+        return (type(value) is int or type(value) is float) and math.isfinite(value)
     except OverflowError:
         return False
 
@@ -53,26 +54,29 @@ def normalize_game_scoring(value: dict | None) -> dict:
         raise ValueError("Unsupported game scoring policy")
     policy = copy.deepcopy(DEFAULT_GAME_SCORING)
     for name, override in (value or {}).items():
-        if isinstance(policy[name], dict):
-            if not isinstance(override, dict) or override.keys() - policy[name].keys():
+        default = policy[name]
+        if isinstance(default, dict):
+            if not isinstance(override, dict) or override.keys() - default.keys():
                 raise ValueError(f"Unsupported game scoring {name}")
-            policy[name].update(copy.deepcopy(override))
+            default.update(copy.deepcopy(override))
         else:
             policy[name] = override
     if policy["schema"] != DEFAULT_GAME_SCORING["schema"]:
         raise ValueError("Unsupported game scoring schema")
     if not _finite(policy["quality_gap_score"]) or policy["quality_gap_score"] >= 0:
         raise ValueError("Game scoring quality_gap_score must be finite and negative")
-    weights = policy["weights"]
+    weights: dict[str, object] = policy["weights"]
     if any(not _finite(w) or w < 0 for w in weights.values()) or not any(weights.values()):
         raise ValueError("Game scoring weights must be finite, nonnegative and have a positive sum")
+    validated_weights = cast(dict[str, float], weights)
     # Scaling first also supports finite weights whose unscaled sum overflows.
-    maximum = max(weights.values())
-    total = math.fsum(w / maximum for w in weights.values())
-    if maximum > 1 or math.fsum(weights.values()) != 1.0:
-        policy["weights"] = {key: (weight / maximum) / total for key, weight in weights.items()}
-        largest = max(weights, key=weights.get)
-        policy["weights"][largest] = 1.0 - math.fsum(w for key, w in policy["weights"].items() if key != largest)
+    maximum = max(validated_weights.values())
+    total = math.fsum(w / maximum for w in validated_weights.values())
+    if maximum > 1 or math.fsum(validated_weights.values()) != 1.0:
+        normalized = {key: (weight / maximum) / total for key, weight in validated_weights.items()}
+        largest = max(validated_weights, key=validated_weights.__getitem__)
+        normalized[largest] = 1.0 - math.fsum(w for key, w in normalized.items() if key != largest)
+        policy["weights"] = normalized
     for group in ("scales", "quality_scales"):
         if any(not _finite(s) or s <= 0 for s in policy[group].values()):
             raise ValueError(f"Game scoring {group} must be finite and positive")
@@ -92,11 +96,10 @@ def _quality(rows: object, scales: dict) -> tuple[float | None, dict, list[str]]
     for key, direction in _DIRECTIONS.items():
         matches = [row for row in rows if isinstance(row, dict) and row.get("key") == key] if isinstance(rows, list) else []
         row = matches[0] if len(matches) == 1 else {}
-        values = [row.get(field) for field in ("value", "native_self", "ref_line")]
-        if row.get("better") != direction or not all(_finite(v) for v in values):
+        measured, native_self, reference = (row.get(field) for field in ("value", "native_self", "ref_line"))
+        if row.get("better") != direction or not (_finite(measured) and _finite(native_self) and _finite(reference)):
             missing.append(f"quality.{key}: missing finite official value, native_self or ref_line")
             continue
-        measured, native_self, reference = values
         if native_self < 0 or reference < 0 or (direction != "near_zero" and measured < 0):
             missing.append(f"quality.{key}: invalid negative measurement or reference")
             continue
@@ -194,7 +197,7 @@ def _frame_quality(quality: dict, scales: dict) -> tuple[float | None, dict, lis
     return gain, details, []
 
 
-def score_game(report: dict, policy: dict) -> dict:
+def score_game(report: dict, policy: dict | None) -> dict:
     """Score measured A/B gains and official quality gaps using fixed weights.
 
     Args:
@@ -221,12 +224,16 @@ def score_game(report: dict, policy: dict) -> dict:
         be selected explicitly in the policy before evaluating candidates.
     """
     policy = normalize_game_scoring(policy)
-    result = {
-        "score": None, "unpenalized_score": None, "metrics": {}, "components": {}, "missing": [],
-        "quality_assessment": {
-            "status": "not_scored", "penalized": False,
-            "penalty_score": policy["quality_gap_score"], "reasons": [],
-        },
+    metrics: dict[str, dict] = {}
+    components: dict[str, dict[str, Any]] = {}
+    missing_metrics: list[str] = []
+    assessment: dict[str, Any] = {
+        "status": "not_scored", "penalized": False,
+        "penalty_score": policy["quality_gap_score"], "reasons": [],
+    }
+    result: dict[str, Any] = {
+        "score": None, "unpenalized_score": None, "metrics": metrics,
+        "components": components, "missing": missing_metrics, "quality_assessment": assessment,
     }
     quality_missing = []
     report = report if isinstance(report, dict) else {}
@@ -237,9 +244,9 @@ def score_game(report: dict, policy: dict) -> dict:
             continue
         source, scale = policy["sources"][name], policy["scales"][name]
         component = {"weight": weight, "scale": scale, "source": copy.deepcopy(source), "contribution": None}
-        result["components"][name] = component
+        components[name] = component
         if name == "quality":
-            rows = report
+            rows: object = report
             parent = None
             for part in source.split("."):
                 parent = rows
@@ -248,7 +255,7 @@ def score_game(report: dict, policy: dict) -> dict:
                 gain, details, missing = _frame_quality(parent, policy["quality_scales"])
                 component["source"] = source.rpartition(".")[0] + ".frames" if "." in source else "frames"
                 component["formula"] = "-mean(per-frame mean(max(0, gap beyond official reference line) / quality scale))"
-                result["quality_assessment"].update(
+                assessment.update(
                     protocol=parent.get("protocol") if isinstance(parent.get("protocol"), str) else None,
                     scope="same_input_gpu_replay",
                 )
@@ -258,8 +265,8 @@ def score_game(report: dict, policy: dict) -> dict:
                     missing.append("quality: official IQ is not completely measured")
                     gain = None
                 component["formula"] = "-mean(max(0, gap beyond official reference line) / quality scale)"
-            result["metrics"][name] = details
-            result["missing"].extend(missing)
+            metrics[name] = details
+            missing_metrics.extend(missing)
             quality_missing.extend(missing)
         else:
             values = []
@@ -271,13 +278,16 @@ def score_game(report: dict, policy: dict) -> dict:
                     value = measured.get(f"{side}_{source}")
                 values.append(value if _finite(value) else None)
             baseline, candidate = values
-            valid = all(_finite(v) and v >= 0 for v in values) and baseline > 0
-            gain = (candidate / baseline - 1) * (100 if name == "fps" else -100) if valid else None
+            gain = (
+                (candidate / baseline - 1) * (100 if name == "fps" else -100)
+                if baseline is not None and baseline > 0 and candidate is not None and candidate >= 0
+                else None
+            )
             if name != "fps" and baseline == candidate == 0:
                 gain = 0.0
             if not _finite(gain):
                 gain = None
-            result["metrics"][name] = {"baseline": baseline, "candidate": candidate, "gain_pct": gain}
+            metrics[name] = {"baseline": baseline, "candidate": candidate, "gain_pct": gain}
             if name == "gpu_per_frame":
                 component["label"] = "Application UID GPU active ms per presented frame"
                 component["formula"] = "(1 - candidate/baseline) * 100; ms/frame = 10 * gpu_uid_active_pct / display_fps"
@@ -289,26 +299,25 @@ def score_game(report: dict, policy: dict) -> dict:
                     else f"Policy-selected P95 (ms): {source}"
                 )
             if gain is None:
-                result["missing"].append(f"{name}: requires finite nonnegative A/B data and a positive baseline from {source}")
+                missing_metrics.append(f"{name}: requires finite nonnegative A/B data and a positive baseline from {source}")
         if gain is not None and _finite(gain / scale) and _finite(weight * (gain / scale)):
             component.update(gain=gain, normalized=gain / scale, contribution=weight * (gain / scale))
         elif gain is not None:
             reason = f"{name}: normalized contribution is nonfinite"
-            result["missing"].append(reason)
+            missing_metrics.append(reason)
             if name == "quality":
                 quality_missing.append(reason)
-    assessment = result["quality_assessment"]
-    quality = result["components"].get("quality")
+    quality = components.get("quality")
     if quality is not None:
         reasons = quality_missing or [
             f"quality.{key}: exceeds official reference line (scaled penalty {item['penalty']})"
-            for key, item in result["metrics"]["quality"].items() if item["gap_beyond_ref"] > 0
+            for key, item in metrics["quality"].items() if item["gap_beyond_ref"] > 0
         ]
         assessment.update(
             status="unverified" if quality_missing else "beyond_reference" if reasons else "within_reference",
             penalized=bool(reasons), reasons=reasons,
         )
-    performance = [item["contribution"] for name, item in result["components"].items() if name != "quality"]
+    performance = [item["contribution"] for name, item in components.items() if name != "quality"]
     if any(value is None for value in performance):
         return result
     try:
@@ -316,18 +325,18 @@ def score_game(report: dict, policy: dict) -> dict:
     except OverflowError:
         performance_score = None
     if not _finite(performance_score):
-        result["missing"].append("score: weighted performance sum is nonfinite")
+        missing_metrics.append("score: weighted performance sum is nonfinite")
         return result
     if quality_missing:
         result["score"] = policy["quality_gap_score"]
         return result
     try:
-        score = math.fsum(item["contribution"] for item in result["components"].values())
+        score = math.fsum(item["contribution"] for item in components.values())
     except OverflowError:
         score = None
     if not _finite(score):
         reason = "quality: weighted score is nonfinite"
-        result["missing"].append(reason)
+        missing_metrics.append(reason)
         assessment.update(status="unverified", penalized=True, reasons=[reason])
         result["score"] = policy["quality_gap_score"]
         return result

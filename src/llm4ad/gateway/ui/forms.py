@@ -166,8 +166,9 @@ async def settings_form(controller: Any, ui: Any, shell: Any, poll: Any) -> None
                 try:
                     result = await controller.apply_settings(settings_payload(patch))
                 except Exception as exception:
-                    if callable(getattr(exception, "errors", None)):
-                        for item in exception.errors(include_input=False, include_url=False):
+                    errors = getattr(exception, "errors", None)
+                    if callable(errors):
+                        for item in errors(include_input=False, include_url=False):
                             field_error(str(item["loc"][0]), item["msg"])
                         raise ValueError(tr("Please correct the highlighted fields.")) from None
                     for key in fields:

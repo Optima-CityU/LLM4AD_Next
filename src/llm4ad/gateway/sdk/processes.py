@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -36,7 +37,7 @@ def persist_record(path: Path, value: dict) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(path)
-        if os.name != "nt":
+        if sys.platform != "win32":
             descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(descriptor)
@@ -88,7 +89,7 @@ def create_owner(directory: Path, *, key: str = "", slot: int = 0) -> dict:
 
 
 def _owner(directory: Path) -> dict:
-    record = json.loads((directory / "owner.json").read_text(encoding="utf-8"))
+    record: dict = json.loads((directory / "owner.json").read_text(encoding="utf-8"))
     if (
         record.get("schema") != "llm4ad/process-owner@1"
         or not isinstance(record.get("nonce"), str)
@@ -145,14 +146,14 @@ def worker_identity(directory: Path) -> dict | None:
         Worker identity, or None before its initializer finishes.
     """
     for path in sorted((Path(directory) / "processes").glob("*.json")):
-        record = json.loads(path.read_text(encoding="utf-8"))
+        record: dict = json.loads(path.read_text(encoding="utf-8"))
         if record.get("role") == "worker":
             return record
     return None
 
 
 def _matches_identity(process: psutil.Process, identity: dict) -> bool:
-    return process.is_running() and process.create_time() == identity.get("create_time")
+    return bool(process.is_running() and process.create_time() == identity.get("create_time"))
 
 
 def _scan_owner(directory: Path, *, command: str | None = None) -> tuple[dict[int, psutil.Process], list[str]]:
