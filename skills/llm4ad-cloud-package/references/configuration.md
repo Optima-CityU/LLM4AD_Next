@@ -198,6 +198,11 @@ the build script for the local OS, if supplied, and then evaluates its artifacts
 
 ### Evaluator and dataset
 
+For standalone ZIPs that delegate execution to the user's gateway, follow
+[remote-evaluation.md](remote-evaluation.md) for `type: remote`, the unbound
+package configuration and validation setup. The following contracts are for
+evaluation in a platform task container.
+
 Read [evaluator-contract.md](evaluator-contract.md) for the exact API and failure
 semantics and [dataset-contract.md](dataset-contract.md) for instance contents,
 discovery, provenance and aggregation. Choose these against the agreed real task.
@@ -240,12 +245,11 @@ include the actual key or a local `.env`.
 ## Verification report
 
 `validation.json` and the sibling report record the tested platform version,
-interpreter/OS, algorithm, config path, actual sample scores/metrics, empty-candidate
-check, the executed `test_evaluator.py` outcome, and SHA-256 of each packaged input file.
-The helper requires that task-specific test script to pass in a separate process
-before writing the deliverable. The overall `--timeout` covers baseline checks
-and the test script together. `full_evolution_run` remains false:
-passing baseline evaluation does not certify generated code or algorithm quality.
+interpreter/OS, algorithm, config path, measured scores/metrics, and SHA-256 of
+each packaged input. A platform-container task also records the empty-candidate
+check and the `test_evaluator.py` exit result. A gateway task records an offline
+worker smoke result and evaluator version information. The overall `--timeout`
+covers all verification. `full_evolution_run` remains false in both modes.
 The hash table excludes `validation.json` itself. The helper validates the extracted
 snapshot, so an edited source directory requires a new archive and new report.
 

@@ -1,0 +1,41 @@
+#version 450
+// 路线 B 第 4 步: 预对齐。把块网格运动场双线性放大到 NPU 输入网格 (ow x oh, 可以等于全分辨率, 也可以是半分辨率),
+// 前帧按 -t*v、后帧按 +(1-t)*v 反向采样到中间时刻, 两帧 RGB 拼成 6 通道 uint8 (NHWC) 写进 NPU 输入缓冲。
+// 半分辨率时直接在半分辨率网格上采样全分辨率帧 (不是先预对齐再抗锯齿缩小, 省一遍全分辨率读写; 与 I1 离线评估略有差别)。
+// 每个线程 2 个像素 = 12 字节 = 3 个 uint; 要求 ow*oh 是 2 的倍数。调度: x = ceil(ow*oh/2/64)。
+#define FLOW_BINDING 2
+#include "interp_common.glsl"
+layout(local_size_x = 64) in;
+layout(binding = 0) uniform sampler2D f0;
+layout(binding = 1) uniform sampler2D f1;
+layout(std430, binding = 3) writeonly buffer Out { uint d[]; } outb;
+layout(push_constant) uniform P {
+    int W; int H; int ow; int oh; int gw; int gh; float cell;   // cell = 每块在全分辨率里的边长 (8 * 4 = 32)
+    float t; float inv_scale; float zp;
+} pc;
+
+void main() {
+    uint g = gl_GlobalInvocationID.x;
+    uint n = uint(pc.ow * pc.oh);
+    uint p0 = g * 2u;
+    if (p0 >= n) return;
+    ivec2 full = ivec2(pc.W, pc.H);
+    vec2 sc = vec2(float(pc.W) / float(pc.ow), float(pc.H) / float(pc.oh));
+    uint b[12];
+    for (uint k = 0u; k < 2u; k++) {
+        uint p = p0 + k;
+        vec2 o = vec2(float(p % uint(pc.ow)), float(p / uint(pc.ow)));
+        vec2 pf = (o + 0.5) * sc - 0.5;                 // NPU 网格像素中心在全分辨率里的位置 (ow==W 时就是 o)
+        vec2 v = flow_at(pf, pc.gw, pc.gh, pc.cell);
+        vec3 a = warp255(f0, pf - pc.t * v, full);
+        vec3 c = warp255(f1, pf + (1.0 - pc.t) * v, full);
+        b[k * 6u]      = quant8(a.r, pc.inv_scale, pc.zp);
+        b[k * 6u + 1u] = quant8(a.g, pc.inv_scale, pc.zp);
+        b[k * 6u + 2u] = quant8(a.b, pc.inv_scale, pc.zp);
+        b[k * 6u + 3u] = quant8(c.r, pc.inv_scale, pc.zp);
+        b[k * 6u + 4u] = quant8(c.g, pc.inv_scale, pc.zp);
+        b[k * 6u + 5u] = quant8(c.b, pc.inv_scale, pc.zp);
+    }
+    for (uint j = 0u; j < 3u; j++)
+        outb.d[g * 3u + j] = pack4(b[j * 4u], b[j * 4u + 1u], b[j * 4u + 2u], b[j * 4u + 3u]);
+}

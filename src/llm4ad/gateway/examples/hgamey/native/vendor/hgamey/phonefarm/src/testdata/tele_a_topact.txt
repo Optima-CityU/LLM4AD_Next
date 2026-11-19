@@ -1,0 +1,1 @@
+    topResumedActivity=ActivityRecord{c849d81 u0 com.ss.android.article.news/com.ss.android.newmedia.activity.browser.BrowserActivity t103}

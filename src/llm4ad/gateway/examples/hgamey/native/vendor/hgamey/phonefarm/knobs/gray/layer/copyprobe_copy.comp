@@ -1,0 +1,13 @@
+// copyprobe 的 1:1 拷贝算子: texelFetch 逐纹素搬, 不做任何重采样。
+// 探针的意义是"机制全走一遍但内容不变" —— 源图多大, 目标图就建多大,
+// 逐纹素拷贝保证游戏自己的放大 shader 拿到的输入逐位相同, 最终画面才能逐像素对比。
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0) uniform sampler2D srcTex;
+layout(rgba8, binding = 1) uniform writeonly image2D dstImg;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dstImg);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    imageStore(dstImg, p, texelFetch(srcTex, p, 0));
+}

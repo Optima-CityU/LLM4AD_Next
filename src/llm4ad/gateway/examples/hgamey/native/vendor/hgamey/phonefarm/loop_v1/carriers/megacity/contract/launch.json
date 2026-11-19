@@ -1,0 +1,214 @@
+{
+  "contract_version": 1,
+  "carrier": "megacity",
+  "upstream": {
+    "repo": "https://github.com/Unity-Technologies/megacity-metro",
+    "ref": "master",
+    "unity_editor": "6000.1.0f1",
+    "license": "Unity Companion License",
+    "note": "第三方工程不进本仓库, 克隆到构建机的 thirdparty/ 下"
+  },
+  "package": "com.unity.megacity.metro",
+  "activity": "com.unity.megacity.MegacityMetro",
+  "activity_note": "上游 Assets/Plugins/Android/AndroidManifest.xml 里声明的自定义 Activity (extends UnityPlayerActivity), android:exported=true, 所以 am start 可直接拉起。applicationId 与 java 包名不同是正常的。",
+  "launch_template": "am start -W -n com.unity.megacity.metro/com.unity.megacity.MegacityMetro --es scene {scene} --es run_id {run_id} --es frames {frames} --es route {route} --es warmup {warmup} --es settle {settle} --es resscale {resscale} --es vsync {vsync}",
+  "extras_are_all_string": true,
+  "no_extras_behavior": "不带 scene extra 启动时 harness 完全不激活, APK 就是原版游戏。测试与正常游玩共用同一个包。",
+  "extras": {
+    "scene": {
+      "required": true,
+      "enum": [
+        "city_flythrough",
+        "city_static"
+      ],
+      "semantics": {
+        "city_flythrough": "相机沿固定路线穿城飞行, 主负载场景",
+        "city_static": "相机钉在路线起点不动, 同一批 subscene 已流式加载完毕; 作几何/流式开销的对照臂"
+      }
+    },
+    "run_id": {
+      "required": false,
+      "default": "unset",
+      "note": "原样回写进输出 json, 构成证据链"
+    },
+    "frames": {
+      "required": false,
+      "default": "3600",
+      "parsed_as": "int",
+      "range": [
+        60,
+        100000
+      ],
+      "note": "pace=frame 时: 被测窗口的帧数, 相机按帧序号推进, 跨轮比较必须锁死同一个 frames。pace=time (缺省) 时: 只用来给出 route_seconds 的缺省值 frames/30, 窗口长度由 route_seconds 决定。"
+    },
+    "pace": {
+      "required": false,
+      "default": "time",
+      "enum": [
+        "time",
+        "frame"
+      ],
+      "note": "路线推进方式 (审计 #8, harness 0.3.0)。time: 相机位置 = 窗口内已过真实时间 / route_seconds, 帧率不锁时两臂同一时刻在同一位置, phonefarm 按 marker 之后固定秒数采集, 两臂覆盖同一段路线。frame: 旧行为, 位姿只由帧序号决定; 帧率不锁时固定秒数的采集窗在两臂覆盖不同长度的路线, 只用于复现旧数据。"
+    },
+    "route_seconds": {
+      "required": false,
+      "default": "frames/30",
+      "parsed_as": "float",
+      "range": [
+        1,
+        100000
+      ],
+      "note": "pace=time 时整条路线飞完的秒数, 也是被测窗口长度。缺省 frames/30 与旧版在 30 fps 下的飞行速度相同, 旧 extras (frames=3600) 等于 120 秒; phonefarm 只采前 seconds 秒 (game_opt_loop 里 30 秒), 即路线前 1/4。"
+    },
+    "fps_cap": {
+      "required": false,
+      "default": "1000",
+      "parsed_as": "int",
+      "range": [
+        1,
+        1000
+      ],
+      "note": "vsync=off 时 Application.targetFrameRate 的值 (QualitySettings.vSyncCount=0)。旧版写 -1, 在 Android 上就是 30 fps。实际上限由屏幕刷新率 / 系统帧调度决定, 回读写进输出 json 的 frame_pacing。"
+    },
+    "route": {
+      "required": false,
+      "default": "route_a",
+      "note": "APK 内 StreamingAssets/refbench_routes/<route>.json 的文件名(不含扩展名)。路线只从 APK 里读 —— 实测 adb push 进 app 外部目录的文件应用看不见(scoped storage 下属主是 shell)。换路线必须重新出包, 而这正是应该的: 路线是被测配置的一部分, APK + 上游 commit 完整决定负载。路线文件的 sha256 会写进输出 json。"
+    },
+    "warmup": {
+      "required": false,
+      "default": "600",
+      "parsed_as": "int",
+      "range": [
+        0,
+        100000
+      ],
+      "note": "预热帧数。静置结束后, 相机钉在路线起点再渲染这么多帧, 等 shader 与常驻分配落定, 之后才落 started 标记并进被测窗口。预热帧不计入 frames。"
+    },
+    "resscale": {
+      "required": false,
+      "default": "1.0",
+      "parsed_as": "float",
+      "range": [
+        0.25,
+        2.0
+      ],
+      "note": "URP render scale。写死而非跟随设备自适应, 否则不同轮的像素量不同。"
+    },
+    "vsync": {
+      "required": false,
+      "default": "off",
+      "enum": [
+        "on",
+        "off"
+      ],
+      "note": "off = QualitySettings.vSyncCount=0 且 targetFrameRate=-1, 让帧率跑满以便分位数统计拿到足够帧 (与 refbench 偏好 MAILBOX/IMMEDIATE 同理)。实际生效值回写进输出 json。"
+    },
+    "settle": {
+      "required": false,
+      "default": "7200",
+      "parsed_as": "int",
+      "range": [
+        0,
+        200000
+      ],
+      "note": "静置帧数上界 —— 不是固定等待。Main.unity 里 6 个 SubScene 都是 AutoLoadScene=1, 城市会自动装且不需要玩家驱动, 但装完要时间。harness 以\"实体总数连续 120 帧不再增长\"作装完信号, 装完就提前进入预热; 到 settle 仍没稳定下来则记 streaming.ready=timeout。首轮就是栽在这里: 当时只等了 300 帧, 城市还没装完就开测, 画面上只有天空。"
+    },
+    "msaa": {
+      "required": false,
+      "default": "(不改, 用画质档自带值; High 档为 4)",
+      "enum": [
+        "1",
+        "2",
+        "4"
+      ],
+      "note": "W1。URP asset msaaSampleCount。实际值回写 graphics.msaa 与 knobs.msaa"
+    },
+    "store_opt": {
+      "required": false,
+      "enum": [
+        "auto",
+        "discard",
+        "store"
+      ],
+      "note": "W2。URP asset storeActionsOptimization"
+    },
+    "feat_off": {
+      "required": false,
+      "note": "W3。逗号分隔, 按渲染器特性名/类型名子串匹配(不分大小写), 对命中的特性 SetActive(false)。例: fog,ambientocclusion。graphics.renderer_features 列出全部特性与实际开关"
+    },
+    "fog_event": {
+      "required": false,
+      "note": "W4。雾特性(名字含 fog)第一个 RenderPassEvent 类型成员改成该值, 接受枚举名或整数(如 AfterRenderingTransparents / 500)"
+    },
+    "ssao_src": {
+      "required": false,
+      "enum": [
+        "depth",
+        "depthnormals"
+      ],
+      "note": "W5。SSAO 特性 m_Settings.Source"
+    },
+    "ssao_after_opaque": {
+      "required": false,
+      "enum": [
+        "0",
+        "1"
+      ],
+      "note": "W5。SSAO 特性 m_Settings.AfterOpaque"
+    },
+    "shadowres": {
+      "required": false,
+      "enum": [
+        "256",
+        "512",
+        "1024",
+        "2048",
+        "4096"
+      ],
+      "note": "W6。URP asset mainLightShadowmapResolution"
+    },
+    "depth_priming": {
+      "required": false,
+      "enum": [
+        "off",
+        "auto",
+        "forced"
+      ],
+      "note": "W7。渲染器数据 depthPrimingMode"
+    }
+  },
+  "fail_loud": {
+    "policy": "路线文件缺失 / 解析失败 / 航点少于 2 个 —— 一律写 clean_exit=false 并退出, 绝不静默退回默认路线或默认相机。城市没装完(streaming.ready != yes)不算硬失败, 但该轮不能当基线用, 由上层判定为无效轮。",
+    "reason": "与 refbench 的 knob.postfx 同一条原则: 静默降级会让 A/B 两臂悄悄变成 A 和 A, 而上层还以为在对照。"
+  },
+  "process": {
+    "self_terminates": true,
+    "liveness_probe": "adb shell pidof com.unity.megacity.metro",
+    "exit_code_is_contract": false,
+    "exit_code_note": "与 refbench 不同: 这是 Unity Activity 不是 NativeActivity, 退出码经 am start 观测不到。轮的有效性一律以输出 json 的 clean_exit 与 streaming.ready 为准。自退实测: Application.Quit() 与 Environment.Exit() 都杀不掉进程(写完 json 后 30 秒仍在), 现改用 android.os.Process.killProcess, 在 json fsync 之后调用。"
+  },
+  "output": {
+    "device_path": "/storage/emulated/0/Android/data/com.unity.megacity.metro/files/megacity_out.json",
+    "written": "FileStream.Flush(true) 落盘后才退出进程",
+    "schema": "output.schema.json"
+  },
+  "started_marker": {
+    "device_path": "/storage/emulated/0/Android/data/com.unity.megacity.metro/files/megacity_started",
+    "written": "预热结束、进入被测渲染窗口前一帧写入; content = '<scene> <run_id>'",
+    "note": "与 refbench 同样刻意不走 logcat —— 本机 logcat 会整个哑掉"
+  },
+  "trace": {
+    "comm_filter": "UnityGfxDeviceW",
+    "comm_filter_status": "VERIFIED 2026-09-23",
+    "comm_filter_note": "红魔(Adreno 840 / Vulkan)上实测确认为 UnityGfxDeviceW —— harness 自己扫 /proc/self/task/*/comm 得到并回写进 render_thread_comm, 不靠猜。phonefarm parse-trace 的 --comm 从输出 json 取, 不要在脚本里写死。",
+    "submits_per_frame": "auto",
+    "submits_per_frame_note": "不写死。URP 单帧提交次数随 render pass 配置变化, 交给 loop_v1 的 detect_submits_per_frame 自相关自检 (原神 2 次/帧就是这么测出来的)。"
+  },
+  "prerequisites": {
+    "record_audio": "首次安装后 Vivox 会弹录音权限框, 框一出应用被挂起、协程停摆。harness 现在会切单机模式(上游只在非单机时实例化 Vivox)绕开它; run 脚本仍会 pm grant android.permission.RECORD_AUDIO 作双保险, 这步是幂等的。"
+  },
+  "knobs_note": "白盒旋钮 (https://github.com/HGamey/docs/blob/main/repos/phonefarm/docs/MEGACITY_WHITEBOX_KNOBS.md)。全部可选, 不给就不碰。城市装完、预热前一次性生效; 每条的想要值/改法(prop|field|none|failed:..)/回读实际值写进输出 json 的 knobs。改法不是 prop/field 的那一臂作废, 不能当对照。",
+  "launch_template_knobs": " --es msaa {msaa} --es store_opt {store_opt} --es feat_off {feat_off} --es fog_event {fog_event} --es ssao_src {ssao_src} --es ssao_after_opaque {ssao_after_opaque} --es shadowres {shadowres} --es depth_priming {depth_priming}",
+  "launch_template_pacing": " --es pace {pace} --es route_seconds {route_seconds} --es fps_cap {fps_cap}"
+}

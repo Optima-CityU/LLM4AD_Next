@@ -1,0 +1,53 @@
+project_name: remote_square_error
+description_en: "Evolve a Python square function and score it through the basic remote gateway. Select a connected square-error evaluator before running."
+description_zh: "用基础远程网关评估 Python 平方函数。运行前请选择已连接的平方误差评估器。"
+
+background: |
+  Improve solve(value) in solution.py so that it returns the square of a
+  finite float. Keep the function signature and edit only the region between
+  EVOLVE_START and EVOLVE_END.
+
+  The remote evaluator compares outputs against the exact squares of five
+  fixed inputs and returns the negative mean squared error as fitness.
+  A score of zero is optimal.
+
+coder:
+  type: custom
+  provider: default
+  default_extension: py
+
+planner:
+  type: llm_evolution
+  provider: default
+  samplers:
+    - name: init_sampler
+    - name: mutation_sampler
+    - name: crossover_sampler
+
+evaluator:
+  type: remote
+  gateway_id: null
+  timeout: 60
+  parallel: false
+  batch_size: 1
+
+evolution:
+  type: island_ga
+  max_generations: 3
+  num_islands: 1
+  island_population_size: 4
+  parallel_islands: false
+  max_llm_concurrency: 1
+
+memory:
+  enabled: false
+
+version_control:
+  enabled: true
+  type: git_worktree
+  local_path: algorithm
+  auto_initialize: true
+
+repo_analyzer:
+  type: evolve_detector
+  include: ["solution.py"]

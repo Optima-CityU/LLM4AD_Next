@@ -1,0 +1,36 @@
+# 密钥
+secrets.env
+
+# 编译产物
+/phonefarm
+/ocr
+src/target/
+
+# 运行数据不入库: 数据根 tasks/ 与 loop_v1/runs*。历史数据在 HGamey/docs 的 repos/phonefarm/
+/tasks/
+/loop_v1/runs*/
+
+.DS_Store
+
+# TFLite benchmark_model 真机二进制 (tools/tflite/fetch.sh 拉取)
+tools/tflite/android_aarch64_benchmark_model*
+
+# refbench 实跑原始产物 (大 trace, 证据已提交到 HGamey/refbench)
+loop_v1/runs_refbench/
+
+# 系统参数闭环的实跑产物 (大 trace, 只留 JSON 证据入库)
+loop_v1/runs_sysparam/**/trace.txt
+loop_v1/runs_sysparam/**/*.txt.gz
+loop_v1/auto/__pycache__/
+loop_v1/runs_graylayer/
+loop_v1/runs_sysparam/**/env.txt
+loop_v1/runs_sysparam/**/*.png
+# 裸帧 (负载自检用, 每张 13MB); 判定结论在 spin_check.json 里, 够作证
+loop_v1/runs_sysparam/**/*.raw
+# selftest 实跑产物 (trace/spv/截图); 结论与判定输入另行挑选入库
+loop_v1/runs_selftest/
+
+# 节点服务在本仓库根跑任务时的输出目录 (node_service.py 写入)
+_jobs/
+knobs/gray/npu_exp/__pycache__/
+_runs/

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "refbench raw GPU timestamp sidecar",
+  "type": "object",
+  "required": [
+    "schema",
+    "run_id",
+    "timestamp_valid_bits",
+    "timestamp_period_ns",
+    "frames_config",
+    "complete",
+    "samples"
+  ],
+  "properties": {
+    "schema": {
+      "const": "refbench/gpu-timestamps@1"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "timestamp_valid_bits": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "timestamp_period_ns": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "frames_config": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "[frame_index, raw_start_tick, raw_end_tick], ordered by frame index; no rate/latency/statistical interpretation in this file."
+    }
+  }
+}

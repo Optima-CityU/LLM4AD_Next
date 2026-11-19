@@ -196,6 +196,41 @@ async def test_running_containers_with_same_config_are_reused(env) -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_hostname_fingerprint_refreshes_existing_image_once(env, monkeypatch) -> None:
+    """Re-entering an old session replaces its hostname environment without an image change."""
+    monkeypatch.setattr(settings, "SECRET_KEY", "legacy-hostnames-regression-secret")
+    monkeypatch.setattr(settings, "ARL_VALIDATION_PORT", 8001)
+    session_id = "hostname-upgrade"
+    config = _config()
+    # Captured before hostname allowlist inputs were included in the fingerprint.
+    legacy_fingerprint = "2ae1b338431abf20"
+    containers = {
+        runtime.container_name(session_id, role): _FakeContainer(
+            runtime.container_name(session_id, role),
+            labels={runtime.CONFIG_FINGERPRINT_LABEL: legacy_fingerprint},
+        )
+        for role in ARLRole
+    }
+    docker = _FakeDocker(containers.copy())
+    _install_docker(env, docker)
+    _stub_ready(env)
+    service = runtime.ARLRuntimeService()
+
+    await service.ensure_session(session_id=session_id, user_id=str(uuid.uuid4()), daemon_config=config)
+
+    assert all(container.removed for container in containers.values())
+    assert len(docker.created) == 2
+    current = runtime._config_fingerprint(config)
+    assert current != legacy_fingerprint
+    hostnames = ",".join(runtime.container_name(session_id, role) for role in ARLRole)
+    for created in docker.created:
+        assert created["labels"][runtime.CONFIG_FINGERPRINT_LABEL] == current
+        assert created["environment"]["PASEO_HOSTNAMES"] == hostnames
+    await service.ensure_session(session_id=session_id, user_id=str(uuid.uuid4()), daemon_config=config)
+    assert len(docker.created) == 2
+
+
+@pytest.mark.asyncio
 async def test_reused_session_re_registers_proxy_tokens(env, monkeypatch) -> None:
     """复用容器也要重新登记代理凭据：闲置到 Redis 过期后重连能自动恢复。"""
     from app.services import credential_broker

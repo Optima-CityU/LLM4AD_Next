@@ -1,0 +1,156 @@
+diff --git a/Samples/Sponza/Main.cpp b/Samples/Sponza/Main.cpp
+index e28210c..dbeed20 100644
+--- a/Samples/Sponza/Main.cpp
++++ b/Samples/Sponza/Main.cpp
+@@ -5,8 +5,63 @@
+ 
+ #include <Samples/Common/SampleApp.h>
+ 
++#include <cstdio>
++#include <unistd.h>
++
+ using namespace anki;
+ 
++// ── phonefarm 确定性跑法 ────────────────────────────────────────────────────
++// 把 Sponza 从「交互式 demo」改成「确定性负载」: 相机走固定轨迹, 渲满固定帧数自退,
++// 进渲染循环前落 started 标记, 退出前写 ground-truth JSON。
++// 契约见 phonefarm loop_v1/carriers/anki-sponza/contract/launch.json。
++//
++// 纪律 (和 refbench 一致):
++//  * 相机姿态是 frame_index 的**纯函数** —— 不用 elapsedTime。墙钟会让每轮轨迹不同,
++//    那样两臂就不可比了。
++//  * 进度信号走文件系统, 不走 logcat (测试机上 logcat 会整个哑掉)。
++//  * JSON 里只写 ground truth, 不写帧率/分位数/任何统计量 —— 测量归 loop_v1。
++//
++// ⚠ 未接的部分: intent extras 还没接进来 (Android 走 NativeActivity, argc/argv 是空的,
++//   要用 JNI 从 g_androidApp->activity 取 getIntent().getStringExtra(), 再灌进 CVarSet)。
++//   在那之前这里用下面这组默认值。
++namespace {
++
++constexpr U32 kDefaultFrames = 3600u; // 渲满多少帧后自退
++
++#if ANKI_OS_ANDROID
++constexpr const Char* kFilesDir = "/storage/emulated/0/Android/data/org.anki.Sponza/files";
++#else
++constexpr const Char* kFilesDir = ".";
++#endif
++
++// 固定轨迹: 绕 Sponza 中庭匀速环绕一圈, 纯 frame_index 的函数。
++void setDeterministicCamera(SceneNode& cam, U32 frameIdx, U32 totalFrames)
++{
++	constexpr F32 kRadius = 12.0f;
++	constexpr F32 kHeight = 3.0f;
++	const F32 t = F32(frameIdx) / F32(totalFrames); // [0, 1)
++	const F32 angle = t * 2.0f * kPi;
++
++	cam.setLocalOrigin(Vec3(kRadius * cos(angle), kHeight, kRadius * sin(angle)));
++	cam.lookAtPoint(Vec4(0.0f, kHeight, 0.0f, 0.0f));
++}
++
++void writeMarker(const Char* name, const Char* contents)
++{
++	Char path[512];
++	snprintf(path, sizeof(path), "%s/%s", kFilesDir, name);
++	FILE* f = fopen(path, "w");
++	if(f)
++	{
++		fputs(contents, f);
++		fflush(f);
++		fsync(fileno(f)); // harness 靠这个文件判起跑/收尾, 必须真落盘
++		fclose(f);
++	}
++}
++
++} // anonymous namespace
++
+ class MyApp : public SampleApp
+ {
+ public:
+@@ -19,26 +74,54 @@ public:
+ 		return Error::kNone;
+ 	}
+ 
+-	Error userMainLoop(Bool& quit, Second elapsedTime) final
++	Error userMainLoop(Bool& quit, [[maybe_unused]] Second elapsedTime) final
+ 	{
+-		ANKI_CHECK(SampleApp::userMainLoop(quit, elapsedTime));
++		quit = false;
++
++		// 刻意**不**调 SampleApp::userMainLoop —— 那里面是交互控制 (键鼠/触摸移动相机、
++		// 切 debug RT、按 P 推进时间), 全都会破坏逐帧可重复性。
++		SceneGraph& scene = SceneGraph::getSingleton();
+ 
+-		static Bool firstTime = true;
+-		if(firstTime)
++		if(m_frameIdx == 0)
+ 		{
+-			firstTime = false;
+-
+-			SceneNode& knight = SceneGraph::getSingleton().findSceneNode("MESH_kinght.001");
+-			AnimationResourcePtr anim;
+-			ANKI_CHECK(ResourceManager::getSingleton().loadResource("Assets/Armature_mixamo.com_Layer0_2ff0b9b4a30af3d0.ankianim", anim));
+-			AnimationPlayInfo inf;
+-			inf.m_repeatTimes = -1;
+-			inf.m_animationSpeedScale = 2.1f;
+-			knight.getFirstComponentOfType<SkinComponent>().playAnimation(0, anim, inf);
++			// 落 started 标记: 第一帧的相机已摆好, 马上要进稳态渲染
++			Char buf[256];
++			snprintf(buf, sizeof(buf), "orbit %s", m_runId);
++			writeMarker("anki_sponza_started", buf);
++		}
++
++		setDeterministicCamera(scene.getActiveCameraNode(), m_frameIdx, m_frames);
++
++		++m_frameIdx;
++		if(m_frameIdx >= m_frames)
++		{
++			m_cleanExit = true;
++			quit = true;
+ 		}
+ 
+ 		return Error::kNone;
+ 	}
++
++	void writeOutputJson()
++	{
++		Char buf[1024];
++		snprintf(buf, sizeof(buf),
++				 "{\n"
++				 "  \"contract_version\": 1,\n"
++				 "  \"run_id\": \"%s\",\n"
++				 "  \"campath\": \"orbit\",\n"
++				 "  \"frames_submitted\": %u,\n"
++				 "  \"clean_exit\": %s\n"
++				 "}\n",
++				 m_runId, m_frameIdx, m_cleanExit ? "true" : "false");
++		writeMarker("anki_sponza_out.json", buf);
++	}
++
++private:
++	U32 m_frameIdx = 0;
++	U32 m_frames = kDefaultFrames;
++	Bool m_cleanExit = false;
++	const Char* m_runId = "unset";
+ };
+ 
+ ANKI_MAIN_FUNCTION(myMain)
+@@ -49,15 +132,15 @@ int myMain(int argc, char* argv[])
+ 	MyApp* app = new MyApp(argc, argv, "Sponza");
+ 	err = app->mainLoop();
+ 
++	app->writeOutputJson();
++
+ 	delete app;
+ 	if(err)
+ 	{
+ 		ANKI_LOGE("Error reported. Bye!!");
+-	}
+-	else
+-	{
+-		ANKI_LOGI("Bye!!");
++		return 2; // 契约: 2 = aborted
+ 	}
+ 
++	ANKI_LOGI("Bye!!");
+ 	return 0;
+ }

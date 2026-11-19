@@ -1,0 +1,198 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EvaluationReport",
+  "description": "一份评测报告。三类改动面 (shader / sysparam / gray) 回同一个形状 —— 上层只有一套优胜档案与一份总报告, 不为每一类另起一套。\n\nsource 字段区分真机实测与本地成本模型估计, 两者绝不可混用: 只有 phonefarm 的记录带统计显著性。\n\nv1 报告没有 version / kind 字段 (由 `phonefarm gpu-op` 产出), 仍然合法, 上层按缺省 kind=shader 解释。",
+  "type": "object",
+  "required": ["candidate_id", "status", "metrics", "verdict", "source"],
+  "properties": {
+    "version": { "type": ["integer", "null"], "enum": [2, null], "description": "省略 = v1 (gpu-op 的扁平报告)" },
+    "kind": {
+      "type": ["string", "null"],
+      "enum": ["shader", "sysparam", "gray", "whitebox", null],
+      "description": "这份报告评的是哪一层。省略 = shader。必须与请求里的 kind 相同 —— 对不上说明上层发错了或接收端认错了, 上层应当整份作废而不是照收。"
+    },
+    "candidate_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["PASS", "REJECT", "SLOW", "POOR_QUALITY", "CRASH", "REVERTED", "ABORT"],
+      "description": "PASS = 这一组值得保留; REJECT = 测量有效但不值得保留 (没有任何指标显著改善, 或存在显著退化); SLOW = 超出耗时硬预算 (shader); POOR_QUALITY = 画质掉到地板以下 (画质是约束不是目标, 一票否决, 排在显著性判断前面); CRASH = 候选臂跑崩了 —— 这也是一个结论, 照常出报告; REVERTED = 已还原; ABORT = **测量本身不算数** (旋钮没全生效 / 超温度上限 / 轮末快照与轮前不一致 / 改写一次都没命中), 这种记录不可进档案, 也不可当成负样本。\n\n注意 REJECT 与 ABORT 的区别: REJECT 是「量到了, 不好」, 是有效的负样本; ABORT 是「这次没量准」, 什么都学不到。混为一谈会让演化把工装故障学成算法结论。"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "所有 kind 共用一张表。某一类量不到的项如实留 null —— **null 不是 0**。\n\n量不到就填 0 是这条链路上最贵的一种错: 一个 0.000 W 看起来像个数字, 会把 A/B 裁决直接带沟里。每个 null 都应该在 unavailable 里配一条人能读的原因。",
+      "required": ["operator_latency_ms", "fps_p95_ms", "power_watt", "psnr_db"],
+      "properties": {
+        "operator_latency_ms": { "type": ["number", "null"], "description": "算子自身的 GPU compute pass 耗时。headless 载体是单次 dispatch 的 VkQueryPool 时间戳; refbench 载体是每帧 GPU 忙时的 A/B 之差 (算子的**边际**开销) —— 同一算子两者可差一倍, 不可混比。sysparam / gray 类为 null。" },
+        "fps_p95_ms": { "type": ["number", "null"], "description": "帧间隔 p95 (毫秒, 越小越好)。KGSL提交分组来源只代表渲染提交代理，不代表present/display实测，来源见metric_provenance。null = 本次未测量 (headless 载体没有渲染上下文), 不可当成 0。" },
+        "frame_p95_ms": { "type": ["number", "null"], "description": "fps_p95_ms 的别名, 兼容 loop_v1 的 frame_p95 口径。两者同时出现时必须相等。" },
+        "fps_mean": { "type": ["number", "null"], "description": "平均帧率 (帧/秒, 越大越好)。\n\n原神这类**每帧发多次 cmdbatch** 的应用必须先自检每帧几次提交, 直接把提交间隔当帧间隔会把帧率算成两倍 (见 loop_v1/tools/parse_trace.py 的 detect_submits_per_frame)。" },
+        "power_watt": { "type": ["number", "null"], "description": "整机功耗。null = 本次未测量, 不可当成 0。接收端在非放电态下这一项必须回 null —— 充电时电池轨量到的是充放相抵的余量, USB 轨含着灌进电池的那一份, 两者都不是整机功耗。该项是否可比看 power_source.on_battery。" },
+        "psnr_db": { "type": ["number", "null"], "description": "画质 (dB, 越大越好), 必须 >= 本场地板。null = 本次未测量。sysparam 类天然为 null (不动画面); gray 类改了画面的话**必须**量, 量不到不能当成没变差。" },
+        "hud_ghost_db": { "type": ["number", "null"], "description": "插帧赛道: HUD 重影, 只在 HUD 区域内算 PSNR。PSNR 是全图平均, 对 HUD 重影极不敏感 (HUD 只占几个百分点面积), 所以单独量、单独一票否决。" },
+        "stretch_pct": { "type": ["number", "null"], "description": "插帧赛道: 拉扯果冻, 落在前后帧邻域包络之外的像素占比。出了包络 = 算子凭空造了前后帧都没有的内容。" },
+        "soc_temp_max_c": { "type": ["number", "null"], "description": "本轮 SoC 结温最高值。不是目标指标, 只用来对照 conditions.temp_cap_c。0 与 NaN 都不是测量结果。" },
+        "unavailable": {
+          "type": ["array", "null"],
+          "description": "每一个 null 的原因。字段名 \"*\" 是特殊值: 整条采集通路不可用, 而不是某一项缺了。",
+          "items": {
+            "type": "object",
+            "required": ["field", "reason"],
+            "properties": {
+              "field": { "type": "string" },
+              "reason": { "type": "string", "description": "人能读懂的原因, 不是错误码" }
+            }
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["is_pareto_improvement", "p_value"],
+      "properties": {
+        "measure_only": { "type": ["boolean", "null"], "description": "whitebox: 本组旋钮改了画面必然变化 (或请求要求只量上限), 结果只回答「这块浪费值多少」, 不是可采纳优化; 此时 status 恒 REJECT。" },
+        "would_keep": { "type": ["boolean", "null"], "description": "measure_only 时记统计上本来会不会判保留 (不影响 status)。" },
+        "is_pareto_improvement": { "type": "boolean", "description": "值不值得保留。仅在**统计显著且方向确实对**时为真: 快了 0.3% 但 p=0.4 是噪声不是改进; 显著但更慢也不是改进 —— 显著性只说明差异真实, 不说明方向对。" },
+        "p_value": { "type": "number", "description": "主指标的检验 p 值。成本模型不做检验, 固定记 1.0 作为「未检验」哨兵, 不伪造小 p 值。每臂样本不足以出 p 值时同样记 1.0。" },
+        "stat": { "type": ["string", "null"], "enum": ["welch_t", "exact_permutation", null], "description": "实际用的是哪种检验" },
+        "alpha_win": { "type": ["number", "null"], "description": "「改善」一侧实际用的门槛 (多重比较收紧后)" },
+        "alpha_regression": { "type": ["number", "null"], "description": "「变差」一侧实际用的门槛 (不收紧)" },
+        "reachable": { "type": ["boolean", "null"], "description": "本轮轮数下 alpha_win 是否**根本够得着**。n v n 精确置换检验能取到的最小双侧 p 值 = 2/C(2n,n); 轮数不足时任何候选都不可能判保留 —— 规则自己交代它的分辨率上限, 不靠事后解释。false 时上层不应把 REJECT 读成「这组没用」。" },
+        "wins": { "type": ["array", "null"], "items": { "type": "string" }, "description": "显著改善的指标 id" },
+        "regressions": { "type": ["array", "null"], "items": { "type": "string" }, "description": "显著变差的指标 id" },
+        "per_metric": {
+          "type": ["object", "null"],
+          "description": "逐指标的对比明细。上层把它原样喂回给出主意的那一方 —— 模型看得到每组参数的实测数字与 p 值, 但没有任何改写判定的途径。",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string", "description": "显著改善 / 显著变差 / 无显著变化 / 缺数据" },
+              "a_mean": { "type": ["number", "null"], "description": "A 臂 (对照) 均值" },
+              "b_mean": { "type": ["number", "null"], "description": "B 臂 (候选) 均值" },
+              "diff_mean": { "type": ["number", "null"], "description": "b - a" },
+              "diff_pct": { "type": ["number", "null"] },
+              "p": { "type": ["number", "null"] },
+              "ci95": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+            }
+          }
+        },
+        "reason": { "type": ["string", "null"], "description": "一句话说明为什么是这个判定。ABORT 时**必须**写清是哪一条前置没成立。" }
+      }
+    },
+    "qualification": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "接收端结论资格，不是统计改善。存在时仅stage=conclusion且eligible=true允许上游晋级；缺失是legacy_unqualified，不能称已资格化游戏收益。",
+      "required": [
+        "stage",
+        "eligible"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "probe",
+            "experiment",
+            "conclusion"
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "array"
+        },
+        "claim_scope": {
+          "type": "string"
+        }
+      }
+    },
+    "artifacts": {
+      "description": "接收端原始证据；上游逐值透传，未知字段不转为测量/通过。"
+    },
+    "metric_provenance": {
+      "description": "接收端原始证据；上游逐值透传，未知字段不转为测量/通过。"
+    },
+    "metrics_provenance": {
+      "description": "接收端原始证据；上游逐值透传，未知字段不转为测量/通过。"
+    },
+    "sequence_quality": {
+      "description": "接收端原始证据；上游逐值透传，未知字段不转为测量/通过。"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["phonefarm", "static_cost_model"],
+      "description": "phonefarm = 真机物理采样; static_cost_model = 本地静态估计, 不是测量值, 不可作为性能结论"
+    },
+    "power_source": {
+      "type": ["object", "null"],
+      "description": "metrics.power_watt 是在什么供电状态下量的。只有 on_battery=true 时那个瓦数才是整机功耗, 也才允许进入支配排序 —— 充电电流随电量上升自己衰减 (CC→CV) 是一条单调漂移, 把它放进支配排序会让「测量顺序」变成选择压力, 先跑的候选系统性占便宜。省略/null = 接收端没报 (旧版 phonefarm), 或指标来自成本模型 (它没连过设备)。",
+      "required": ["rail", "battery_status", "on_battery"],
+      "properties": {
+        "rail": { "type": "string", "enum": ["usb", "battery"], "description": "读的是哪条功耗轨" },
+        "battery_status": { "type": "string", "description": "/sys/class/power_supply/battery/status 原值" },
+        "battery_current_now_ua": { "type": ["integer", "null"], "description": "current_now (μA)。正 = 在往电池里充, 负 = 电池在放电" },
+        "battery_capacity_pct": { "type": ["integer", "null"] },
+        "on_battery": { "type": "boolean", "description": "整机是不是真由电池供电。false 时 power_watt 必为 null" },
+        "charging_suspended_via": { "type": ["string", "null"], "description": "这一轮有没有用 root 停充, 停的是哪个节点。停了就必须还原, 还原结果记在 conditions_observed.restored" }
+      }
+    },
+    "quality_reference": {
+      "type": ["object", "null"],
+      "description": "metrics.psnr_db 是对着哪张 (哪组) 参考图量出来的。**绝对 dB 不可跨参考图比较** —— 同一算子在 runner 内置程序化图案上 42.826 dB, 换成真机截帧只剩 31.333 dB。不记来源, 档案里那堆 dB 之间就没法比。省略/null = 接收端没报, 或指标来自成本模型 (它根本没看过任何图像)。",
+      "required": ["kind", "frames"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["real_frames", "procedural"],
+          "description": "real_frames = 真机截帧; procedural = runner 内置程序化图案 (没有真实帧时的退路)"
+        },
+        "source": { "type": ["string", "null"], "description": "真值的本地来源路径 (单张图或整个目录)" },
+        "frames": { "type": "integer", "minimum": 1, "description": "参与平均的帧数" },
+        "frame_files": { "type": "array", "items": { "type": "string" }, "description": "逐帧文件名, 按使用顺序" },
+        "candidate_psnr_db": { "type": "array", "items": { "type": ["number", "null"] }, "description": "候选臂逐帧 PSNR, 与 frame_files **逐位对齐** (那一张没量到就记 null, 不塌缩 —— 塌缩会让下标跟 frame_files 错开)。均值即 metrics.psnr_db; 均值看不出「一组帧里某一张特别差」" },
+        "baseline_psnr_db": { "type": "array", "items": { "type": ["number", "null"] }, "description": "基线臂逐帧 PSNR, 与 frame_files 逐位对齐" }
+      }
+    },
+    "conditions_observed": {
+      "type": ["object", "null"],
+      "description": "这一轮**实际**是在什么条件下量的。请求里的 conditions 是意图, 这里是事实。两者不符时以这里为准, 上层据此判断这条记录能不能跟别的比。",
+      "properties": {
+        "cool_c_target": { "type": ["number", "null"] },
+        "cool_reached_c": { "type": ["number", "null"], "description": "实际起跑温度。等冷超时**不作废本组** (组内交替已让两臂承受同样的残余热漂移), 但必须如实记下来是热起跑的。" },
+        "cool_timeout": { "type": ["boolean", "null"] },
+        "temp_cap_c": { "type": ["number", "null"] },
+        "soc_temp_max_c": { "type": ["number", "null"] },
+        "fan": { "type": ["string", "null"], "enum": ["on", "off", "unknown", null] },
+        "ingame_fps_setting": { "type": ["string", "null"] },
+        "screen_brightness": { "type": ["integer", "null"] },
+        "apply_ok": { "type": ["boolean", "null"], "description": "改动是否**全部**生效。false 必须导致 status=ABORT —— 没全生效的那一组对应的不是请求里提的那组参数, 证据会对不上账。" },
+        "hits": { "type": ["integer", "null"], "description": "gray: 改写被绑定的次数。0 而 require_hit=true 时必须 ABORT。" },
+        "snapshot_identical": { "type": ["boolean", "null"], "description": "轮末设备快照与轮前是否逐行相等。false = 留痕了, 本轮作废。" },
+        "restored": { "type": ["boolean", "null"], "description": "所有写入 (sysfs / settings / 属性 / 停充) 是否已全部还原并回读一致。false 是需要人介入的状态, 上层不应继续下发下一个候选。" },
+        "snapshot_diff": { "type": ["array", "null"], "items": { "type": "string" }, "description": "snapshot_identical=false 时, 差在哪几行" },
+        "contested_arms": { "type": ["integer", "null"], "description": "sysparam: 改写臂里有几臂被厂商性能服务抢回 (施加后约 12 秒或负载末尾回读对不上)。这几臂不进统计; 全部抢回则 ABORT。" },
+        "contested": { "type": ["array", "null"], "description": "sysparam: 每个被抢回的臂 {round, nodes: [\"路径: 写 X +12s回读 Y\"]}" },
+        "snapshot_vendor_drift": { "type": ["array", "null"], "items": { "type": "string" }, "description": "sysparam: 快照前后只在厂商服务会动的频率边界 (kgsl.*pwrlevel、cpu.*.scaling_max/min 等) 上不同, 不判留痕, 逐项记下" },
+        "image_check": { "type": ["object", "null"], "description": "gray: 画面比对 {min_psnr_db, psnr_knob_vs_ctrl_db: [...], psnr_ctrl_vs_ctrl_db: [...]}" }
+      }
+    },
+    "image_check": {
+      "type": ["object", "null"],
+      "description": "whitebox: 静态场景 (workload.launch.static_extras) 按 对照/改写/对照 各截两张的画面比对。PSNR 99 = 逐像素相同。",
+      "properties": {
+        "min_psnr_db": { "type": ["number", "null"] },
+        "static_extras": { "type": ["string", "null"] },
+        "psnr_knob_vs_ctrl": { "type": ["array", "null"], "items": { "type": ["number", "null"] }, "description": "改写臂对两次对照臂的 PSNR" },
+        "psnr_ctrl_vs_ctrl": { "type": ["number", "null"], "description": "两次对照之间的 PSNR: 噪声底" },
+        "psnr_within_1s": { "type": ["array", "null"], "items": { "type": ["number", "null"] }, "description": "同一次启动内相隔 1 秒两张的 PSNR: 动画噪声" }
+      }
+    },
+    "evidence_dir": { "type": ["string", "null"], "description": "接收端把本轮原始证据 (trace / 快照 / 逐轮 metrics) 落在哪。上层把它记进总报告, 让每一个数字都能回溯到原始采集。" },
+    "phonefarm_version": { "type": ["string", "null"], "description": "产出这份报告的接收端版本" }
+  }
+}

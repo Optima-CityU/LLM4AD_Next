@@ -190,6 +190,14 @@ def delete_project(db: Session, project_id: uuid.UUID, current_user: models.User
             except Exception as e:
                 logger.warning(f"强制停止任务 {task.id} 失败: {e}")
 
+    from app.services.evaluation_data import cleanup_task_evidence, task_outbox
+
+    evidence = [
+        (task.id, task_outbox(db, task))
+        for task in db.exec(select(models.Task).where(models.Task.project_id == project_id))
+    ]
     db.delete(project)
     db.commit()
+    for task_id, outbox in evidence:
+        cleanup_task_evidence(task_id, outbox)
     return Message(message="项目已删除")

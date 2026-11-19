@@ -93,15 +93,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { DEMO_TASK, isDemoProjectId } from "@/data/demoFixtures"
-import useCustomToast from "@/hooks/useCustomToast"
-import { getDemoState, setDemoPhase, useDemoState } from "@/hooks/useDemoMode"
-import { useEvolution } from "@/hooks/useEvolution"
 import {
   useAutoDesignSessions,
   useCreateAutoDesignSession,
 } from "@/hooks/useAutoDesign"
+import useCustomToast from "@/hooks/useCustomToast"
+import { getDemoState, setDemoPhase, useDemoState } from "@/hooks/useDemoMode"
+import { useEvolution } from "@/hooks/useEvolution"
 import { autoDesignKeys } from "@/lib/autoDesign"
 import { taskKeys } from "@/lib/task-queries"
+import { taskListItemChanged } from "@/lib/task-version"
 import { cn, formatDateTime } from "@/lib/utils"
 import { handleError } from "@/utils"
 import {
@@ -1161,6 +1162,7 @@ export default function EvolutionTaskList() {
     projectValid,
     selectedTask,
     setSelectedTask,
+    setSelectedChildTaskId,
     setLeftCollapsed,
     effectiveStatus,
     designSessionId,
@@ -1241,6 +1243,7 @@ export default function EvolutionTaskList() {
   })
 
   const selectEntry = (entry: TaskListItem | null, replace = false) => {
+    setSelectedChildTaskId(null)
     setSelectedTask(entry?.kind === "task" ? entry.task : null)
     void navigate({
       to: "/evolution",
@@ -1301,10 +1304,7 @@ export default function EvolutionTaskList() {
         setSelectedTask(items[0])
       } else {
         const updated = items.find((t) => t.id === current.id)
-        if (
-          updated &&
-          (updated.status !== current.status || updated.name !== current.name)
-        ) {
+        if (updated && taskListItemChanged(current, updated)) {
           setSelectedTask(updated)
         }
       }

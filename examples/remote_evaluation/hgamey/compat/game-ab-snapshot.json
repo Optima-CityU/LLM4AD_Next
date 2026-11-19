@@ -1,0 +1,129 @@
+{
+  "patch": "game-ab.patch",
+  "patch_sha256": "6e6c549e0229f3cf58345f13a00ee7d2100794e9eec566439d58e153479d618b",
+  "comparison": "exact pre-game-ab local extraction byte snapshots; not repository HEAD or upstream main",
+  "original_snapshot_root": "/tmp/hgamey-game-ab-original",
+  "scope": "game-ab executor dispatch, foreground identification/recovery guards and host fixture tests; present candidate build/metadata; bounded PNG screenshot timeout",
+  "apply_order": [
+    "executor-compat.patch",
+    "battery-telemetry.patch",
+    "display-rotation.patch",
+    "present-probe.patch",
+    "game-ab.patch"
+  ],
+  "required_prior_patches": [
+    "executor-compat.patch",
+    "present-probe.patch"
+  ],
+  "prior_patch_sha256": {
+    "executor-compat.patch": "8621b3f9f575d50540359b8b65cb9651ba71917bbb54e4f68872b21937d9442f",
+    "battery-telemetry.patch": "689efe2cec5a882c8db46c70234c8ac7fb1ac3628b7ade6d0e64218da0b445d6",
+    "display-rotation.patch": "d73efb8d8d1af5064ea46744549e3d2a07cfbef8c5c9871682328b8520991fbb",
+    "present-probe.patch": "e5957ba29d9c6b9e775c3716dfdec79bc199d7ab2fff2a378a394e05b86829b1"
+  },
+  "prerequisite_note": "Apply the existing compatibility patch stack first. Direct overlapping dependencies are executor-compat.patch and present-probe.patch; battery/display fixes are retained separately, not duplicated here. Do not reapply patches already present.",
+  "runtime_dependency": "Canonical game_ab.py adapter must separately be exported to /opt/gateway/adapter/game_ab.py and importable as game_ab; it is not bundled in this external-source patch.",
+  "test_executor_compat_original_provenance": {
+    "image_reference": "hgamey-evaluator:rotation-fix-test",
+    "image_id": "sha256:e3891a8bcb5fbf7f2ec3460edb4292c26620258cc20d9b179ed23fff80c2041d",
+    "image_path": "/opt/executor/tests/test_executor_compat.py",
+    "matches_prior_snapshot": "snapshot.json:patched_files[tests/test_executor_compat.py]"
+  },
+  "files": [
+    {
+      "path": "executor.py",
+      "original_sha256": "80463542be841d2f2984bbc7bedd3945e2964ee1c65725927421c40f597e83bc",
+      "patched_sha256": "17cf0607bc8d1463c90954df17a9e9ac24b748f27788f9f9baab523416bb741e",
+      "original_bytes": 38287,
+      "patched_bytes": 41523,
+      "original_source": "/tmp/hgamey-game-ab-original/executor.py",
+      "original_matches_prior_patch": "executor-compat.patch"
+    },
+    {
+      "path": "tests/test_game_ab_executor.py",
+      "original_sha256": null,
+      "patched_sha256": "e8f122f87015e0e5b23cc141518ae3727ff66cef0518216436305eb6b01c07b2",
+      "original_bytes": null,
+      "patched_bytes": 23263,
+      "original_source": "new file; absent before this change"
+    },
+    {
+      "path": "tests/test_executor_compat.py",
+      "original_sha256": "11e68c95b564d0dbfd5841ca3f58f471e4923889e7c59ae61949d6cf46eb93ae",
+      "patched_sha256": "55209c5c67c0bf58027051169b85387fcb6a12c45f782d9f90bd5d0ee5bbc902",
+      "original_bytes": 26511,
+      "patched_bytes": 26522,
+      "original_source": "/tmp/hgamey-game-ab-original/tests/test_executor_compat.py",
+      "original_matches_prior_patch": "executor-compat.patch"
+    },
+    {
+      "path": "tools/experiments/build_present_candidate.py",
+      "original_sha256": "8489163f6fc3e5eb4f0e6d7fb39c259e9fe343959b4b553df1961597e5420d35",
+      "patched_sha256": "ea5c4b995b4609a40c2e146f234cc3e35435f731e1ece230c5e2a796738660b4",
+      "original_bytes": 5461,
+      "patched_bytes": 5735,
+      "original_source": "/tmp/hgamey-game-ab-original/tools/experiments/build_present_candidate.py",
+      "original_matches_prior_patch": "present-probe.patch"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp",
+      "original_sha256": "16852a358fdd2ebb1053ad683605e582155829aafff549ff055b749364fc446b",
+      "patched_sha256": "3db8e09e60fd1ed5f1104fb7755e62502fe76ec0b903900865a52b6a3c86934f",
+      "original_bytes": 40552,
+      "patched_bytes": 40598,
+      "original_source": "/tmp/hgamey-game-ab-original/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp",
+      "original_matches_prior_patch": "present-probe.patch"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/src/capture.rs",
+      "original_sha256": "b547be4c3f6bca1c5a2395f3618da52dfa62d773882f74b6e2f6265651efdeee",
+      "patched_sha256": "5a75fff53d3f1514b2e8d58de9dbe14bff0afe52bf0ad404e70af57c4811178a",
+      "original_bytes": 24935,
+      "patched_bytes": 27106,
+      "original_source": "/tmp/hgamey-game-ab-original/vendor/hgamey/phonefarm/src/capture.rs"
+    },
+    {
+      "path": "vendor/hgamey/phonefarm/src/capture_worker.rs",
+      "original_sha256": "c1996c776fd7dfbffb933cd73b2226181ee91cf0a3d3fda918956bfc77c2abd0",
+      "patched_sha256": "3a0709677aaee4f8e2dcf5043405a75e5da6636ee02b399b073479703580902c",
+      "original_bytes": 17670,
+      "patched_bytes": 21485,
+      "original_source": "/tmp/hgamey-game-ab-original/vendor/hgamey/phonefarm/src/capture_worker.rs"
+    }
+  ],
+  "verification": {
+    "forward_apply": "git apply --check and git apply passed in a temporary copy; all 7 patched SHA-256 hashes matched exact current source bytes",
+    "reverse_apply": "git apply --reverse --check and reverse apply passed; all 6 original hashes restored and the new test file removed",
+    "prior_patch_overlap_replay": "Overlapping files from executor-compat.patch and present-probe.patch reverse/reapplied to exact original hashes",
+    "python_tests_on_replayed_patch": {
+      "test_game_ab_executor.py": 19,
+      "test_executor_compat.py": 22
+    },
+    "native_timeout_tests": {
+      "source": "previous Docker run against these exact capture.rs/capture_worker.rs patched hashes",
+      "capture_worker::tests": {
+        "passed": 4,
+        "failed": 0
+      },
+      "capture::tests": {
+        "passed": 4,
+        "failed": 0
+      },
+      "log": "/tmp/hgamey-game-ab-native-tests/build.log",
+      "device_access": false,
+      "patched_source_sha256": {
+        "vendor/hgamey/phonefarm/src/capture.rs": "5a75fff53d3f1514b2e8d58de9dbe14bff0afe52bf0ad404e70af57c4811178a",
+        "vendor/hgamey/phonefarm/src/capture_worker.rs": "3a0709677aaee4f8e2dcf5043405a75e5da6636ee02b399b073479703580902c"
+      }
+    },
+    "existing_patch_files": "unchanged",
+    "foreground_capture_replay": {
+      "source": "Read-only parent-captured foreground-probe-window.txt and foreground-probe-activity.txt",
+      "window_focus": null,
+      "unique_activity_component": "com.miHoYo.Yuanshen/com.miHoYo.GetMobileInfo.MainActivity",
+      "window_sha256": "a6bdba18d23d00e91fbf3824b7eedf933bb31f68fce575a9979cdfbd346b3678",
+      "activity_sha256": "5c9c026ae2d1620412d3eee3f9dae3f0aa0a836975f5ccb09f0c312b796f50ef",
+      "device_access": false
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "note": "Manual checkpoint: native Genshin, Mondstadt open world, 2520x1152 landscape. Two-finger forward/right and backward/left, then jump. This is an input-and-telemetry smoke workload, not a repeatable A/B benchmark.",
+  "steps": [
+    {
+      "action": "shell",
+      "cmd": "uinput -T -m 400 850 400 700 1300 650 1450 650 -k 300 600"
+    },
+    {
+      "action": "sleep",
+      "ms": 250
+    },
+    {
+      "action": "shell",
+      "cmd": "uinput -T -m 400 850 400 1000 1450 650 1300 650 -k 300 600"
+    },
+    {
+      "action": "shell",
+      "cmd": "uinput -T -c 2210 790"
+    },
+    {
+      "action": "sleep",
+      "ms": 500
+    }
+  ]
+}

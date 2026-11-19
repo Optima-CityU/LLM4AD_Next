@@ -29,6 +29,7 @@ export interface WorkflowStep<T extends string = string> {
   description?: string
   status?: "pending" | "complete" | "revision" | "stale"
   statusLabel?: string
+  disabled?: boolean
 }
 
 interface WorkflowStepperProps<T extends string> {
@@ -146,7 +147,7 @@ export default function WorkflowStepper<T extends string>({
               size="icon"
               aria-label={previousLabel}
               title={previousLabel}
-              disabled={activeIndex === 0}
+              disabled={activeIndex === 0 || steps[activeIndex - 1]?.disabled}
               onClick={() => onValueChange(steps[activeIndex - 1].id)}
             >
               <ChevronLeft />
@@ -155,7 +156,7 @@ export default function WorkflowStepper<T extends string>({
               value={activeStep.id}
               onValueChange={(id) => {
                 const step = steps.find((item) => item.id === id)
-                if (step) onValueChange(step.id)
+                if (step && !step.disabled) onValueChange(step.id)
               }}
             >
               <SelectTrigger
@@ -183,6 +184,7 @@ export default function WorkflowStepper<T extends string>({
                     key={step.id}
                     value={step.id}
                     textValue={step.label}
+                    disabled={step.disabled}
                     className="py-2"
                   >
                     <StepMarker
@@ -205,7 +207,10 @@ export default function WorkflowStepper<T extends string>({
               size="icon"
               aria-label={nextLabel}
               title={nextLabel}
-              disabled={activeIndex === steps.length - 1}
+              disabled={
+                activeIndex === steps.length - 1 ||
+                steps[activeIndex + 1]?.disabled
+              }
               onClick={() => onValueChange(steps[activeIndex + 1].id)}
             >
               <ChevronRight />
@@ -242,6 +247,7 @@ export default function WorkflowStepper<T extends string>({
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
+                      disabled={step.disabled}
                       aria-current={
                         step.id === activeStep.id ? "step" : undefined
                       }

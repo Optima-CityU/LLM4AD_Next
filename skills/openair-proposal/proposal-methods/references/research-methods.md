@@ -1,6 +1,6 @@
 # Research Methods and Technical Route Method
 
-The methods stage explains how the project will answer each key problem and how the resulting claims will be evaluated.
+The methods guidance explains how the project will answer each key problem and how the resulting claims will be evaluated.
 
 ## 1. Build the overall technical route
 
@@ -34,7 +34,7 @@ When mathematics is useful:
 - state domains and constraints explicitly;
 - explain what each equation means and how it connects to the procedure;
 - use labels and references for equations reused later;
-- preserve Typst syntax and semantic structure.
+- preserve Markdown mathematics, reference identities and semantic structure.
 
 Do not introduce formulas merely to make the section appear technical. Never copy an equation whose assumptions do not match the project.
 
@@ -53,9 +53,9 @@ Ask the author when data access, evaluation standards, or experimental condition
 
 ## 5. Explain methodological contribution
 
-For each major component, state the specific difference from established approaches and why it matters under the proposal's conditions. Avoid unsupported "first" or "groundbreaking" language. Innovation will be summarized later; here it must be technically grounded.
+For each major component, state the specific difference from established approaches and why it matters under the proposal's conditions. Avoid unsupported "first" or "groundbreaking" language. Innovation may also be summarized separately; the method argument still needs a technical basis.
 
-## 6. Quality gate
+## 6. Review prompts
 
 Confirm that:
 
@@ -63,5 +63,5 @@ Confirm that:
 - procedures are detailed enough to execute or audit;
 - assumptions and failure conditions are visible;
 - the methods do not depend on unconfirmed resources or results;
-- terminology, citation keys, and symbols remain consistent;
+- terminology, numbered references (or legacy citation keys), and symbols remain consistent;
 - the technical route is coherent rather than a collection of fashionable components.

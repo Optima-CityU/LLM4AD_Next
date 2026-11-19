@@ -159,8 +159,15 @@ def test_autodiscovery_arxiv_import_requires_local_download(
     assert missing.value.status_code == 404
 
 
-def test_conversation_preferences_are_saved_without_changing_proposal_brief(db: Session) -> None:
+def test_conversation_preferences_are_saved_without_changing_proposal_brief(
+    db: Session,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Persist explanatory preferences independently of source context."""
+    storage = _MemoryStorage({})
+    monkeypatch.setattr(paper_service, "_storage", lambda: storage)
+    monkeypatch.setattr(paper_service.settings, "DOCKER_PROJECT_HOME", str(tmp_path))
     user = create_random_user(db)
     workspace = paper_service.create_workspace(
         db,
@@ -307,9 +314,7 @@ providers: []
         "algorithm/solve.py": b"# EVOLVE_START\npass\n# EVOLVE_END\n",
         "blueprint_meta.json": b'{"validation_status": "passed"}',
     }
-    storage = _MemoryStorage(
-        {f"{package_prefix}/{relative}": content for relative, content in package_files.items()}
-    )
+    storage = _MemoryStorage({f"{package_prefix}/{relative}": content for relative, content in package_files.items()})
     monkeypatch.setattr(paper_service, "_storage", lambda: storage)
     proposal = models.PaperAlgorithmProposal(
         workspace_id=workspace.id,
@@ -358,10 +363,7 @@ providers: []
     assert project.name == proposal.title
     assert task.input_args["memory"]["enabled"] is False
     assert task.ai_built is False
-    assert (
-        storage.objects[f"{task.input_data_path}/exported-algorithm/config.yaml"]
-        == package_files["config.yaml"]
-    )
+    assert storage.objects[f"{task.input_data_path}/exported-algorithm/config.yaml"] == package_files["config.yaml"]
     assert not hasattr(workspace, "project_id")
     [repeated_link] = paper_service.create_proposal_tasks(
         db,
@@ -373,7 +375,7 @@ providers: []
     assert len(db.exec(select(models.Project).where(models.Project.user_id == user.id)).all()) == 1
 
 
-def test_proposal_workspace_starts_with_an_editable_typst_document(
+def test_proposal_workspace_starts_with_an_editable_markdown_document(
     db: Session,
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -395,35 +397,45 @@ def test_proposal_workspace_starts_with_an_editable_typst_document(
     )
 
     assert workspace.active_source_version_id is not None
-    assert workspace.proposal_entry_path == "proposal.typ"
+    from app.services.paper_proposal import DEFAULT_PROPOSAL_ENTRY, PROPOSAL_CHAPTERS
+
+    assert workspace.proposal_entry_path == DEFAULT_PROPOSAL_ENTRY
     source = db.get(models.PaperSourceVersion, workspace.active_source_version_id)
     assert source is not None
     source_entries = dict(paper_service._source_entries(source))
     assert source.manifest == sorted(
         [
-            "proposal.typ",
+            *(path for _identifier, _title, path in PROPOSAL_CHAPTERS),
+            "proposal-state.json",
+            "proposal-log.md",
             paper_service._PROPOSAL_STYLE_PATH,
-            *paper_service._PROPOSAL_SECTION_SOURCES,
         ]
     )
-    proposal_source = source_entries["proposal.typ"].decode()
+    proposal_source = source_entries[DEFAULT_PROPOSAL_ENTRY].decode()
     style_source = source_entries[paper_service._PROPOSAL_STYLE_PATH].decode()
-    assert '#import "styles/nsfc-proposal.typ": nsfc-proposal' in proposal_source
-    assert "#show: nsfc-proposal.with(title: project_title)" in proposal_source
-    assert '#let project_title = "Description-first proposal"' in proposal_source
-    assert "Study robust optimization under uncertain constraints." in proposal_source
+    context = json.loads(source_entries["proposal-state.json"])
+    assert context["project_info"]["topic"] == "Description-first proposal"
+    assert context["project_info"]["description"] == "Study robust optimization under uncertain constraints."
     assert 'paper: "a4"' in style_source
     assert "top: 2.78cm" in style_source
     assert "Readon/NSFC-application-template-typst" in style_source
     assert "@preview" not in style_source
     assert "报告正文" in style_source
-    assert "（一）立项依据：" in proposal_source
-    assert "（二）研究内容：" in proposal_source
-    assert "（三）研究基础：" in proposal_source
-    assert '#include "sections/04-objectives.typ"' in proposal_source
-    assert proposal_source.index('#include "sections/07-plan.typ"') < proposal_source.index("（三）研究基础：")
-    assert proposal_source.index("（三）研究基础：") < proposal_source.index('#include "sections/06-feasibility.typ"')
-    assert "== 研究目标与总体思路" in source_entries["sections/04-objectives.typ"].decode()
+    assert "# 研究目的与意义" in proposal_source
+    assert "proposal.md" not in source_entries
+    assert "references.bib" not in source_entries
+    detail = paper_service.get_workspace_detail(db, user, workspace.id)
+    assert [chapter.id for chapter in detail.proposal_chapters] == [f"S{number}" for number in range(1, 10)]
+    assert all(not chapter.has_content for chapter in detail.proposal_chapters)
+    from app.services.paper_workflow_coordinator import workflow_context
+
+    context = workflow_context(db, workspace)
+    assert context["proposal_chapters"] == [chapter.model_dump() for chapter in detail.proposal_chapters]
+    assert context["progression_policy"] == "author_confirmed_phases"
+    assert context["final_layout_trigger"] == "author_confirmation_button"
+    assert context["chapter_state_path"] == "proposal-state.json"
+    assert context["writing_log_path"] == "proposal-log.md"
+    assert not any(path.startswith("sections/") and path.endswith(".typ") for path in source.manifest)
 
 
 def test_proposal_assembly_preserves_existing_includes_without_duplicates() -> None:
@@ -491,13 +503,13 @@ def test_user_can_edit_proposal_source_independently_of_the_selected_stage(
         user,
         workspace.active_source_version_id,
         paper_schemas.PaperSourceFileUpdateRequest(
-            path="proposal.typ",
-            content="= User edit\n",
+            path=workspace.proposal_entry_path,
+            content="# User edit\n",
             workflow_stage="literature",
         ),
     )
 
-    assert dict(paper_service._source_entries(updated))["proposal.typ"] == b"= User edit\n"
+    assert dict(paper_service._source_entries(updated))[workspace.proposal_entry_path] == b"# User edit\n"
 
 
 def test_final_review_entry_edit_only_stales_final_review(
@@ -529,8 +541,8 @@ def test_final_review_entry_edit_only_stales_final_review(
         user,
         workspace.active_source_version_id,
         paper_schemas.PaperSourceFileUpdateRequest(
-            path="proposal.typ",
-            content="= Final assembly edit\n",
+            path=workspace.proposal_entry_path,
+            content="# Final assembly edit\n",
             workflow_stage="final_review",
         ),
     )
@@ -567,7 +579,7 @@ def test_system_generated_proposal_files_cannot_be_deleted(
             db,
             user,
             workspace.active_source_version_id,
-            paper_schemas.PaperSourcePathDeleteRequest(path="sections/01-rationale.typ"),
+            paper_schemas.PaperSourcePathDeleteRequest(path=workspace.proposal_entry_path),
         )
 
 
@@ -660,8 +672,9 @@ def test_proposal_formatting_can_create_a_typst_entry_from_source_material() -> 
         paper_service._proposal_formatting_entry(["notes.md"], "application/proposal.typ") == "application/proposal.typ"
     )
 
-    with pytest.raises(HTTPException, match="Typst"):
-        paper_service._proposal_formatting_entry(["notes.md"], "notes.md")
+    assert paper_service._proposal_formatting_entry(["notes.md"], "notes.md") == "notes.md"
+    with pytest.raises(HTTPException, match="Markdown or Typst"):
+        paper_service._proposal_formatting_entry(["notes.md"], "notes.pdf")
 
 
 def test_paper_source_is_mirrored_into_the_project_workspace(
@@ -704,32 +717,29 @@ def test_paper_source_export_uses_an_authenticated_backend_download(
 
 
 def test_research_workflow_definition_is_owned_by_the_backend() -> None:
-    """Expose the backend-owned AutoRebuttal workflow and shared boundaries."""
+    """Keep artifact adapters while enabling one shared AutoRebuttal workflow."""
     definition = paper_workflow.get_research_workflow("manuscript")
 
     assert definition.mode == "manuscript"
     assert definition.available is True
     assert definition.stages == ("rebuttal_baseline", "autorebuttal", "ac_summary")
-    assert definition.skills_by_run_kind["rebuttal_baseline"] == (
-        "rebuttal-baseline",
-        "research-stage-publication",
-    )
-    assert definition.skills_by_run_kind["autorebuttal"] == (
-        "autorebuttal",
-        "research-stage-publication",
-    )
-    assert definition.skills_by_run_kind["ac_summary"] == (
-        "ac-summary",
-        "research-stage-publication",
+    assert all(
+        skills == ("autorebuttal-workflow", "research-stage-publication")
+        for skills in definition.skills_by_run_kind.values()
     )
     assert definition.prerequisites_by_run_kind["autorebuttal"] == ("rebuttal_baseline",)
     assert definition.prerequisites_by_run_kind["ac_summary"] == ("autorebuttal",)
     assert all(not paths for paths in definition.writable_paths_by_run_kind.values())
-    assert "read-only evidence" in definition.prompt_preamble
+    assert all(
+        definition.prerequisite_satisfied(stage, predecessor, None)
+        for stage in definition.stages
+        for predecessor in definition.prerequisites_by_run_kind[definition.run_kind_by_stage[stage]]
+    )
+    assert "autorebuttal" in definition.prompt_preamble
 
 
-def test_proposal_workflow_defines_eight_isolated_stages() -> None:
-    """Expose the complete backend-controlled proposal workflow."""
+def test_proposal_workflow_retains_eight_adapters_with_one_shared_skill() -> None:
+    """Keep historical proposal artifacts without imposing execution locks."""
     definition = paper_workflow.get_research_workflow("proposal")
 
     assert definition.available is True
@@ -744,20 +754,20 @@ def test_proposal_workflow_defines_eight_isolated_stages() -> None:
         "final_review",
     )
     assert definition.skills_by_run_kind["proposal_formatting"] == (
-        "proposal-foundation-layout",
+        "openair-proposal",
         "typst-author",
         "research-stage-publication",
     )
     assert definition.skills_by_run_kind["proposal_literature"] == (
-        "proposal-literature-evidence",
+        "openair-proposal",
         "research-stage-publication",
     )
     assert definition.skills_by_run_kind["proposal_innovation_plan"] == (
-        "proposal-innovation-plan",
+        "openair-proposal",
         "research-stage-publication",
     )
     assert definition.skills_by_run_kind["proposal_foundation_feasibility"] == (
-        "proposal-foundation-feasibility",
+        "openair-proposal",
         "research-stage-publication",
     )
     assert definition.prerequisites_by_run_kind["proposal_final_review"] == (
@@ -771,9 +781,12 @@ def test_proposal_workflow_defines_eight_isolated_stages() -> None:
         "foundation_feasibility",
         "final_review",
     )
-    assert "edit only" in definition.prompt_preamble.lower()
-    assert "Project documents are optional context" in definition.prompt_preamble
-    assert "Read other sections" not in definition.prompt_preamble
+    assert all("openair-proposal" in skills for skills in definition.skills_by_run_kind.values())
+    assert all(
+        definition.prerequisite_satisfied(stage, predecessor, None)
+        for stage in definition.stages
+        for predecessor in definition.prerequisites_by_run_kind[definition.run_kind_by_stage[stage]]
+    )
 
 
 def test_algorithm_workflow_has_four_scoped_stages() -> None:
@@ -810,7 +823,7 @@ def test_algorithm_workflow_has_four_scoped_stages() -> None:
     assert "Only the final discovery stage" in definition.prompt_preamble
 
 
-def test_editing_a_paper_file_updates_the_current_source_in_place(
+def test_editing_a_paper_file_creates_a_linked_source_version(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -831,9 +844,13 @@ def test_editing_a_paper_file_updates_the_current_source_in_place(
     sources = list(
         db.exec(select(models.PaperSourceVersion).where(models.PaperSourceVersion.workspace_id == workspace.id)).all()
     )
-    assert updated.id == source.id
-    assert [item.id for item in sources] == [source.id]
-    assert storage.objects[source.object_key] == b"# Updated working paper\n"
+    assert updated.id != source.id
+    assert updated.parent_version_id == source.id
+    assert updated.version == source.version + 1
+    assert workspace.active_source_version_id == updated.id
+    assert {item.id for item in sources} == {source.id, updated.id}
+    assert storage.objects[source.object_key] == b"draft"
+    assert storage.objects[updated.object_key] == b"# Updated working paper\n"
 
 
 def test_discovery_source_edit_stales_stages_without_deleting_linked_task(
@@ -879,7 +896,7 @@ def test_discovery_source_edit_stales_stages_without_deleting_linked_task(
     assert db.get(models.PaperAlgorithmProposal, proposal.id).status == "confirmed"
 
 
-def test_deleting_the_last_paper_file_clears_the_current_source(
+def test_deleting_the_last_paper_file_retains_downloadable_history(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -897,8 +914,9 @@ def test_deleting_the_last_paper_file_clears_the_current_source(
     db.refresh(workspace)
     assert updated is None
     assert workspace.active_source_version_id is None
-    assert db.get(models.PaperSourceVersion, source.id) is None
-    assert source.object_key not in storage.objects
+    assert db.get(models.PaperSourceVersion, source.id) is not None
+    assert storage.objects[source.object_key] == b"draft"
+    assert paper_service.download_source_version(db, user, source.id)[0] == b"draft"
 
 
 def test_validate_paper_source_accepts_markdown_without_rewriting_content() -> None:

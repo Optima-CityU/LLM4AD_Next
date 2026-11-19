@@ -138,6 +138,39 @@ ENV PATH="/app/backend/.venv/bin:$PATH"
 # ---------- 安装依赖（含 research extra，不含工作区包，利用 Docker 层缓存）----------
 ARG UV_INDEX_URL
 ARG GITHUB_PROXY_URL=""
+# Install the pinned offline Markdown converter and network sandbox library.
+ARG PANDOC_VERSION="3.10.2"
+ARG PANDOC_SHA256=""
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates libseccomp2 fontconfig \
+    && rm -rf /var/lib/apt/lists/* \
+    && case "$(dpkg --print-architecture)" in \
+      amd64) pandoc_arch=amd64; pandoc_sha=c7edd535941c48be6a362081a748272837de81ae11777202d9c341d3d8261c9a ;; \
+      arm64) pandoc_arch=arm64; pandoc_sha=1c4d69f2a092bd47cb180e58a4aab7b9637101ced928252458c7d41a7f7fa71d ;; \
+      *) echo "Unsupported Pandoc architecture" >&2; exit 1 ;; \
+    esac \
+    && if [ "$PANDOC_VERSION" != "3.10.2" ] && [ -z "$PANDOC_SHA256" ]; then \
+      echo "Set PANDOC_SHA256 when overriding the pinned Pandoc version" >&2; exit 1; \
+    fi \
+    && pandoc_url="https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-linux-${pandoc_arch}.tar.gz" \
+    && if [ -n "$GITHUB_PROXY_URL" ]; then pandoc_url="${GITHUB_PROXY_URL%/}/${pandoc_url}"; fi \
+    && curl -fsSL --retry 3 --max-time 180 "$pandoc_url" -o /tmp/pandoc.tar.gz \
+    && echo "${PANDOC_SHA256:-$pandoc_sha}  /tmp/pandoc.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/pandoc.tar.gz -C /usr/local/bin --strip-components=2 "pandoc-${PANDOC_VERSION}/bin/pandoc" \
+    && rm /tmp/pandoc.tar.gz \
+    && pandoc --version
+
+# Reuse the exact pinned browser fonts, including CJK and mathematical faces.
+COPY src/frontend/scripts/fetch-typst-fonts.sh /opt/llm4ad-render/scripts/fetch-typst-fonts.sh
+RUN --mount=type=cache,id=llm4ad-typst-fonts,sharing=locked,target=/var/cache/llm4ad/typst-fonts \
+    TYPST_FONT_CACHE_DIR=/var/cache/llm4ad/typst-fonts \
+    bash /opt/llm4ad-render/scripts/fetch-typst-fonts.sh \
+    && mkdir -p /usr/local/share/fonts/llm4ad \
+    && cp -a /opt/llm4ad-render/public/typst-fonts/. /usr/local/share/fonts/llm4ad/ \
+    && ln -s /usr/local/share/fonts/llm4ad /app/typst-fonts \
+    && fc-cache -f /usr/local/share/fonts/llm4ad \
+    && rm -rf /opt/llm4ad-render
+ENV TYPST_FONT_DIR=/app/typst-fonts
+
 COPY src/backend/uv.lock uv.lock
 RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
     --mount=type=bind,source=src/backend/pyproject.toml,target=pyproject.toml \
@@ -155,6 +188,7 @@ RUN --mount=type=cache,id=uv-task-runner,target=/root/.cache/uv \
 # 高频改动的入口脚本延后到 uv sync 之后再 COPY，避免改脚本触发工作区重装。
 COPY ./src/backend/pyproject.toml /app/backend/
 COPY ./src/backend/app/__init__.py        /app/backend/app/__init__.py
+COPY ./src/backend/app/templates/nsfc-proposal.typ /app/backend/app/templates/nsfc-proposal.typ
 
 # 复制 llm4ad 核心库及根项目配置
 COPY ./src/llm4ad             /src/llm4ad
@@ -201,35 +235,31 @@ COPY ./docker/paper-agent/stage_bridge.py                     /app/paper-agent/s
 COPY ./docker/paper-agent/autodesign_bridge.py                /app/paper-agent/autodesign_bridge.py
 COPY ./docker/paper-agent/validate_cloud_task.py              /app/paper-agent/validate_cloud_task.py
 COPY ./docker/paper-agent/arxiv_entrypoint.py                 /app/paper-agent/arxiv_entrypoint.py
+COPY ./docker/paper-agent/searxng_entrypoint.py               /app/paper-agent/searxng_entrypoint.py
 COPY ./docker/paper-agent/protocol_adapter.py                 /app/paper-agent/protocol_adapter.py
 COPY ./src/backend/app/services/arxiv_coordination.py         /app/paper-agent/arxiv_coordination.py
+COPY ./src/backend/app/services/research_search.py            /app/paper-agent/research_search.py
+COPY ./src/backend/app/services/search_coordination.py        /app/paper-agent/search_coordination.py
 COPY --chmod=0755 ./docker/paper-agent/workspace-entrypoint.sh /app/paper-agent/workspace-entrypoint.sh
 COPY ./skills/llm4ad-task-builder                             /app/skills/llm4ad-task-builder
 COPY ./skills/llm4ad-cloud-package                            /app/skills/llm4ad-cloud-package
 COPY ./skills/autodesign/autodesign                          /app/skills/autodesign
 COPY ./skills/autodesign/run-analysis                        /app/skills/llm4ad-run-analysis
 COPY ./skills/autodesign/task-memory                         /app/skills/llm4ad-task-memory
+COPY ./skills/research-workflow-coordinator                   /app/skills/research-workflow-coordinator
 COPY ./skills/research-stage-publication                      /app/skills/research-stage-publication
+COPY ./skills/research-web-search                            /app/skills/research-web-search
 COPY ./skills/autodiscovery/algorithm-discovery               /app/skills/algorithm-discovery
 COPY ./skills/autodiscovery/discovery-baseline                 /app/skills/discovery-baseline
 COPY ./skills/autodiscovery/discovery-candidates               /app/skills/discovery-candidates
 COPY ./skills/autodiscovery/discovery-evaluation               /app/skills/discovery-evaluation
 COPY ./skills/typst-author                                    /app/skills/typst-author
-COPY ./skills/openair-proposal/ATTRIBUTION.md                 /app/skills/ATTRIBUTION.md
-COPY ./skills/openair-proposal/proposal-foundation-layout     /app/skills/proposal-foundation-layout
-COPY ./skills/openair-proposal/proposal-literature-evidence   /app/skills/proposal-literature-evidence
-COPY ./skills/openair-proposal/proposal-rationale             /app/skills/proposal-rationale
-COPY ./skills/openair-proposal/proposal-objectives            /app/skills/proposal-objectives
-COPY ./skills/openair-proposal/proposal-methods               /app/skills/proposal-methods
-COPY ./skills/openair-proposal/proposal-innovation-plan       /app/skills/proposal-innovation-plan
-COPY ./skills/openair-proposal/proposal-foundation-feasibility /app/skills/proposal-foundation-feasibility
-COPY ./skills/openair-proposal/proposal-final-review          /app/skills/proposal-final-review
+COPY ./skills/openair-proposal                               /app/skills/openair-proposal
+COPY ./skills/autorebuttal                                   /app/skills/autorebuttal-workflow
+# Retain the attribution, license, and shared-guide paths used by historical references.
 COPY ./skills/autorebuttal/ATTRIBUTION.md                     /app/skills/autorebuttal-shared/ATTRIBUTION.md
 COPY ./skills/autorebuttal/LICENSE.AutoRebuttal               /app/skills/autorebuttal-shared/LICENSE.AutoRebuttal
 COPY ./skills/autorebuttal/shared                             /app/skills/autorebuttal-shared
-COPY ./skills/autorebuttal/rebuttal-baseline                  /app/skills/rebuttal-baseline
-COPY ./skills/autorebuttal/autorebuttal                       /app/skills/autorebuttal
-COPY ./skills/autorebuttal/ac-summary                         /app/skills/ac-summary
 
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner

@@ -1,0 +1,32 @@
+services:
+  gateway:
+    build:
+      context: .
+      args:
+        LLM4AD_PACKAGE: ${LLM4AD_PACKAGE:-llm4ad-next=={{SDK_VERSION}}}
+        LLM4AD_EXTRAS: gateway-ui
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    command: ["python", "-m", "llm4ad.gateway", "start", "--ui-host", "0.0.0.0", "--ui-port", "8768", "--no-open-browser"]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      LLM4AD_SERVER_URL: ${LLM4AD_SERVER_URL:-https://llm4ad-next.cn}
+      LLM4AD_GATEWAY_NAME: ${LLM4AD_GATEWAY_NAME:-local-evaluator}
+      LLM4AD_ALLOWED_USER_IDS: ${LLM4AD_ALLOWED_USER_IDS:-}
+      LLM4AD_EVALUATOR: ${LLM4AD_EVALUATOR:-/evaluator/evaluator.py:Evaluator}
+      LLM4AD_GATEWAY_STATE_DIR: /state
+      LLM4AD_GATEWAY_CONCURRENCY: ${LLM4AD_GATEWAY_CONCURRENCY:-1}
+      LLM4AD_GATEWAY_LOG_KEEP_SECONDS: ${LLM4AD_GATEWAY_LOG_KEEP_SECONDS:-604800}
+      LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}
+      LLM4AD_GATEWAY_UI_PASSWORD:
+    ports:
+      - "${LLM4AD_GATEWAY_UI_HOST:-127.0.0.1}:${LLM4AD_GATEWAY_UI_PORT:-8768}:8768"
+    volumes:
+      - ./:/evaluator:ro
+      - ./state:/state
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

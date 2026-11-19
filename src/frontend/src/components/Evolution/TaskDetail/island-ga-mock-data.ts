@@ -10,14 +10,15 @@ export interface GANode {
   score: number
   /** Original score from evaluation (may be any number) */
   rawScore: number
+  evaluation?: Record<string, unknown>
   parentIds: string[]
-  /** True when this node has no evaluation score; rendered gray and non-interactive in the viz only */
+  /** True when this node has no evaluation score; rendered gray and selectable for diagnostics. */
   unscored?: boolean
 }
 
 export interface IslandGAData {
   nodes: GANode[]
-  /** Nodes without a valid evaluation score. Surfaced ONLY to the D3 viz for gray/non-interactive rendering; statistics, sorting, classification, normalization etc. continue to read `nodes` only. */
+  /** Nodes available for diagnostic selection; population statistics, classification and normalization use `nodes` only. */
   unscoredNodes: GANode[]
   maxGeneration: number
   islandCount: number

@@ -1,0 +1,6 @@
+{
+  "sources": ["vk_layer_refknobs.cpp", "npuprobe.cpp", "framedump.cpp", "interp.cpp", "selfsr.cpp", "interp_bm.cpp"],
+  "inputs": ["artifact_stats.h", "dispatch_ownership.h", "npu_rt.h", "framedump.h", "interp.h", "interp_b_luma.comp", "interp_b_bm.comp", "interp_b_smooth.comp", "interp_b_compose.comp", "interp_common.glsl", "selfsr.h", "selfsr_up.comp", "selfsr_rcas.comp", "copyprobe_copy.comp", "VkLayer_refknobs.json"],
+  "compile_flags": ["-O2", "-Wall", "-fPIC", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-static-libstdc++", "-Wl,--exclude-libs,ALL"],
+  "link_flags": ["-shared", "-Wl,-z,defs", "-Wl,-z,max-page-size=16384", "-llog", "-ldl"]
+}

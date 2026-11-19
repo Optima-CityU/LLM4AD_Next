@@ -1,0 +1,14 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_refknobs_readonly",
+    "type": "GLOBAL",
+    "library_path": "libVkLayer_refknobs.so",
+    "api_version": "1.1.0",
+    "implementation_version": "1",
+    "description": "refknobs read-only probe: pass-through + render pass counting (gray-box feasibility)",
+    "functions": {
+      "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+    }
+  }
+}

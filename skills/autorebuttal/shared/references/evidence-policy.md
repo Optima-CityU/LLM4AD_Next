@@ -1,9 +1,11 @@
 # Evidence policy
 
 Adapted from AutoRebuttal's evidence ledger and measured-experiment guidance.
-See `/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+See [the adaptation attribution](../../ATTRIBUTION.md).
 
-Every response entry has one evidence status:
+When the current output schema includes an evidence-status field, preserve
+these distinctions. If the field is absent, keep the distinctions clear in the
+response without inventing new wire metadata:
 
 - `source_grounded`: directly supported by the submitted paper.
 - `verified`: supported by explicit author-provided evidence outside the paper.

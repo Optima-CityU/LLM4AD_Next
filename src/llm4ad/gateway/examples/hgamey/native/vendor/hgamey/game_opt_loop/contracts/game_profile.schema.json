@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game_profile.schema.json",
+  "title": "游戏档案 (game profile) v1",
+  "description": "phonefarm onboard 在真机上给一个游戏实测出来的接入结果: 怎么进到游戏里、用什么负载、解析哪个渲染线程、可重复性量到多少、基线、坑、哪里需要人。game_opt_loop 只收 status == PASS 的档案 (profiles/<包名>/profile.json), optimize --game <包名> 读它。下面只钉死 game_opt_loop 用到的字段, 其余 (逐轮明细、进门截图、渲染线程发现过程) 是证据, 原样留在文件里。",
+  "type": "object",
+  "required": ["profile_version", "status", "package", "workload"],
+  "properties": {
+    "profile_version": { "const": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "NEEDS_HUMAN"],
+      "description": "PASS = 进了游戏、负载让画面转起来、各轮 frame_p95 变异系数在判据内; FAIL = 量了但不可重复; NEEDS_HUMAN = 卡在登录 / 实名 / 更新 / 认不出的画面, 原因见 needs_human。"
+    },
+    "package": { "type": "string" },
+    "version_name": { "type": ["string", "null"] },
+    "created_at": { "type": ["string", "null"] },
+    "entry": {
+      "type": "object",
+      "description": "进门。replay = policy: 复现时重跑同一套白名单状态机, 不盲放点击坐标 (公告每天不一样)。",
+      "properties": {
+        "status": { "type": "string", "enum": ["INGAME", "NEEDS_HUMAN", "FAILED"] },
+        "taps": { "type": "integer", "minimum": 0 },
+        "seconds": { "type": "number" },
+        "vlm_calls": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "required": ["script", "seconds"],
+      "properties": {
+        "script": { "type": "string", "description": "负载脚本, 相对档案所在目录。只转视角的触控拖动, 右拖左拖成对, 净转角为零。" },
+        "seconds": { "type": "integer", "minimum": 1, "description": "每轮采集秒数" },
+        "render_comm": { "type": ["string", "null"], "description": "ftrace 里这个包发 GPU 提交最多的线程名, 评测请求原样带上 (eval_request workload.render_comm)。" },
+        "graphics_api": { "type": ["string", "null"] }
+      }
+    },
+    "criteria": { "type": "object", "description": "可重复判据 (冻结常量, 不随这一次量到什么而变)。" },
+    "repeatability": {
+      "type": "object",
+      "properties": {
+        "judge": {
+          "type": "object",
+          "properties": {
+            "verdict": { "type": "string" },
+            "frame_p95_cv": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "baseline": { "type": "object" },
+    "conditions": { "type": ["object", "null"] },
+    "pitfalls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "symptom", "workaround"],
+        "properties": {
+          "id": { "type": "string" },
+          "symptom": { "type": "string" },
+          "workaround": { "type": "string" }
+        }
+      }
+    },
+    "needs_human": { "type": "array", "description": "要人做的事: [{stage, reason, screenshot?}]。PASS 的档案里应为空。" }
+  }
+}

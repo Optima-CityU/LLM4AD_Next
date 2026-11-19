@@ -1,0 +1,15 @@
+{
+  "note": "HarmonyOS native Genshin open-world smoke only; coordinates require a 2520x1152 landscape screen. Inspect step1.jpg and step2.jpg; do not use as a repeatable benchmark.",
+  "steps": [
+    {
+      "action": "shell",
+      "cmd": "uinput -T -m 400 850 400 700 1300 650 1450 650 -k 300 500",
+      "heavy": false
+    },
+    {
+      "action": "sleep",
+      "ms": 100,
+      "heavy": false
+    }
+  ]
+}

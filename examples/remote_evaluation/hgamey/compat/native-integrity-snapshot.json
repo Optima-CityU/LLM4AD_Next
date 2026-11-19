@@ -1,0 +1,48 @@
+{
+  "patch": "native-integrity.patch",
+  "patch_sha256": "da6cbe77fec359c4dec0474aba92ebe71b3a88cae1cb84160d1f0648a1c094c5",
+  "upstream_base_revision": "95f55e5c72ae28806181d299107fc57471818be5",
+  "comparison": "Incremental patch against the local extraction after the existing compatibility stack; use exact original hashes.",
+  "scope": [
+    "Require parent-shell completion receipts before accepting timing/quality metrics. Preserve structured negative runner feedback.",
+    "Explicitly drain and destroy Vulkan resources before success JSON; RAII also cleans partial initialization.",
+    "Record verified per-arm runner exit status for inspection.",
+    "Stage lossless capture screenshots in an attempt-owned device file; read bounded chunks with full length and SHA-256 checks before publication.",
+    "Retain screenshot ownership across uncertainty and restrict parent cleanup to the current token after confirmed worker completion and matching boot identity."
+  ],
+  "files": {
+    "vendor/hgamey/phonefarm/src/gpuop.rs": {
+      "original_sha256": "4495ceb4fd89bac8439b98af567f6ea4fc7908e2f2198338c51a5d34b0e7f9d1",
+      "patched_sha256": "2812752fa914ec2a1a333dd0e063bdc9429dfc3447970ff08a17cc16495cd421"
+    },
+    "vendor/hgamey/phonefarm/tools/vkop/main.cpp": {
+      "original_sha256": "98f9cc7b5c2eed8084701ed8a56a56e08126173044ea13a52fe47091dcfde73d",
+      "patched_sha256": "e2ecbc50aa45f35a0c0822a9c6cacefb8b2f661bcd49549ce3ca357aab4e42a1"
+    },
+    "vendor/hgamey/phonefarm/src/capture_worker.rs": {
+      "original_sha256": "3a0709677aaee4f8e2dcf5043405a75e5da6636ee02b399b073479703580902c",
+      "patched_sha256": "c03f5bd949373580f4576115a22a1d7d2f53bfaa7ed547b8585d4dcb8328fa04"
+    },
+    "vendor/hgamey/phonefarm/src/capture_session.rs": {
+      "original_sha256": "305666b897096d3947fa2a45e3c202e30d8470984ef7629b3a7146dce357474e",
+      "patched_sha256": "c79aca0862633a5d8d830a37f475cb84c639131eb2d8a5d66765e6040249f9ca"
+    }
+  },
+  "verification": {
+    "patch_apply": "forward apply, all output hashes, reverse apply check passed",
+    "native_regressions": "63 gpuop and 19 capture-related tests passed in the image build.",
+    "real_runner_smoke": "20 fixed-baseline real-device invocations exited 0 with no new native crash records. Complete follow-up standard/elite acceptance passed.",
+    "real_device_acceptance": {
+      "date": "2026-11-10",
+      "device": "wireless OnePlus PLC110, Android 15, Mali-G925",
+      "task_id": "5accf6e0-7ddb-41aa-ae32-a2a758a531b7",
+      "image": "sha256:f2e1d9a2cbdddfc0238da0b9d812860c791db4cc110e9e6219fcaf6335df647a",
+      "formal_arm_exit_receipts": 48,
+      "fresh_verified_videos": 8,
+      "persisted_perfetto_artifacts": 16,
+      "device_restored": true,
+      "report": "openspec/changes/add-hgamey-fidelity-evaluation/verification.md"
+    }
+  },
+  "rebuild": "Rebuild Android vkop_runner, update dist manifest with tools/build_native.py or equivalent source build, then rebuild the gateway/phonefarm image. Export the canonical Python helper separately."
+}

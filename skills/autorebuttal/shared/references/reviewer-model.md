@@ -1,9 +1,11 @@
 # Reviewer model
 
 Adapted from AutoRebuttal's reviewer-card model. See
-`/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+[the adaptation attribution](../../ATTRIBUTION.md).
 
-Build one card per stable reviewer ID. Each card captures:
+When reviewer-level analysis is useful, retain the stable reviewer identity.
+Useful descriptors include the following, using only fields supported by the
+current output schema when publishing:
 
 - `reviewer_id`
 - `sentiment`: positive / mixed / negative

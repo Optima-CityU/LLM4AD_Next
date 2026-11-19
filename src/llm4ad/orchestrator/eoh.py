@@ -567,7 +567,7 @@ class EoHOrchestrator(BaseOrchestrator):
             evaluation_time_ms=result.duration_ms,
             timing=ExecutionTiming(evaluation_total_ms=result.duration_ms),
         )
-        algorithm.custom_metadata["evaluation_result"] = result.model_dump(mode="json")
+        algorithm.custom_metadata["evaluation_result"] = result.candidate_summary()
         self._eval_successes += 1
 
     # ------------------------------------------------------------------ #

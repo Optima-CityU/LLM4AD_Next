@@ -121,7 +121,7 @@ def _read_config(root: Path, *, contents: bytes | None = None) -> dict:
         if not root.joinpath(*_relative_path(filename).parts).is_file():
             raise ValueError(f"Evaluator file is missing: {filename}")
     dataset = parsed.evaluator.dataset
-    if dataset is not None:
+    if parsed.evaluator.type != "remote" and dataset is not None:
         if dataset.mode == "files":
             paths = [root.joinpath(*_relative_path(value).parts) for value in (dataset.files or [])]
             if not paths or not all(path.is_file() for path in paths):

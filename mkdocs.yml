@@ -171,10 +171,12 @@ nav:
       - LunarLander: en/examples/lunarlander.md
       - Symbolic Regression: en/examples/symbolic-regression.md
       - ML Hyperparameter: en/examples/ml-hyperpara.md
+      - HGamey Remote Evaluation: en/examples/hgamey-remote-evaluation.md
   - Advanced:
       - Component Customization:
           - Providers: en/guides/providers.md
           - Evaluators: en/guides/evaluators.md
+          - Remote Evaluation: en/guides/remote-evaluation.md
           - Multimodal: en/guides/multimodal.md
           - Embeddings & Trajectory: en/guides/embeddings.md
           - Timing & Metrics: en/guides/timing-metrics.md
@@ -225,10 +227,12 @@ nav:
           - LunarLander: zh/examples/lunarlander.md
           - 符号回归: zh/examples/symbolic-regression.md
           - ML 超参数: zh/examples/ml-hyperpara.md
+          - HGamey 远程评估: zh/examples/hgamey-remote-evaluation.md
       - 进阶:
           - 组件定制:
               - 模型供应商: zh/guides/providers.md
               - 评估器: zh/guides/evaluators.md
+              - 远程评估: zh/guides/remote-evaluation.md
               - 多模态: zh/guides/multimodal.md
               - 嵌入与轨迹: zh/guides/embeddings.md
               - 计时与指标: zh/guides/timing-metrics.md

@@ -1,28 +1,32 @@
-# Typst Template Provenance and Adaptation
+# Export Template Provenance and Adaptation
 
-The default `styles/nsfc-proposal.typ` presentation layer is adapted from
+The historical `styles/nsfc-proposal.typ` presentation layer is adapted from
 [`Readon/NSFC-application-template-typst`](https://github.com/Readon/NSFC-application-template-typst)
 at commit `39e6baf84a3db6691c2e3c95134a7dbb97f1de6b` under the MIT License.
-The generated style file carries the upstream copyright and full license text.
+Its generated style carries the upstream copyright and full license text.
+This is export-template provenance, not an instruction to author proposal text
+in Typst or to activate a shell-based writing workflow.
 
-Reuse is limited to presentation ideas and measured layout parameters:
+The adaptation reuses presentation ideas and measured layout parameters:
 
 - A4 page geometry and margins;
-- body type size, leading, indentation, and paragraph spacing;
+- body type size, leading, indentation and paragraph spacing;
 - the centered `报告正文` title;
-- blue fixed-outline typography and heading spacing.
+- fixed-outline typography and heading spacing.
 
-Do not restore the upstream document outline: it targets the 2023 application
-form. LLM4AD owns the proposal structure in `proposal.typ` and currently follows
-the 2026 three-part outline. Do not restore the upstream `cuti` package import;
-the browser compiler must work without Typst package-network access.
+The upstream outline targets the 2023 application form. The earlier LLM4AD
+adaptation used a 2026 three-part outline and omitted the remote `cuti` package.
+These are historical adaptation facts, not a claim that a pinned template is
+the current official submission form. Author-supplied or verified current
+requirements take precedence; do not silently impose either dated outline.
 
-Keep responsibilities separated:
-
-- `proposal.typ` owns official outline text, section ordering, and includes;
-- `styles/nsfc-proposal.typ` owns reusable presentation rules;
-- `sections/*.typ` own author content and must not redefine global layout.
-
-The template is unofficial. Preserve the current-year outline downloaded from
-the NSFC information system when an author supplies it; official submission
-requirements take precedence over both upstream and LLM4AD defaults.
+New proposals use the nine root Markdown chapters and numbered references in
+`4-参考文献.md`; do not maintain a second `proposal.md` aggregate. Only the
+author's explicit **确认并排版** UI action asks the platform to convert those
+ordered chapters. The model does not automatically generate/export Typst/PDF
+or require a compiler. The platform owns the generated representation and its
+template dependencies. Preserve license notices and link derived files to their
+source revision; export failures retain drafts and earlier successful outputs.
+Do not add remote packages during normal authoring. Existing Markdown and Typst
+projects retain their format, files and editing support; an existing canonical
+Typst source remains editable and is not a generated duplicate to discard.

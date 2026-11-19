@@ -23,7 +23,7 @@ import {
   Square,
   X,
 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type {
   MemoryCardResponse,
@@ -68,10 +68,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useCopyBeforeRun } from "@/hooks/useCopyBeforeRun"
 import { isDemoTaskId } from "@/data/demoFixtures"
+import { useCopyBeforeRun } from "@/hooks/useCopyBeforeRun"
 import { useEvolution } from "@/hooks/useEvolution"
 import { useTaskLogsList } from "@/hooks/useTaskLogs"
+import {
+  compareNodeFitness,
+  hasNodeFitness,
+  selectionScoreStats,
+  toSelectedNodeInfo,
+} from "@/lib/evolutionSelection"
 import { INPUT_LIMITS } from "@/lib/inputLimits"
 import {
   resetTaskCaches,
@@ -79,6 +85,7 @@ import {
   taskKeys,
 } from "@/lib/task-queries"
 import { cn, formatDateTime, formatScore } from "@/lib/utils"
+import NodeEvaluationData from "./NodeEvaluationData"
 import { type GANode, ISLAND_COLORS } from "./TaskDetail/island-ga-mock-data"
 import {
   LOG_LEVELS,
@@ -86,7 +93,6 @@ import {
   matchesLogLevels,
   renderEntry,
 } from "./TaskDetail/log-renderers"
-
 import { computeNodeClassifications } from "./TaskDetail/node-classification"
 import TaskVersionTree from "./TaskVersionTree"
 
@@ -1515,12 +1521,14 @@ function NodeLink({
   crossIslandLabel: string
   locateLabel: string
 }) {
+  const { t } = useTranslation()
   const node = nodeMap.get(nodeId)
   const nodeIsland = node?.island ?? -1
   const isCrossIsland = nodeIsland !== currentIsland && nodeIsland >= 0
-  const ariaLabel = node
-    ? `${node.name} (${formatScore(node.rawScore)})`
-    : nodeId
+  const scoreLabel = hasNodeFitness(node)
+    ? formatScore(node!.rawScore)
+    : t("evaluationData.unscored")
+  const ariaLabel = node ? `${node.name} (${scoreLabel})` : nodeId
 
   return (
     <div
@@ -1552,7 +1560,7 @@ function NodeLink({
       </span>
       {node && (
         <span className="font-mono text-[9px] text-muted-foreground/70 shrink-0">
-          {formatScore(node.rawScore)}
+          {scoreLabel}
         </span>
       )}
       <span className="font-mono text-[9px] text-muted-foreground/50 shrink-0">
@@ -1604,19 +1612,23 @@ function NodeInfoSection({
     setActiveTab,
     activeTab,
     requestFocusNode,
+    effectiveTaskId,
+    effectiveStatus,
   } = useEvolution()
   const { t } = useTranslation()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   const nodeMap = useMemo(() => {
     const m = new Map<string, GANode>()
-    for (const n of evolutionData.nodes) m.set(n.id, n)
+    for (const n of [...evolutionData.nodes, ...evolutionData.unscoredNodes]) {
+      m.set(n.id, n)
+    }
     return m
   }, [evolutionData])
 
   const childrenMap = useMemo(() => {
     const m = new Map<string, string[]>()
-    for (const n of evolutionData.nodes) {
+    for (const n of [...evolutionData.nodes, ...evolutionData.unscoredNodes]) {
       for (const pid of n.parentIds) {
         if (!m.has(pid)) m.set(pid, [])
         m.get(pid)!.push(n.id)
@@ -1630,7 +1642,12 @@ function NodeInfoSection({
     [evolutionData],
   )
 
-  const selectedNode = selectedNodes.length === 1 ? selectedNodes[0] : null
+  const resolvedSelectedNodes = useMemo(
+    () => selectedNodes.map((node) => nodeMap.get(node.id) ?? node),
+    [selectedNodes, nodeMap],
+  )
+  const selectedNode =
+    resolvedSelectedNodes.length === 1 ? resolvedSelectedNodes[0] : null
 
   // Sort children by score desc — most relevant first
   const sortedChildIds = useMemo(() => {
@@ -1639,7 +1656,7 @@ function NodeInfoSection({
     return [...ids].sort((a, b) => {
       const na = nodeMap.get(a)
       const nb = nodeMap.get(b)
-      return (nb?.rawScore ?? 0) - (na?.rawScore ?? 0)
+      return compareNodeFitness(na, nb)
     })
   }, [selectedNode, childrenMap, nodeMap])
 
@@ -1649,7 +1666,7 @@ function NodeInfoSection({
     return [...selectedNode.parentIds].sort((a, b) => {
       const na = nodeMap.get(a)
       const nb = nodeMap.get(b)
-      return (nb?.rawScore ?? 0) - (na?.rawScore ?? 0)
+      return compareNodeFitness(na, nb)
     })
   }, [selectedNode, nodeMap])
 
@@ -1671,19 +1688,7 @@ function NodeInfoSection({
   const navigateToNode = (nodeId: string) => {
     const node = nodeMap.get(nodeId)
     if (node) {
-      setSelectedNodes([
-        {
-          id: node.id,
-          generation: node.generation,
-          island: node.island,
-          islandId: node.islandId,
-          name: node.name,
-          fileName: node.fileName,
-          score: node.score,
-          rawScore: node.rawScore,
-          parentIds: node.parentIds,
-        },
-      ])
+      setSelectedNodes([toSelectedNodeInfo(node)])
     }
   }
 
@@ -1693,27 +1698,21 @@ function NodeInfoSection({
 
   // Multi-select stats
   const multiStats = useMemo(() => {
-    if (selectedNodes.length < 2) return null
-    const scores = selectedNodes.map((n) => n.rawScore)
-    const gens = selectedNodes.map((n) => n.generation)
-    const islands = new Set(selectedNodes.map((n) => n.island))
-    const max = Math.max(...scores)
-    const min = Math.min(...scores)
-    const avg = scores.reduce((s, v) => s + v, 0) / scores.length
+    if (resolvedSelectedNodes.length < 2) return null
+    const gens = resolvedSelectedNodes.map((n) => n.generation)
+    const islands = new Set(resolvedSelectedNodes.map((n) => n.island))
     return {
-      max,
-      min,
-      avg,
+      scores: selectionScoreStats(resolvedSelectedNodes),
       genMin: Math.min(...gens),
       genMax: Math.max(...gens),
       islandCount: islands.size,
     }
-  }, [selectedNodes])
+  }, [resolvedSelectedNodes])
 
   // Sort multi-select list by score desc
   const sortedMultiNodes = useMemo(() => {
-    return [...selectedNodes].sort((a, b) => b.rawScore - a.rawScore)
-  }, [selectedNodes])
+    return [...resolvedSelectedNodes].sort(compareNodeFitness)
+  }, [resolvedSelectedNodes])
 
   // Collapsed summary
   const summary = (() => {
@@ -1864,37 +1863,43 @@ function NodeInfoSection({
               })()}
 
               {/* Score */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                    {t("evolution.fitnessScore")}
-                  </span>
-                  <span
-                    className="text-[9px] text-muted-foreground/60"
-                    title={t("evolution.scoreNormalizedHint", {
-                      defaultValue:
-                        "Bar shows score normalized within current population",
-                    })}
-                  >
-                    {(selectedNode.score * 100).toFixed(4)}%
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${selectedNode.score * 100}%`,
-                        background: `linear-gradient(90deg, #004466, ${ISLAND_COLORS[selectedNode.island % ISLAND_COLORS.length]})`,
-                        boxShadow: `0 0 6px ${ISLAND_COLORS[selectedNode.island % ISLAND_COLORS.length]}40`,
-                      }}
-                    />
+              {hasNodeFitness(selectedNode) ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      {t("evolution.fitnessScore")}
+                    </span>
+                    <span
+                      className="text-[9px] text-muted-foreground/60"
+                      title={t("evolution.scoreNormalizedHint", {
+                        defaultValue:
+                          "Bar shows score normalized within current population",
+                      })}
+                    >
+                      {(selectedNode.score * 100).toFixed(4)}%
+                    </span>
                   </div>
-                  <span className="text-sm font-mono font-bold text-primary min-w-[48px] text-right">
-                    {formatScore(selectedNode.rawScore)}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${selectedNode.score * 100}%`,
+                          background: `linear-gradient(90deg, #004466, ${ISLAND_COLORS[selectedNode.island % ISLAND_COLORS.length]})`,
+                          boxShadow: `0 0 6px ${ISLAND_COLORS[selectedNode.island % ISLAND_COLORS.length]}40`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-sm font-mono font-bold text-primary min-w-[48px] text-right">
+                      {formatScore(selectedNode.rawScore)}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <Badge variant="secondary">
+                  {t("evaluationData.unscored")}
+                </Badge>
+              )}
 
               <InfoRow
                 label={t("evolution.generation")}
@@ -1926,6 +1931,19 @@ function NodeInfoSection({
                   </span>
                 </span>
               </InfoRow>
+
+              {effectiveTaskId && !isDemoTaskId(effectiveTaskId) && (
+                <NodeEvaluationData
+                  key={`${effectiveTaskId}:${selectedNode.id}`}
+                  taskId={effectiveTaskId}
+                  nodeId={selectedNode.id}
+                  active={
+                    effectiveStatus === "running" ||
+                    effectiveStatus === "pending"
+                  }
+                  evaluation={nodeMap.get(selectedNode.id)?.evaluation}
+                />
+              )}
 
               {/* Parents — sorted by score, truncated */}
               <div className="space-y-1">
@@ -2049,7 +2067,9 @@ function NodeInfoSection({
                       })}
                     </div>
                     <div className="font-mono text-primary font-medium">
-                      {formatScore(multiStats.max)}
+                      {multiStats.scores
+                        ? formatScore(multiStats.scores.max)
+                        : t("evaluationData.unscored")}
                     </div>
                   </div>
                   <div className="px-2 py-1.5 rounded border border-border/30 bg-muted/40">
@@ -2059,7 +2079,9 @@ function NodeInfoSection({
                       })}
                     </div>
                     <div className="font-mono text-foreground/80 font-medium">
-                      {formatScore(multiStats.avg)}
+                      {multiStats.scores
+                        ? formatScore(multiStats.scores.avg)
+                        : t("evaluationData.unscored")}
                     </div>
                   </div>
                   <div className="px-2 py-1.5 rounded border border-border/30 bg-muted/40">
@@ -2069,7 +2091,9 @@ function NodeInfoSection({
                       })}
                     </div>
                     <div className="font-mono text-foreground/80 font-medium">
-                      {formatScore(multiStats.min)}
+                      {multiStats.scores
+                        ? formatScore(multiStats.scores.min)
+                        : t("evaluationData.unscored")}
                     </div>
                   </div>
                   <div className="px-2 py-1.5 rounded border border-border/30 bg-muted/40">
@@ -2114,7 +2138,7 @@ function NodeInfoSection({
                     }}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${node.name} (${formatScore(node.rawScore)})`}
+                    aria-label={`${node.name} (${hasNodeFitness(node) ? formatScore(node.rawScore) : t("evaluationData.unscored")})`}
                   >
                     <span
                       className="size-2 rounded-full shrink-0"
@@ -2127,7 +2151,9 @@ function NodeInfoSection({
                       {node.name}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0">
-                      {formatScore(node.rawScore)}
+                      {hasNodeFitness(node)
+                        ? formatScore(node.rawScore)
+                        : t("evaluationData.unscored")}
                     </span>
                     <button
                       type="button"

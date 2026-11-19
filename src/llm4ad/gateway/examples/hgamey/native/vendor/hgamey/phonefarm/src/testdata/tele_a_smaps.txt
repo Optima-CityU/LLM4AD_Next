@@ -1,0 +1,12 @@
+14000000-7fe9c59000 ---p 00000000 00:00 0                                [rollup]
+Rss:              819636 kB
+Pss:              693584 kB
+Pss_Dirty:        300639 kB
+Pss_Anon:         307518 kB
+Pss_File:         383850 kB
+Pss_Shmem:          2215 kB
+Shared_Clean:     154704 kB
+Shared_Dirty:      13728 kB
+Private_Clean:    352848 kB
+Private_Dirty:    298356 kB
+Referenced:       542656 kB

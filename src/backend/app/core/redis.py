@@ -73,6 +73,15 @@ def release_task_execution_lock(task_id: str | uuid.UUID, owner_token: str) -> b
     )
 
 
+def renew_task_execution_lock(task_id: str | uuid.UUID, owner_token: str, ttl_seconds: int) -> bool:
+    """Extend a waiting task lease only while it belongs to the same executor."""
+    script = (
+        "if redis.call('get',KEYS[1])==ARGV[1] then "
+        "return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end"
+    )
+    return bool(get_sync_redis().eval(script, 1, task_execution_lock_key(task_id), owner_token, ttl_seconds))
+
+
 # ---- ARL 会话容器编排锁 ----
 # ARL 的容器名按 session_id 确定性派生，多个 WS 连接（可能落在不同 uvicorn
 # worker）会同时尝试启动同一对容器。没有跨进程互斥时，后到者的 containers.run

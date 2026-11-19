@@ -1,0 +1,9 @@
+- [x] Consolidate the gateway SDK, optional adapters, lifecycle and deployment sources with compatibility aliases.
+- [x] Support direct installed/custom adapter startup, configuration and source inspection.
+- [x] Retain optional template generation and local checks over the same SDK core.
+- [x] Package the existing HGamey Python executor/lifecycle as an optional case with preserved provenance.
+- [x] Update bilingual guides and verify built wheel, container configurations, core regressions and required checks.
+- [x] Include the actual HGamey native source, source-build container, and README device/install prerequisites; verify native builds and installed-wheel source completeness.
+- [x] Unify service lifecycle, health/probing and acknowledgement-fenced cleanup in the SDK; keep only optional backend/evidence hooks in HGamey and use the same path for ordinary custom evaluators.
+- [x] Complete durable message/metadata reporting, shared exception diagnostics and attachment descriptions; preserve rich failed/cancelled results through platform storage and the SDK client, document the contract, and verify compatibility.
+- [x] Make scheduling, local replay and cancellation SDK defaults; expose optional operation pre/post hooks, preserve external-backend confirmation semantics, and verify restart/concurrency/cancellation with real isolated workers.

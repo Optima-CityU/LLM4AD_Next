@@ -1,0 +1,930 @@
+diff --git a/executor.py b/executor.py
+--- a/executor.py
++++ b/executor.py
+@@ -24,7 +24,7 @@
+ APP = Path(__file__).resolve()
+ JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
+ IDEMPOTENCY_KEY = re.compile(r"[0-9a-f]{64}\Z")
+-FEATURES = ["idempotent_submit", "job_lookup", "cancel"]
++FEATURES = ["idempotent_submit", "job_lookup", "cancel", "game_ab"]
+ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+ KINDS = {"shader", "sysparam", "gray", "whitebox"}
+ 
+@@ -115,8 +115,8 @@
+             raise ValueError("unknown or disabled device_id")
+     frozen = copy.deepcopy(body)
+     op = frozen.setdefault("operation", "eval")
+-    if op not in {"probe", "eval", "gray-loadop"}:
+-        raise ValueError("operation must be probe, eval or gray-loadop")
++    if op not in {"probe", "eval", "gray-loadop", "game-ab"}:
++        raise ValueError("operation must be probe, eval, gray-loadop or game-ab")
+     if type(frozen.get("pause_foreground", False)) is not bool:
+         raise ValueError("pause_foreground must be boolean")
+     if op == "eval":
+@@ -140,8 +140,12 @@
+             val = options.setdefault(key, default)
+             if type(val) is not int or not low <= val <= high:
+                 raise ValueError(f"gray-loadop {key} must be {low}..{high}; layer counter evidence requires at least 300 frames")
++    elif op == "game-ab":
++        import game_ab
++
++        frozen["options"] = game_ab.validate_options(frozen.get("options", {}))
+     elif "options" in frozen:
+-        raise ValueError("options only apply to gray-loadop")
++        raise ValueError("options only apply to gray-loadop or game-ab")
+     return {"device": copy.deepcopy(device), "submission": frozen}
+ 
+ 
+@@ -174,6 +178,39 @@
+ def assert_identity(device, observed):
+     if observed.strip() != device["expected_serial"]:
+         raise RuntimeError(f"wireless phone identity mismatch: expected {device['expected_serial']}, got {observed.strip()!r}; evaluation not started")
++
++
++def foreground_component(raw, fields):
++    """Return one unambiguous component from exact foreground field names."""
++    lines = re.findall(r"(?m)^[ \t]*(?:" + "|".join(fields) + r")[ \t]*[:=]([^\r\n]*)", raw)
++    components = {
++        component for line in lines
++        for component in re.findall(r"\bu\d+[ \t]+([A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+)(?=[ \t}]|$)", line)
++    }
++    return next(iter(components)) if len(components) == 1 else None
++
++
++def game_cleanup_confirmed(folder):
++    """Prevent foreground writes while a game wrapper leaves ownership uncertain."""
++    try:
++        report = read_json(folder / "result.json")
++        if report.get("conditions_observed", {}).get("restored") is not True:
++            return False
++        records = [report]
++        for path in (folder / "game-restoration.json", folder / "evidence/restore.json"):
++            if path.exists():
++                receipt = read_json(path)
++                if path.name == "game-restoration.json" and receipt.get("restored") is not True:
++                    return False
++                records.append(receipt)
++        for record in records:
++            if (record.get("recovery_unknown", False) is not False
++                    or record.get("restoration_deferred", False) is not False
++                    or record.get("layer_absent", True) is not True):
++                return False
++        return True
++    except (OSError, ValueError, AttributeError, TypeError):
++        return False
+ 
+ 
+ def execute_on_device(folder):
+@@ -200,12 +237,21 @@
+         result = {"schema": "hgamey/executor-probe@1", "status": "PASS", "connection": connection, "facts": facts, "root_verified": "uid=0(" in facts}
+         write_json(folder / "result.json", result)
+         return 0
+-    previous = None
+     foreground = adb("-s", endpoint, "shell", "dumpsys window")
+-    match = re.search(r"mCurrentFocus=.*?\bu\d+\s+([A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+)", foreground)
+-    if match:
+-        previous = match.group(1)
++    with (folder / "foreground-window.txt").open("x") as raw:
++        raw.write(foreground)
++    previous = foreground_component(foreground, ("mCurrentFocus",))
++    foreground_source = "window" if previous else "unknown"
++    if previous is None:
++        activity = adb("-s", endpoint, "shell", "dumpsys activity activities")
++        with (folder / "foreground-activity.txt").open("x") as raw:
++            raw.write(activity)
++        previous = foreground_component(activity, ("topResumedActivity", "mResumedActivity", "ResumedActivity", "Resumed"))
++        if previous:
++            foreground_source = "activity"
+     target = body.get("request", {}).get("package", "io.github.hgamey.refbench")
++    if body["operation"] == "game-ab":
++        target = body["options"]["package"]
+     # Pause only the explicitly requested foreground workload, and restore its activity.
+     paused = False
+     try:
+@@ -216,12 +262,20 @@
+                 paused = True
+         if body["operation"] == "eval":
+             argv = ["phonefarm", "eval", "--request", str(folder / "eval-request.json"), "--serial", endpoint, "--out", str(folder / "evidence"), "--json"]
++        elif body["operation"] == "game-ab":
++            argv = [sys.executable, "/opt/gateway/adapter/game_ab.py", "--job", str(folder)]
+         else:
+             o = body["options"]
+             argv = ["phonefarm", "gray-layer", "refbench-loadop", "--serial", endpoint, "--frames", str(o["frames"]), "--intensity", str(o["intensity"]), "--timeout-seconds", str(o["timeout_seconds"]), "--so", "/opt/executor/assets/libVkLayer_refknobs.so", "--out", str(folder / "evidence"), "--json"]
+         write_json(folder / "backend-command.json", argv)
+         with (folder / "backend.stdout").open("x") as out, (folder / "backend.stderr").open("x") as err:
+             done = command(argv, pf=True, stdout=out, stderr=err)
++        if body["operation"] == "game-ab":
++            # The wrapper owns the report; stdout retains human-readable evidence.
++            report = read_json(folder / "result.json")
++            if not isinstance(report, dict):
++                raise ValueError("game-ab wrapper result must be a JSON object")
++            return done.returncode
+         raw = (folder / "backend.stdout").read_text()
+         try:
+             report = json.loads(raw)
+@@ -238,8 +292,11 @@
+         if headless and not paused:
+             required = False
+         receipt = {"previous": previous, "paused": paused, "headless": headless, "restore_required": required, "restored": None}
++        receipt["source"] = foreground_source
++        if body["operation"] == "game-ab" and not game_cleanup_confirmed(folder):
++            receipt["restore_blocked"] = "game-ab cleanup is unconfirmed"
+         write_json(folder / "foreground.json", receipt)
+-        if required:
++        if required and not receipt.get("restore_blocked"):
+             restored = command(["/usr/bin/adb", "-s", endpoint, "shell", "am", "start", "-W", "-n", previous], capture_output=True, text=True, timeout=30)
+             (folder / "foreground-restore.txt").write_text(restored.stdout + restored.stderr)
+             receipt.update(restore_exit_code=restored.returncode, restored=restored.returncode == 0 and bool(re.search(r"^Status: ok\s*$", restored.stdout, re.MULTILINE)))
+@@ -358,6 +415,10 @@
+             (folder / "validation.stderr").write_text(check.stderr)
+             if check.returncode:
+                 raise ValueError("phonefarm rejected the request before connecting to phone; see validation logs")
++        elif body["operation"] == "game-ab":
++            import game_ab
++
++            game_ab.validate_options(body["options"])
+         sync_registry(frozen["device"], folder)
+     except Exception as error:
+         raise BackendNotStarted(str(error)) from error
+@@ -404,6 +465,8 @@
+         if gpu_lock is not None and (not isinstance(gpu_lock, dict) or gpu_lock.get("restored") is not True):
+             return False
+         foreground = read_json(folder / "foreground.json")
++        if foreground.get("restore_blocked"):
++            return False
+         if foreground.get("restore_required") is False:
+             foreground_ok = foreground.get("paused") is False and (bool(foreground.get("previous")) or foreground.get("headless") is True)
+         else:
+@@ -482,6 +545,10 @@
+             folder.mkdir()
+             sync_directory(self.jobs)
+             freeze_shader_inputs(folder, frozen)
++            if frozen["submission"]["operation"] == "game-ab":
++                import game_ab
++
++                game_ab.freeze_inputs(folder, frozen)
+             write_json(folder / "input.json", frozen)
+             job = {"id": key, "state": "queued", "device_id": frozen["device"]["id"], "endpoint": frozen["device"]["endpoint"], "operation": frozen["submission"]["operation"], "created_at": time.time(), "evidence_directory": str(folder), "submission_hash": digest, "idempotency_key": token, "cleanup_status": "pending"}
+             try:
+diff --git a/tests/test_game_ab_executor.py b/tests/test_game_ab_executor.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_game_ab_executor.py
+@@ -0,0 +1,486 @@
++#!/usr/bin/env python3
++"""Verify game A/B queue integration with a fixture wrapper and no devices."""
++
++import copy
++import hashlib
++import importlib.util
++import subprocess
++import sys
++import tempfile
++import threading
++import time
++import unittest
++from pathlib import Path
++from types import ModuleType
++from unittest.mock import Mock, patch
++
++spec = importlib.util.spec_from_file_location(
++    "game_ab_executor", Path(__file__).parents[1] / "executor.py"
++)
++app = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(app)
++
++
++class GameABExecutorTests(unittest.TestCase):
++    """Exercise executor responsibilities independently of the real game wrapper."""
++
++    def setUp(self):
++        """Install a wrapper fixture and prohibit unmocked external commands."""
++        self.temporary = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temporary.cleanup)
++        self.root = Path(self.temporary.name)
++        self.layer = self.root / "upstream.so"
++        self.layer.write_bytes(b"fixture upstream layer")
++        self.config = self.root / "devices.json"
++        self.device = {
++            "id": "fixture-phone",
++            "label": "Fixture",
++            "host": "192.0.2.10",
++            "port": 5555,
++            "expected_serial": "fixture-serial",
++            "enabled": True,
++        }
++        app.write_json(self.config, {"version": 1, "devices": [self.device]})
++        self.wrapper = ModuleType("game_ab")
++        self.wrapper.validate_options = Mock(side_effect=self.validate_options)
++        self.wrapper.freeze_inputs = Mock(side_effect=self.freeze_inputs)
++        modules = patch.dict(sys.modules, {"game_ab": self.wrapper})
++        modules.start()
++        self.addCleanup(modules.stop)
++        commands = patch.object(
++            app, "command", side_effect=AssertionError("Unexpected external command")
++        )
++        self.commands = commands.start()
++        self.addCleanup(commands.stop)
++        self.engines, self.gates = [], []
++
++    def tearDown(self):
++        """Release fixture workers before removing their temporary journals."""
++        for gate in self.gates:
++            gate.set()
++        for engine in reversed(self.engines):
++            engine.close()
++
++    def validate_options(self, options):
++        """Return fixture defaults through the parent's declared wrapper API."""
++        if not isinstance(options, dict):
++            raise TypeError("fixture options must be an object")
++        return {
++            "package": "com.fixture.game",
++            "a": "native",
++            "b": "sr:0.7:1920x1080",
++            "rounds": 2,
++            "window": 10,
++            "settle": 20,
++            "enter_script": None,
++            "layer_path": str(self.layer),
++            "timeout_seconds": 600,
++            "pan": False,
++            "cool_max": 0,
++            **options,
++        }
++
++    @staticmethod
++    def freeze_inputs(folder, frozen):
++        """Stage fixture bytes using the existing executor manifest contract."""
++        options = frozen["submission"]["options"]
++        source = Path(options["layer_path"])
++        target = folder / "inputs" / "game-ab" / "layer.so"
++        target.parent.mkdir(parents=True)
++        data = source.read_bytes()
++        target.write_bytes(data)
++        target.chmod(0o444)
++        options["layer_path"] = str(target)
++        frozen.setdefault("input_files", []).append(
++            {
++                "source": str(source),
++                "path": target.relative_to(folder).as_posix(),
++                "sha256": hashlib.sha256(data).hexdigest(),
++                "bytes": len(data),
++            }
++        )
++
++    def engine(self, runner):
++        """Start the real serialized queue with a fixture backend."""
++        engine = app.Engine(self.root / "data", self.config, runner)
++        self.engines.append(engine)
++        return engine
++
++    def gate(self):
++        """Create a worker gate that teardown always releases."""
++        gate = threading.Event()
++        self.gates.append(gate)
++        return gate
++
++    def wait(self, engine, job_id):
++        """Wait for a bounded fixture execution to reach its terminal state."""
++        deadline = time.monotonic() + 3
++        while time.monotonic() < deadline:
++            job = engine.get(job_id)
++            if job["state"] not in {"queued", "running", "cancel_requested"}:
++                return job
++            time.sleep(0.005)
++        self.fail("Fixture job did not finish")
++
++    def folder(self, **submission):
++        """Prepare a job exactly as the device worker receives it."""
++        folder = self.root / "job"
++        folder.mkdir()
++        frozen = app.prepare_submission(
++            {"operation": "game-ab", **submission}, app.load_devices(self.config)
++        )
++        self.wrapper.freeze_inputs(folder, frozen)
++        app.write_json(folder / "input.json", frozen)
++        return folder
++
++    @staticmethod
++    def receipts(folder, restored=True):
++        """Write diagnostic-only fixture output and ordinary foreground receipts."""
++        app.write_json(
++            folder / "result.json",
++            {
++                "status": "PASS",
++                "candidate_applied": False,
++                "conditions_observed": {"restored": restored},
++            },
++        )
++        app.write_json(
++            folder / "foreground.json",
++            {"previous": "com.fixture.game/.Main", "paused": False, "restore_required": False},
++        )
++
++    def test_submission_delegates_validation_and_preserves_original(self):
++        """Normalize only the frozen options and retain the selected device."""
++        body = {"operation": "game-ab", "options": {"rounds": 3}}
++        original = copy.deepcopy(body)
++        frozen = app.prepare_submission(body, app.load_devices(self.config))
++        self.wrapper.validate_options.assert_called_once_with({"rounds": 3})
++        self.assertEqual(body, original)
++        self.assertEqual(frozen["submission"]["options"]["rounds"], 3)
++        self.assertEqual(frozen["submission"]["options"]["package"], "com.fixture.game")
++        self.assertEqual(frozen["device"]["expected_serial"], "fixture-serial")
++        self.assertIn("game_ab", app.FEATURES)
++        self.commands.assert_not_called()
++
++    def test_invalid_options_and_eval_request_are_rejected(self):
++        """Reject invalid wrapper options and mixed operation protocols."""
++        devices = app.load_devices(self.config)
++        for body in (
++            {"operation": "game-ab", "options": []},
++            {"operation": "game-ab", "request": {"version": 2, "kind": "shader"}},
++        ):
++            with self.subTest(body=body), self.assertRaises((TypeError, ValueError)):
++                app.prepare_submission(body, devices)
++        self.commands.assert_not_called()
++
++    def test_queue_freezes_layer_and_reuses_idempotent_submission(self):
++        """A game job shares probe serialization and retains its original layer."""
++        entered, release = self.gate(), self.gate()
++
++        def runner(folder):
++            entered.set()
++            release.wait(3)
++            return 0
++
++        engine = self.engine(runner)
++        engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        body = {"operation": "game-ab", "idempotency_key": "a" * 64}
++        job = engine.submit(body)
++        self.assertEqual(engine.get(job["id"])["state"], "queued")
++        folder = engine.jobs / job["id"]
++        frozen = app.read_json(folder / "input.json")
++        layer = Path(frozen["submission"]["options"]["layer_path"])
++        self.layer.write_bytes(b"changed outside the queue")
++        self.assertEqual(layer.read_bytes(), b"fixture upstream layer")
++        self.assertEqual(frozen["submitted_body"], {"operation": "game-ab"})
++        app.verify_frozen_inputs(folder, frozen)
++        self.assertEqual(engine.submit(body)["id"], job["id"])
++        self.wrapper.freeze_inputs.assert_called_once()
++        with self.assertRaises(app.SubmissionConflict):
++            engine.submit({**body, "options": {"rounds": 3}})
++        self.assertEqual(engine.cancel(job["id"])["state"], "cancelled")
++        self.commands.assert_not_called()
++
++    def test_freeze_failure_never_publishes_a_job(self):
++        """A missing layer cannot become accepted queue work."""
++        engine = self.engine(lambda _: self.fail("Unexpected execution"))
++        self.wrapper.freeze_inputs.side_effect = FileNotFoundError("fixture layer missing")
++        with self.assertRaises(FileNotFoundError):
++            engine.submit({"operation": "game-ab", "idempotency_key": "a" * 64})
++        self.assertFalse(list(engine.jobs.glob("*/job.json")))
++        with self.assertRaises(KeyError):
++            engine.get_by_key("a" * 64)
++
++    def test_tampered_layer_is_rejected_before_device_work(self):
++        """Reuse the executor's file verifier for game layer snapshots."""
++        folder = self.folder()
++        frozen = app.read_json(folder / "input.json")
++        layer = Path(frozen["submission"]["options"]["layer_path"])
++        layer.chmod(0o644)
++        layer.write_bytes(b"tampered")
++        with patch.object(app, "sync_registry") as registry:
++            with self.assertRaises(app.BackendNotStarted):
++                app.run_backend(folder)
++            registry.assert_not_called()
++        self.commands.assert_not_called()
++
++    def test_backend_validates_game_options_without_eval_preflight(self):
++        """Game jobs enter the existing lease after wrapper-only validation."""
++        folder = self.folder()
++        self.wrapper.validate_options.reset_mock()
++
++        def worker(argv, **kwargs):
++            self.assertEqual(argv[:2], ["phonefarm", "lease"])
++            self.assertNotIn("--validate-only", argv)
++            self.receipts(folder)
++            return subprocess.CompletedProcess(argv, 0)
++
++        with patch.object(app, "sync_registry") as registry:
++            with patch.object(app, "command", side_effect=worker) as command:
++                self.assertEqual(app.run_backend(folder), 0)
++                command.assert_called_once()
++            registry.assert_called_once()
++        self.wrapper.validate_options.assert_called_once_with(
++            app.read_json(folder / "input.json")["submission"]["options"]
++        )
++        self.assertFalse((folder / "eval-request.json").exists())
++
++    def test_backend_validation_failure_is_safe_preflight_failure(self):
++        """Invalid persisted options cannot reach registry or device commands."""
++        folder = self.folder()
++        self.wrapper.validate_options.side_effect = ValueError("invalid game options")
++        with patch.object(app, "sync_registry") as registry:
++            with self.assertRaisesRegex(app.BackendNotStarted, "invalid game options"):
++                app.run_backend(folder)
++            registry.assert_not_called()
++        self.commands.assert_not_called()
++
++    def device_worker(self, folder, previous, result="valid", serial="fixture-serial", window=None, activity="", cleanup=None):
++        """Run the device worker with fully intercepted ADB and wrapper calls.
++
++        Args:
++            folder: Frozen fixture job directory.
++            previous: Foreground activity reported by the fixture phone.
++            result: Wrapper report fixture, valid, missing, or malformed.
++            serial: Physical identity returned by the fixture transport.
++            window: Optional exact window dump, including null focus.
++            activity: Exact activity dump used only by fallback identification.
++            cleanup: Optional upstream cleanup receipt.
++
++        Returns:
++            Worker exit code and intercepted command arguments.
++        """
++        calls = []
++        self.device_calls = calls
++
++        def command(argv, **kwargs):
++            calls.append(argv)
++            stdout = ""
++            if argv[0] == sys.executable:
++                self.assertEqual(
++                    argv, [sys.executable, "/opt/gateway/adapter/game_ab.py", "--job", str(folder)]
++                )
++                self.assertTrue(kwargs["pf"])
++                kwargs["stdout"].write("Upstream progress and Markdown, not JSON\n")
++                if result == "valid":
++                    self.receipts(folder)
++                elif result == "malformed":
++                    (folder / "result.json").write_text("[]")
++                elif isinstance(result, dict):
++                    app.write_json(folder / "result.json", result)
++                if cleanup is not None:
++                    (folder / "evidence").mkdir(exist_ok=True)
++                    app.write_json(folder / "evidence/restore.json", cleanup)
++                return subprocess.CompletedProcess(argv, 1)
++            self.assertEqual(argv[0], "/usr/bin/adb")
++            if argv[-1] == "get-state":
++                stdout = "device\n"
++            elif argv[-1] == "ro.serialno":
++                stdout = serial + "\n"
++            elif argv[-1] == "dumpsys window":
++                stdout = window if window is not None else f"mCurrentFocus=Window{{1 u0 {previous}}}"
++            elif argv[-1] == "dumpsys activity activities":
++                stdout = activity
++            elif "start" in argv:
++                stdout = "Status: ok\n"
++            return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
++
++        with (
++            patch.object(app, "inherited_fds", return_value=(1,)),
++            patch.object(app, "command", side_effect=command),
++        ):
++            return app.execute_on_device(folder), calls
++
++    def test_device_worker_reads_file_and_restores_other_foreground(self):
++        """Non-JSON stdout never replaces the wrapper's diagnostic envelope."""
++        folder = self.folder(pause_foreground=True)
++        code, calls = self.device_worker(folder, "com.fixture.other/.Main")
++        self.assertEqual(code, 1)
++        report = app.read_json(folder / "result.json")
++        self.assertIs(report["candidate_applied"], False)
++        self.assertNotIn("score", report)
++        self.assertTrue(app.cleanup_completed(folder, "game-ab"))
++        self.assertTrue(any("force-stop" in argv for argv in calls))
++        self.assertEqual(calls[-1][-2:], ["-n", "com.fixture.other/.Main"])
++        self.assertIn("not JSON", (folder / "backend.stdout").read_text())
++
++    def test_target_package_uses_normal_foreground_policy(self):
++        """The game package is not mistaken for the default refbench target."""
++        folder = self.folder(pause_foreground=True)
++        _, calls = self.device_worker(folder, "com.fixture.game/.Main")
++        self.assertFalse(any("force-stop" in argv or "start" in argv for argv in calls))
++        self.assertTrue(app.cleanup_completed(folder, "game-ab"))
++
++    def test_missing_report_defers_foreground_restore(self):
++        """A missing wrapper receipt leaves native ownership unconfirmed."""
++        folder = self.folder()
++        with self.assertRaises(FileNotFoundError):
++            self.device_worker(folder, "com.fixture.other/.Main", result="missing")
++        self.assertIsNone(app.read_json(folder / "foreground.json")["restored"])
++        self.assertFalse(any("start" in argv for argv in self.device_calls))
++        self.assertFalse(app.cleanup_completed(folder, "game-ab"))
++
++    def test_non_object_report_is_rejected_and_preserved(self):
++        """Malformed report evidence survives a failed wrapper execution."""
++        folder = self.folder()
++        with self.assertRaisesRegex(ValueError, "JSON object"):
++            self.device_worker(folder, "com.fixture.other/.Main", result="malformed")
++        self.assertEqual((folder / "result.json").read_text(), "[]")
++        self.assertIsNone(app.read_json(folder / "foreground.json")["restored"])
++        self.assertFalse(any("start" in argv for argv in self.device_calls))
++
++    def test_null_focus_uses_exact_resumed_activity_fields(self):
++        """Recognize Android 15 resumed records without using paused history."""
++        base = self.folder()
++        component = "com.fixture.other/com.fixture.MainActivity"
++        for index, fields in enumerate((
++            ("topResumedActivity=",), ("mResumedActivity:",),
++            ("ResumedActivity:",), ("Resumed:",), ("Resumed:", "ResumedActivity:"),
++        )):
++            with self.subTest(fields=fields):
++                folder = base / str(index)
++                folder.mkdir()
++                (folder / "input.json").write_bytes((base / "input.json").read_bytes())
++                window = "  mCurrentFocus=null\n"
++                activity = "Resumed activities in task display areas (from top to bottom):\n"
++                activity += "\n".join(f"    {field} ActivityRecord{{123 u0 {component} t109}}" for field in fields)
++                activity += "\n  mLastPausedActivity: ActivityRecord{456 u0 com.stale/.Old t3}\n"
++                _, calls = self.device_worker(folder, None, window=window, activity=activity)
++                receipt = app.read_json(folder / "foreground.json")
++                self.assertEqual(receipt["previous"], component)
++                self.assertEqual(receipt["source"], "activity")
++                self.assertEqual((folder / "foreground-window.txt").read_text(), window)
++                self.assertEqual((folder / "foreground-activity.txt").read_text(), activity)
++                self.assertEqual(calls[-1][-2:], ["-n", component])
++                self.assertTrue(app.cleanup_completed(folder, "game-ab"))
++
++    def test_window_foreground_has_priority(self):
++        """A valid current focus requires no activity fallback."""
++        folder = self.folder()
++        window = "  mCurrentFocus=Window{123 u0 com.fixture.game/.Main}\n"
++        _, calls = self.device_worker(folder, None, window=window, activity="Resumed: com.stale/.Old")
++        receipt = app.read_json(folder / "foreground.json")
++        self.assertEqual(receipt["previous"], "com.fixture.game/.Main")
++        self.assertEqual(receipt["source"], "window")
++        self.assertEqual((folder / "foreground-window.txt").read_text(), window)
++        self.assertFalse(any(argv[-1] == "dumpsys activity activities" for argv in calls))
++        self.assertFalse((folder / "foreground-activity.txt").exists())
++
++    def test_unknown_or_ambiguous_foreground_remains_unknown(self):
++        """Paused history and conflicting resumed components cannot prove a foreground."""
++        base = self.folder()
++        for index, activity in enumerate((
++            "", "mLastPausedActivity: ActivityRecord{123 u0 com.stale/.Old t3}\n",
++            "Resumed: ActivityRecord{123 u0 com.one/.Main t1}\nResumedActivity: ActivityRecord{456 u0 com.two/.Main t2}\n",
++        )):
++            with self.subTest(activity=activity):
++                folder = base / str(index)
++                folder.mkdir()
++                (folder / "input.json").write_bytes((base / "input.json").read_bytes())
++                _, calls = self.device_worker(folder, None, window="mCurrentFocus=null\n", activity=activity)
++                receipt = app.read_json(folder / "foreground.json")
++                self.assertIsNone(receipt["previous"])
++                self.assertIsNone(receipt["restore_required"])
++                self.assertIsNone(receipt["restored"])
++                self.assertFalse(any("start" in argv for argv in calls))
++                self.assertFalse(app.cleanup_completed(folder, "game-ab"))
++                self.assertEqual((folder / "foreground-activity.txt").read_text(), activity)
++
++    def test_existing_foreground_raw_is_never_overwritten(self):
++        """A fresh execution must not replace or reuse another observation."""
++        folder = self.folder()
++        raw = folder / "foreground-window.txt"
++        raw.write_text("old observation")
++        with self.assertRaises(FileExistsError):
++            self.device_worker(folder, "com.fixture.game/.Main")
++        self.assertEqual(raw.read_text(), "old observation")
++        self.assertFalse(any(argv[0] == sys.executable for argv in self.device_calls))
++
++    def test_unconfirmed_game_cleanup_blocks_foreground_mutation(self):
++        """Outer finally cannot compete with an unconfirmed native owner."""
++        base = self.folder()
++        cases = (
++            ({"conditions_observed": {"restored": False}}, None),
++            ({"conditions_observed": {"restored": True}, "recovery_unknown": True}, None),
++            ({"conditions_observed": {"restored": True}}, {"recovery_unknown": True, "restoration_deferred": True}),
++        )
++        for index, (report, cleanup) in enumerate(cases):
++            with self.subTest(index=index):
++                folder = base / str(index)
++                folder.mkdir()
++                (folder / "input.json").write_bytes((base / "input.json").read_bytes())
++                _, calls = self.device_worker(folder, "com.fixture.other/.Main", result=report, cleanup=cleanup)
++                receipt = app.read_json(folder / "foreground.json")
++                self.assertIs(receipt["restore_required"], True)
++                self.assertIsNone(receipt["restored"])
++                self.assertTrue(receipt["restore_blocked"])
++                self.assertFalse(any("start" in argv for argv in calls))
++                self.assertFalse(app.cleanup_completed(folder, "game-ab"))
++
++    def test_identity_mismatch_prevents_wrapper_execution(self):
++        """The new operation retains physical phone identity enforcement."""
++        folder = self.folder()
++        with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
++            self.device_worker(folder, "com.fixture.game/.Main", serial="wrong-phone")
++        self.assertFalse((folder / "backend-command.json").exists())
++
++    def test_running_cancel_remains_pending_until_wrapper_cleanup(self):
++        """The wrapper observes durable cancellation before the queue releases it."""
++        entered, release = self.gate(), self.gate()
++
++        def runner(folder):
++            entered.set()
++            release.wait(3)
++            self.assertEqual(app.read_json(folder / "job.json")["state"], "cancel_requested")
++            self.receipts(folder)
++            return 0
++
++        engine = self.engine(runner)
++        job = engine.submit({"operation": "game-ab", "idempotency_key": "a" * 64})
++        self.assertTrue(entered.wait(1))
++        self.assertEqual(engine.cancel(job["id"])["state"], "cancel_requested")
++        release.set()
++        done = self.wait(engine, job["id"])
++        self.assertEqual((done["state"], done["cleanup_status"]), ("cancelled", "completed"))
++
++    def test_uncertain_restoration_stays_quarantined_across_restart(self):
++        """A game report cannot release queued work without confirmed cleanup."""
++        def runner(folder):
++            self.receipts(folder, restored=False)
++            return 0
++
++        engine = self.engine(runner)
++        job = engine.submit({"operation": "game-ab", "idempotency_key": "a" * 64})
++        self.assertEqual(self.wait(engine, job["id"])["state"], "uncertain")
++        queued = engine.submit({"operation": "probe"})
++        engine.close()
++        self.engines.remove(engine)
++        reopened = self.engine(lambda _: self.fail("Unexpected replay"))
++        self.assertEqual(reopened.get_by_key("a" * 64)["id"], job["id"])
++        self.assertEqual(reopened.get(queued["id"])["state"], "queued")
++        self.assertEqual(reopened.health()["blocked_jobs"], [job["id"]])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_executor_compat.py b/tests/test_executor_compat.py
+--- a/tests/test_executor_compat.py
++++ b/tests/test_executor_compat.py
+@@ -156,7 +156,7 @@
+         for path in ("/health", "/v1/health"):
+             status, health = self.request(engine, "GET", path)
+             self.assertEqual(status, 200)
+-            self.assertEqual(health["features"], ["idempotent_submit", "job_lookup", "cancel"])
++            self.assertEqual(health["features"], ["idempotent_submit", "job_lookup", "cancel", "game_ab"])
+         self.assertEqual(self.request(engine, "POST", "/v1/jobs/" + "f" * 32 + "/cancel")[0], 404)
+ 
+     def test_queued_cancel_is_immediate_and_never_runs(self):
+diff --git a/tools/experiments/build_present_candidate.py b/tools/experiments/build_present_candidate.py
+--- a/tools/experiments/build_present_candidate.py
++++ b/tools/experiments/build_present_candidate.py
+@@ -21,7 +21,9 @@
+     parser.add_argument("--ndk", type=Path, required=True)
+     parser.add_argument("--phonefarm", type=Path, required=True)
+     parser.add_argument("--out", type=Path, required=True)
+-    parser.add_argument("--kind", choices=("seed", "diagnostic"), required=True)
++    parser.add_argument("--kind", choices=("seed", "diagnostic", "candidate"), required=True)
++    parser.add_argument("--phonefarm-root", type=Path)
++    parser.add_argument("--mode", choices=("native", "resize"), default="native")
+     args = parser.parse_args()
+     ndk = args.ndk.resolve(strict=True)
+     phonefarm = args.phonefarm.resolve(strict=True)
+@@ -54,7 +56,7 @@
+     gray = out / "gray"
+     repository = Path(__file__).resolve().parents[2]
+     shutil.copytree(
+-        repository / "vendor/hgamey/phonefarm/knobs/gray", gray,
++        (args.phonefarm_root or repository / "vendor/hgamey/phonefarm") / "knobs/gray", gray,
+         ignore=shutil.ignore_patterns("out", "__pycache__"),
+     )
+     env = dict(os.environ, REFBENCH_NDK=str(ndk))
+@@ -101,7 +103,8 @@
+     frozen += [gray / "build/layer_build.json", gray / "build/build_layer.sh"]
+     manifest = {
+         "schema": "llm4ad/experimental-present-candidate@1",
+-        "kind": args.kind, "scope": "same_extent_present_stage_postprocessing",
++        "kind": args.kind, "scope": ("game_present_upscaling" if args.mode == "resize"
++                                      else "same_extent_present_stage_postprocessing"),
+         "original_game_upscaler_replaced": False, "device_validation": "not_run",
+         "source_sha256": digest(source), "adapted_spirv_sha256": digest(adapted),
+         "layer_sha256": digest(layer),
+diff --git a/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp b/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp
+--- a/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp
++++ b/vendor/hgamey/phonefarm/knobs/gray/layer/selfsr.cpp
+@@ -700,7 +700,7 @@
+     json += ",\"submissions_completed\":" + std::to_string(g_completed);
+     json += ",\"presents_succeeded\":" + std::to_string(g_presents);
+     json += ",\"last_result\":" + std::to_string(static_cast<int>(g_last_result));
+-    if (g_native) {
++    if (g_native || strlen(kSelfsrCandidateSourceSha256) == 64) {
+         json += std::string(",\"candidate_source_sha256\":\"") + kSelfsrCandidateSourceSha256 + "\"";
+         json += std::string(",\"candidate_spirv_sha256\":\"") + kSelfsrCandidateSpirvSha256 + "\"";
+         json += std::string(",\"candidate_kind\":\"") + kSelfsrCandidateKind + "\"";
+diff --git a/vendor/hgamey/phonefarm/src/capture.rs b/vendor/hgamey/phonefarm/src/capture.rs
+--- a/vendor/hgamey/phonefarm/src/capture.rs
++++ b/vendor/hgamey/phonefarm/src/capture.rs
+@@ -45,10 +45,17 @@
+     recover: Option<String>,
+     evidence_origin: String,
+     timeout_s: u64,
++    #[serde(default = "default_screenshot_timeout_ms")]
++    screenshot_timeout_ms: u64,
++}
++
++fn default_screenshot_timeout_ms() -> u64 {
++    15_000
+ }
+ 
+ const USAGE: &str = "用法: phonefarm capture --serial <设备> [--out <目录>] [--frames 200] [--max-steps N] [--settle-ms 800]\n\
+       [--mode auto|navigate|dialogue] [--no-shutdown] [--ready-only] [--json] [--timeout-s 3600]\n\
++      [--screenshot-timeout-ms 15000] (1..60000; outer --timeout-s still applies)\n\
+       phonefarm capture --serial <设备> --recover <session目录> [--json]\n\
+       [--evidence-origin device|synthetic]\n\
+       --ready-only: 最多观察8次，只取1帧，不启动/导航/强停游戏；恢复原stayon仍可能写设备。\n\
+@@ -68,6 +75,7 @@
+         recover: None,
+         evidence_origin: "device".into(),
+         timeout_s: 3600,
++        screenshot_timeout_ms: default_screenshot_timeout_ms(),
+     };
+     let need = |args: &[String], i: usize, name: &str| -> Result<String, String> {
+         args.get(i + 1)
+@@ -126,6 +134,12 @@
+                     .map_err(|_| "--timeout-s 需为整数")?;
+                 i += 1;
+             }
++            "--screenshot-timeout-ms" => {
++                a.screenshot_timeout_ms = need(args, i, "--screenshot-timeout-ms")?
++                    .parse()
++                    .map_err(|_| "--screenshot-timeout-ms must be an integer")?;
++                i += 1;
++            }
+             other => return Err(format!("无法识别的参数 '{other}'\n{USAGE}")),
+         }
+         i += 1;
+@@ -149,6 +163,7 @@
+     if !(1..=86400).contains(&a.timeout_s) {
+         return Err("--timeout-s 必须为 1..86400".into());
+     }
++    crate::capture_worker::validate_screenshot_timeout_ms(a.screenshot_timeout_ms)?;
+     if a.recover.is_some() && a.out.is_some() {
+         return Err("--recover 使用已有session，不与 --out 混用".into());
+     }
+@@ -327,7 +342,7 @@
+         if a.out.as_deref() != dir.join("frames").to_str() || state["shutdown"] != a.shutdown {
+             return Err("capture request differs from session".into());
+         }
+-        let worker = crate::capture_worker::Worker::open(&dir)?;
++        let worker = crate::capture_worker::Worker::open(&dir, a.screenshot_timeout_ms)?;
+         let captured = capture(&a, &worker, || worker.png());
+         let closed = worker.close();
+         let captured = captured?;
+@@ -576,6 +591,36 @@
+     }
+ 
+     #[test]
++    fn screenshot_timeout_defaults_bounds_and_request_roundtrip() {
++        let defaults = parse_args(&["--serial".into(), "X".into()]).unwrap();
++        assert_eq!(defaults.screenshot_timeout_ms, 15_000);
++        for timeout in [1, 15_000, 45_000, 60_000] {
++            let args = parse_args(&[
++                "--serial".into(), "X".into(), "--ready-only".into(),
++                "--timeout-s".into(), "120".into(),
++                "--screenshot-timeout-ms".into(), timeout.to_string(),
++            ]).unwrap();
++            let request = serde_json::to_vec(&args).unwrap();
++            let restored: CaptureArgs = serde_json::from_slice(&request).unwrap();
++            assert_eq!(restored.screenshot_timeout_ms, timeout);
++            assert_eq!(restored.timeout_s, 120);
++        }
++        for invalid in ["0", "60001", "-1", "1.5", "invalid", "18446744073709551616"] {
++            assert!(parse_args(&[
++                "--serial".into(), "X".into(),
++                "--screenshot-timeout-ms".into(), invalid.into(),
++            ]).is_err(), "{invalid}");
++        }
++        assert!(parse_args(&[
++            "--serial".into(), "X".into(), "--screenshot-timeout-ms".into(),
++        ]).is_err());
++        let mut legacy = serde_json::to_value(defaults).unwrap();
++        legacy.as_object_mut().unwrap().remove("screenshot_timeout_ms");
++        let restored: CaptureArgs = serde_json::from_value(legacy).unwrap();
++        assert_eq!(restored.screenshot_timeout_ms, 15_000);
++    }
++
++    #[test]
+     fn ready_only_returns_without_starting_or_cruising() {
+         struct ObserveOnly;
+         impl QuestDevice for ObserveOnly {
+diff --git a/vendor/hgamey/phonefarm/src/capture_worker.rs b/vendor/hgamey/phonefarm/src/capture_worker.rs
+--- a/vendor/hgamey/phonefarm/src/capture_worker.rs
++++ b/vendor/hgamey/phonefarm/src/capture_worker.rs
+@@ -28,6 +28,14 @@
+     fatal: RefCell<Option<String>>,
+     gamepad: RefCell<Option<Gamepad>>,
+     sequence: Cell<u64>,
++    screenshot_timeout_ms: u64,
++}
++
++pub(crate) fn validate_screenshot_timeout_ms(ms: u64) -> Result<(), String> {
++    if !(1..=60_000).contains(&ms) {
++        return Err("--screenshot-timeout-ms must be in 1..=60000".into());
++    }
++    Ok(())
+ }
+ 
+ fn validate_session(state: &Value) -> Result<(), String> {
+@@ -92,8 +100,9 @@
+ 
+ impl Worker {
+     /// The entry point must install lease_command::worker_guard before this call.
+-    pub fn open(dir: &Path) -> Result<Self, String> {
++    pub fn open(dir: &Path, screenshot_timeout_ms: u64) -> Result<Self, String> {
+         crate::lease_command::worker_remaining()?;
++        validate_screenshot_timeout_ms(screenshot_timeout_ms)?;
+         let mut bytes = Vec::new();
+         File::open(dir.join("session.json"))
+             .map_err(|e| e.to_string())?
+@@ -125,6 +134,7 @@
+             fatal: RefCell::new(None),
+             gamepad: RefCell::new(None),
+             sequence: Cell::new(0),
++            screenshot_timeout_ms,
+         })
+     }
+ 
+@@ -288,7 +298,7 @@
+ 
+     pub fn png(&self) -> Result<Vec<u8>, String> {
+         self.check()?;
+-        let bytes = self.raw(&["exec-out", "screencap", "-p"], 15_000)?;
++        let bytes = self.raw(&["exec-out", "screencap", "-p"], self.screenshot_timeout_ms)?;
+         if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+             return self.fail("capture screencap did not return PNG");
+         }
+@@ -398,6 +408,71 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    #[test]
++    fn png_uses_configured_timeout_and_preserves_uncertainty() {
++        const FIXTURE_DIR: &str = "PF_CAPTURE_SCREENSHOT_TIMEOUT_TEST_DIR";
++        const FIXTURE_TIMEOUT: &str = "PF_CAPTURE_SCREENSHOT_TIMEOUT_TEST_MS";
++        if let Some(dir) = std::env::var_os(FIXTURE_DIR) {
++            let dir = PathBuf::from(dir);
++            let worker = Worker {
++                adb: dir.join("fake-transport").to_string_lossy().into_owned(),
++                serial: "synthetic".into(),
++                hid_name: "synthetic".into(),
++                group: std::process::id() as i32,
++                state: RefCell::new(json!({
++                    "transport_uncertain": false, "write_pending": null, "hid_started": false,
++                })),
++                fatal: RefCell::new(None),
++                gamepad: RefCell::new(None),
++                sequence: Cell::new(0),
++                screenshot_timeout_ms: std::env::var(FIXTURE_TIMEOUT).unwrap().parse().unwrap(),
++                dir,
++            };
++            assert_eq!(worker.png().unwrap(), b"\x89PNG\r\n\x1a\n");
++            return;
++        }
++        let root = std::env::temp_dir().join(format!(
++            "pf-capture-screenshot-timeout-{}", std::process::id(),
++        ));
++        for timeout in [45_000_u64, 1] {
++            let dir = root.join(timeout.to_string());
++            fs::create_dir_all(dir.join("worker-commands")).unwrap();
++            let fake = dir.join("fake-transport");
++            // A local producer exercises the real proxy without contacting a device.
++            fs::write(&fake, b"#!/bin/sh\nsleep 0.1\nprintf '\\211PNG\\r\\n\\032\\n'\n").unwrap();
++            fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
++            let output = std::process::Command::new(std::env::current_exe().unwrap())
++                .args(["--exact", "capture_worker::tests::png_uses_configured_timeout_and_preserves_uncertainty"])
++                .env(FIXTURE_DIR, &dir)
++                .env(FIXTURE_TIMEOUT, timeout.to_string())
++                .env_remove("PF_TRANSPORT_LIFELINE")
++                .env_remove("PF_TRANSPORT_PATH")
++                .env_remove("ADB_BIN")
++                .env_remove("HDC_BIN")
++                // Timeout cleanup must only target this isolated fixture group.
++                .process_group(0)
++                .output()
++                .unwrap();
++            let intent = fs::read_dir(dir.join("worker-commands")).unwrap()
++                .map(|entry| entry.unwrap().path())
++                .find(|path| path.extension().is_some_and(|ext| ext == "json"))
++                .unwrap();
++            let record: Value = serde_json::from_slice(&fs::read(intent).unwrap()).unwrap();
++            assert_eq!(record["timeout_ms"], timeout);
++            assert_eq!(record["argv"], json!(["exec-out", "screencap", "-p"]));
++            if timeout == 1 {
++                assert_eq!(output.status.signal(), Some(libc::SIGKILL));
++                assert!(record["exit"].is_null());
++                let state: Value = serde_json::from_slice(&fs::read(dir.join("session.json")).unwrap()).unwrap();
++                assert_eq!(state["transport_uncertain"], true);
++            } else {
++                assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++                assert_eq!(record["exit"], 0);
++            }
++        }
++        fs::remove_dir_all(root).unwrap();
++    }
+ 
+     #[test]
+     fn initial_session_rejects_pending_or_reused_input() {

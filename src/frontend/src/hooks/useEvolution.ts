@@ -14,6 +14,7 @@ export interface SelectedNodeInfo {
   fileName: string
   score: number
   rawScore: number
+  unscored?: boolean
   parentIds: string[]
 }
 

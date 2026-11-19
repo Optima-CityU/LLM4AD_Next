@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from llm4ad.config.evolution import IslandGAConfig
 from llm4ad.infra.state import EvolutionState
+from llm4ad.orchestrator.base import EvolutionCheckpoint
 from llm4ad.orchestrator.island_ga import IslandGAOrchestrator
 from llm4ad.planner.base import Algorithm, EvaluationResult, InsightType
 
@@ -138,3 +139,45 @@ def test_step_stop_reports_the_completed_step_before_cursor_increment():
     assert result.total_evaluations == 27
     assert orchestrator.current_generation == 1
     assert checkpoint_cursors == []
+
+
+def test_resumed_population_preserves_progress_and_tracker_history():
+    """Continue saved generations without resetting history or sampling a baseline."""
+    orchestrator, generated_counts, _ = _orchestrator()
+    asyncio.run(orchestrator.initialize_population())
+    orchestrator.current_generation = 17
+    orchestrator.history = [{"generation": 16, "best_score": 1.0}]
+    saved_metrics = [{"generation": 16}]
+    orchestrator.state_tracker.metrics_history = saved_metrics
+    orchestrator.state_tracker.start_run.reset_mock()
+
+    result = asyncio.run(orchestrator.run())
+
+    assert result.final_generation == 20
+    assert [entry["generation"] for entry in result.history] == [16, 17, 18, 19, 20]
+    assert generated_counts == Counter({0: 15, 17: 12, 18: 12, 19: 12, 20: 12})
+    orchestrator.state_tracker.start_run.assert_not_called()
+    assert orchestrator.state_tracker.metrics_history is saved_metrics
+
+
+def test_checkpoint_restores_a_typed_best_individual(tmp_path):
+    """Restore saved algorithm objects before comparing scores after a restart."""
+    original, _, _ = _orchestrator()
+    asyncio.run(original.initialize_population())
+    checkpoint = EvolutionCheckpoint(
+        generation=17,
+        population=original._get_global_population(),
+        best_individual=original.global_best_individual,
+        history=[{"generation": 16, "best_score": 1.0}],
+        metadata={"islands": [island.model_dump() for island in original.islands]},
+    )
+    path = tmp_path / "resume.json"
+    path.write_text(checkpoint.model_dump_json())
+    restored, generated, _ = _orchestrator()
+
+    asyncio.run(restored.load_checkpoint(str(path)))
+
+    assert isinstance(restored.global_best_individual, Algorithm)
+    result = asyncio.run(restored.run())
+    assert result.final_generation == 20
+    assert set(generated) == {17, 18, 19, 20}

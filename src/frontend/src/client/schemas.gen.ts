@@ -2541,6 +2541,302 @@ export const EmbeddingProviderUpdateSchema = {
     description: 'Embedding 供应商更新请求（所有字段均可选）。'
 } as const;
 
+export const EvaluationDetailSchema = {
+    properties: {
+        record: {
+            '$ref': '#/components/schemas/EvaluationRecord'
+        },
+        summary: {
+            '$ref': '#/components/schemas/EvaluationSummary'
+        },
+        available_artifact_ids: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Available Artifact Ids'
+        }
+    },
+    type: 'object',
+    required: ['record', 'summary'],
+    title: 'EvaluationDetail',
+    description: 'Combine a saved record with optional live gateway progress.'
+} as const;
+
+export const EvaluationFileSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        sha256: {
+            type: 'string',
+            title: 'Sha256'
+        },
+        size: {
+            type: 'integer',
+            title: 'Size'
+        },
+        media_type: {
+            type: 'string',
+            title: 'Media Type',
+            default: 'application/octet-stream'
+        },
+        description: {
+            type: 'string',
+            title: 'Description',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'sha256', 'size'],
+    title: 'EvaluationFile',
+    description: 'Describe an immutable saved file without exposing local paths.'
+} as const;
+
+export const EvaluationListSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/EvaluationSummary'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        },
+        page: {
+            type: 'integer',
+            title: 'Page'
+        },
+        page_size: {
+            type: 'integer',
+            title: 'Page Size'
+        },
+        storage_available: {
+            type: 'boolean',
+            title: 'Storage Available',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['data', 'count', 'page', 'page_size'],
+    title: 'EvaluationList',
+    description: 'Return a filtered page of immutable evaluation identities.'
+} as const;
+
+export const EvaluationRecordSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        task_id: {
+            type: 'string',
+            title: 'Task Id',
+            default: ''
+        },
+        execution_id: {
+            type: 'string',
+            title: 'Execution Id',
+            default: ''
+        },
+        algorithm_id: {
+            type: 'string',
+            title: 'Algorithm Id',
+            default: ''
+        },
+        algorithm_name: {
+            type: 'string',
+            title: 'Algorithm Name',
+            default: ''
+        },
+        source_fingerprint: {
+            type: 'string',
+            title: 'Source Fingerprint',
+            default: ''
+        },
+        evaluation_profile: {
+            type: 'string',
+            title: 'Evaluation Profile',
+            default: 'standard'
+        },
+        instance_id: {
+            type: 'string',
+            title: 'Instance Id',
+            default: ''
+        },
+        origin: {
+            type: 'string',
+            title: 'Origin',
+            default: 'local'
+        },
+        state: {
+            type: 'string',
+            title: 'State',
+            default: 'completed'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        storage_state: {
+            type: 'string',
+            title: 'Storage State',
+            default: 'pending'
+        },
+        storage_errors: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Storage Errors'
+        },
+        result: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Result'
+        },
+        artifacts: {
+            items: {
+                '$ref': '#/components/schemas/EvaluationFile'
+            },
+            type: 'array',
+            title: 'Artifacts'
+        },
+        remote_job_id: {
+            type: 'string',
+            title: 'Remote Job Id',
+            default: ''
+        },
+        remote_attempt_id: {
+            type: 'string',
+            title: 'Remote Attempt Id',
+            default: ''
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_at'],
+    title: 'EvaluationRecord',
+    description: 'Store one candidate, source version, profile and instance evaluation.'
+} as const;
+
+export const EvaluationSummarySchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        algorithm_id: {
+            type: 'string',
+            title: 'Algorithm Id',
+            default: ''
+        },
+        algorithm_name: {
+            type: 'string',
+            title: 'Algorithm Name',
+            default: ''
+        },
+        execution_id: {
+            type: 'string',
+            title: 'Execution Id',
+            default: ''
+        },
+        evaluation_profile: {
+            type: 'string',
+            title: 'Evaluation Profile',
+            default: 'standard'
+        },
+        instance_id: {
+            type: 'string',
+            title: 'Instance Id',
+            default: ''
+        },
+        source_fingerprint: {
+            type: 'string',
+            title: 'Source Fingerprint',
+            default: ''
+        },
+        origin: {
+            type: 'string',
+            title: 'Origin',
+            default: 'local'
+        },
+        state: {
+            type: 'string',
+            title: 'State',
+            default: 'completed'
+        },
+        created_at: {
+            type: 'string',
+            title: 'Created At'
+        },
+        storage_state: {
+            type: 'string',
+            title: 'Storage State',
+            default: 'saved'
+        },
+        score: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Score'
+        },
+        artifact_count: {
+            type: 'integer',
+            title: 'Artifact Count',
+            default: 0
+        },
+        transfer_pending: {
+            type: 'boolean',
+            title: 'Transfer Pending',
+            default: false
+        },
+        gateway_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Name'
+        },
+        gateway_online: {
+            anyOf: [
+                {
+                    type: 'boolean'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Online'
+        },
+        progress: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Progress'
+        }
+    },
+    type: 'object',
+    required: ['id', 'created_at'],
+    title: 'EvaluationSummary',
+    description: 'Describe one evaluation in the task workbench.'
+} as const;
+
 export const ExampleTemplateConfigItemSchema = {
     properties: {
         name: {
@@ -3534,6 +3830,64 @@ export const FolderRenameRequestSchema = {
     description: '文件夹重命名请求。'
 } as const;
 
+export const GatewayViewSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        contract: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Contract'
+        },
+        contract_key: {
+            type: 'string',
+            title: 'Contract Key'
+        },
+        capacity: {
+            type: 'integer',
+            title: 'Capacity'
+        },
+        online: {
+            type: 'boolean',
+            title: 'Online'
+        },
+        last_seen: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Last Seen'
+        },
+        running: {
+            type: 'integer',
+            title: 'Running'
+        },
+        queued: {
+            type: 'integer',
+            title: 'Queued'
+        },
+        protocol_version: {
+            type: 'integer',
+            title: 'Protocol Version',
+            default: 1
+        },
+        ready: {
+            type: 'boolean',
+            title: 'Ready',
+            default: true
+        }
+    },
+    type: 'object',
+    required: ['id', 'name', 'contract', 'contract_key', 'capacity', 'online', 'last_seen', 'running', 'queued'],
+    title: 'GatewayView',
+    description: 'Public metadata visible only to allowed users.'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {
@@ -3546,6 +3900,101 @@ export const HTTPValidationErrorSchema = {
     },
     type: 'object',
     title: 'HTTPValidationError'
+} as const;
+
+export const JobViewSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        state: {
+            type: 'string',
+            title: 'State'
+        },
+        gateway_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Id'
+        },
+        gateway_name: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Gateway Name'
+        },
+        evaluator_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Evaluator Id'
+        },
+        gateway_online: {
+            type: 'boolean',
+            title: 'Gateway Online'
+        },
+        report: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Report'
+        },
+        updated_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Updated At'
+        },
+        attempt_count: {
+            type: 'integer',
+            title: 'Attempt Count',
+            default: 0
+        },
+        max_attempts: {
+            type: 'integer',
+            title: 'Max Attempts',
+            default: 1
+        },
+        failure_category: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Failure Category'
+        },
+        attempt_history: {
+            items: {
+                additionalProperties: true,
+                type: 'object'
+            },
+            type: 'array',
+            title: 'Attempt History'
+        }
+    },
+    type: 'object',
+    required: ['id', 'state', 'gateway_id', 'gateway_name', 'gateway_online', 'report', 'updated_at'],
+    title: 'JobView',
+    description: 'Recent evaluation progress, without runtime channels or storage keys.'
 } as const;
 
 export const KnowledgeContentResponseSchema = {
@@ -6278,7 +6727,7 @@ export const PaperAgentRunResponseSchema = {
         },
         run_kind: {
             type: 'string',
-            enum: ['autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
+            enum: ['research_workflow', 'autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge'],
             title: 'Run Kind'
         },
         status: {
@@ -6812,6 +7261,231 @@ export const PaperExportResponseSchema = {
     required: ['url', 'filename'],
     title: 'PaperExportResponse',
     description: 'Owned short-lived export URL.'
+} as const;
+
+export const PaperHistoryComparedFileSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        status: {
+            type: 'string',
+            enum: ['added', 'modified', 'deleted', 'unchanged'],
+            title: 'Status'
+        },
+        mime_type: {
+            type: 'string',
+            title: 'Mime Type'
+        },
+        binary: {
+            type: 'boolean',
+            title: 'Binary'
+        },
+        before_size: {
+            type: 'integer',
+            title: 'Before Size',
+            default: 0
+        },
+        after_size: {
+            type: 'integer',
+            title: 'After Size',
+            default: 0
+        }
+    },
+    type: 'object',
+    required: ['path', 'status', 'mime_type', 'binary'],
+    title: 'PaperHistoryComparedFile',
+    description: 'Byte-level comparison metadata for one namespaced file.'
+} as const;
+
+export const PaperHistoryComparisonSchema = {
+    properties: {
+        base_id: {
+            type: 'string',
+            title: 'Base Id'
+        },
+        target_id: {
+            type: 'string',
+            title: 'Target Id'
+        },
+        files: {
+            items: {
+                '$ref': '#/components/schemas/PaperHistoryComparedFile'
+            },
+            type: 'array',
+            title: 'Files'
+        },
+        counts: {
+            additionalProperties: {
+                type: 'integer'
+            },
+            type: 'object',
+            title: 'Counts'
+        }
+    },
+    type: 'object',
+    required: ['base_id', 'target_id', 'files', 'counts'],
+    title: 'PaperHistoryComparison',
+    description: 'A complete file inventory suitable for text and binary comparisons.'
+} as const;
+
+export const PaperHistoryFileSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        },
+        binary: {
+            type: 'boolean',
+            title: 'Binary'
+        },
+        mime_type: {
+            type: 'string',
+            title: 'Mime Type'
+        },
+        download_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Download Url'
+        },
+        exists: {
+            type: 'boolean',
+            title: 'Exists'
+        }
+    },
+    type: 'object',
+    required: ['path', 'content', 'binary', 'mime_type', 'download_url', 'exists'],
+    title: 'PaperHistoryFile',
+    description: 'Exact UTF-8 text or an authenticated download for binary content.'
+} as const;
+
+export const PaperHistoryResponseSchema = {
+    properties: {
+        revisions: {
+            items: {
+                '$ref': '#/components/schemas/PaperHistoryRevision'
+            },
+            type: 'array',
+            title: 'Revisions'
+        },
+        current_revision_id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Current Revision Id'
+        },
+        current_state_hash: {
+            type: 'string',
+            title: 'Current State Hash'
+        }
+    },
+    type: 'object',
+    required: ['revisions', 'current_revision_id', 'current_state_hash'],
+    title: 'PaperHistoryResponse',
+    description: 'Owned revisions and the optimistic concurrency token for current content.'
+} as const;
+
+export const PaperHistoryRestoreRequestSchema = {
+    properties: {
+        expected_state_hash: {
+            type: 'string',
+            maxLength: 64,
+            minLength: 64,
+            pattern: '^[a-f0-9]{64}$',
+            title: 'Expected State Hash'
+        },
+        expected_revision_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expected Revision Id'
+        }
+    },
+    type: 'object',
+    required: ['expected_state_hash'],
+    title: 'PaperHistoryRestoreRequest',
+    description: 'Restore only against the complete content state the author observed.'
+} as const;
+
+export const PaperHistoryRevisionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        label: {
+            type: 'string',
+            title: 'Label'
+        },
+        created_time: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created Time'
+        },
+        origin: {
+            type: 'string',
+            title: 'Origin'
+        },
+        summary: {
+            type: 'string',
+            title: 'Summary'
+        },
+        source_version_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Source Version Id'
+        },
+        state_hash: {
+            type: 'string',
+            title: 'State Hash'
+        },
+        is_current: {
+            type: 'boolean',
+            title: 'Is Current',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['id', 'label', 'created_time', 'origin', 'summary', 'state_hash'],
+    title: 'PaperHistoryRevision',
+    description: 'One immutable capture or an identifiable recovered legacy record.'
 } as const;
 
 export const PaperJudgeAggregateSchema = {
@@ -7682,6 +8356,43 @@ export const PaperOptimizationTargetUpdateSchema = {
     description: 'Editable target fields and confirmation state.'
 } as const;
 
+export const PaperProposalChapterSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        status: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Status'
+        },
+        has_content: {
+            type: 'boolean',
+            title: 'Has Content',
+            default: false
+        }
+    },
+    type: 'object',
+    required: ['id', 'title', 'path'],
+    title: 'PaperProposalChapter',
+    description: 'Display one author-owned chapter without imposing workflow prerequisites.'
+} as const;
+
 export const PaperProposalTaskCreateRequestSchema = {
     properties: {
         proposal_ids: {
@@ -7729,6 +8440,491 @@ export const PaperProposalTaskLinkResponseSchema = {
     required: ['proposal_id', 'task_id', 'project_id'],
     title: 'PaperProposalTaskLinkResponse',
     description: 'Idempotent link between a proposal and its explicit evolution task.'
+} as const;
+
+export const PaperRegionSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        kind: {
+            type: 'string',
+            title: 'Kind'
+        },
+        title: {
+            type: 'string',
+            title: 'Title'
+        },
+        content: {
+            type: 'string',
+            title: 'Content'
+        },
+        revision: {
+            type: 'string',
+            title: 'Revision'
+        },
+        review_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Review Id'
+        },
+        source_refs: {
+            items: {
+                '$ref': '#/components/schemas/PaperRegionSourceRef'
+            },
+            type: 'array',
+            title: 'Source Refs'
+        }
+    },
+    type: 'object',
+    required: ['id', 'kind', 'title', 'content', 'revision'],
+    title: 'PaperRegion',
+    description: 'One independently editable textual block and its optimistic revision.'
+} as const;
+
+export const PaperRegionApplySchema = {
+    properties: {
+        base_revision: {
+            type: 'string',
+            maxLength: 128,
+            minLength: 1,
+            title: 'Base Revision'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    required: ['base_revision'],
+    title: 'PaperRegionApply',
+    description: "Author approval guarded by the candidate's original region revision."
+} as const;
+
+export const PaperRegionPatchSchema = {
+    properties: {
+        base_revision: {
+            type: 'string',
+            maxLength: 128,
+            minLength: 1,
+            title: 'Base Revision'
+        },
+        content: {
+            type: 'string',
+            maxLength: 1000000,
+            title: 'Content'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    required: ['base_revision', 'content'],
+    title: 'PaperRegionPatch',
+    description: 'Author edit guarded by the exact region revision.'
+} as const;
+
+export const PaperRegionRequestSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        region_id: {
+            type: 'string',
+            title: 'Region Id'
+        },
+        state: {
+            type: 'string',
+            enum: ['queued', 'dispatched', 'processing', 'candidate', 'applied', 'rejected', 'stale'],
+            title: 'State'
+        },
+        instruction: {
+            type: 'string',
+            title: 'Instruction'
+        },
+        answer: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Answer'
+        },
+        base_revision: {
+            type: 'string',
+            title: 'Base Revision'
+        },
+        original_text: {
+            type: 'string',
+            title: 'Original Text'
+        },
+        replacement_text: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Replacement Text'
+        },
+        message: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Message'
+        },
+        created_at: {
+            type: 'string',
+            format: 'date-time',
+            title: 'Created At'
+        },
+        prompt: {
+            type: 'string',
+            title: 'Prompt'
+        }
+    },
+    type: 'object',
+    required: ['id', 'region_id', 'state', 'instruction', 'base_revision', 'original_text', 'created_at', 'prompt'],
+    title: 'PaperRegionRequest',
+    description: 'Persisted request, including its diff and precise reusable agent prompt.'
+} as const;
+
+export const PaperRegionRequestCreateSchema = {
+    properties: {
+        base_revision: {
+            type: 'string',
+            maxLength: 128,
+            minLength: 1,
+            title: 'Base Revision'
+        },
+        instruction: {
+            type: 'string',
+            maxLength: 50000,
+            minLength: 1,
+            title: 'Instruction'
+        },
+        answer: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 100000
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Answer'
+        },
+        selection: {
+            anyOf: [
+                {
+                    '$ref': '#/components/schemas/PaperRegionSelection'
+                },
+                {
+                    type: 'null'
+                }
+            ]
+        },
+        idempotency_key: {
+            type: 'string',
+            maxLength: 200,
+            minLength: 1,
+            title: 'Idempotency Key'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    required: ['base_revision', 'instruction', 'idempotency_key'],
+    title: 'PaperRegionRequestCreate',
+    description: 'Durable request to the existing CloudCLI conversation.'
+} as const;
+
+export const PaperRegionSelectionSchema = {
+    properties: {
+        start: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Start'
+        },
+        end: {
+            type: 'integer',
+            minimum: 0,
+            title: 'End'
+        },
+        original_text: {
+            type: 'string',
+            maxLength: 1000000,
+            minLength: 1,
+            title: 'Original Text'
+        }
+    },
+    additionalProperties: false,
+    type: 'object',
+    required: ['start', 'end', 'original_text'],
+    title: 'PaperRegionSelection',
+    description: 'Exact selected substring, using browser UTF-16 code-unit offsets.'
+} as const;
+
+export const PaperRegionSnapshotSchema = {
+    properties: {
+        regions: {
+            items: {
+                '$ref': '#/components/schemas/PaperRegion'
+            },
+            type: 'array',
+            title: 'Regions'
+        },
+        requests: {
+            items: {
+                '$ref': '#/components/schemas/PaperRegionRequest'
+            },
+            type: 'array',
+            title: 'Requests'
+        }
+    },
+    type: 'object',
+    required: ['regions', 'requests'],
+    title: 'PaperRegionSnapshot',
+    description: 'Current editable regions and durable request queue/history.'
+} as const;
+
+export const PaperRegionSourceRefSchema = {
+    properties: {
+        review_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Review Id'
+        },
+        version: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Version'
+        },
+        quote: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Quote'
+        },
+        path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Path'
+        },
+        status: {
+            type: 'string',
+            title: 'Status',
+            default: 'unverified'
+        }
+    },
+    type: 'object',
+    title: 'PaperRegionSourceRef',
+    description: 'Owned original evidence, with explicit verification for legacy references.'
+} as const;
+
+export const PaperRenderDiagnosticSchema = {
+    properties: {
+        message: {
+            type: 'string',
+            title: 'Message'
+        },
+        path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Path'
+        },
+        line: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Line'
+        },
+        severity: {
+            type: 'string',
+            enum: ['error', 'warning', 'info'],
+            title: 'Severity',
+            default: 'error'
+        }
+    },
+    type: 'object',
+    required: ['message'],
+    title: 'PaperRenderDiagnostic',
+    description: 'An actual conversion or compilation diagnostic, never an editorial gate.'
+} as const;
+
+export const PaperRenderFileSchema = {
+    properties: {
+        path: {
+            type: 'string',
+            title: 'Path'
+        },
+        mime_type: {
+            type: 'string',
+            title: 'Mime Type'
+        },
+        url: {
+            type: 'string',
+            title: 'Url'
+        }
+    },
+    type: 'object',
+    required: ['path', 'mime_type', 'url'],
+    title: 'PaperRenderFile',
+    description: 'One persisted generated artifact served through an authenticated route.'
+} as const;
+
+export const PaperRenderRequestSchema = {
+    properties: {
+        entry_paths: {
+            anyOf: [
+                {
+                    items: {
+                        type: 'string'
+                    },
+                    type: 'array'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Entry Paths'
+        },
+        expected_source_hash: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expected Source Hash'
+        }
+    },
+    type: 'object',
+    title: 'PaperRenderRequest',
+    description: 'Author-confirmed ordered inputs and the source snapshot being approved.'
+} as const;
+
+export const PaperRenderResponseSchema = {
+    properties: {
+        status: {
+            type: 'string',
+            enum: ['ready', 'failed'],
+            title: 'Status'
+        },
+        source_version_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Source Version Id'
+        },
+        source_hash: {
+            type: 'string',
+            title: 'Source Hash'
+        },
+        entry_path: {
+            type: 'string',
+            title: 'Entry Path'
+        },
+        entry_paths: {
+            items: {
+                type: 'string'
+            },
+            type: 'array',
+            title: 'Entry Paths'
+        },
+        diagnostics: {
+            items: {
+                '$ref': '#/components/schemas/PaperRenderDiagnostic'
+            },
+            type: 'array',
+            title: 'Diagnostics'
+        },
+        files: {
+            items: {
+                '$ref': '#/components/schemas/PaperRenderFile'
+            },
+            type: 'array',
+            title: 'Files'
+        },
+        pdf_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Pdf Url'
+        },
+        typst_url: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Typst Url'
+        }
+    },
+    type: 'object',
+    required: ['status', 'source_version_id', 'source_hash', 'entry_path'],
+    title: 'PaperRenderResponse',
+    description: 'Build outputs tied to one immutable source revision and converter build.'
 } as const;
 
 export const PaperReviewContentResponseSchema = {
@@ -8043,18 +9239,42 @@ export const PaperRevisionPatchResponseSchema = {
     description: 'User-owned revision patch content for review.'
 } as const;
 
+export const PaperRevisionRejectResponseSchema = {
+    properties: {
+        candidate_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Candidate Id'
+        },
+        status: {
+            type: 'string',
+            const: 'rejected',
+            title: 'Status'
+        }
+    },
+    type: 'object',
+    required: ['candidate_id', 'status'],
+    title: 'PaperRevisionRejectResponse',
+    description: 'Terminal decision for an owned, unapplied source revision candidate.'
+} as const;
+
 export const PaperRuntimeSessionCreateSchema = {
     properties: {
         workflow_stage: {
             type: 'string',
             enum: ['autodesign', 'formatting', 'literature', 'rationale', 'objectives', 'methods', 'innovation_plan', 'foundation_feasibility', 'final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'discovery', 'reviews', 'boundary', 'targets', 'branch'],
             title: 'Workflow Stage'
+        },
+        auto_workflow: {
+            type: 'boolean',
+            title: 'Auto Workflow',
+            default: false
         }
     },
     type: 'object',
     required: ['workflow_stage'],
     title: 'PaperRuntimeSessionCreate',
-    description: 'Select the backend-owned stage profile for a native session.'
+    description: 'Select a native stage or the automatic research coordinator.'
 } as const;
 
 export const PaperRuntimeSessionResponseSchema = {
@@ -8066,6 +9286,18 @@ export const PaperRuntimeSessionResponseSchema = {
         session_id: {
             type: 'string',
             title: 'Session Id'
+        },
+        run_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Run Id'
         }
     },
     type: 'object',
@@ -8153,6 +9385,38 @@ export const PaperSourcePathDeleteRequestSchema = {
     required: ['path'],
     title: 'PaperSourcePathDeleteRequest',
     description: 'Remove one file or directory prefix through version derivation.'
+} as const;
+
+export const PaperSourceRestoreRequestSchema = {
+    properties: {
+        expected_source_version_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expected Source Version Id'
+        },
+        expected_content_hash: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Expected Content Hash'
+        }
+    },
+    type: 'object',
+    required: ['expected_source_version_id'],
+    title: 'PaperSourceRestoreRequest',
+    description: 'Restore a snapshot only against the source currently shown to its owner.'
 } as const;
 
 export const PaperSourceVersionResponseSchema = {
@@ -8522,6 +9786,13 @@ export const PaperWorkspaceDetailSchema = {
             type: 'array',
             title: 'Source Versions'
         },
+        proposal_chapters: {
+            items: {
+                '$ref': '#/components/schemas/PaperProposalChapter'
+            },
+            type: 'array',
+            title: 'Proposal Chapters'
+        },
         reviews: {
             items: {
                 '$ref': '#/components/schemas/PaperReviewResponse'
@@ -8592,7 +9863,7 @@ export const PaperWorkspaceDetailSchema = {
         available_run_kinds: {
             items: {
                 type: 'string',
-                enum: ['autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
+                enum: ['research_workflow', 'autodesign', 'proposal_formatting', 'proposal_literature', 'proposal_rationale', 'proposal_objectives', 'proposal_methods', 'proposal_innovation_plan', 'proposal_foundation_feasibility', 'proposal_final_review', 'rebuttal_baseline', 'autorebuttal', 'ac_summary', 'boundary_analysis', 'issue_extraction', 'discovery_baseline', 'discovery_candidates', 'discovery_evaluation', 'algorithm_discovery', 'metric_suggestion', 'paper_revision', 'judge']
             },
             type: 'array',
             title: 'Available Run Kinds'
@@ -9909,7 +11180,6 @@ export const RebuttalEntrySchema = {
             },
             type: 'array',
             maxItems: 100,
-            minItems: 1,
             title: 'Concern Ids'
         },
         evidence_status: {
@@ -15510,6 +16780,194 @@ export const VerifyEmailRequestSchema = {
     required: ['email', 'code'],
     title: 'VerifyEmailRequest',
     description: '邮箱验证码校验请求。'
+} as const;
+
+export const _ProgressSnapshotSchema = {
+    properties: {
+        sessionId: {
+            type: 'string',
+            title: 'Sessionid'
+        },
+        runId: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Runid'
+        },
+        sequence: {
+            anyOf: [
+                {
+                    type: 'integer',
+                    minimum: 0
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Sequence'
+        },
+        status: {
+            type: 'string',
+            enum: ['ready', 'running', 'waiting', 'idle', 'interrupted', 'failed', 'completed'],
+            title: 'Status'
+        },
+        currentTool: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Currenttool'
+        },
+        agents: {
+            items: {
+                '$ref': '#/components/schemas/_ProgressStep'
+            },
+            type: 'array',
+            title: 'Agents'
+        }
+    },
+    type: 'object',
+    required: ['sessionId', 'status', 'currentTool', 'agents'],
+    title: '_ProgressSnapshot',
+    description: 'Validate the host progress contract before durable storage.'
+} as const;
+
+export const _ProgressStepSchema = {
+    properties: {
+        id: {
+            type: 'string',
+            title: 'Id'
+        },
+        runId: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Runid'
+        },
+        parentId: {
+            type: 'string',
+            title: 'Parentid'
+        },
+        stage: {
+            type: 'string',
+            title: 'Stage'
+        },
+        description: {
+            type: 'string',
+            title: 'Description'
+        },
+        status: {
+            type: 'string',
+            enum: ['running', 'waiting', 'completed', 'failed', 'interrupted'],
+            title: 'Status'
+        },
+        toolCount: {
+            type: 'integer',
+            minimum: 0,
+            title: 'Toolcount'
+        },
+        currentTool: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Currenttool'
+        },
+        tools: {
+            items: {
+                '$ref': '#/components/schemas/_ProgressTool'
+            },
+            type: 'array',
+            title: 'Tools'
+        },
+        startedAt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Startedat'
+        },
+        updatedAt: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Updatedat'
+        },
+        artifactRunId: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Artifactrunid'
+        }
+    },
+    type: 'object',
+    required: ['id', 'parentId', 'stage', 'description', 'status', 'toolCount', 'currentTool', 'tools'],
+    title: '_ProgressStep',
+    description: 'Validate an actual worker or parent tool attempt.'
+} as const;
+
+export const _ProgressToolSchema = {
+    properties: {
+        id: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Id'
+        },
+        name: {
+            type: 'string',
+            title: 'Name'
+        },
+        done: {
+            type: 'boolean',
+            title: 'Done'
+        },
+        failed: {
+            type: 'boolean',
+            title: 'Failed'
+        }
+    },
+    type: 'object',
+    required: ['name', 'done', 'failed'],
+    title: '_ProgressTool',
+    description: 'Validate a tool call observed in the transcript.'
 } as const;
 
 export const autodesign_upload_materialsSchema = {

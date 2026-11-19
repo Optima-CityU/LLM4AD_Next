@@ -1,0 +1,35 @@
+diff --git a/AnKi/Window/InputAndroid.cpp b/AnKi/Window/InputAndroid.cpp
+index 9f73da9..6668a4c 100644
+--- a/AnKi/Window/InputAndroid.cpp
++++ b/AnKi/Window/InputAndroid.cpp
+@@ -59,7 +59,7 @@ Error Input::handleEvents()
+ 	int events;
+ 	android_poll_source* source;
+ 
+-	while((ident = ALooper_pollAll(0, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0)
++	while((ident = ALooper_pollOnce(0, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0)
+ 	{
+ 		if(source != nullptr)
+ 		{
+diff --git a/AnKi/Window/NativeWindowAndroid.cpp b/AnKi/Window/NativeWindowAndroid.cpp
+index 62a596a..b9e7c4a 100644
+--- a/AnKi/Window/NativeWindowAndroid.cpp
++++ b/AnKi/Window/NativeWindowAndroid.cpp
+@@ -54,7 +54,7 @@ NativeWindowAndroid::~NativeWindowAndroid()
+ 		int events;
+ 		android_poll_source* source;
+ 
+-		while((ident = ALooper_pollAll(0, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0)
++		while((ident = ALooper_pollOnce(0, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0)
+ 		{
+ 			if(source != nullptr)
+ 			{
+@@ -78,7 +78,7 @@ Error NativeWindowAndroid::initInternal(U32 targetFps, [[maybe_unused]] CString
+ 		android_poll_source* source;
+ 
+ 		const int timeoutMs = 5;
+-		while((ident = ALooper_pollAll(timeoutMs, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0)
++		while((ident = ALooper_pollOnce(timeoutMs, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0)
+ 		{
+ 			if(source != nullptr)
+ 			{

@@ -31,6 +31,7 @@ class ResearchWorkspaceMode(StrEnum):
 
 
 class PaperAgentRunKind(StrEnum):
+    RESEARCH_WORKFLOW = "research_workflow"
     PROPOSAL_FORMATTING = "proposal_formatting"
     PROPOSAL_LITERATURE = "proposal_literature"
     PROPOSAL_RATIONALE = "proposal_rationale"

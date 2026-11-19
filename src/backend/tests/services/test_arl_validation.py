@@ -6,9 +6,13 @@
 2. Validator 环境变量与 Worker ``CLAUDE.md`` 里写的地址、token 必须是同一组值。
 3. 写 ``CLAUDE.md`` 只替换系统段落，保留 setup 与 agent 写的内容，且幂等。
 4. 探测失败不抛异常，给出可展示的 reason。
+5. 只有真正搭建过的验证服务才能（重新）启动；启动幂等、不抛异常。
 """
 
 from __future__ import annotations
+
+import asyncio
+import json
 
 import httpx
 import pytest
@@ -177,7 +181,7 @@ def test_probe_unreachable_is_not_an_error(monkeypatch) -> None:
 def test_payload_never_contains_token() -> None:
     """推给前端的 payload 不含 token。"""
     payload = ValidationStatus(configured=True, url="http://v:8765").to_payload()
-    assert set(payload) == {"configured", "url", "reason"}
+    assert set(payload) == {"configured", "url", "reason", "declared", "starting"}
 
 
 def test_same_state_ignores_detail() -> None:
@@ -187,3 +191,178 @@ def test_same_state_ignores_detail() -> None:
     assert a.same_state_as(b)
     assert not a.same_state_as(None)
     assert not a.same_state_as(ValidationStatus(configured=True, url="u"))
+
+
+# ---- 搭建判定与（重新）启动 ----
+
+
+@pytest.fixture
+def validator_project(tmp_path, monkeypatch):
+    """把会话挂载根指向 tmp_path，返回 Validator 项目目录（已创建、尚未搭建）。"""
+
+    def fake_session_root(session_id: str) -> tuple[str, str]:
+        root = tmp_path / session_id
+        return str(root), str(root)
+
+    monkeypatch.setattr("app.services.arl.runtime._session_root", fake_session_root)
+    monkeypatch.setattr(validation, "_start_locks", {})
+    monkeypatch.setattr(validation, "_last_start_at", {})
+    project = validation.role_workspace(SESSION_ID, ARLRole.VALIDATOR)
+    project.mkdir(parents=True)
+    return project
+
+
+def _declare(project, script: object | None = None) -> None:
+    """模拟 validator-setup apply 的产物：冻结配置 + paseo.json 里的 service 脚本。"""
+    config = project / ".contrejour" / "validation" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}", encoding="utf-8")
+    if script is None:
+        script = {"type": "service", "command": "node validation-cli.js serve"}
+    (project / "paseo.json").write_text(
+        json.dumps({"scripts": {"contrejour": script}}), encoding="utf-8"
+    )
+
+
+class FakeDaemon:
+    """只实现启动验证服务用到的三个 RPC，记录调用顺序。"""
+
+    def __init__(self, lifecycle: str = "stopped", fail: Exception | None = None):
+        self.lifecycle = lifecycle
+        self.fail = fail
+        self.calls: list[str] = []
+
+    async def open_workspace(self, cwd: str) -> dict:
+        self.calls.append(f"open:{cwd}")
+        if self.fail:
+            raise self.fail
+        return {
+            "id": "ws-1",
+            "scripts": [{"scriptName": "contrejour", "lifecycle": self.lifecycle}],
+        }
+
+    async def stop_workspace_script(self, workspace_id: str, name: str) -> dict:
+        self.calls.append(f"stop:{workspace_id}:{name}")
+        self.lifecycle = "stopped"
+        return {}
+
+    async def start_workspace_script(self, workspace_id: str, name: str) -> dict:
+        self.calls.append(f"start:{workspace_id}:{name}")
+        self.lifecycle = "running"
+        return {}
+
+
+@pytest.fixture
+def unhealthy(monkeypatch):
+    """验证服务健康检查不通过。"""
+    monkeypatch.setattr(validation, "use_container_network", lambda: True)
+
+    def fake_get(*_args, **_kwargs) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(validation.httpx, "get", fake_get)
+
+
+def test_declared_requires_config_and_service_script(validator_project) -> None:
+    """没有冻结配置或 paseo.json 都不算搭建；两者齐全才算。"""
+    assert validation.is_validation_declared(SESSION_ID) is False
+    _declare(validator_project)
+    assert validation.is_validation_declared(SESSION_ID) is True
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        {"command": "node x.js"},  # 不是 service
+        {"type": "service", "command": "   "},  # 空命令
+        "node x.js",  # 结构不对
+    ],
+)
+def test_declared_rejects_incomplete_script(validator_project, script) -> None:
+    """脚本条目不完整时不算搭建，不会去启动它。"""
+    _declare(validator_project, script)
+    assert validation.is_validation_declared(SESSION_ID) is False
+
+
+def test_declared_tolerates_broken_paseo_json(validator_project) -> None:
+    """paseo.json 不是合法 JSON 时按未搭建处理，不抛异常。"""
+    _declare(validator_project)
+    (validator_project / "paseo.json").write_text("{not json", encoding="utf-8")
+    assert validation.is_validation_declared(SESSION_ID) is False
+
+
+@pytest.mark.usefixtures("unhealthy", "validator_project")
+def test_start_skips_when_not_declared() -> None:
+    """没搭建过就不碰 daemon。"""
+    daemon = FakeDaemon()
+    result = asyncio.run(validation.start_validation_service(daemon, SESSION_ID))
+    assert (result.ok, result.action) == (False, "not_declared")
+    assert daemon.calls == []
+
+
+@pytest.mark.usefixtures("container_network")
+def test_start_skips_when_healthy(validator_project, monkeypatch) -> None:
+    """服务已在线时什么也不做。"""
+    _declare(validator_project)
+    monkeypatch.setattr(
+        validation.httpx, "get", lambda *_a, **_k: httpx.Response(200, json={})
+    )
+    daemon = FakeDaemon()
+    result = asyncio.run(validation.start_validation_service(daemon, SESSION_ID))
+    assert (result.ok, result.action) == (True, "healthy")
+    assert daemon.calls == []
+
+
+@pytest.mark.usefixtures("unhealthy")
+def test_start_launches_stopped_script_once(validator_project) -> None:
+    """停着的脚本被启动；宽限期内再次调用直接返回 starting，不重复启动。"""
+    _declare(validator_project)
+    daemon = FakeDaemon(lifecycle="stopped")
+
+    first = asyncio.run(validation.start_validation_service(daemon, SESSION_ID))
+    assert (first.ok, first.action) == (True, "started")
+    assert daemon.calls == ["open:/workspace/validator", "start:ws-1:contrejour"]
+    assert validation.probe_validation(SESSION_ID).starting is True
+
+    second = asyncio.run(
+        validation.start_validation_service(daemon, SESSION_ID, restart=True)
+    )
+    assert (second.ok, second.action) == (True, "starting")
+    assert len(daemon.calls) == 2
+
+
+@pytest.mark.usefixtures("unhealthy")
+def test_auto_start_leaves_running_script_alone(validator_project) -> None:
+    """进程在跑但不健康时，自动恢复不去停它。"""
+    _declare(validator_project)
+    daemon = FakeDaemon(lifecycle="running")
+    result = asyncio.run(validation.start_validation_service(daemon, SESSION_ID))
+    assert result.ok is False
+    assert daemon.calls == ["open:/workspace/validator"]
+
+
+@pytest.mark.usefixtures("unhealthy")
+def test_manual_restart_stops_then_starts(validator_project) -> None:
+    """手动重启时先停掉卡住的进程再启动。"""
+    _declare(validator_project)
+    daemon = FakeDaemon(lifecycle="running")
+    result = asyncio.run(
+        validation.start_validation_service(daemon, SESSION_ID, restart=True)
+    )
+    assert (result.ok, result.action) == (True, "started")
+    assert daemon.calls == [
+        "open:/workspace/validator",
+        "stop:ws-1:contrejour",
+        "start:ws-1:contrejour",
+    ]
+
+
+@pytest.mark.usefixtures("unhealthy")
+def test_start_errors_become_failed_result(validator_project) -> None:
+    """daemon 报错不外抛，只变成失败结果，且不进入宽限期（允许再试）。"""
+    _declare(validator_project)
+    daemon = FakeDaemon(fail=RuntimeError("daemon down"))
+    result = asyncio.run(validation.start_validation_service(daemon, SESSION_ID))
+    assert (result.ok, result.action) == (False, "failed")
+    assert "daemon down" in (result.message or "")
+    assert validation.is_validation_starting(SESSION_ID) is False

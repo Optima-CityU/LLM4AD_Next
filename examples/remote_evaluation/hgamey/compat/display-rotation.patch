@@ -1,0 +1,67 @@
+--- a/vendor/hgamey/phonefarm/src/gray_session.rs
++++ b/vendor/hgamey/phonefarm/src/gray_session.rs
+@@ -1134,9 +1134,26 @@
+
+ pub(crate) fn rotation_from_input(text: &str) -> Result<u32, String> {
+     let mut orientation = None;
+-    for value in text.lines().filter_map(|line| line.trim().strip_prefix("SurfaceOrientation:")) {
++    for line in text.lines().map(str::trim) {
++        let value = if let Some(value) = line.strip_prefix("SurfaceOrientation:") {
++            value
++        } else if let Some(viewport) = line.strip_prefix("Viewport INTERNAL:") {
++            let field = |name: &str| viewport.split(',').find_map(|part| {
++                let (key, value) = part.trim().split_once('=')?;
++                (key == name).then_some(value.trim())
++            });
++            if field("displayId") != Some("0") { continue; }
++            match field("isActive") {
++                Some("[0]" | "0" | "false") => continue,
++                None | Some("[1]" | "1" | "true") => {},
++                _ => return Err("invalid viewport activity from dumpsys input".into()),
++            }
++            field("orientation").ok_or("default display viewport has no orientation")?
++        } else {
++            continue;
++        };
+         let rotation = value.trim().parse::<u32>().ok().filter(|n| *n <= 3)
+-            .ok_or("invalid SurfaceOrientation from dumpsys input")?;
++            .ok_or("invalid display orientation from dumpsys input")?;
+         if orientation.is_some_and(|prior| prior != rotation) {
+             return Err("conflicting display orientations from dumpsys input".into());
+         }
+@@ -1370,6 +1387,35 @@
+         assert_eq!(rotation_from_input("SurfaceOrientation: 0\nSurfaceOrientation: 0\n").unwrap(), 0);
+         for text in ["", "rotation=1", "SurfaceOrientation: 4", "SurfaceOrientation: unknown",
+             "SurfaceOrientation: 0\nSurfaceOrientation: 1\n"] {
++            assert!(rotation_from_input(text).is_err(), "accepted {text:?}");
++        }
++    }
++
++    #[test]
++    fn display_rotation_reads_android_15_default_viewport() {
++        let observed = "Viewport INTERNAL: displayId=0, uniqueId=local:4627039422300187648, port=0, orientation=1, logicalFrame=[0, 0, 2800, 1272], physicalFrame=[0, 0, 2800, 1272], deviceSize=[2800, 1272], isActive=[1]";
++        assert_eq!(rotation_from_input(observed).unwrap(), 1);
++        assert_eq!(rotation_from_input(&format!("{observed}\n  {observed}\n")).unwrap(), 1);
++        assert_eq!(rotation_from_input(&format!("SurfaceOrientation: 1\n{observed}")).unwrap(), 1);
++    }
++
++    #[test]
++    fn display_rotation_ignores_other_and_inactive_viewports() {
++        let other = "Viewport EXTERNAL: displayId=1, orientation=3, isActive=[1]\nViewport INTERNAL: displayId=2, orientation=2, isActive=[1]\nViewport INTERNAL: displayId=0, orientation=3, isActive=[0]";
++        assert!(rotation_from_input(other).is_err());
++        assert_eq!(rotation_from_input(&format!("{other}\nViewport INTERNAL: displayId=0, orientation=1, isActive=[1]")).unwrap(), 1);
++    }
++
++    #[test]
++    fn display_rotation_rejects_invalid_or_conflicting_viewports() {
++        for text in [
++            "Viewport INTERNAL: displayId=0, isActive=[1]",
++            "Viewport INTERNAL: displayId=0, orientation=4, isActive=[1]",
++            "Viewport INTERNAL: displayId=0, orientation=unknown, isActive=[1]",
++            "Viewport INTERNAL: displayId=0, orientation=1, isActive=unknown",
++            "SurfaceOrientation: 0\nViewport INTERNAL: displayId=0, orientation=1, isActive=[1]",
++            "Viewport INTERNAL: displayId=0, orientation=0\nViewport INTERNAL: displayId=0, orientation=1",
++        ] {
+             assert!(rotation_from_input(text).is_err(), "accepted {text:?}");
+         }
+     }

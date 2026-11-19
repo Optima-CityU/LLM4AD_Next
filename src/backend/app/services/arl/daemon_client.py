@@ -82,26 +82,6 @@ class PaseoDaemonClient:
     #: daemon 推送中与 agent 内容无关、不需要上抛给前端的消息
     IGNORED_MESSAGE_TYPES = frozenset({"status", "pong"})
 
-    #: 已知的 agent 推送事件类型。仅用于日志分类：实际转发不做白名单过滤，
-    #: 因为 RPC 响应已在上游按 ``requestId`` 消费掉，剩下的 session 消息
-    #: 都是 daemon 的推送，漏掉任何一种都会让前端少渲染一块内容。
-    AGENT_EVENT_TYPES = frozenset(
-        {
-            "agent_stream",
-            "agent_update",
-            "agent_status",
-            "agent_list",
-            "agent_deleted",
-            "agent_archived",
-            "agent_attention_required",
-            "agent_permission_request",
-            "agent_permission_resolved",
-            "agent.timeline.replacement",
-            "agent.create.update",
-            "agent.provider_subagents.update",
-        }
-    )
-
     def __init__(
         self,
         url: str,
@@ -202,7 +182,6 @@ class PaseoDaemonClient:
         try:
             # 1. 建立 WebSocket 连接
             self._ws = await self._open_socket()
-            logger.info("已连接到 Paseo daemon: {}", self.url)
 
             # 2. 发送 hello 消息
             #    注意：接收循环必须等握手结束后再启动，否则它与
@@ -242,11 +221,6 @@ class PaseoDaemonClient:
                 },
             }
 
-            logger.info(
-                "发送 hello 消息: clientId={}, clientType={}",
-                self.client_id,
-                self.client_type,
-            )
             await self._ws.send(json.dumps(hello_message))
 
             # 3. 等待 server_info（daemon 接受 hello 后下发的 status 消息）
@@ -260,8 +234,8 @@ class PaseoDaemonClient:
             self._connected = True
             self._receive_task = asyncio.create_task(self._receive_loop())
             logger.info(
-                "已完成 daemon 握手: serverId={}, daemonVersion={}",
-                (self._server_info or {}).get("serverId"),
+                "已连接 Paseo daemon: url={}, daemonVersion={}",
+                self.url,
                 (self._server_info or {}).get("version"),
             )
 
@@ -306,7 +280,6 @@ class PaseoDaemonClient:
                     self._session_id = payload.get("serverId")
                     return payload
 
-            logger.debug("握手期间忽略消息: type={}", data.get("type"))
 
         raise ConnectionError("WebSocket 在收到 server_info 之前关闭")
 
@@ -331,7 +304,6 @@ class PaseoDaemonClient:
         try:
             await self._ws.close()
             self._connected = False
-            logger.info("已断开 Paseo daemon 连接")
         except Exception as e:
             logger.warning("断开连接失败: {}", e)
 
@@ -398,7 +370,6 @@ class PaseoDaemonClient:
         """
         if data.get("type") != "session":
             # ping/pong、hello.rejected 等非 session 帧与 RPC 无关。
-            logger.debug("📨 [DaemonClient] 非 session 帧: type={}", data.get("type"))
             return
 
         message = data.get("message") or {}
@@ -422,11 +393,6 @@ class PaseoDaemonClient:
                 )
                 future.set_exception(RuntimeError(f"RPC 失败({code}): {error}"))
             else:
-                logger.debug(
-                    "✅ [DaemonClient] RPC 响应: requestId={}, type={}",
-                    request_id,
-                    message_type,
-                )
                 future.set_result(payload)
             return
 
@@ -434,11 +400,7 @@ class PaseoDaemonClient:
         # 这里刻意不做类型白名单——前端渲染依赖完整的事件序列，
         # 任何被丢掉的推送都会表现为「消息收到了但渲染不出来」。
         if message_type in self.IGNORED_MESSAGE_TYPES:
-            logger.debug("📨 [DaemonClient] 忽略消息: type={}", message_type)
             return
-
-        if message_type not in self.AGENT_EVENT_TYPES:
-            logger.debug("📨 [DaemonClient] 转发未登记的推送: type={}", message_type)
 
         for callback in list(self._timeline_callbacks):
             try:
@@ -487,9 +449,6 @@ class PaseoDaemonClient:
         self._rpc_futures[request_id] = future
 
         message = {"type": request_type, "requestId": request_id, **(params or {})}
-        logger.debug(
-            "📤 [DaemonClient] 发送请求: type={}, requestId={}", request_type, request_id
-        )
 
         try:
             await self._send_session_message(message)
@@ -517,7 +476,6 @@ class PaseoDaemonClient:
 
         payload = await self._rpc_call("fetch_agents_request", params)
         entries = payload.get("entries", [])
-        logger.info("📋 [DaemonClient] 查询到 {} 个 agent", len(entries))
         return entries
 
     async def create_agent(
@@ -567,12 +525,6 @@ class PaseoDaemonClient:
             raise RuntimeError(f"create_agent 未返回 agentId: {payload}")
         agent["id"] = agent_id
 
-        logger.info(
-            "🆕 [DaemonClient] 已创建 agent: provider={}, mode={}, id={}",
-            provider,
-            agent.get("currentModeId") or mode_id,
-            agent_id,
-        )
         return agent
 
     async def cancel_agent(self, agent_id: str) -> dict[str, Any]:
@@ -590,7 +542,6 @@ class PaseoDaemonClient:
         Raises:
             RuntimeError: daemon 拒绝取消。
         """
-        logger.info("🛑 [DaemonClient] 取消 agent 回合: agentId={}", agent_id)
         payload = await self._rpc_call("cancel_agent_request", {"agentId": agent_id})
         if payload.get("error"):
             raise RuntimeError(f"取消 agent 失败: {payload['error']}")
@@ -614,9 +565,6 @@ class PaseoDaemonClient:
         Raises:
             RuntimeError: daemon 拒绝切换。
         """
-        logger.info(
-            "🔧 [DaemonClient] 切换权限模式: agentId={}, modeId={}", agent_id, mode_id
-        )
         payload = await self._rpc_call(
             "set_agent_mode_request", {"agentId": agent_id, "modeId": mode_id}
         )
@@ -643,9 +591,6 @@ class PaseoDaemonClient:
         Raises:
             RuntimeError: The daemon rejected the change.
         """
-        logger.info(
-            "🔧 [DaemonClient] 切换模型: agentId={}, modelId={}", agent_id, model_id
-        )
         payload = await self._rpc_call(
             "set_agent_model_request", {"agentId": agent_id, "modelId": model_id}
         )
@@ -673,11 +618,6 @@ class PaseoDaemonClient:
         if payload.get("error"):
             raise RuntimeError(f"获取命令列表失败: {payload['error']}")
         commands = payload.get("commands") or []
-        logger.info(
-            "📋 [DaemonClient] 获取到命令列表: agentId={}, 条数={}",
-            agent_id,
-            len(commands),
-        )
         return commands
 
     async def send_agent_message(
@@ -697,9 +637,6 @@ class PaseoDaemonClient:
         if active_turn_behavior:
             params["activeTurnBehavior"] = active_turn_behavior
 
-        logger.info(
-            "📤 [DaemonClient] 发送消息: agentId={}, 长度={}", agent_id, len(text)
-        )
         await self._rpc_call("send_agent_message_request", params)
 
     async def read_file(self, path: str, cwd: str | None = None) -> str:
@@ -795,7 +732,6 @@ class PaseoDaemonClient:
             detail = result.get("error") or result.get("version") or result
             raise OSError(f"写入 {target_cwd}/{path} 失败({status}): {detail}")
 
-        logger.debug("💾 [DaemonClient] 已写入 {}/{}", target_cwd, path)
 
     async def list_files(
         self, path: str = "", cwd: str | None = None
@@ -1012,14 +948,6 @@ class PaseoDaemonClient:
         )
         if payload.get("error"):
             raise RuntimeError(f"拉取 agent 历史失败: {payload['error']}")
-
-        entries = payload.get("entries") or []
-        logger.info(
-            "📜 [DaemonClient] 拉取到 agent 历史: agentId={}, 条数={}, hasOlder={}",
-            agent_id,
-            len(entries),
-            payload.get("hasOlder"),
-        )
         return payload
 
     async def refresh_agent(self, agent_id: str) -> dict[str, Any]:
@@ -1037,7 +965,6 @@ class PaseoDaemonClient:
         Raises:
             RuntimeError: 恢复失败，例如 codex 找不到线程的 rollout 文件。
         """
-        logger.info("🔄 [DaemonClient] 重新加载 agent: agentId={}", agent_id)
         return await self._rpc_call(
             "refresh_agent_request", {"agentId": agent_id}, timeout=60.0
         )
@@ -1057,13 +984,82 @@ class PaseoDaemonClient:
         Raises:
             RuntimeError: daemon 拒绝归档。
         """
-        logger.info("🗄️ [DaemonClient] 归档 agent: agentId={}", agent_id)
         payload = await self._rpc_call(
             "archive_agent_request", {"agentId": agent_id}, timeout=60.0
         )
         if payload.get("error"):
             raise RuntimeError(f"归档 agent 失败: {payload['error']}")
         return payload
+
+    async def open_workspace(self, cwd: str | None = None) -> dict[str, Any]:
+        """按目录查找（不存在则登记）Paseo 工作区（``open_project_request``）。
+
+        Paseo 的 workspaceId 是随机生成的不透明 ID，不等于目录路径；脚本相关
+        的 RPC 都要先用它换出 ID。对已登记的目录是幂等查找。
+
+        Args:
+            cwd: 容器内目录，默认用 client 的项目目录
+
+        Returns:
+            工作区描述（含 ``id``，以及 ``scripts``：各脚本的 ``lifecycle``）
+
+        Raises:
+            RuntimeError: 目录不存在或 daemon 返回错误
+        """
+        payload = await self._rpc_call("open_project_request", {"cwd": cwd or self.cwd})
+        workspace = payload.get("workspace")
+        if payload.get("error") or not isinstance(workspace, dict) or not workspace.get("id"):
+            raise RuntimeError(f"打开工作区失败: {payload.get('error') or payload}")
+        return workspace
+
+    async def start_workspace_script(
+        self, workspace_id: str, script_name: str
+    ) -> dict[str, Any]:
+        """启动 ``paseo.json`` 里登记的脚本（``workspace.script.start.request``）。
+
+        与用户在 Paseo 界面上点「启动」走同一条路，端口分配、服务代理与界面
+        上的脚本状态都由 daemon 维护。脚本已在运行时 daemon 会拒绝。
+
+        Args:
+            workspace_id: :meth:`open_workspace` 返回的工作区 ID
+            script_name: ``paseo.json`` 中 ``scripts`` 下的名字
+
+        Returns:
+            脚本状态（``lifecycle`` / ``port`` / ``terminalId`` 等）
+
+        Raises:
+            RuntimeError: daemon 拒绝启动（未登记、已在运行、配置解析失败等）
+        """
+        payload = await self._rpc_call(
+            "workspace.script.start.request",
+            {"workspaceId": workspace_id, "scriptName": script_name},
+        )
+        if payload.get("error"):
+            raise RuntimeError(f"启动脚本 {script_name} 失败: {payload['error']}")
+        return payload.get("script") or {}
+
+    async def stop_workspace_script(
+        self, workspace_id: str, script_name: str
+    ) -> dict[str, Any]:
+        """停止正在运行的工作区脚本（``workspace.script.stop.request``）。
+
+        Args:
+            workspace_id: 工作区 ID
+            script_name: 脚本名
+
+        Returns:
+            脚本状态
+
+        Raises:
+            RuntimeError: 脚本不在运行或 daemon 报错
+        """
+        payload = await self._rpc_call(
+            "workspace.script.stop.request",
+            {"workspaceId": workspace_id, "scriptName": script_name},
+        )
+        if payload.get("error"):
+            raise RuntimeError(f"停止脚本 {script_name} 失败: {payload['error']}")
+        return payload.get("script") or {}
 
     async def list_provider_subagents(self, parent_agent_id: str) -> list[dict[str, Any]]:
         """列出某个 agent 名下由 provider 派生的子 agent（如 Claude 的 Task）。
@@ -1215,12 +1211,6 @@ class PaseoDaemonClient:
             request_id: 权限请求 ID（来自 agent_permission_request 事件）
             response: 响应数据，形如 ``{"behavior": "allow"}``
         """
-        logger.info(
-            "🔐 [DaemonClient] 响应权限请求: agentId={}, requestId={}, behavior={}",
-            agent_id,
-            request_id,
-            response.get("behavior"),
-        )
         await self._send_session_message(
             {
                 "type": "agent_permission_response",

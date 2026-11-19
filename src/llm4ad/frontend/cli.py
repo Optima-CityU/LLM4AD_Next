@@ -18,6 +18,7 @@ from rich.table import Table
 from llm4ad import LLM4AD, __version__
 from llm4ad.coder.base import BaseCoder
 from llm4ad.evaluator.base import BaseEvaluator
+from llm4ad.gateway.cli import app as gateway_app
 from llm4ad.infra.provider.base import BaseProvider
 from llm4ad.memory.cli_commands import app as memory_app
 from llm4ad.orchestrator.base import BaseOrchestrator
@@ -43,6 +44,7 @@ app.add_typer(evolve_app, name="evolve")
 
 # Register memory management commands (interactive TUI).
 app.add_typer(memory_app, name="memory")
+app.add_typer(gateway_app, name="evaluator-gateway")
 
 load_dotenv()
 

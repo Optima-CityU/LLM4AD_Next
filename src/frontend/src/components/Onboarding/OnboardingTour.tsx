@@ -36,6 +36,11 @@ interface OnboardingTourProps {
   onStepChange?: (stepIndex: number | null) => void
   stepIndex?: number
   onStepIndexChange?: (stepIndex: number) => void
+  /**
+   * Bump this counter to replay the tour from the first step, even if it was
+   * already completed or skipped. `0`/`undefined` means "no replay requested".
+   */
+  replayToken?: number
 }
 
 interface Rect {
@@ -133,6 +138,7 @@ export default function OnboardingTour({
   onStepChange,
   stepIndex: controlledStepIndex,
   onStepIndexChange,
+  replayToken = 0,
 }: OnboardingTourProps) {
   const { t } = useTranslation()
   const [active, setActive] = useState(false)
@@ -150,15 +156,18 @@ export default function OnboardingTour({
   // Decide whether to start the tour.
   useEffect(() => {
     if (!enabled) return
-    if (isTourDone(tourId)) return
+    const replaying = replayToken > 0
+    if (!replaying && isTourDone(tourId)) return
     // Demo-mode coordination: while demo is active, only the demo tour itself
     // may run; while demo is inactive, demo-only tours stay dormant.
     const demoActive = getDemoState().active
     if (demoActive && !isDemoTour) return
     if (!demoActive && isDemoTour) return
+    // A replay always starts over from the first step.
+    if (replaying) setUncontrolledStepIndex(0)
     const t = window.setTimeout(() => setActive(true), startDelay)
     return () => window.clearTimeout(t)
-  }, [enabled, tourId, startDelay, isDemoTour])
+  }, [enabled, tourId, startDelay, isDemoTour, replayToken])
 
   // A tour can lose its target while a parent dialog closes, a task changes,
   // or the prerequisite data becomes unavailable. Explicitly end it so a

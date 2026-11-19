@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "refbench output json (refbench_out.json)",
+  "description": "Ground-truth facts only. No timing, no rates, no statistics — measurement belongs to loop_v1.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "app_version",
+    "run_id",
+    "scene",
+    "declared_bottleneck",
+    "effective_knobs",
+    "params",
+    "render_thread_name",
+    "swapchain",
+    "passes",
+    "frames_submitted",
+    "clean_exit"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "app_version": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "scene": {
+      "enum": [
+        "bw_pingpong",
+        "frag_alu",
+        "idle_cap",
+        "sr_pipeline"
+      ]
+    },
+    "declared_bottleneck": {
+      "enum": [
+        "bandwidth",
+        "fragment",
+        "fragment+compute",
+        "none",
+        "vertex"
+      ]
+    },
+    "effective_knobs": {
+      "type": "object",
+      "properties": {
+        "loadop": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        },
+        "postfx": {
+          "enum": [
+            "on",
+            "off"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "params": {
+      "type": "object",
+      "required": [
+        "frames",
+        "intensity"
+      ],
+      "properties": {
+        "frames": {
+          "type": "integer"
+        },
+        "intensity": {
+          "type": "integer"
+        },
+        "rt_width": {
+          "type": "integer"
+        },
+        "rt_height": {
+          "type": "integer"
+        }
+      }
+    },
+    "render_thread_name": {
+      "const": "RefbenchRender"
+    },
+    "driver_submit_thread_name": {
+      "const": "RefbenchDrv"
+    },
+    "renamed_driver_threads": {
+      "type": "integer",
+      "description": "how many in-process driver threads were renamed for trace filtering"
+    },
+    "gpu_name": {
+      "type": "string"
+    },
+    "swapchain": {
+      "type": "object",
+      "required": [
+        "present_mode",
+        "format",
+        "width",
+        "height",
+        "image_count"
+      ],
+      "properties": {
+        "present_mode": {
+          "enum": [
+            "FIFO",
+            "MAILBOX",
+            "IMMEDIATE",
+            "FIFO_RELAXED"
+          ]
+        },
+        "format": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "image_count": {
+          "type": "integer"
+        },
+        "pre_transform": {
+          "type": "string"
+        }
+      }
+    },
+    "passes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "target",
+          "load_op",
+          "store_op",
+          "width",
+          "height",
+          "format"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "also emitted as VK_EXT_debug_utils label when supported"
+          },
+          "target": {
+            "type": "string"
+          },
+          "load_op": {
+            "enum": [
+              "LOAD",
+              "CLEAR",
+              "DONT_CARE",
+              "NONE"
+            ],
+            "description": "NONE denotes a compute pass with no attachment load operation."
+          },
+          "store_op": {
+            "enum": [
+              "STORE",
+              "DONT_CARE"
+            ]
+          },
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "format": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "debug_labels_supported": {
+      "type": "boolean"
+    },
+    "frames_submitted": {
+      "type": "integer",
+      "description": "count of presented frames — bookkeeping, not a timing metric"
+    },
+    "clean_exit": {
+      "type": "boolean"
+    },
+    "postfx": {
+      "type": "object",
+      "description": "sr_pipeline 的 postfx 配置事实。只有配置, 没有任何时间量 —— 测量与判定在 phonefarm 侧 (https://github.com/HGamey/docs/blob/main/repos/refbench/DESIGN.md §1 跑测分离)。",
+      "properties": {
+        "active": {
+          "type": "boolean",
+          "description": "算子是否真的挂上了。false 且 knob 为 on 时必定伴随 clean_exit=false"
+        },
+        "shader_path": {
+          "type": "string"
+        },
+        "shader_bytes": {
+          "type": "integer"
+        },
+        "lo": {
+          "type": "array",
+          "description": "低分辨率场景 RT [w,h]"
+        },
+        "hi": {
+          "type": "array",
+          "description": "送显分辨率 RT [w,h]"
+        },
+        "workgroup": {
+          "type": "array",
+          "description": "dispatch 用的工作组尺寸"
+        }
+      }
+    },
+    "capture_mode": {
+      "const": "quality_only",
+      "description": "Present only for optional native paired capture; HR/readback/IO changes load."
+    },
+    "performance_eligible": {
+      "const": false,
+      "description": "Capture output cannot be used as normal performance or power evidence."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "capture_mode"
+        ]
+      },
+      "then": {
+        "required": [
+          "performance_eligible"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "game_opt_loop/goal_state@1",
+  "title": "目标运行的 state.json",
+  "description": "harness 每一步都整份覆盖写 (先写临时文件再改名, 网页读到的永远是完整的一份)。",
+  "type": "object",
+  "required": ["schema", "run_id", "status", "goal_summary", "generation", "max_generations", "elapsed_min", "budget_min", "best", "progress_to_target", "device", "human_md_rev", "updated_at"],
+  "properties": {
+    "schema": { "const": "game_opt_loop/goal_state@1" },
+    "run_id": { "type": "string" },
+    "status": { "type": "string", "enum": ["drafting", "awaiting_confirm", "running", "paused", "done", "failed"] },
+    "goal_summary": { "type": "string" },
+    "generation": { "type": "integer", "description": "正在跑 / 刚跑完第几代; 0 = 还没开始" },
+    "max_generations": { "type": "integer" },
+    "elapsed_min": { "type": "number" },
+    "budget_min": { "type": "number", "description": "时间预算 (含 human.md 的「预算 +N 分钟」)" },
+    "best": {
+      "type": ["object", "null"],
+      "required": ["candidate", "metric", "delta_pct", "verdict"],
+      "properties": {
+        "candidate": { "type": "string" },
+        "metric": { "type": "string" },
+        "delta_pct": { "type": "number", "description": "主指标相对对照的变化 (%), 带符号" },
+        "verdict": { "type": "string" }
+      }
+    },
+    "progress_to_target": { "type": "number", "description": "|best.delta_pct| / target_pct, 封顶 1" },
+    "device": { "type": ["string", "null"], "description": "goal.md 指定的序列号; any 时为 null" },
+    "human_md_rev": { "type": "integer", "description": "harness 读到过几个不同版本的 human.md" },
+    "updated_at": { "type": "string" },
+    "goal_sha256": { "type": ["string", "null"], "description": "冻结时 goal.md 的 sha256" },
+    "stop_reason": { "type": ["string", "null"], "enum": ["target_reached", "budget_exhausted", "no_gain", "human_stop", "error", null] },
+    "no_gain_streak": { "type": "integer", "description": "连续几代没有收益" }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "version": 2,
+  "kind": "shader",
+  "candidate_id": "gol-typed-native-sr",
+  "serial": "fixture-device",
+  "package": "io.github.hgamey.refbench",
+  "workload": {
+    "carrier": "refbench",
+    "script": "sr_pipeline",
+    "frames": 370,
+    "intensity": 3
+  },
+  "conditions": {
+    "cool_c": 42.0,
+    "require_root": true,
+    "require_discharging": true,
+    "charging_suspend": {
+      "enabled": true
+    },
+    "fan": "unknown",
+    "notes": "Typed offline contract fixture; no device measurement"
+  },
+  "protocol": {
+    "cool_c": 42.0,
+    "replay_seconds": 30,
+    "rounds": 5,
+    "alternating": true,
+    "p_threshold": 0.05,
+    "stat": "welch_t",
+    "multiple_comparison": "bonferroni_on_wins",
+    "metrics": [
+      {
+        "id": "operator_latency_ms",
+        "better": "lower"
+      },
+      {
+        "id": "power_watt",
+        "better": "lower"
+      },
+      {
+        "id": "psnr_db",
+        "better": "higher",
+        "constraint": true
+      }
+    ]
+  },
+  "payload": {
+    "track": "sr",
+    "shader_path": "candidate.glsl",
+    "spirv_path": "absent.spv",
+    "budget_ms": 3.0,
+    "quality_baseline_db": 30.0,
+    "inject": {
+      "via": "carrier_native"
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "contract_version": 1,
+  "status": "PROPOSED_NOT_IMPLEMENTED",
+  "status_note": "本契约是照 refbench/contract/launch.json 的形状为 AnKi Sponza 设计的, 但**尚未落地也未在设备上验证** —— 见 ../README.md 的「当前状态」。字段先冻在这里, 是为了让 patch 和 run_anki_sponza.sh 有一个共同的靶子; 任何一次实测之前不要当成事实引用。",
+  "carrier": "anki-sponza",
+  "upstream": {
+    "repo": "https://github.com/godlikepanos/anki-3d-engine",
+    "license": "BSD",
+    "commit": "7ea70050a4de716c3e1e36e130d79e57bcb00c53",
+    "commit_date": "2026-08-31",
+    "checkout": "/Users/mac/projects/thirdparty/anki-3d-engine (不进任何我们的仓库)"
+  },
+  "package": "org.anki.Sponza",
+  "activity": "android.app.NativeActivity",
+  "launch_template": "am start -W -n org.anki.Sponza/android.app.NativeActivity --es run_id {run_id} --es frames {frames} --es campath {campath} --es render_scaling {render_scaling} [--es knob.postfx {postfx} --es postfx.shader {postfx_shader}]",
+  "extras_are_all_string": true,
+  "extras": {
+    "run_id": {
+      "required": false,
+      "default": "unset",
+      "note": "原样回写进输出 json, 作证据链"
+    },
+    "frames": {
+      "required": false,
+      "default": "3600",
+      "parsed_as": "int",
+      "range": [60, 100000],
+      "note": "渲染满这么多帧后自退。固定帧数而不是固定时长 —— 和 refbench 一致, 保证两臂做的功一样多"
+    },
+    "campath": {
+      "required": false,
+      "default": "orbit",
+      "enum": ["orbit", "static"],
+      "note": "固定镜头路径, 纯 frame_index 的函数, 不吃输入、不吃 elapsedTime —— 同样的 frames 必须产生逐帧一致的相机姿态。orbit=绕 Sponza 中庭匀速环绕; static=定机位(用来看纯 shading 抖动)"
+    },
+    "render_scaling": {
+      "required": false,
+      "default": "1.0",
+      "parsed_as": "float",
+      "range": [0.25, 1.0],
+      "note": "直接喂引擎 cvar Render.RenderScaling (AnKi/Renderer/Renderer.h:23)。< 1.0 时 post-process 分辨率低于 swapchain, 引擎自动插入 'Final Blit' 上采样 pass (Renderer.cpp:952) —— 这就是 sr_pipeline 的 A 臂"
+    },
+    "knob.postfx": {
+      "required": false,
+      "default": "off",
+      "enum": ["on", "off"],
+      "note": "off = A 臂, 用引擎自带 Final Blit (三线性放大) 送显; on = B 臂, 管线尾部换成外部 compute 算子。仅在 render_scaling < 1.0 时有意义",
+      "design": "../DESIGN_COMPUTE_HOOK.md"
+    },
+    "postfx.shader": {
+      "required": false,
+      "default": "",
+      "applies_to": ["knob.postfx=on"],
+      "note": "设备侧 candidate.spv 绝对路径。binding 0 = readonly 低分辨率图, binding 1 = writeonly 送显分辨率图, 工作组 16x16 —— 与 game_opt_loop 赛道契约、refbench sr_pipeline 完全一致",
+      "failure": "knob.postfx=on 时装载失败 (文件缺失 / 非 SPIR-V / doReflectionSpirv 失败 / 建管线失败 / 未给路径) 一律退出码 2 且 clean_exit=false。**绝不静默退回 off** —— 那会让 A/B 两臂变成 A 和 A, 而上层还以为在对照算子"
+    }
+  },
+  "determinism": {
+    "requirement": "同样的 (frames, campath, render_scaling) 必须每轮渲染完全相同的一串画面",
+    "how": [
+      "相机姿态是 frame_index 的纯函数, 不用 elapsedTime (墙钟会让每轮轨迹不同)",
+      "禁掉 Sponza Main.cpp 里那段骑士动画的播放, 或同样改成按 frame_index 推进",
+      "TemporalAA / 任何带 history 的 pass 在固定路径下是收敛的, 但前若干帧不可比 —— 采集窗要避开起手 N 帧",
+      "关 UI / 开发者控制台"
+    ],
+    "unverified": true
+  },
+  "process": {
+    "self_terminates": true,
+    "liveness_probe": "adb shell pidof org.anki.Sponza",
+    "exit_codes": {
+      "0": "clean: 帧数跑满, json 已落盘",
+      "2": "aborted: 窗口丢失 / vulkan 错误 / postfx 装载失败, json 可能仍写出且 clean_exit=false"
+    }
+  },
+  "output": {
+    "device_path": "/storage/emulated/0/Android/data/org.anki.Sponza/files/anki_sponza_out.json",
+    "written": "退出前 fsync",
+    "fields": [
+      "contract_version", "run_id", "frames_submitted", "campath",
+      "render_scaling", "effective_knobs", "swapchain", "gpu_name", "clean_exit"
+    ],
+    "note": "只写 ground truth —— 不写帧率/分位数/任何统计量。测量归 loop_v1, 和 refbench 同一条纪律"
+  },
+  "started_marker": {
+    "device_path": "/storage/emulated/0/Android/data/org.anki.Sponza/files/anki_sponza_started",
+    "written": "进渲染循环前, 内容 = '<campath> <run_id>'",
+    "note": "harness 轮询这个文件判起跑; logcat 刻意不进契约 —— 这台测试机上观察到 logcat 会整个哑掉"
+  },
+  "trace": {
+    "render_thread_name": "AnkiRender",
+    "driver_submit_thread_name": "AnkiDrv",
+    "trace_comm_filter": "AnkiDrv",
+    "note": "和 refbench 一样, 要把进程内 Adreno 驱动提交线程改名成稳定契约, 否则 raw ftrace kgsl 没法按 comm 过滤。AnKi 每帧提交次数未实测, 不像 refbench 那样保证恰好 1 次 —— 解析侧不能假设 submits_per_frame==1",
+    "unverified": true
+  }
+}

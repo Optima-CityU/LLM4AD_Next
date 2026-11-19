@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ParetoArchive",
+  "description": "历代优胜档案。下一代变异的亲本从这里取, 跨代去重也靠这里。每条记录都带 source, 任何汇总都必须先按来源分组。",
+  "type": "object",
+  "required": ["version", "track", "budget_ms", "quality_baseline_db", "entries"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "track": { "type": "string", "enum": ["sr", "frame_gen"] },
+    "budget_ms": { "type": "number", "description": "该赛道的耗时硬预算, 随档案落盘以便离线复核判据" },
+    "quality_baseline_db": { "type": "number", "description": "该赛道的画质基线" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "generation", "track", "fingerprint", "origin", "report", "recorded_at", "shader_source"],
+        "properties": {
+          "id": { "type": "string" },
+          "generation": { "type": "integer", "minimum": 0 },
+          "track": { "type": "string", "enum": ["sr", "frame_gen"] },
+          "parent_id": { "type": ["string", "null"] },
+          "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+          "origin": { "type": "string", "enum": ["baseline", "llm", "local_mutation"] },
+          "notes": { "type": ["string", "null"] },
+          "report": { "$ref": "eval_report.schema.json" },
+          "recorded_at": { "type": "string", "format": "date-time" },
+          "shader_source": { "type": "string", "description": "源码随档案落盘, 档案才能独立复现" }
+        }
+      }
+    }
+  }
+}

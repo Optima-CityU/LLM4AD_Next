@@ -4,7 +4,7 @@ export type RebuttalBaselineConcern = {
   label: "W" | "Q" | "M"
   concern: string
   concernType: string
-  severity: "low" | "medium" | "high"
+  severity: "low" | "medium" | "high" | "unknown"
   answerSource: string
   draftMove: string
   sourceRefs: string[]
@@ -101,8 +101,7 @@ function parseConcern(
     !id ||
     !reviewerId ||
     !concern ||
-    !["W", "Q", "M"].includes(label) ||
-    !["low", "medium", "high"].includes(severity)
+    !["W", "Q", "M"].includes(label)
   ) {
     return null
   }
@@ -113,7 +112,9 @@ function parseConcern(
     label: label as RebuttalBaselineConcern["label"],
     concern,
     concernType: asString(value.concern_type),
-    severity: severity as RebuttalBaselineConcern["severity"],
+    severity: ["low", "medium", "high"].includes(severity)
+      ? (severity as RebuttalBaselineConcern["severity"])
+      : "unknown",
     answerSource: asString(value.answer_source),
     draftMove: asString(value.draft_move),
     sourceRefs: asStringArray(value.source_refs),

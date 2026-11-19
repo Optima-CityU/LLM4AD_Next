@@ -1,0 +1,44 @@
+#version 450
+// npuop 解包: NPU 输出张量 (NHWC, 每通道 1 字节) -> 送显分辨率的 rgba8 storage image (即 upop 的 dst)。
+// 约定 (N1<->N2): 输出 4 通道 RGBA uint8, 每像素正好一个 uint, 一次读取; 3 通道也兼容 (逐字节取)。
+// 反量化 v = (q - zp) * dq, dq 已含「模型的浮点量程是 0..1 还是 0..255」; alpha 不用, 写 1。
+// 张量尺寸 (tw,th) 与送显尺寸 (dw,dh) 不同 (2268x1028 -> 2141x969 等) 时在这里做最后一次
+// 双线性重采样, 半像素对齐, 与 upop.comp 同一公式; 尺寸相同时退化为逐像素直取。
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(std430, binding = 0) readonly buffer In { uint d[]; };
+layout(binding = 1, rgba8) uniform writeonly image2D dst;
+layout(push_constant) uniform P { int tw; int th; int tc; int sgn; int dw; int dh; float dq; float zp; } pc;
+
+float qbyte(uint b) {
+    uint v = (d[b >> 2] >> ((b & 3u) * 8u)) & 0xFFu;
+    float q = float(v);
+    if (pc.sgn != 0 && v >= 128u) q -= 256.0;
+    return q;
+}
+
+vec3 tap(ivec2 p) {
+    p = clamp(p, ivec2(0), ivec2(pc.tw - 1, pc.th - 1));
+    uint i = uint(p.y * pc.tw + p.x);
+    vec3 q;
+    if (pc.tc == 4) {
+        uint u = d[i];
+        uvec3 b = uvec3(u, u >> 8, u >> 16) & 0xFFu;
+        q = vec3(b);
+        if (pc.sgn != 0) q -= vec3(greaterThanEqual(b, uvec3(128u))) * 256.0;
+    } else {
+        uint b0 = i * uint(pc.tc);
+        q = vec3(qbyte(b0), qbyte(b0 + 1u), qbyte(b0 + 2u));
+    }
+    return (q - pc.zp) * pc.dq;
+}
+
+void main() {
+    ivec2 o = ivec2(gl_GlobalInvocationID.xy);
+    if (o.x >= pc.dw || o.y >= pc.dh) return;
+    vec2 uv = (vec2(o) + 0.5) * vec2(pc.tw, pc.th) / vec2(pc.dw, pc.dh) - 0.5;
+    ivec2 b = ivec2(floor(uv));
+    vec2 f = uv - vec2(b);
+    vec3 c = mix(mix(tap(b), tap(b + ivec2(1, 0)), f.x),
+                 mix(tap(b + ivec2(0, 1)), tap(b + ivec2(1, 1)), f.x), f.y);
+    imageStore(dst, o, vec4(clamp(c, 0.0, 1.0), 1.0));
+}

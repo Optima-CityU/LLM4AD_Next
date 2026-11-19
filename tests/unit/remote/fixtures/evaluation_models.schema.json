@@ -1,0 +1,234 @@
+{
+  "Metric": {
+    "$defs": {
+      "MetricType": {
+        "description": "Types of evaluation metrics.",
+        "enum": [
+          "minimize",
+          "maximize"
+        ],
+        "title": "MetricType",
+        "type": "string"
+      }
+    },
+    "description": "A single metric definition.",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "type": {
+        "$ref": "#/$defs/MetricType",
+        "default": "maximize"
+      },
+      "weight": {
+        "default": 1.0,
+        "title": "Weight",
+        "type": "number"
+      },
+      "description": {
+        "default": "",
+        "title": "Description",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "title": "Metric",
+    "type": "object"
+  },
+  "EvaluationResult": {
+    "$defs": {
+      "BehaviorData": {
+        "description": "Container for all behavior data from one evaluation instance.\n\nGroups together text observations and visual artifacts produced\nby evaluating an algorithm on a single problem instance.\n\nAttributes:\n    observation: Text description of algorithm behavior (LLM-readable).\n    visualizations: Zero or more visual artifacts.\n    instance_id: Identifier of the problem instance that produced this data.",
+        "properties": {
+          "observation": {
+            "default": "",
+            "title": "Observation",
+            "type": "string"
+          },
+          "visualizations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/BehaviorVisualization"
+            },
+            "title": "Visualizations",
+            "type": "array"
+          },
+          "instance_id": {
+            "default": "",
+            "title": "Instance Id",
+            "type": "string"
+          }
+        },
+        "title": "BehaviorData",
+        "type": "object"
+      },
+      "BehaviorVisualization": {
+        "description": "A single visualization artifact from algorithm evaluation.\n\nRepresents one visual snapshot of algorithm behavior (e.g., a TSP tour\nplot, a car trajectory, a lander descent path). Supports both\npre-rendered images and raw data for deferred rendering.\n\nAttributes:\n    label: Human-readable name for this visualization.\n    media_type: MIME type of the rendered image.\n    data_base64: Pre-rendered image as base64 string (Case 1).\n    raw_data: Raw data for deferred rendering (Case 2).\n    renderer: Registry name of the renderer to convert raw_data to image.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "image/png",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "data_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data Base64"
+          },
+          "raw_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Raw Data"
+          },
+          "renderer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Renderer"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "BehaviorVisualization",
+        "type": "object"
+      },
+      "EvaluationArtifact": {
+        "description": "Declare a file produced by an evaluator for durable retention.\n\nPaths are relative to ``EvalContext.artifact_dir`` (``RemoteJob.artifact_dir``\nfor gateway adapters) or absolute paths inside that directory. Declaring a file never changes the evaluation score.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "application/octet-stream",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "title": "EvaluationArtifact",
+        "type": "object"
+      }
+    },
+    "description": "Evaluation result container.\n\nContains the computed score, detailed metrics, and any extra metadata\nfor monitoring, logging, and algorithm analysis.\n\nUsers only need to provide:\n- `metrics`: dict of metric name -> value (supports multiple objectives/metrics)\n- `score`: Primary aggregated score (computed by base class from metrics)\nEverything else is optional with good defaults.\n\nExtra information that is not used for evolution (monitoring, logs, analysis)\nshould go into `metadata`.",
+    "properties": {
+      "score": {
+        "default": 0.0,
+        "title": "Score",
+        "type": "number"
+      },
+      "metrics": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "title": "Metrics",
+        "type": "object"
+      },
+      "monitor_metrics": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "default": {},
+        "title": "Monitor Metrics",
+        "type": "object"
+      },
+      "metadata": {
+        "additionalProperties": true,
+        "default": {},
+        "title": "Metadata",
+        "type": "object"
+      },
+      "evolution_feedback": {
+        "additionalProperties": true,
+        "title": "Evolution Feedback",
+        "type": "object"
+      },
+      "success": {
+        "default": true,
+        "title": "Success",
+        "type": "boolean"
+      },
+      "error_message": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error Message"
+      },
+      "duration_ms": {
+        "default": 0.0,
+        "title": "Duration Ms",
+        "type": "number"
+      },
+      "behavior": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BehaviorData"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/EvaluationArtifact"
+        },
+        "title": "Artifacts",
+        "type": "array"
+      }
+    },
+    "required": [
+      "metrics"
+    ],
+    "title": "EvaluationResult",
+    "type": "object"
+  }
+}

@@ -1,0 +1,6 @@
+- [x] Add shared remote contracts, candidate bundles, CLI gateway and durable local journal.
+- [x] Add gateway/job models, migration, authenticated discovery, dispatch, reporting and notifications.
+- [x] Integrate the remote evaluator, execution lifecycle, cancellation and credential renewal.
+- [x] Add authorized gateway selection and live remote progress to task configuration/workbench.
+- [x] Add recovery examples, bilingual docs, generated API client and end-to-end regression coverage.
+- [x] Replace WebSocket notifications with authenticated SSE; verify framing, timeout isolation, reconnection, database release and independent heartbeat recovery, and refresh the exported gateway runtime.

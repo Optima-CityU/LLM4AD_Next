@@ -1,7 +1,7 @@
 # Initial rebuttal style
 
 Adapted from AutoRebuttal's initial-round style guide. See
-`/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+[the adaptation attribution](../../ATTRIBUTION.md).
 
 For the first response round, prefer a short global opener when the confirmed
 format permits one, answer before lengthy framing, keep one strong point per

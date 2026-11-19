@@ -1,0 +1,3 @@
+# Preserve the exact packaged bytes recorded in HGamey's upstream provenance.
+src/llm4ad/gateway/examples/hgamey/protocol/upstream/selfsr/selfsr_ab.py -text
+src/llm4ad/gateway/examples/hgamey/protocol/upstream/gfrc/gfrc_ab.py -text

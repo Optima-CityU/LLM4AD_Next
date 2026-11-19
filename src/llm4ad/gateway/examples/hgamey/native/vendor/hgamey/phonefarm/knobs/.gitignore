@@ -1,0 +1,4 @@
+gray/build/out/
+*.so
+*.o
+.DS_Store

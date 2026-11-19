@@ -1,0 +1,11 @@
+services:
+  gateway:
+    build:
+      args:
+        LLM4AD_EXTRAS: gateway-ui
+    command: ["python", "-m", "llm4ad.gateway", "start", "--ui-host", "0.0.0.0", "--ui-port", "8768", "--no-open-browser"]
+    environment:
+      LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}
+      LLM4AD_GATEWAY_UI_PASSWORD:
+    ports:
+      - "${LLM4AD_GATEWAY_UI_HOST:-127.0.0.1}:${LLM4AD_GATEWAY_UI_PORT:-8768}:8768"

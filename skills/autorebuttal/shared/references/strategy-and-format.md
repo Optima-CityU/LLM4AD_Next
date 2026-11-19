@@ -1,7 +1,7 @@
 # Strategy and format
 
 Adapted from AutoRebuttal's strategy memo and venue format-plan workflow. See
-`/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+[the adaptation attribution](../../ATTRIBUTION.md).
 
 Identify concerns shared across reviewers and answer them consistently. Choose
 priority reviewers by severity, movability, and overlap with central claims.
@@ -12,7 +12,8 @@ author-supplied result placeholder, or respectfully decline an unreasonable or
 out-of-scope request.
 
 Choose either reviewer-specific blocks or a shared response letter according
-to the confirmed response mode and venue presentation. Use a concise global
+to the author-requested response structure and verified venue presentation.
+A missing format choice does not require a confirmed baseline or block drafting. Use a concise global
 response only for genuinely shared concerns; put every remaining concern in
 the matching reviewer's block. Do not repeat the same concern in both places.
 

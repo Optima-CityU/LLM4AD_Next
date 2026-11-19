@@ -1,0 +1,1080 @@
+--- a/executor.py
++++ b/executor.py
+@@ -2,5 +2,7 @@
+ import argparse
+ import copy
++from collections import deque
+ import fcntl
++import hashlib
+ import ipaddress
+ import json
+@@ -10,4 +12,5 @@
+ import re
+ import signal
++import stat
+ import subprocess
+ import sys
+@@ -21,10 +24,33 @@
+ APP = Path(__file__).resolve()
+ JOB_ID = re.compile(r"[0-9a-f]{32}\Z")
++IDEMPOTENCY_KEY = re.compile(r"[0-9a-f]{64}\Z")
++FEATURES = ["idempotent_submit", "job_lookup", "cancel"]
+ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+ KINDS = {"shader", "sysparam", "gray", "whitebox"}
+
+
++class SubmissionConflict(ValueError):
++    """Indicate that an idempotency key already belongs to another submission."""
++
++
++class BackendNotStarted(RuntimeError):
++    """Indicate a preflight failure before any device worker was started."""
++
++
+ def read_json(path):
+     return json.loads(Path(path).read_text())
++
++
++def sync_directory(path):
++    """Persist directory entries after an atomic metadata publication.
++
++    Args:
++        path: Directory containing the newly published entries.
++    """
++    directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
++    try:
++        os.fsync(directory)
++    finally:
++        os.close(directory)
+
+
+@@ -32,9 +58,13 @@
+     path = Path(path)
+     tmp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+-    with tmp.open("x") as stream:
+-        json.dump(value, stream, indent=2, ensure_ascii=False, allow_nan=False)
+-        stream.flush()
+-        os.fsync(stream.fileno())
+-    tmp.replace(path)
++    try:
++        with tmp.open("x") as stream:
++            json.dump(value, stream, indent=2, ensure_ascii=False, allow_nan=False)
++            stream.flush()
++            os.fsync(stream.fileno())
++        tmp.replace(path)
++        sync_directory(path.parent)
++    finally:
++        tmp.unlink(missing_ok=True)
+
+
+@@ -203,8 +233,116 @@
+         return done.returncode
+     finally:
+-        if previous and previous.split("/")[0] != target:
++        required = previous.split("/")[0] != target if previous else None
++        request = body.get("request", {})
++        headless = request.get("kind") == "shader" and request.get("workload", {}).get("carrier") == "headless"
++        if headless and not paused:
++            required = False
++        receipt = {"previous": previous, "paused": paused, "headless": headless, "restore_required": required, "restored": None}
++        write_json(folder / "foreground.json", receipt)
++        if required:
+             restored = command(["/usr/bin/adb", "-s", endpoint, "shell", "am", "start", "-W", "-n", previous], capture_output=True, text=True, timeout=30)
+             (folder / "foreground-restore.txt").write_text(restored.stdout + restored.stderr)
+-            write_json(folder / "foreground.json", {"previous": previous, "paused": paused, "restore_exit_code": restored.returncode})
++            receipt.update(restore_exit_code=restored.returncode, restored=restored.returncode == 0 and bool(re.search(r"^Status: ok\s*$", restored.stdout, re.MULTILINE)))
++            write_json(folder / "foreground.json", receipt)
++
++
++def freeze_shader_inputs(folder, frozen):
++    """Snapshot shader files and reference images before publishing a job.
++
++    Args:
++        folder: New job directory retaining the immutable copies.
++        frozen: Prepared submission whose backend paths can be rewritten.
++
++    Raises:
++        ValueError: An input is not stable or references conflict.
++        OSError: An input cannot be copied and synced.
++    """
++    request = frozen["submission"].get("request", {})
++    if request.get("kind") != "shader":
++        return
++    payload = request.get("payload", {})
++    conditions = request.get("conditions", {})
++    if not isinstance(payload, dict) or not isinstance(conditions, dict):
++        raise ValueError("shader payload and conditions must be objects")
++    manifest = []
++
++    def snapshot(source, destination):
++        source = Path(source)
++        destination.parent.mkdir(parents=True, exist_ok=True)
++        digest = hashlib.sha256()
++        descriptor = os.open(source, os.O_RDONLY | os.O_NONBLOCK)
++        with os.fdopen(descriptor, "rb") as stream, destination.open("xb") as output:
++            before = os.fstat(stream.fileno())
++            if not stat.S_ISREG(before.st_mode):
++                raise ValueError("shader inputs must be regular files")
++            while chunk := stream.read(1048576):
++                output.write(chunk)
++                digest.update(chunk)
++            after = os.fstat(stream.fileno())
++            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
++                raise ValueError("shader input changed while being frozen")
++            output.flush()
++            os.fchmod(output.fileno(), 0o444)
++            os.fsync(output.fileno())
++        parent = destination.parent
++        while parent != folder:
++            sync_directory(parent)
++            parent = parent.parent
++        manifest.append({"source": str(source), "path": str(destination.relative_to(folder)), "sha256": digest.hexdigest(), "bytes": before.st_size})
++        return str(destination)
++
++    assets = folder / "inputs" / "shader"
++    if payload.get("shader_path") is not None:
++        payload["shader_path"] = snapshot(payload["shader_path"], assets / "candidate.comp")
++    if payload.get("spirv_path") is not None:
++        original = Path(payload["spirv_path"])
++        payload["spirv_path"] = snapshot(original, assets / "candidate.spv")
++        snapshot(original.parent / "baseline.spv", assets / "baseline.spv")
++    references = [section["quality_reference"] for section in (payload, conditions) if section.get("quality_reference") is not None]
++    if references:
++        if any(value != references[0] for value in references):
++            raise ValueError("quality_reference conflicting payload/conditions")
++        reference = Path(references[0])
++        destination = folder / "inputs" / "reference"
++        if reference.is_dir():
++            images = sorted(p for p in reference.iterdir() if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg"))
++            if not images:
++                raise ValueError("quality_reference contains no images")
++            if len(images) > 32:
++                images = [images[(i * (len(images) - 1) + 15) // 31] for i in range(32)]
++            for image in images:
++                snapshot(image, destination / image.name)
++            frozen_reference = str(destination)
++        else:
++            frozen_reference = snapshot(reference, destination / reference.name)
++        for section in (payload, conditions):
++            if section.get("quality_reference") is not None:
++                section["quality_reference"] = frozen_reference
++    frozen["input_files"] = manifest
++
++
++def verify_frozen_inputs(folder, frozen):
++    """Verify the staged file manifest before starting a device worker.
++
++    Args:
++        folder: Job directory retaining the staged files.
++        frozen: Persisted submission and its file manifest.
++
++    Raises:
++        BackendNotStarted: A staged file no longer matches its recorded bytes.
++    """
++    manifest = frozen.get("input_files", [])
++    if "input_files" in frozen:
++        expected = {item["path"] for item in manifest}
++        actual = {str(path.relative_to(folder)) for path in (folder / "inputs").rglob("*") if path.is_file()}
++        if actual != expected:
++            raise BackendNotStarted("frozen shader input file set changed; device worker not started")
++    for item in manifest:
++        digest = hashlib.sha256()
++        with (folder / item["path"]).open("rb") as stream:
++            while chunk := stream.read(1048576):
++                digest.update(chunk)
++        if digest.hexdigest() != item["sha256"]:
++            raise BackendNotStarted("frozen shader input changed; device worker not started")
+
+
+@@ -212,12 +350,16 @@
+     frozen = read_json(folder / "input.json")
+     body = frozen["submission"]
+-    if body["operation"] == "eval":
+-        write_json(folder / "eval-request.json", body["request"])
+-        check = command(["phonefarm", "eval", "--request", str(folder / "eval-request.json"), "--validate-only", "--json"], capture_output=True, text=True, timeout=30)
+-        (folder / "validation.stdout").write_text(check.stdout)
+-        (folder / "validation.stderr").write_text(check.stderr)
+-        if check.returncode:
+-            raise ValueError("phonefarm rejected the request before connecting to phone; see validation logs")
+-    sync_registry(frozen["device"], folder)
++    try:
++        verify_frozen_inputs(folder, frozen)
++        if body["operation"] == "eval":
++            write_json(folder / "eval-request.json", body["request"])
++            check = command(["phonefarm", "eval", "--request", str(folder / "eval-request.json"), "--validate-only", "--json"], capture_output=True, text=True, timeout=30)
++            (folder / "validation.stdout").write_text(check.stdout)
++            (folder / "validation.stderr").write_text(check.stderr)
++            if check.returncode:
++                raise ValueError("phonefarm rejected the request before connecting to phone; see validation logs")
++        sync_registry(frozen["device"], folder)
++    except Exception as error:
++        raise BackendNotStarted(str(error)) from error
+     # Global PF lease enforces the one-phone-at-a-time rule even across restarts
+     # and other local PF clients sharing /work. Its FDs survive in task children.
+@@ -228,4 +370,46 @@
+         raise RuntimeError("device worker returned no report; see worker.stderr")
+     return result.returncode
++
++
++def cleanup_completed(folder, operation):
++    """Check owned-resource and foreground receipts after the backend exits.
++
++    Args:
++        folder: Directory retaining the original backend evidence.
++        operation: Frozen executor operation.
++
++    Returns:
++        Whether all applicable restoration receipts confirm completion.
++    """
++    if (folder / "worker-error.json").exists():
++        return False
++    if operation == "probe":
++        return True
++    try:
++        report = read_json(folder / "result.json")
++        observed = report.get("conditions_observed", {})
++        if not isinstance(observed, dict):
++            return False
++        confirmed = False
++        if "restored" in observed:
++            if observed["restored"] is not True:
++                return False
++            confirmed = True
++        if "recovery" in report:
++            recovery = report["recovery"]
++            if not isinstance(recovery, dict) or recovery.get("status") != "reported_complete":
++                return False
++            confirmed = True
++        gpu_lock = observed.get("gpu_level_lock")
++        if gpu_lock is not None and (not isinstance(gpu_lock, dict) or gpu_lock.get("restored") is not True):
++            return False
++        foreground = read_json(folder / "foreground.json")
++        if foreground.get("restore_required") is False:
++            foreground_ok = foreground.get("paused") is False and (bool(foreground.get("previous")) or foreground.get("headless") is True)
++        else:
++            foreground_ok = foreground.get("restore_required") is True and foreground.get("restored") is True and foreground.get("restore_exit_code") == 0
++        return confirmed and foreground_ok
++    except (OSError, ValueError, AttributeError, TypeError):
++        return False
+
+
+@@ -241,36 +425,73 @@
+             self.guard.close()
+             raise RuntimeError("another executor already owns this data directory")
+-        load_devices(self.config)
+-        self.pending, self.mutex, self.stopping = queue.Queue(maxsize=64), threading.Lock(), threading.Event()
+-        self.active = None
+-        recovered = []
+-        for folder in self.jobs.iterdir():
+-            if not JOB_ID.fullmatch(folder.name) or not (folder / "job.json").is_file():
+-                continue
+-            job = read_json(folder / "job.json")
+-            if job["state"] == "running":
+-                job.update(state="interrupted", error="executor restarted; original evidence retained, task not replayed", finished_at=time.time())
+-                write_json(folder / "job.json", job)
+-            elif job["state"] == "queued":
+-                recovered.append(job)
+-        for job in sorted(recovered, key=lambda j: j["created_at"]):
+-            self.pending.put_nowait(job["id"])
+-        self.thread = threading.Thread(target=self._work, name="single-phone-worker")
+-        self.thread.start()
++        try:
++            load_devices(self.config)
++            self.pending, self.mutex, self.stopping = deque(), threading.Lock(), threading.Event()
++            self.ready = threading.Condition(self.mutex)
++            self.active, self.by_key, self.blocked_jobs = None, {}, set()
++            recovered = []
++            for folder in self.jobs.iterdir():
++                if not JOB_ID.fullmatch(folder.name) or not (folder / "job.json").is_file():
++                    continue
++                job = read_json(folder / "job.json")
++                token = job.get("idempotency_key")
++                if token is not None:
++                    if not isinstance(token, str) or not IDEMPOTENCY_KEY.fullmatch(token) or token in self.by_key:
++                        raise ValueError("invalid or duplicate persisted idempotency key")
++                    if not isinstance(job.get("submission_hash"), str) or not IDEMPOTENCY_KEY.fullmatch(job["submission_hash"]):
++                        raise ValueError("invalid persisted submission hash")
++                    self.by_key[token] = folder.name
++                if job["state"] in ("running", "cancel_requested"):
++                    job.update(state="interrupted", cleanup_status="uncertain", error="executor restarted; cleanup unknown, original evidence retained, task not replayed", finished_at=time.time())
++                    write_json(folder / "job.json", job)
++                if job["state"] in ("uncertain", "interrupted") or job.get("cleanup_status") == "uncertain":
++                    self.blocked_jobs.add(folder.name)
++                elif job["state"] == "queued":
++                    recovered.append(job)
++            for job in sorted(recovered, key=lambda j: j["created_at"]):
++                self.pending.append(job["id"])
++            self.thread = threading.Thread(target=self._work, name="single-phone-worker")
++            self.thread.start()
++        except BaseException:
++            self.guard.close()
++            raise
+
+     def submit(self, body):
+-        frozen = prepare_submission(body, load_devices(self.config))
++        if not isinstance(body, dict):
++            raise ValueError("submission must be an object")
++        body = copy.deepcopy(body)
++        has_token = "idempotency_key" in body
++        token = body.pop("idempotency_key", None)
++        if has_token and (not isinstance(token, str) or not IDEMPOTENCY_KEY.fullmatch(token)):
++            raise ValueError("idempotency_key must be 64 lowercase hexadecimal characters")
++        digest = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+         with self.mutex:
++            if token in self.by_key:
++                job = self.get(self.by_key[token])
++                if job["submission_hash"] != digest:
++                    raise SubmissionConflict("idempotency_key already used with a different submitted body")
++                return job
+             if self.stopping.is_set():
+                 raise RuntimeError("executor is stopping")
+-            if self.pending.full():
++            if len(self.pending) >= 64:
+                 raise queue.Full("executor queue is full")
++            frozen = prepare_submission(body, load_devices(self.config))
++            frozen.update(submitted_body=body, submission_hash=digest, idempotency_key=token)
+             key = uuid.uuid4().hex
+             folder = self.jobs / key
+             folder.mkdir()
++            sync_directory(self.jobs)
++            freeze_shader_inputs(folder, frozen)
+             write_json(folder / "input.json", frozen)
+-            job = {"id": key, "state": "queued", "device_id": frozen["device"]["id"], "endpoint": frozen["device"]["endpoint"], "operation": frozen["submission"]["operation"], "created_at": time.time(), "evidence_directory": str(folder)}
+-            write_json(folder / "job.json", job)
+-            self.pending.put_nowait(key)
++            job = {"id": key, "state": "queued", "device_id": frozen["device"]["id"], "endpoint": frozen["device"]["endpoint"], "operation": frozen["submission"]["operation"], "created_at": time.time(), "evidence_directory": str(folder), "submission_hash": digest, "idempotency_key": token, "cleanup_status": "pending"}
++            try:
++                write_json(folder / "job.json", job)
++            finally:
++                # A directory fsync failure can follow a successful atomic rename.
++                if (folder / "job.json").is_file():
++                    if token is not None:
++                        self.by_key[token] = key
++                    self.pending.append(key)
++                    self.ready.notify()
+             return job
+
+@@ -283,27 +504,100 @@
+         return read_json(path)
+
++    def get_by_key(self, token):
++        if not isinstance(token, str) or not IDEMPOTENCY_KEY.fullmatch(token):
++            raise KeyError("invalid idempotency key")
++        with self.mutex:
++            if token not in self.by_key:
++                raise KeyError("unknown idempotency key")
++            return self.get(self.by_key[token])
++
++    def cancel(self, key):
++        with self.mutex:
++            job = self.get(key)
++            if job["state"] == "queued":
++                job.update(state="cancelled", cancel_requested_at=time.time(), finished_at=time.time(), cleanup_status="completed")
++            elif job["state"] == "running":
++                job.update(state="cancel_requested", cancel_requested_at=time.time())
++            else:
++                if job["state"] == "cancelled" and key in self.pending:
++                    self.pending.remove(key)
++                return job
++            write_json(self.jobs / key / "job.json", job)
++            if job["state"] == "cancelled":
++                self.pending.remove(key)
++            return job
++
++    def health(self):
++        with self.mutex:
++            return {"status": "blocked" if self.blocked_jobs else "ok", "max_active_jobs": 1, "active_job": self.active, "queued": len(self.pending), "transport": "wireless_adb", "features": FEATURES, "blocked_jobs": sorted(self.blocked_jobs)}
++
++    def resolve(self, key, confirmation):
++        """Release quarantined work after an explicit local operator confirmation.
++
++        Args:
++            key: Interrupted or uncertain executor job ID.
++            confirmation: Boolean assertions that old work stopped and was restored.
++
++        Returns:
++            Terminal metadata retaining operator attribution and original evidence.
++        """
++        if not isinstance(confirmation, dict) or confirmation != {"confirmed_stopped": True, "confirmed_restored": True}:
++            raise ValueError("confirm both stopped execution and restored device state")
++        if any(type(value) is not bool for value in confirmation.values()):
++            raise ValueError("operator confirmation values must be boolean true")
++        with self.ready:
++            job = self.get(key)
++            if self.active == key or job["state"] not in {"uncertain", "interrupted"}:
++                raise SubmissionConflict("only inactive uncertain/interrupted jobs can be operator-resolved")
++            job.update(
++                state="cancelled", cleanup_status="completed", finished_at=time.time(),
++                cleanup_confirmation={"source": "operator", "confirmed_at": time.time(), **confirmation},
++            )
++            write_json(self.jobs / key / "job.json", job)
++            self.blocked_jobs.discard(key)
++            self.ready.notify_all()
++            return job
++
+     def _work(self):
+-        while not self.stopping.is_set():
+-            try:
+-                key = self.pending.get(timeout=0.2)
+-            except queue.Empty:
+-                continue
+-            folder = self.jobs / key
+-            job = self.get(key)
+-            self.active = key
+-            job.update(state="running", started_at=time.time())
+-            write_json(folder / "job.json", job)
++        while True:
++            with self.ready:
++                while (not self.pending or self.blocked_jobs) and not self.stopping.is_set():
++                    self.ready.wait(timeout=0.2)
++                if self.stopping.is_set():
++                    return
++                key = self.pending.popleft()
++                folder = self.jobs / key
++                job = self.get(key)
++                if job["state"] != "queued":
++                    continue
++                job.update(state="running", started_at=time.time())
++                write_json(folder / "job.json", job)
++                self.active = key
+             try:
+                 code = self.runner(folder)
+-                job.update(state="completed" if code in (0, 1) else "failed", backend_exit_code=code)
++                completed = cleanup_completed(folder, job["operation"])
++                outcome = {"state": "completed" if code in (0, 1) else "failed", "backend_exit_code": code}
++            except BackendNotStarted as error:
++                completed = True
++                outcome = {"state": "failed", "error": str(error)}
+             except Exception as error:
+-                job.update(state="failed", error=str(error))
+-            job["finished_at"] = time.time()
+-            write_json(folder / "job.json", job)
+-            self.active = None
+-            self.pending.task_done()
++                completed = False
++                outcome = {"state": "failed", "error": str(error)}
++            with self.mutex:
++                job = self.get(key)
++                cancelled = job["state"] == "cancel_requested"
++                job.update(outcome, finished_at=time.time(), cleanup_status="completed" if completed else "uncertain")
++                if not completed:
++                    job["state"] = "uncertain"
++                    self.blocked_jobs.add(key)
++                elif cancelled:
++                    job["state"] = "cancelled"
++                write_json(folder / "job.json", job)
++                self.active = None
+
+     def close(self):
+-        self.stopping.set()
++        with self.ready:
++            self.stopping.set()
++            self.ready.notify_all()
+         self.thread.join()
+         self.guard.close()
+@@ -323,5 +617,5 @@
+             try:
+                 if self.path in ("/health", "/v1/health"):
+-                    return self.reply(200, {"status": "ok", "max_active_jobs": 1, "active_job": engine.active, "queued": engine.pending.qsize(), "transport": "wireless_adb"})
++                    return self.reply(200, engine.health())
+                 if self.path == "/v1/devices":
+                     return self.reply(200, {"devices": load_devices(engine.config), "selection": "exactly one per job; endpoint and physical serial are verified"})
+@@ -329,4 +623,7 @@
+                     jobs = [read_json(p) for p in engine.jobs.glob("*/job.json")]
+                     return self.reply(200, {"jobs": sorted(jobs, key=lambda j: j["created_at"], reverse=True)[:100]})
++                lookup = re.fullmatch(r"/v1/jobs/by-key/([0-9a-f]{64})", self.path)
++                if lookup:
++                    return self.reply(200, engine.get_by_key(lookup.group(1)))
+                 match = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})(?:/(result|logs))?", self.path)
+                 if not match:
+@@ -352,4 +649,28 @@
+
+         def do_POST(self):
++            resolve = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})/resolve", self.path)
++            if resolve:
++                try:
++                    size = int(self.headers.get("Content-Length", "0"))
++                    if not 0 < size <= 4096:
++                        return self.reply(413, {"error": "confirmation body must be 1..4096 bytes"})
++                    confirmation = json.loads(self.rfile.read(size))
++                    return self.reply(200, engine.resolve(resolve.group(1), confirmation))
++                except KeyError as error:
++                    return self.reply(404, {"error": str(error)})
++                except SubmissionConflict as error:
++                    return self.reply(409, {"error": str(error)})
++                except (ValueError, TypeError) as error:
++                    return self.reply(400, {"error": str(error)})
++                except OSError as error:
++                    return self.reply(503, {"error": str(error)})
++            cancel = re.fullmatch(r"/v1/jobs/([0-9a-f]{32})/cancel", self.path)
++            if cancel:
++                try:
++                    return self.reply(200, engine.cancel(cancel.group(1)))
++                except KeyError as error:
++                    return self.reply(404, {"error": str(error)})
++                except (ValueError, OSError) as error:
++                    return self.reply(503, {"error": str(error)})
+             if self.path != "/v1/jobs":
+                 return self.reply(404, {"error": "unknown endpoint"})
+@@ -359,4 +680,6 @@
+                     return self.reply(413, {"error": "body must be 1..1048576 bytes"})
+                 return self.reply(202, engine.submit(json.loads(self.rfile.read(size))))
++            except SubmissionConflict as error:
++                self.reply(409, {"error": str(error)})
+             except queue.Full:
+                 self.reply(429, {"error": "executor queue is full"})
+@@ -423,5 +746,5 @@
+         if not args.wait:
+             return 0
+-        while job["state"] in ("queued", "running"):
++        while job["state"] in ("queued", "running", "cancel_requested"):
+             time.sleep(1)
+             job = http_call(args.url, "/v1/jobs/" + job["id"])
+--- a/README.md
++++ b/README.md
+@@ -240,4 +240,16 @@
+ | `GET /v1/jobs/<id>/logs` | ID | 每份日志末尾至多 64KiB |
+
++### Executor compatibility
++
++`GET /health` and `/v1/health` advertise `features: ["idempotent_submit", "job_lookup", "cancel"]`. `POST /v1/jobs` accepts an optional `idempotency_key` of exactly 64 lowercase hexadecimal characters. A replay returns HTTP 202 with the original job's current metadata, even after device configuration changes; a different submitted body with the same key returns HTTP 409. `GET /v1/jobs/by-key/<key>` returns that metadata or HTTP 404 across restarts, independently of the recent 100-job listing. Original submitted fields, canonical `submission_hash`, candidate ID, and frozen device selection remain stable.
++
++`POST /v1/jobs/<id>/cancel` returns HTTP 200 metadata: queued jobs become `cancelled` immediately; running jobs persist `cancel_requested` and finish the existing backend experiment and cleanup. Cancellation can therefore take the entire remaining experiment duration; there is no bounded acknowledgement latency or process/phone kill. Terminal `cancelled` requires `cleanup_status: "completed"`. Result files and logs remain available.
++
++Cleanup checks the actual `conditions_observed.restored`, optional `recovery.status == "reported_complete"`, GPU-lock restoration, and foreground receipts. A safely restored ABORT remains executor `completed`. Unknown or unsafe cleanup becomes `uncertain`; interrupted jobs also retain uncertain cleanup. Both hold all further phone jobs across restart (`health.status: "blocked"`, `blocked_jobs`) until explicit operator reconciliation. Queued cancellation and clean queued recovery remain available. This confirms owned-resource cleanup, not restoration of game state.
++
++After a local operator has independently confirmed the old process stopped and the device was restored, `POST /v1/jobs/<id>/resolve` with `{"confirmed_stopped":true,"confirmed_restored":true}` releases an inactive uncertain/interrupted job as cancelled. It records `cleanup_confirmation.source="operator"`, preserves original reports, and never pretends the backend verified those facts. Running jobs and incomplete/false confirmations are rejected. The SDK job must then be resolved separately using its normal workflow; neither layer automatically repeats the old experiment.
++
++Shader jobs freeze only source/SPIR-V, the implicit sibling `baseline.spv`, and reference images into read-only job-local files before queue admission. Directory references use the same evenly sampled maximum of 32 frames as upstream. SHA256 manifests are checked before device execution; original submitted-body hashes exclude the optional key and precede path rewriting. Other job kinds retain their existing inputs.
++
+ ```bash
+ curl --noproxy '*' -H 'Content-Type: application/json' \
+--- /dev/null
++++ b/tests/test_executor_compat.py
+@@ -0,0 +1,526 @@
++"""Exercise durable submission and cancellation without services or devices."""
++import copy
++import hashlib
++import importlib.util
++import io
++import json
++from pathlib import Path
++import queue
++import subprocess
++import tempfile
++import threading
++import time
++import unittest
++from concurrent.futures import ThreadPoolExecutor
++from unittest.mock import patch
++
++spec = importlib.util.spec_from_file_location("executor_compat", Path(__file__).parents[1] / "executor.py")
++app = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(app)
++
++
++class CompatibilityTests(unittest.TestCase):
++    """Use temporary job stores and synchronous dummy backends."""
++
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory()
++        self.root = Path(self.tmp.name)
++        self.config = self.root / "devices.json"
++        self.configure()
++        self.engines, self.gates = [], []
++
++    def tearDown(self):
++        for gate in self.gates:
++            gate.set()
++        for engine in reversed(self.engines):
++            engine.close()
++        self.tmp.cleanup()
++
++    def configure(self, enabled=True):
++        self.config.write_text(json.dumps({"version": 1, "devices": [{"id": "test", "label": "Test", "host": "192.0.2.10", "port": 5555, "expected_serial": "test-device", "enabled": enabled}]}))
++
++    def engine(self, runner=lambda _: 0):
++        engine = app.Engine(self.root / "data", self.config, runner)
++        self.engines.append(engine)
++        return engine
++
++    def gate(self):
++        gate = threading.Event()
++        self.gates.append(gate)
++        return gate
++
++    def wait(self, engine, key):
++        deadline = time.monotonic() + 3
++        while time.monotonic() < deadline:
++            job = engine.get(key)
++            if job["state"] not in ("queued", "running", "cancel_requested"):
++                return job
++            time.sleep(.005)
++        self.fail("dummy job did not finish")
++
++    def request(self, engine, method, path, body=None):
++        handler_type = app.make_handler(engine)
++        handler = handler_type.__new__(handler_type)
++        handler.path = path
++        raw = json.dumps(body).encode() if body is not None else b""
++        handler.headers = {"Content-Length": str(len(raw))}
++        handler.rfile = io.BytesIO(raw)
++        replies = []
++        handler.reply = lambda status, value: replies.append((status, value))
++        getattr(handler, "do_" + method)()
++        return replies[0]
++
++    def receipts(self, folder, report=None):
++        app.write_json(folder / "result.json", report if report is not None else {"status": "ABORT", "conditions_observed": {"restored": True}})
++        app.write_json(folder / "foreground.json", {"previous": "test.package/.Main", "paused": False, "restore_required": False, "restored": None})
++
++    def test_replay_uses_original_body_before_reloading_device_config(self):
++        engine = self.engine()
++        body = {"operation": "probe", "idempotency_key": "a" * 64}
++        original = engine.submit(body)
++        self.wait(engine, original["id"])
++        self.configure(enabled=False)
++        replay = engine.submit(dict(reversed(list(body.items()))))
++        self.assertEqual(replay["id"], original["id"])
++        self.config.write_text("invalid config")
++        self.assertEqual(engine.submit(body)["id"], original["id"])
++        with self.assertRaises(app.SubmissionConflict):
++            engine.submit(dict(body, pause_foreground=False))
++        frozen = app.read_json(engine.jobs / original["id"] / "input.json")
++        self.assertEqual(frozen["submitted_body"], {"operation": "probe"})
++        digest = hashlib.sha256(b'{"operation":"probe"}').hexdigest()
++        self.assertEqual(frozen["submission_hash"], digest)
++        self.assertEqual(replay["submission_hash"], digest)
++
++    def test_key_is_optional_and_invalid_keys_are_rejected(self):
++        engine = self.engine()
++        first = engine.submit({"operation": "probe"})
++        second = engine.submit({"operation": "probe"})
++        self.assertNotEqual(first["id"], second["id"])
++        for token in (None, "", "A" * 64, "a" * 63, "a" * 65, "g" * 64, "a" * 64 + "\n", 64, [], True):
++            with self.subTest(token=token), self.assertRaises(ValueError):
++                engine.submit({"operation": "probe", "idempotency_key": token})
++
++    def test_concurrent_retries_publish_one_job(self):
++        entered, release = self.gate(), self.gate()
++        calls = []
++        def run(folder):
++            calls.append(folder.name)
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        barrier = threading.Barrier(8)
++        def submit(_):
++            barrier.wait(timeout=3)
++            return engine.submit({"operation": "probe", "idempotency_key": "b" * 64})
++        with ThreadPoolExecutor(max_workers=8) as pool:
++            jobs = list(pool.map(submit, range(8)))
++        self.assertTrue(entered.wait(1))
++        self.assertEqual(len({job["id"] for job in jobs}), 1)
++        self.assertEqual(len(list(engine.jobs.glob("*/job.json"))), 1)
++        release.set()
++        self.wait(engine, jobs[0]["id"])
++        self.assertEqual(len(calls), 1)
++
++    def test_lookup_survives_restart_outside_recent_hundred(self):
++        engine = self.engine()
++        body = {"operation": "probe", "idempotency_key": "c" * 64}
++        original = engine.submit(body)
++        self.wait(engine, original["id"])
++        engine.close()
++        for index in range(110):
++            key = f"{index:032x}"
++            folder = engine.jobs / key
++            folder.mkdir()
++            app.write_json(folder / "job.json", {"id": key, "state": "completed", "created_at": original["created_at"] + index + 1})
++        engine = self.engine(lambda _: self.fail("unexpected replay"))
++        status, listing = self.request(engine, "GET", "/v1/jobs")
++        self.assertEqual(status, 200)
++        self.assertNotIn(original["id"], {job["id"] for job in listing["jobs"]})
++        status, found = self.request(engine, "GET", "/v1/jobs/by-key/" + body["idempotency_key"])
++        self.assertEqual((status, found["id"]), (200, original["id"]))
++        self.assertEqual(engine.submit(body)["id"], original["id"])
++        self.assertEqual(self.request(engine, "GET", "/v1/jobs/by-key/" + "d" * 64)[0], 404)
++        self.assertEqual(self.request(engine, "GET", "/v1/jobs/by-key/" + "C" * 64)[0], 404)
++
++    def test_http_submit_conflict_validation_and_health_contract(self):
++        engine = self.engine()
++        body = {"operation": "probe", "idempotency_key": "d" * 64}
++        status, original = self.request(engine, "POST", "/v1/jobs", body)
++        self.assertEqual(status, 202)
++        status, replay = self.request(engine, "POST", "/v1/jobs", body)
++        self.assertEqual((status, replay["id"]), (202, original["id"]))
++        self.assertEqual(self.request(engine, "POST", "/v1/jobs", dict(body, pause_foreground=True))[0], 409)
++        self.assertEqual(self.request(engine, "POST", "/v1/jobs", dict(body, idempotency_key=None))[0], 400)
++        for path in ("/health", "/v1/health"):
++            status, health = self.request(engine, "GET", path)
++            self.assertEqual(status, 200)
++            self.assertEqual(health["features"], ["idempotent_submit", "job_lookup", "cancel"])
++        self.assertEqual(self.request(engine, "POST", "/v1/jobs/" + "f" * 32 + "/cancel")[0], 404)
++
++    def test_queued_cancel_is_immediate_and_never_runs(self):
++        entered, release = self.gate(), self.gate()
++        calls = []
++        def run(folder):
++            calls.append(folder.name)
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        first = engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        body = {"operation": "probe", "idempotency_key": "e" * 64}
++        queued = engine.submit(body)
++        status, cancelled = self.request(engine, "POST", "/v1/jobs/" + queued["id"] + "/cancel")
++        self.assertEqual((status, cancelled["state"], cancelled["cleanup_status"]), (200, "cancelled", "completed"))
++        self.assertNotIn("started_at", cancelled)
++        self.assertEqual(engine.health()["queued"], 0)
++        self.assertEqual(engine.cancel(queued["id"]), cancelled)
++        self.assertEqual(engine.submit(body), cancelled)
++        release.set()
++        self.wait(engine, first["id"])
++        engine.close()
++        self.assertEqual(calls, [first["id"]])
++        engine = self.engine(lambda _: self.fail("cancelled job replayed"))
++        self.assertEqual(engine.get_by_key(body["idempotency_key"]), cancelled)
++
++    def test_running_cancel_waits_for_backend_cleanup_and_preserves_evidence(self):
++        entered, cleanup = self.gate(), self.gate()
++        def run(folder):
++            (folder / "backend.stdout").write_bytes(b"retained evidence\n")
++            self.receipts(folder)
++            entered.set()
++            cleanup.wait(3)
++            (folder / "cleanup.done").write_text("done")
++            return 1
++        engine = self.engine(run)
++        job = engine.submit({"request": {"version": 2, "kind": "shader", "candidate_id": "original"}})
++        self.assertTrue(entered.wait(1))
++        status, cancelled = self.request(engine, "POST", "/v1/jobs/" + job["id"] + "/cancel")
++        self.assertEqual((status, cancelled["state"]), (200, "cancel_requested"))
++        self.assertNotIn("finished_at", cancelled)
++        self.assertEqual(engine.cancel(job["id"]), cancelled)
++        queued = engine.submit({"operation": "probe"})
++        self.assertEqual(engine.get(queued["id"])["state"], "queued")
++        cleanup.set()
++        done = self.wait(engine, job["id"])
++        self.assertEqual((done["state"], done["cleanup_status"]), ("cancelled", "completed"))
++        self.assertEqual(done["cancel_requested_at"], cancelled["cancel_requested_at"])
++        self.assertTrue((engine.jobs / job["id"] / "cleanup.done").exists())
++        self.assertEqual((engine.jobs / job["id"] / "backend.stdout").read_bytes(), b"retained evidence\n")
++        self.wait(engine, queued["id"])
++
++    def test_cancel_racing_with_completion_never_loses_request(self):
++        engine = self.engine()
++        for _ in range(25):
++            job = engine.submit({"operation": "probe"})
++            cancelled = engine.cancel(job["id"])
++            done = self.wait(engine, job["id"])
++            if cancelled["state"] in ("cancel_requested", "cancelled"):
++                self.assertEqual(done["state"], "cancelled")
++                self.assertIn("cancel_requested_at", done)
++            else:
++                self.assertEqual(done["state"], "completed")
++            self.assertEqual(engine.cancel(job["id"]), done)
++
++    def test_unknown_cleanup_holds_every_phone_job_across_restart(self):
++        entered, release = self.gate(), self.gate()
++        calls = []
++        def run(folder):
++            calls.append(folder.name)
++            app.write_json(folder / "result.json", {"status": "PASS"})
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        job = engine.submit({"request": {"version": 2, "kind": "shader"}})
++        self.assertTrue(entered.wait(1))
++        engine.cancel(job["id"])
++        queued = engine.submit({"operation": "probe"})
++        release.set()
++        done = self.wait(engine, job["id"])
++        self.assertEqual((done["state"], done["cleanup_status"]), ("uncertain", "uncertain"))
++        self.assertEqual(engine.health()["blocked_jobs"], [job["id"]])
++        self.assertEqual(engine.cancel(job["id"])["state"], "uncertain")
++        engine.close()
++        engine = self.engine(lambda _: self.fail("unsafe restart unblocked phone"))
++        self.assertEqual(engine.get(queued["id"])["state"], "queued")
++        self.assertEqual(engine.health()["status"], "blocked")
++        self.assertEqual(engine.cancel(queued["id"])["state"], "cancelled")
++        self.assertEqual(calls, [job["id"]])
++
++    def test_report_restoration_and_optional_recovery_are_checked(self):
++        folder = self.root / "report"
++        folder.mkdir()
++        reports = [
++            ({"conditions_observed": {"restored": True}}, True),
++            ({"status": "ABORT", "conditions_observed": {"restored": True}}, True),
++            ({"recovery": {"status": "reported_complete"}, "game_state_restored": False}, True),
++            ({"conditions_observed": {"restored": False}, "recovery": {"status": "reported_complete"}}, False),
++            ({"conditions_observed": {"restored": True}, "recovery": {"status": "required"}}, False),
++            ({"conditions_observed": {"restored": True}, "recovery": {"status": "verified"}}, False),
++            ({"conditions_observed": {"restored": True, "gpu_level_lock": {"restored": False}}}, False),
++            ({"conditions_observed": {"restored": True, "gpu_level_lock": {"restored": True}}}, True),
++            ({"conditions_observed": {"restored": 1}}, False),
++            ({"status": "PASS"}, False),
++            ([], False),
++        ]
++        for report, expected in reports:
++            with self.subTest(report=report):
++                self.receipts(folder, report)
++                self.assertEqual(app.cleanup_completed(folder, "eval"), expected)
++        self.receipts(folder)
++        (folder / "foreground.json").unlink()
++        self.assertFalse(app.cleanup_completed(folder, "eval"))
++        app.write_json(folder / "foreground.json", {"restore_required": True, "restored": True, "restore_exit_code": 0})
++        self.assertTrue(app.cleanup_completed(folder, "eval"))
++        app.write_json(folder / "foreground.json", {"previous": None, "paused": False, "headless": True, "restore_required": False})
++        self.assertTrue(app.cleanup_completed(folder, "eval"))
++        app.write_json(folder / "worker-error.json", {"error": "restore failed"})
++        self.assertFalse(app.cleanup_completed(folder, "eval"))
++
++    def test_safe_abort_completes_and_releases_next_job(self):
++        def run(folder):
++            self.receipts(folder)
++            return 1
++        engine = self.engine(run)
++        jobs = [engine.submit({"request": {"version": 2, "kind": "shader"}}) for _ in range(2)]
++        self.assertTrue(all(self.wait(engine, job["id"])["state"] == "completed" for job in jobs))
++        self.assertEqual(engine.health()["blocked_jobs"], [])
++
++    def test_runner_exception_is_uncertain_but_known_preflight_is_safe(self):
++        def preflight(_):
++            raise app.BackendNotStarted("validation failed before connection")
++        engine = self.engine(preflight)
++        job = engine.submit({"operation": "probe"})
++        done = self.wait(engine, job["id"])
++        self.assertEqual((done["state"], done["cleanup_status"]), ("failed", "completed"))
++        self.assertEqual(engine.health()["blocked_jobs"], [])
++        engine.close()
++        def broken(_):
++            raise RuntimeError("backend interruption")
++        engine = self.engine(broken)
++        job = engine.submit({"operation": "probe"})
++        self.assertEqual(self.wait(engine, job["id"])["state"], "uncertain")
++        self.assertEqual(engine.health()["blocked_jobs"], [job["id"]])
++
++    def test_recovery_keeps_queued_order_and_quarantines_interruption(self):
++        engine = self.engine()
++        engine.close()
++        for index, state in enumerate(("running", "cancel_requested", "queued")):
++            key = f"{index:032x}"
++            folder = engine.jobs / key
++            folder.mkdir()
++            app.write_json(folder / "job.json", {"id": key, "state": state, "created_at": index})
++        engine = self.engine(lambda _: self.fail("interruption must hold queue"))
++        self.assertEqual(engine.get("0" * 32)["state"], "interrupted")
++        self.assertEqual(engine.get(f"{1:032x}")["cleanup_status"], "uncertain")
++        self.assertEqual(engine.get(f"{2:032x}")["state"], "queued")
++        self.assertEqual(len(engine.health()["blocked_jobs"]), 2)
++        self.assertEqual(engine.cancel(f"{2:032x}")["state"], "cancelled")
++
++    def test_clean_restart_recovers_queued_in_original_order(self):
++        entered, release = self.gate(), self.gate()
++        def run(_):
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        active = engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        jobs = [engine.submit({"operation": "probe"}) for _ in range(3)]
++        engine.stopping.set()
++        release.set()
++        self.wait(engine, active["id"])
++        engine.close()
++        calls = []
++        engine = self.engine(lambda folder: calls.append(folder.name) or 0)
++        for job in jobs:
++            self.wait(engine, job["id"])
++        self.assertEqual(calls, [job["id"] for job in jobs])
++
++    def test_queue_limit_and_queued_cancel_release_capacity(self):
++        entered, release = self.gate(), self.gate()
++        def run(_):
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        jobs = [engine.submit({"operation": "probe", "idempotency_key": f"{index:064x}"}) for index in range(64)]
++        with self.assertRaises(queue.Full):
++            engine.submit({"operation": "probe"})
++        self.assertEqual(engine.submit({"operation": "probe", "idempotency_key": "0" * 64})["id"], jobs[0]["id"])
++        self.assertEqual(self.request(engine, "POST", "/v1/jobs", {"operation": "probe"})[0], 429)
++        engine.cancel(jobs[0]["id"])
++        self.assertEqual(engine.submit({"operation": "probe"})["state"], "queued")
++        engine.stopping.set()
++
++    def test_atomic_json_failure_preserves_original_and_removes_temporary(self):
++        path = self.root / "metadata.json"
++        app.write_json(path, {"original": True})
++        original = path.read_bytes()
++        with self.assertRaises(ValueError):
++            app.write_json(path, {"bad": float("nan")})
++        self.assertEqual(path.read_bytes(), original)
++        self.assertEqual(list(self.root.glob("*.tmp")), [])
++        with patch.object(Path, "replace", side_effect=OSError("replace failed")), self.assertRaises(OSError):
++            app.write_json(path, {"replacement": True})
++        self.assertEqual(path.read_bytes(), original)
++        self.assertEqual(list(self.root.glob("*.tmp")), [])
++
++    def test_commit_fsync_error_does_not_allow_duplicate_key(self):
++        engine = self.engine()
++        body = {"operation": "probe", "idempotency_key": "1" * 64}
++        original = app.write_json
++        def publish_then_fail(path, value):
++            original(path, value)
++            if Path(path).name == "job.json" and value["state"] == "queued":
++                raise OSError("directory fsync failed after rename")
++        with patch.object(app, "write_json", side_effect=publish_then_fail), self.assertRaises(OSError):
++            engine.submit(body)
++        replay = engine.submit(body)
++        self.assertEqual(len(list(engine.jobs.glob("*/job.json"))), 1)
++        self.assertEqual(engine.get_by_key(body["idempotency_key"])["id"], replay["id"])
++        self.wait(engine, replay["id"])
++
++    def test_cancel_fsync_error_cannot_replay_persisted_cancelled_job(self):
++        entered, release = self.gate(), self.gate()
++        calls = []
++        def run(folder):
++            calls.append(folder.name)
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        first = engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        second = engine.submit({"operation": "probe"})
++        original = app.write_json
++        def publish_then_fail(path, value):
++            original(path, value)
++            raise OSError("directory fsync failed after rename")
++        with patch.object(app, "write_json", side_effect=publish_then_fail), self.assertRaises(OSError):
++            engine.cancel(second["id"])
++        self.assertEqual(engine.cancel(second["id"])["state"], "cancelled")
++        release.set()
++        self.wait(engine, first["id"])
++        engine.close()
++        self.assertEqual(calls, [first["id"]])
++
++    def shader_body(self, references=40):
++        source = self.root / "source"
++        source.mkdir()
++        (source / "shader.comp").write_bytes(b"shader original")
++        (source / "candidate.spv").write_bytes(b"candidate original")
++        (source / "baseline.spv").write_bytes(b"baseline original")
++        frames = source / "frames"
++        frames.mkdir()
++        for index in range(references):
++            (frames / f"{index:03}.png").write_bytes(f"frame {index}".encode())
++        (frames / "unrelated.txt").write_text("never copy")
++        return {"idempotency_key": "f" * 64, "request": {"version": 2, "kind": "shader", "candidate_id": "keep-id", "payload": {"shader_path": str(source / "shader.comp"), "spirv_path": str(source / "candidate.spv"), "quality_reference": str(frames)}, "conditions": {"quality_reference": str(frames)}}}
++
++    def test_shader_snapshot_freezes_baseline_and_upstream_sampled_frames(self):
++        entered, release = self.gate(), self.gate()
++        def run(_):
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        body = self.shader_body()
++        original = copy.deepcopy(body)
++        job = engine.submit(body)
++        self.assertEqual(body, original)
++        folder = engine.jobs / job["id"]
++        frozen = app.read_json(folder / "input.json")
++        self.assertEqual(frozen["submitted_body"], {"request": original["request"]})
++        self.assertEqual(frozen["submission"]["request"]["candidate_id"], "keep-id")
++        payload = frozen["submission"]["request"]["payload"]
++        self.assertEqual(payload["quality_reference"], frozen["submission"]["request"]["conditions"]["quality_reference"])
++        frames = sorted(Path(payload["quality_reference"]).iterdir())
++        expected = [f"{(i * 39 + 15) // 31:03}.png" for i in range(32)]
++        self.assertEqual([frame.name for frame in frames], expected)
++        self.assertEqual(len(frozen["input_files"]), 35)
++        for name in ("shader.comp", "candidate.spv", "baseline.spv"):
++            (self.root / "source" / name).write_text("changed while queued")
++        self.assertEqual(Path(payload["shader_path"]).read_bytes(), b"shader original")
++        self.assertEqual((Path(payload["spirv_path"]).parent / "baseline.spv").read_bytes(), b"baseline original")
++        self.assertEqual(engine.submit(body)["id"], job["id"])
++        app.verify_frozen_inputs(folder, frozen)
++        self.assertEqual(len(list(folder.glob("inputs/**/*txt"))), 0)
++        engine.cancel(job["id"])
++
++    def test_frozen_file_tamper_is_rejected_before_any_backend_command(self):
++        body = self.shader_body(references=1)
++        frozen = app.prepare_submission({"request": body["request"]}, app.load_devices(self.config))
++        folder = self.root / "frozen"
++        folder.mkdir()
++        app.freeze_shader_inputs(folder, frozen)
++        app.write_json(folder / "input.json", frozen)
++        candidate = Path(frozen["submission"]["request"]["payload"]["spirv_path"])
++        candidate.chmod(0o644)
++        candidate.write_bytes(b"tampered")
++        with patch.object(app, "command") as command, self.assertRaises(app.BackendNotStarted):
++            app.run_backend(folder)
++        command.assert_not_called()
++        candidate.write_bytes(b"candidate original")
++        app.verify_frozen_inputs(folder, frozen)
++        frames = Path(frozen["submission"]["request"]["payload"]["quality_reference"])
++        (frames / "extra.png").write_bytes(b"unexpected additional frame")
++        with patch.object(app, "command") as command, self.assertRaises(app.BackendNotStarted):
++            app.run_backend(folder)
++        command.assert_not_called()
++
++    def test_operator_resolution_releases_only_confirmed_inactive_quarantine(self):
++        """Quarantine requires explicit local operator confirmation, never a retry."""
++        entered, release = self.gate(), self.gate()
++        def run(folder):
++            entered.set()
++            release.wait(3)
++            return 0
++        engine = self.engine(run)
++        active = engine.submit({"operation": "probe"})
++        self.assertTrue(entered.wait(1))
++        confirmation = {"confirmed_stopped": True, "confirmed_restored": True}
++        path = "/v1/jobs/" + active["id"] + "/resolve"
++        self.assertEqual(self.request(engine, "POST", path, confirmation)[0], 409)
++        release.set()
++        self.wait(engine, active["id"])
++        key = "e" * 32
++        folder = engine.jobs / key
++        folder.mkdir()
++        app.write_json(folder / "job.json", {"id": key, "state": "interrupted", "cleanup_status": "uncertain", "created_at": 1})
++        engine.blocked_jobs.add(key)
++        path = "/v1/jobs/" + key + "/resolve"
++        for invalid in ({}, {"confirmed_stopped": True}, {"confirmed_stopped": True, "confirmed_restored": False}, {"confirmed_stopped": 1, "confirmed_restored": True}):
++            self.assertEqual(self.request(engine, "POST", path, invalid)[0], 400)
++            self.assertIn(key, engine.blocked_jobs)
++        status, resolved = self.request(engine, "POST", path, confirmation)
++        self.assertEqual(status, 200)
++        self.assertEqual((resolved["state"], resolved["cleanup_status"]), ("cancelled", "completed"))
++        self.assertEqual(resolved["cleanup_confirmation"]["source"], "operator")
++        self.assertNotIn(key, engine.blocked_jobs)
++        engine.close()
++        reopened = self.engine()
++        self.assertEqual(reopened.get(key)["cleanup_confirmation"]["source"], "operator")
++        self.assertEqual(reopened.health()["status"], "ok")
++
++    def test_preflight_rejection_does_not_start_a_device_worker(self):
++        folder = self.root / "preflight"
++        folder.mkdir()
++        frozen = app.prepare_submission({"request": {"version": 2, "kind": "shader"}}, app.load_devices(self.config))
++        app.write_json(folder / "input.json", frozen)
++        result = subprocess.CompletedProcess([], 1, stdout="invalid request", stderr="")
++        with patch.object(app, "command", return_value=result) as command, self.assertRaises(app.BackendNotStarted):
++            app.run_backend(folder)
++        self.assertEqual(command.call_count, 1)
++        self.assertIn("--validate-only", command.call_args.args[0])
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -1,7 +1,7 @@
 # Human rebuttal style
 
 Adapted from AutoRebuttal's human-response style guide. See
-`/app/skills/autorebuttal-shared/ATTRIBUTION.md`.
+[the adaptation attribution](../../ATTRIBUTION.md).
 
 Prefer:
 
@@ -11,7 +11,7 @@ Prefer:
 - explicit issue framing
 - one strong point per paragraph
 - reviewer stance awareness
-- a global strategy memo before reviewer-by-reviewer prose
+- a coherent shared strategy reflected in the reviewer-specific prose
 - local experiment placeholder tables when empirical evidence is central
 
 Avoid generic customer-support phrasing, repetitive gratitude, broad promises,
