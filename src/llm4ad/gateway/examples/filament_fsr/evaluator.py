@@ -12,6 +12,7 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import TypedDict
 
 from llm4ad.gateway.examples.filament_fsr import TASK_TEMPLATE
 from llm4ad.gateway.sdk import (
@@ -44,6 +45,14 @@ QUALITY_PENALTY_CAP = -100.0
 RELAXED_FLIP_TOLERANCE = 0.10
 CAPTURED_FRAMES = tuple(f"frame-{index:03d}" for index in range(0, FRAME_COUNT, 10))
 SCENES = {"DamagedHelmet": "FILAMENT_SCENE", "Fox": "FILAMENT_FOX_SCENE"}
+
+
+class _TimingPair(TypedDict):
+    """GPU timing summaries and the relative P50 improvement for one pair."""
+
+    stock: dict[str, float]
+    candidate: dict[str, float]
+    improvement_pct: float
 
 
 def local_path(variable: str, *, directory: bool = False) -> Path:
@@ -256,7 +265,7 @@ def summarize(evidence: Path) -> dict:
     """Summarize paired GPU timings and ImageDiff results per scene."""
     scenes = {}
     for scene in SCENES:
-        rounds = []
+        rounds: list[_TimingPair] = []
         for pair in range(1, PAIR_COUNT + 1):
             timings = {
                 variant: timing_summary(
@@ -265,7 +274,13 @@ def summarize(evidence: Path) -> dict:
                 for variant in ("stock", "candidate")
             }
             stock, candidate = timings["stock"]["p50_ms"], timings["candidate"]["p50_ms"]
-            rounds.append({**timings, "improvement_pct": (stock - candidate) / stock * 100})
+            rounds.append(
+                {
+                    "stock": timings["stock"],
+                    "candidate": timings["candidate"],
+                    "improvement_pct": (stock - candidate) / stock * 100,
+                }
+            )
         scenes[scene] = {
             "pairs": rounds,
             "improvement_pct": statistics.median(pair["improvement_pct"] for pair in rounds),
