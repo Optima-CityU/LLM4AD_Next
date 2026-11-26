@@ -163,6 +163,35 @@ def test_builtin_example_check_needs_no_project(tmp_path):
     assert json.loads(result.stdout)["ok"]
 
 
+def test_filament_cli_uses_sdk_example_and_platform_baseline(tmp_path, monkeypatch):
+    """Resolve the bundled adapter, deployment files, and its canonical shader."""
+    from llm4ad.gateway.sdk import check
+    from llm4ad.gateway.sdk.contracts import load_evaluator_class
+    from llm4ad.gateway.settings import GatewaySettings
+
+    monkeypatch.delenv("FILAMENT_STARTUP_QUALITY_MODE", raising=False)
+    cli = CliRunner()
+    sources = cli.invoke(app, ["source", "--adapter", "filament"])
+    assert sources.exit_code == 0, sources.output
+    paths = json.loads(sources.stdout)
+    assert (Path(paths["deployment"]) / "compose.yaml").is_file()
+    assert Path(paths["task"]).is_file()
+    candidate = Path(paths["candidate"])
+    assert (candidate / "ffx_fsr1_mobile.glsl").is_file()
+    spec = GatewaySettings(adapter="filament").evaluator_spec
+    assert load_evaluator_class(spec).contract.evaluator_id == "filament-fsr1-android"
+    state = tmp_path / "check"
+
+    def check_baseline(evaluator, baseline, state_dir, timeout, *, parameters):
+        assert (evaluator, baseline, state_dir, timeout) == (spec, candidate, state, 420.0)
+        assert parameters == {"quality_mode": "flip"}
+        return {"ok": True}
+
+    monkeypatch.setattr(check, "check_evaluator", check_baseline)
+    result = cli.invoke(app, ["check", "--adapter", "filament", "--state-dir", str(state), "--timeout", "420"])
+    assert result.exit_code == 0, result.output
+
+
 def test_real_check_keeps_candidate_and_retains_explicit_files(workspace, tmp_path):
     """Run syntax compilation and an actual child process, without changing the source."""
     source = workspace / "candidate/solution.py"

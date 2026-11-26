@@ -1,0 +1,6 @@
+**
+!requirements.txt
+!deployment/
+!deployment/compose.yaml
+!deployment/wheels/
+!deployment/wheels/llm4ad_next-*.whl

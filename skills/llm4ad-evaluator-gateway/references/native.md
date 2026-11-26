@@ -12,6 +12,10 @@ Use `--timeout` if the baseline needs longer. Read the result and verify that th
 candidate was actually executed. To test the SDK with its bundled candidate, run
 `llm4ad evaluator-gateway check --adapter example`.
 
+For the Android Filament FSR1 example, run `llm4ad evaluator-gateway source --adapter filament`
+and follow its README to prepare the device and assets. Then use `check --adapter filament`
+and `start --adapter filament` with the configured environment.
+
 After the user authorizes connection, start the gateway. Replace
 `YOUR_USER_UUID` with **My user ID** from the platform. The server defaults to
 `https://llm4ad-next.cn`. Supply `--server` for another deployment.

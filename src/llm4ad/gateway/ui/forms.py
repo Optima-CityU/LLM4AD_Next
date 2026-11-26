@@ -31,7 +31,7 @@ FIELD_LABELS = {
 
 async def settings_form(controller: Any, ui: Any, shell: Any, poll: Any) -> None:
     """Render settings without rebuilding form fields during background refreshes."""
-    from llm4ad.gateway.settings import ADAPTERS
+    from llm4ad.gateway.settings import ADAPTERS, SERIAL_ADAPTERS
 
     tr = shell.tr
     snapshot = await controller.get_snapshot()
@@ -62,6 +62,7 @@ async def settings_form(controller: Any, ui: Any, shell: Any, poll: Any) -> None
                         "custom": tr("Custom evaluator"),
                         "example": tr("Built-in example"),
                         "hgamey": tr("HGamey shader evaluator"),
+                        "filament": tr("Filament FSR1 evaluator"),
                     },
                     value=values.get("adapter", "custom"),
                     label=tr("Evaluator source"),
@@ -79,7 +80,7 @@ async def settings_form(controller: Any, ui: Any, shell: Any, poll: Any) -> None
                 )
             ui.label(tr("One user per line, or comma-separated.")).classes("lab-muted")
             builtin_hint = ui.label(tr("Read-only built-in evaluator import.")).classes("lab-muted")
-            serialized = ui.label(tr("HGamey runs one evaluation at a time.")).classes("lab-muted")
+            serialized = ui.label(tr("This evaluator runs one evaluation at a time.")).classes("lab-muted")
             previous_source = values.get("adapter", "custom")
             custom_import = (values.get("evaluator") or "") if previous_source == "custom" else ""
 
@@ -96,9 +97,9 @@ async def settings_form(controller: Any, ui: Any, shell: Any, poll: Any) -> None
                     fields["evaluator"].set_value(ADAPTERS[source])
                     fields["evaluator"].props("readonly")
                 builtin_hint.set_visibility(source != "custom")
-                serialized.set_visibility(source == "hgamey")
-                fields["concurrency"].set_enabled(source != "hgamey")
-                if source == "hgamey":
+                serialized.set_visibility(source in SERIAL_ADAPTERS)
+                fields["concurrency"].set_enabled(source not in SERIAL_ADAPTERS)
+                if source in SERIAL_ADAPTERS:
                     fields["concurrency"].set_value(1)
                 previous_source = source
 

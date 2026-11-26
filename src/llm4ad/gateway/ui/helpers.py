@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
+from llm4ad.gateway.settings import ADAPTERS, SERIAL_ADAPTERS
+
 SETTINGS_FIELDS = (
     "server",
     "name",
@@ -175,7 +177,7 @@ def settings_payload(values: Mapping[str, Any]) -> dict[str, Any]:
             if not math.isfinite(result[key]) or result[key] < 0 or (key == "cleanup_interval" and result[key] == 0):
                 raise ValueError(f"Invalid {key}")
     for key, choices in (
-        ("adapter", {"custom", "example", "hgamey"}),
+        ("adapter", {"custom", *ADAPTERS}),
         ("language", {"auto", "zh", "en"}),
         ("theme", {"auto", "dark", "light"}),
     ):
@@ -193,11 +195,11 @@ def settings_payload(values: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("cleanup_enabled", "open_browser"):
         if key in result and not isinstance(result[key], bool) and not (key == "open_browser" and result[key] is None):
             raise ValueError(f"Invalid {key}")
-    if result.get("adapter") == "hgamey":
+    if result.get("adapter") in SERIAL_ADAPTERS:
         result["concurrency"] = 1
     if "evaluator" in result:
         result["evaluator"] = str(result["evaluator"]).strip() if result["evaluator"] else None
-    if result.get("adapter") in {"example", "hgamey"}:
+    if result.get("adapter") in ADAPTERS:
         result["evaluator"] = None
     return result
 

@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from llm4ad.gateway.examples.filament_fsr import TASK_TEMPLATE
 from llm4ad.gateway.sdk import (
     EvaluationConfigurationError,
     EvaluationContract,
@@ -29,7 +30,7 @@ from llm4ad.gateway.sdk.check import check_evaluator
 from llm4ad.gateway.sdk.runtime import GatewayBinding, GatewayRuntime
 
 HERE = Path(__file__).resolve().parent
-SEED = HERE.parent.parent / "applications" / "filament_fsr1_single_pass" / "algorithm"
+SEED = TASK_TEMPLATE / "algorithm"
 SOURCE_NAME = "ffx_fsr1_mobile.glsl"
 SHADER_NAME = "ffx_fsr1_mobile.fs"
 MATERIAL_NAME = "fsr_easu_mobile.mat"
@@ -166,8 +167,6 @@ def material_tool(tool: Path, workspace: Path, *arguments: str, candidate: bool 
         "/lib64",
         "--dev",
         "/dev",
-        "--proc",
-        "/proc",
         "--tmpfs",
         "/tmp",
         "--ro-bind",
@@ -394,7 +393,7 @@ class FilamentRuntime(GatewayRuntime):
         """Exercise the complete SDK worker and device path before registration."""
         relaxed = gateway.adapter.relaxed_quality
         root = gateway.root if relaxed else self.options["root"]
-        parameters = {} if relaxed else {"quality_mode": os.environ.get("FILAMENT_STARTUP_QUALITY_MODE", "pixel_exact")}
+        parameters = {} if relaxed else {"quality_mode": os.environ.get("FILAMENT_STARTUP_QUALITY_MODE", "flip")}
         report = await asyncio.to_thread(
             check_evaluator,
             gateway.spec,
@@ -445,7 +444,7 @@ class Evaluator(GatewayEvaluator):
             raise EvaluationConfigurationError("quality_mode must be pixel_exact or flip")
         if quality_mode == "flip":
             try:
-                from comparison_sheet import write_comparison_sheet
+                from llm4ad.gateway.examples.filament_fsr.comparison_sheet import write_comparison_sheet
             except ModuleNotFoundError as error:
                 if error.name != "PIL":
                     raise

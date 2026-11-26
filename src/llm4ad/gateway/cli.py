@@ -18,6 +18,7 @@ from llm4ad.gateway.sdk.service import create_service, run_service
 from llm4ad.gateway.settings import ADAPTERS, load_settings
 
 app = typer.Typer(help="Run an installed adapter or your custom evaluator directly.")
+ADAPTER_OPTIONS = ", ".join(("custom", *ADAPTERS))
 
 
 def evaluator_spec(adapter: str, evaluator: str | None) -> str:
@@ -27,7 +28,7 @@ def evaluator_spec(adapter: str, evaluator: str | None) -> str:
             raise ValueError("Set --evaluator FILE.py:ClassName for a custom gateway")
         return evaluator
     if adapter not in ADAPTERS:
-        raise ValueError("adapter must be custom, example or hgamey")
+        raise ValueError(f"Choose an adapter from: {ADAPTER_OPTIONS}")
     if evaluator:
         raise ValueError("Choose --adapter or --evaluator, not both")
     return ADAPTERS[adapter]
@@ -68,7 +69,7 @@ def init_workspace(
 def start(
     server: Annotated[str | None, typer.Option()] = None,
     name: Annotated[str | None, typer.Option()] = None,
-    adapter: Annotated[str | None, typer.Option(help="custom, example or hgamey")] = None,
+    adapter: Annotated[str | None, typer.Option(help=ADAPTER_OPTIONS)] = None,
     evaluator: Annotated[
         str | None, typer.Option(help="Custom FILE.py:Class or package.module:Class")
     ] = None,
@@ -86,7 +87,7 @@ def start(
     ui_host: str | None = None,
     ui_port: Annotated[int | None, typer.Option(min=0, max=65535)] = None,
 ):
-    """Start the SDK gateway or the packaged HGamey gateway/executor service."""
+    """Start a custom evaluator or a packaged gateway adapter."""
     try:
         environment = dict(os.environ)
         values = {}
@@ -165,10 +166,9 @@ def start(
 @app.command()
 def source(adapter: str = "example"):
     """Show installed source and deployment paths without creating files or running code."""
-    if adapter not in {"example", "hgamey", "custom"}:
-        raise typer.BadParameter("adapter must be custom, example or hgamey")
+    if adapter != "custom" and adapter not in ADAPTERS:
+        raise typer.BadParameter(f"Choose an adapter from: {ADAPTER_OPTIONS}")
     root = Path(__file__).parent
-    case = root / "examples" / ("hgamey" if adapter == "hgamey" else "basic")
     paths = {
         "root": str(root),
         "sdk": str(root / "sdk"),
@@ -178,6 +178,7 @@ def source(adapter: str = "example"):
     if adapter == "custom":
         paths["adapter"] = "--evaluator FILE.py:Class"
     else:
+        case = root / "examples" / {"example": "basic", "hgamey": "hgamey", "filament": "filament_fsr"}[adapter]
         paths.update(example=str(case), adapter=str(case), deployment=str(case / "deployment"))
         if adapter == "hgamey":
             paths.update(
@@ -187,6 +188,14 @@ def source(adapter: str = "example"):
                 }
             )
             paths.update({name: str(case / f"{name}.py") for name in ("runtime", "evidence")})
+        elif adapter == "filament":
+            from llm4ad.gateway.examples.filament_fsr import TASK_TEMPLATE
+
+            paths.update(
+                candidate=str(TASK_TEMPLATE / "algorithm"),
+                task=str(TASK_TEMPLATE / "config.yaml"),
+                readme=str(case / "README.md"),
+            )
     typer.echo(json.dumps(paths, indent=2, ensure_ascii=False))
 
 
@@ -203,11 +212,17 @@ def check(
 
     try:
         spec = evaluator_spec(adapter, evaluator)
+        parameters = None
+        if adapter == "filament":
+            from llm4ad.gateway.examples.filament_fsr import TASK_TEMPLATE
+
+            candidate = candidate or TASK_TEMPLATE / "algorithm"
+            parameters = {"quality_mode": os.environ.get("FILAMENT_STARTUP_QUALITY_MODE", "flip")}
         if candidate is None:
             if adapter != "example":
                 raise ValueError("Provide --candidate for this evaluator")
             candidate = Path(__file__).parent / "examples/basic/candidate"
-        result = check_evaluator(spec, candidate, state_dir, timeout)
+        result = check_evaluator(spec, candidate, state_dir, timeout, parameters=parameters)
     except (OSError, ValueError, sqlite3.OperationalError, ImportError, AttributeError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(json.dumps(result, ensure_ascii=False, allow_nan=False))

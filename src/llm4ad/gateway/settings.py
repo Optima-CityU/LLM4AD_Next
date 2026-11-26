@@ -15,7 +15,9 @@ DEFAULT_SERVER = "https://llm4ad-next.cn"
 ADAPTERS = {
     "example": "llm4ad.gateway.examples.basic.evaluator:Evaluator",
     "hgamey": "llm4ad.gateway.examples.hgamey.evaluator:HGameyShaderEvaluator",
+    "filament": "llm4ad.gateway.examples.filament_fsr.evaluator:Evaluator",
 }
+SERIAL_ADAPTERS = frozenset({"hgamey", "filament"})
 ENVIRONMENT_KEYS = {
     "server": "LLM4AD_SERVER_URL",
     "name": "LLM4AD_GATEWAY_NAME",
@@ -45,7 +47,7 @@ class GatewaySettings(BaseModel):
     server: str = DEFAULT_SERVER
     name: str = "local-evaluator"
     allowed_users: list[str] = Field(default_factory=list)
-    adapter: Literal["custom", "example", "hgamey"] = "custom"
+    adapter: Literal["custom", "example", "hgamey", "filament"] = "custom"
     evaluator: str | None = None
     state_dir: str = ".llm4ad-gateway"
     concurrency: int = Field(default=1, ge=1)
@@ -112,9 +114,9 @@ class GatewaySettings(BaseModel):
         if not self.allowed_users:
             raise ValueError("Provide --allow-user UUID or LLM4AD_ALLOWED_USER_IDS")
         _ = self.evaluator_spec
-        if self.adapter == "hgamey" and self.concurrency != 1:
+        if self.adapter in SERIAL_ADAPTERS and self.concurrency != 1:
             raise ValueError(
-                "The HGamey device executor has one serialized evaluation slot per device"
+                f"The {self.adapter} adapter requires --concurrency 1"
             )
 
     def environment(self, base: dict | None = None) -> dict:

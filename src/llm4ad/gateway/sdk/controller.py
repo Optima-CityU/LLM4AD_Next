@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
 
-from llm4ad.gateway.settings import COLD_SETTINGS, LISTENER_SETTINGS, GatewaySettings, SettingsStore
+from llm4ad.gateway.settings import COLD_SETTINGS, LISTENER_SETTINGS, SERIAL_ADAPTERS, GatewaySettings, SettingsStore
 
 from .journal import Journal, gateway_lease
 from .runtime import platform_directory
@@ -468,7 +468,7 @@ class GatewayController:
             "max_concurrency": (
                 getattr(self.service.runtime, "max_concurrency", None)
                 if self.service
-                else (1 if self.settings.adapter == "hgamey" else None)
+                else (1 if self.settings.adapter in SERIAL_ADAPTERS else None)
             ),
         }
 
