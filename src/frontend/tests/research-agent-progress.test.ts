@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { createInstance } from "i18next"
-import { createElement } from "react"
+import { type ComponentProps, createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { I18nextProvider } from "react-i18next"
 
@@ -8,7 +8,9 @@ import type { ProposalStageState } from "../src/client"
 import ResearchAgentProgressPanel from "../src/components/Paper/ResearchAgentProgressPanel"
 import en from "../src/i18n/locales/en.json"
 import zh from "../src/i18n/locales/zh.json"
+import { proposalStepResult } from "../src/lib/proposalDocument"
 import {
+  currentProposalResearchStep,
   mergeResearchAgentProgress,
   type ResearchAgentProgress,
   type ResearchProgressStep,
@@ -29,6 +31,7 @@ function render(
   progress: unknown,
   stageStates: Record<string, ProposalStageState> = {},
   language = "zh",
+  options: Partial<ComponentProps<typeof ResearchAgentProgressPanel>> = {},
 ) {
   return renderToStaticMarkup(
     createElement(
@@ -39,6 +42,7 @@ function render(
         stageStates,
         progress: progress ? researchAgentProgressSchema.parse(progress) : null,
         onOpenStage: () => {},
+        ...options,
       }),
     ),
   )
@@ -280,6 +284,97 @@ test("result actions require an actual published stage and a completed logical s
   expect(
     render(withSteps([logical()]), { methods: publication() }, "en"),
   ).not.toContain("View deliverable")
+})
+
+test("proposal resumes the latest interrupted step with its original identity", () => {
+  const progress = withSteps(
+    [
+      logical({
+        id: "author-choice",
+        status: "waiting",
+        updatedAt: "2026-11-18T08:00:00Z",
+      }),
+      logical({
+        id: "thermal-evidence",
+        title: "Verify thermal identifiability",
+        status: "interrupted",
+        updatedAt: "2026-11-18T08:10:00Z",
+      }),
+    ],
+    { status: "idle" },
+  )
+  const steps = researchProgressSteps(progress, {}, true)
+  expect(steps[0].status).toBe("waiting")
+  expect(currentProposalResearchStep(steps)?.id).toBe("step:thermal-evidence")
+  const html = render(progress, {}, "zh", { onResumeStep: () => {} })
+  expect(html).toContain("继续此步骤")
+  expect(html).toContain("Verify thermal identifiability")
+  expect(html.match(/aria-expanded="true"/g)).toHaveLength(1)
+})
+
+test("proposal results open saved chapters and do not expose internal or empty files", () => {
+  const draft = {
+    id: "S2",
+    title: "Related work",
+    path: "2-国内外研究现状.md",
+    has_content: true,
+  }
+  const bibliography = { ...draft, id: "S4", path: "4-参考文献.md" }
+  const internalPaths = [
+    "proposal-state.json",
+    "proposal-log.md",
+    "styles/nsfc-proposal.typ",
+  ]
+  const completed = logical({
+    status: "completed",
+    stage: "literature",
+    outputPaths: [...internalPaths, draft.path],
+  })
+  expect(
+    proposalStepResult(
+      completed,
+      [...internalPaths, draft.path],
+      [draft],
+      [],
+      false,
+    ),
+  ).toEqual({
+    view: "document",
+    path: draft.path,
+  })
+  expect(
+    proposalStepResult(completed, internalPaths, [draft], [], false),
+  ).toBeNull()
+  expect(
+    proposalStepResult(
+      completed,
+      [draft.path],
+      [{ ...draft, has_content: false }],
+      [],
+      false,
+    ),
+  ).toBeNull()
+  expect(
+    proposalStepResult(
+      { ...completed, outputPaths: [bibliography.path] },
+      [bibliography.path],
+      [bibliography],
+      [],
+      false,
+    ),
+  ).toEqual({
+    view: "source",
+    path: bibliography.path,
+  })
+  const finalReview = logical({ status: "completed", stage: "final_review" })
+  expect(proposalStepResult(finalReview, [], [], [], false)).toBeNull()
+  expect(proposalStepResult(finalReview, [], [], [], true)).toEqual({
+    view: "layout",
+    path: null,
+  })
+  const options = { onResumeStep: () => {}, getResultAction: () => null }
+  const template = render(null, { formatting: publication() }, "zh", options)
+  expect(template).not.toContain("查看成果")
 })
 
 test("published legacy artifacts restore only known research stages without future placeholders", () => {

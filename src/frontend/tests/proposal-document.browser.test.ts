@@ -8,6 +8,7 @@ import { type Browser, chromium, expect, type Page } from "@playwright/test"
 import tailwindcss from "@tailwindcss/vite"
 import { createServer, transformWithEsbuild, type ViteDevServer } from "vite"
 import en from "../src/i18n/locales/en.json" with { type: "json" }
+import type { ResearchAgentProgress } from "../src/lib/researchAgentProgress"
 
 let server: ViteDevServer
 let browser: Browser
@@ -77,7 +78,19 @@ before(async () => {
         load(id) {
           if (id === "\0proposal-route-save") return saveModule.code
           if (id.endsWith("/components/Paper/PaperNativeRuntime.tsx"))
-            return 'import React from "react"; export default function Assistant(){return React.createElement("textarea", {"aria-label":"Assistant message"})}'
+            return `
+              import React, { useEffect } from "react";
+              export default function Assistant({onAgentProgress, pendingRequest}) {
+                useEffect(() => {
+                  if (window.proposalTestProgress)
+                    onAgentProgress(window.proposalTestProgress);
+                }, [onAgentProgress]);
+                return React.createElement("textarea", {
+                  "aria-label": "Assistant message",
+                  "data-request": pendingRequest?.prompt,
+                });
+              }
+            `
           if (
             /\/components\/Paper\/(AlgorithmStagePanel|RebuttalEntriesPanel)\.tsx$/.test(
               id,
@@ -738,6 +751,7 @@ async function actualRoute(
     references?: boolean
     assistant?: boolean
     additionalChapter?: boolean
+    progress?: ResearchAgentProgress
   } = {},
 ) {
   const sources = {
@@ -759,6 +773,7 @@ async function actualRoute(
     hasDraft: !options.empty,
     hasReferences: options.references ?? true,
     hasPublishedStep: false,
+    unavailableOutput: false,
     rejectSave: false,
     referenceAssetReads: [] as string[],
     posts: [] as { id: string; hash: string }[],
@@ -779,16 +794,24 @@ async function actualRoute(
     pdf_url: `/api/v1/llm4ad/papers/source-versions/${id}/render/proposal.pdf`,
     typst_url: `/api/v1/llm4ad/papers/source-versions/${id}/render/proposal.typ`,
   })
-  await page.addInitScript(() => {
+  await page.addInitScript((progress) => {
     if (window !== window.top) return
     localStorage.setItem("llm4ad-language", "en")
     localStorage.setItem("access_token", "proposal-test-token")
-  })
+    Object.assign(window, { proposalTestProgress: progress })
+  }, options.progress)
   await page.route("**/api/v1/llm4ad/**", async (route) => {
     const request = route.request(),
       url = new URL(request.url())
     if (url.pathname.endsWith("/providers/"))
-      return route.fulfill({ json: { items: [], total: 0 } })
+      return route.fulfill({
+        json: {
+          items: options.progress
+            ? [{ id: "proposal-provider", type: "anthropic" }]
+            : [],
+          total: options.progress ? 1 : 0,
+        },
+      })
     const workspaceId = url.pathname.match(
       /\/workspaces\/(workspace-[ab])/,
     )?.[1] as keyof typeof sources | undefined
@@ -865,6 +888,8 @@ async function actualRoute(
               }
             : {},
           revision_candidates: [],
+          analysis_provider_id: options.progress ? "proposal-provider" : null,
+          analysis_model_name: options.progress ? "proposal-model" : null,
           analysis_context_window_tokens: 128000,
           analysis_max_output_tokens: 16384,
         },
@@ -894,6 +919,11 @@ async function actualRoute(
       if (request.method() === "GET") {
         state.fileReads.push(url.searchParams.get("path")!)
         const path = url.searchParams.get("path")
+        if (path === "methods.md" && state.unavailableOutput)
+          return route.fulfill({
+            status: 404,
+            json: { detail: "File unavailable" },
+          })
         return route.fulfill({
           json: {
             source_version_id: id,
@@ -1217,6 +1247,85 @@ test("a blank proposal offers optional reference uploads before and during draft
     ).toHaveCount(0)
     assert.deepEqual(state.posts, [])
     assert.deepEqual(state.saves, [])
+    assert.deepEqual(errors, [])
+  } finally {
+    await page.close()
+  }
+})
+
+test("a proposal opens the reported chapter and resumes the same step after reload", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 1400, height: 1000 },
+  })
+  try {
+    const priorStep = {
+      goal: "",
+      approach: "",
+      summary: "",
+      stage: "methods",
+      outputPaths: [],
+    }
+    const { state, errors } = await actualRoute(page, {
+      additionalChapter: true,
+      assistant: true,
+      progress: {
+        sessionId: "proposal-session",
+        workflowSequence: 3,
+        status: "idle",
+        currentTool: null,
+        agents: [],
+        workflowSteps: [
+          {
+            ...priorStep,
+            id: "author-choice",
+            title: "Choose a hypothesis",
+            status: "waiting",
+            updatedAt: "2026-11-18T08:00:00Z",
+          },
+          {
+            ...priorStep,
+            id: "methods-draft",
+            title: "Draft the methods",
+            status: "completed",
+            outputPaths: ["proposal-log.md", "methods.md"],
+            updatedAt: "2026-11-18T08:10:00Z",
+          },
+          {
+            ...priorStep,
+            id: "evidence",
+            title: "Assess the evidence",
+            status: "interrupted",
+            updatedAt: "2026-11-18T08:20:00Z",
+          },
+        ],
+      },
+    })
+    const deliverable = page.getByRole("button", { name: "View deliverable" })
+    await expect(deliverable).toHaveCount(1)
+    state.unavailableOutput = true
+    const unavailable = page.waitForResponse(
+      (response) =>
+        response.url().includes("path=methods.md") && response.status() === 404,
+    )
+    await deliverable.click()
+    await unavailable
+    await expect(page.getByTestId("research-agent-progress")).toBeVisible()
+    await expect(page.getByTestId("proposal-document")).toHaveCount(0)
+    state.unavailableOutput = false
+    await deliverable.click()
+    await expect(page.getByTestId("proposal-document")).toContainText(
+      "Independent chapter text.",
+    )
+    assert.ok(state.fileReads.includes("methods.md"))
+    await page.reload()
+    const assistant = page.getByRole("textbox", { name: "Assistant message" })
+    await expect(assistant).not.toHaveAttribute("data-request")
+    const resume = page
+      .locator('[data-step-id="step:evidence"]')
+      .getByRole("button", { name: "Continue this step" })
+    await resume.click()
+    await expect(assistant).toHaveAttribute("data-request", /evidence/)
+    assert.deepEqual(state.posts, [])
     assert.deepEqual(errors, [])
   } finally {
     await page.close()

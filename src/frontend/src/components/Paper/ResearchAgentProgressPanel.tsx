@@ -12,10 +12,12 @@ import type { ProposalStageState } from "@/client"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  currentProposalResearchStep,
   isPublishedResearchStage,
   isResearchStepActive,
   type ResearchAgentProgress,
   researchProgressSteps,
+  type ResearchWorkflowStep,
 } from "@/lib/researchAgentProgress"
 import { cn } from "@/lib/utils"
 
@@ -25,6 +27,9 @@ type Props = {
   progress: ResearchAgentProgress | null
   emptyMessage?: string
   onOpenStage: (stage: string) => void
+  getResultAction?: (step: ResearchWorkflowStep) => (() => void) | null
+  onResumeStep?: (step: ResearchWorkflowStep) => void
+  resumeDisabled?: boolean
 }
 
 /** Present research goals, design reasoning and outcomes as stable logical stages. */
@@ -33,16 +38,22 @@ export default function ResearchAgentProgressPanel({
   progress,
   emptyMessage,
   onOpenStage,
+  getResultAction,
+  onResumeStep,
+  resumeDisabled,
 }: Props) {
   const { t } = useTranslation()
-  const steps = researchProgressSteps(progress, stageStates)
+  const proposal = Boolean(onResumeStep)
+  const steps = researchProgressSteps(progress, stageStates, proposal)
+  const proposalStep = proposal ? currentProposalResearchStep(steps) : undefined
   const rawStatus = progress?.status ?? "ready"
   const activeIndex = steps.reduce(
     (latest, step, index) => (isResearchStepActive(step) ? index : latest),
     -1,
   )
-  const currentIndex =
-    activeIndex >= 0
+  const currentIndex = proposalStep
+    ? steps.indexOf(proposalStep)
+    : activeIndex >= 0
       ? activeIndex
       : ["failed", "interrupted"].includes(
             steps[steps.length - 1]?.status ?? "",
@@ -50,9 +61,10 @@ export default function ResearchAgentProgressPanel({
         ? steps.length - 1
         : -1
   const status =
-    rawStatus === "failed" || rawStatus === "interrupted" || activeIndex < 0
+    proposalStep?.status ??
+    (rawStatus === "failed" || rawStatus === "interrupted" || activeIndex < 0
       ? rawStatus
-      : steps[activeIndex].status
+      : steps[activeIndex].status)
   const running = status === "running" || status === "waiting"
 
   return (
@@ -88,9 +100,17 @@ export default function ResearchAgentProgressPanel({
         {steps.map((step, index) => {
           const active = isResearchStepActive(step)
           const current = index === currentIndex
-          const canOpen =
-            step.status === "completed" &&
-            isPublishedResearchStage(stageStates[step.stage])
+          const openResult = getResultAction
+            ? getResultAction(step)
+            : step.status === "completed" &&
+                isPublishedResearchStage(stageStates[step.stage])
+              ? () => onOpenStage(step.stage)
+              : null
+          const canResume =
+            onResumeStep &&
+            current &&
+            proposalStep === step &&
+            (step.status === "failed" || step.status === "interrupted")
           const title =
             step.title.trim() ||
             t(`paper.workflow.stage.${step.stage}`, {
@@ -197,18 +217,31 @@ export default function ResearchAgentProgressPanel({
                     ))}
                   </dl>
                 </Collapsible.Content>
-                {canOpen && (
+                {(openResult || canResume) && (
                   <div className="border-t px-4 py-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="link"
-                      className="h-auto px-0 text-sm"
-                      onClick={() => onOpenStage(step.stage)}
-                    >
-                      {t("paper.agentProgress.openResult")}
-                      <ChevronRight data-icon="inline-end" />
-                    </Button>
+                    {openResult && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="link"
+                        className="h-auto px-0 text-sm"
+                        onClick={openResult}
+                      >
+                        {t("paper.agentProgress.openResult")}
+                        <ChevronRight data-icon="inline-end" />
+                      </Button>
+                    )}
+                    {canResume && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={resumeDisabled}
+                        onClick={() => onResumeStep(step)}
+                      >
+                        {t("paper.agentProgress.resumeStep")}
+                      </Button>
+                    )}
                   </div>
                 )}
               </Collapsible.Root>

@@ -1,7 +1,10 @@
 """Contracts for optional helpers, revision context and legacy publication."""
 
+import asyncio
+import json
 import uuid
-from unittest.mock import Mock
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from fastapi import HTTPException, Request
@@ -12,6 +15,72 @@ from app.api.llm4ad import paper_runtime
 from app.services import paper_workflow
 from app.services import paper_workflow_coordinator as coordinator
 from app.tasks import paper_agent
+
+
+@pytest.mark.parametrize(
+    ("event", "end_status"),
+    [
+        ({"kind": "chat_subscribed", "isProcessing": False}, "interrupted"),
+        ({"kind": "complete", "success": True}, "interrupted"),
+        ({"kind": "complete", "success": False, "aborted": True}, "interrupted"),
+        ({"kind": "complete", "success": False}, "failed"),
+    ],
+)
+def test_proposal_interruption_is_durable_and_continues_the_same_step(monkeypatch, event, end_status):
+    """Persist the stop without promoting earlier author decisions or creating a new step."""
+    db = MagicMock()
+    workspace = models.PaperWorkspace(user_id=uuid.uuid4(), title="Proposal", mode="proposal")
+    run = models.PaperAgentRun(
+        workspace_id=workspace.id,
+        run_kind="research_workflow",
+        session_id="proposal-session",
+        request_payload={"auto_workflow": True},
+    )
+    db.exec.return_value.all.return_value = [run]
+    db.exec.return_value.first.return_value = run
+    monkeypatch.setattr(paper_runtime, "Session", lambda _: db)
+    db.__enter__.return_value = db
+    author_step = {"id": "author-choice", "title": "Choose the hypothesis", "status": "waiting"}
+    current_step = {
+        "id": "remaining-evidence",
+        "title": "Evaluate the remaining evidence",
+        "status": "running",
+        "outputPaths": ["2-国内外研究现状.md"],
+    }
+    coordinator.record_workflow_step(db, workspace, run, author_step)
+    coordinator.record_workflow_step(db, workspace, run, current_step)
+    snapshot = {"sessionId": run.session_id, "status": "idle", "currentTool": None, "agents": []}
+    # A browser progress snapshot and an active subscription never end a turn.
+    coordinator.record_progress_snapshot(db, workspace, run, snapshot)
+    ended_at = datetime.now(UTC).isoformat()
+
+    def handle(frame: dict, session_id: str = run.session_id) -> None:
+        assert asyncio.run(
+            paper_runtime._runtime_message_is_current(
+                str(workspace.id),
+                json.dumps({**frame, "sessionId": session_id, "timestamp": ended_at}),
+                proposal=True,
+            )
+        )
+
+    handle({"kind": "chat_subscribed", "isProcessing": True})
+    handle(event, "another-session")
+    assert coordinator.load_progress_snapshot(db, workspace)["workflowSteps"][-1]["status"] == "running"
+    handle(event)
+    recovered = coordinator.load_progress_snapshot(db, workspace)
+    waiting, interrupted = recovered["workflowSteps"]
+    assert waiting["status"] == "waiting"
+    assert interrupted["status"] == end_status
+    assert interrupted["outputPaths"] == current_step["outputPaths"]
+    assert recovered["workflowSequence"] == 3
+
+    coordinator.record_progress_snapshot(db, workspace, run, {**snapshot, "status": "running"})
+    resumed = coordinator.record_workflow_step(db, workspace, run, current_step)
+    handle(event)
+    assert resumed["id"] == interrupted["id"]
+    assert resumed["revision"] == interrupted["revision"] + 1
+    assert coordinator.load_progress_snapshot(db, workspace)["status"] == "running"
+    assert coordinator.load_progress_snapshot(db, workspace)["workflowSteps"] == [waiting, resumed]
 
 
 def test_optional_helpers_load_domain_skills_and_inherit_the_bound_model():

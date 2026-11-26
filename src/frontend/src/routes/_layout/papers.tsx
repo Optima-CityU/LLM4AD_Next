@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   ArrowRight,
@@ -112,6 +113,7 @@ import { useHljsTheme } from "@/hooks/useHljsTheme"
 import { usePaperHeader } from "@/hooks/usePaperHeader"
 import { usePaperRegions } from "@/hooks/usePaperRegions"
 import {
+  paperSourceFileOptions,
   useDeletePaperSourcePath,
   useDeletePaperWorkspace,
   usePaperSourceFile,
@@ -131,11 +133,14 @@ import {
   type ProposalRenderRevision,
   proposalChapters,
   proposalDraftChapters,
+  proposalStepResult,
 } from "@/lib/proposalDocument"
 import {
+  currentProposalResearchStep,
   mergeResearchAgentProgress,
   type ResearchAgentProgress,
   researchProgressSteps,
+  type ResearchWorkflowStep,
 } from "@/lib/researchAgentProgress"
 import { CLAUDE_RUNTIME_PROVIDER_TYPES } from "@/lib/researchModels"
 import {
@@ -1709,6 +1714,13 @@ export function PaperWorkbench({
     initialProjectRequest?.workspaceId === workspaceId
       ? initialProjectRequest
       : null
+  const [proposalResume, setProposalResume] = useState<{
+    workspaceId: string
+    id: string
+    prompt: string
+  } | null>(null)
+  const resumeRequest =
+    proposalResume?.workspaceId === workspaceId ? proposalResume : null
   const [regionalQueue, setRegionalQueue] = useState<{
     workspaceId: string
     requests: Array<{ id: string; prompt: string }>
@@ -1951,13 +1963,12 @@ export function PaperWorkbench({
       researchProgressSteps(
         agentProgress,
         workspace?.proposal_stage_states ?? {},
+        workspace?.mode === "proposal",
       ),
-    [agentProgress, workspace?.proposal_stage_states],
+    [agentProgress, workspace?.mode, workspace?.proposal_stage_states],
   )
   const currentProposalStep =
-    [...proposalProgressSteps]
-      .reverse()
-      .find((step) => step.status === "running" || step.status === "waiting") ??
+    currentProposalResearchStep(proposalProgressSteps) ??
     proposalProgressSteps[proposalProgressSteps.length - 1]
   const receiveAgentProgress = useCallback(
     (progress: ResearchAgentProgress) => {
@@ -1994,27 +2005,6 @@ export function PaperWorkbench({
       researchView,
       workspace?.mode,
     ],
-  )
-  const openStageResult = (stage: string) => {
-    if (workspace?.mode === "proposal") {
-      void changeProposalView("document")
-      return
-    }
-    setActiveStage(stage as PaperTool)
-    setResearchView("result")
-  }
-  const progressPanel = (
-    <ResearchAgentProgressPanel
-      stages={workflowStages}
-      stageStates={workspace?.proposal_stage_states ?? {}}
-      progress={agentProgress}
-      emptyMessage={
-        workspace?.mode === "proposal"
-          ? t("paper.proposalStart.stepsHint")
-          : undefined
-      }
-      onOpenStage={openStageResult}
-    />
   )
   const nativeStage = workflowStages.includes(activeStage)
     ? activeStage
@@ -2351,6 +2341,131 @@ export function PaperWorkbench({
           : selectedPath)
     return selectProposalPath(path, view)
   }
+
+  const proposalMode = workspace?.mode === "proposal"
+  const queryClient = useQueryClient()
+  const manifest = activeSource?.manifest ?? []
+  const completedProposalOutputs = proposalMode
+    ? proposalProgressSteps
+        .filter((step) => step.status === "completed")
+        .flatMap((step) => step.outputPaths)
+    : []
+  const bibliography = usePaperSourceFile(
+    activeSource?.id ?? null,
+    completedProposalOutputs.includes("references.bib") &&
+      manifest.includes("references.bib")
+      ? "references.bib"
+      : null,
+    activeSource?.content_hash,
+  )
+  const legacyProposal = usePaperSourceFile(
+    activeSource?.id ?? null,
+    !isMarkdownProposal &&
+      completedProposalOutputs.includes(proposalEntryPath) &&
+      manifest.includes(proposalEntryPath)
+      ? proposalEntryPath
+      : null,
+    activeSource?.content_hash,
+  )
+  const resumeDisabled =
+    !modelReady ||
+    Boolean(resumeRequest || initialRequest || regionalRequests.length) ||
+    agentProgress?.status === "running"
+  const resumeProposalStep = (step: ResearchWorkflowStep) => {
+    if (resumeDisabled) return
+    const request = {
+      workspaceId,
+      id: `proposal-resume:${crypto.randomUUID()}`,
+      prompt: t("paper.agentProgress.resumePrompt", {
+        step: step.id.slice("step:".length),
+        title: step.title,
+      }),
+    }
+    setProposalResume((previous) =>
+      previous?.workspaceId === workspaceId ? previous : request,
+    )
+  }
+  const openProposalResult = async (
+    target: NonNullable<ReturnType<typeof proposalStepResult>>,
+  ) => {
+    const fresh = await workspaceQuery.refetch()
+    if (sourceWorkspace.current !== workspaceId) return
+    const version = fresh.data?.source_versions?.find(
+      (item) => item.id === fresh.data?.active_source_version_id,
+    )
+    if (
+      fresh.isError ||
+      !version ||
+      version.id !== activeSource?.id ||
+      version.content_hash !== activeSource.content_hash ||
+      (target.path && !version.manifest.includes(target.path))
+    ) {
+      toast.info(t("paper.agentProgress.resultUnavailable"))
+      return
+    }
+    if (target.path) {
+      try {
+        const file = await queryClient.fetchQuery(
+          paperSourceFileOptions(version.id, target.path, version.content_hash),
+        )
+        if (!file.content.trim()) {
+          toast.info(t("paper.agentProgress.resultUnavailable"))
+          return
+        }
+      } catch {
+        toast.info(t("paper.agentProgress.resultUnavailable"))
+        return
+      }
+    }
+    if (sourceWorkspace.current !== workspaceId) return
+    if (
+      sourceState.current.activeSource?.id !== version.id ||
+      sourceState.current.activeSource.content_hash !== version.content_hash
+    ) {
+      toast.info(t("paper.agentProgress.resultUnavailable"))
+      return
+    }
+    await selectProposalPath(target.path, target.view)
+  }
+  const progressPanel = (
+    <ResearchAgentProgressPanel
+      stages={workflowStages}
+      stageStates={workspace?.proposal_stage_states ?? {}}
+      progress={agentProgress}
+      emptyMessage={
+        proposalMode ? t("paper.proposalStart.stepsHint") : undefined
+      }
+      onOpenStage={(stage) => {
+        setActiveStage(stage as PaperTool)
+        setResearchView("result")
+      }}
+      onResumeStep={proposalMode ? resumeProposalStep : undefined}
+      resumeDisabled={resumeDisabled}
+      getResultAction={
+        proposalMode
+          ? (step) => {
+              const target = proposalStepResult(
+                step,
+                manifest,
+                workspace.proposal_chapters ?? [],
+                [
+                  ...(bibliography.data?.content.trim()
+                    ? ["references.bib"]
+                    : []),
+                  ...(legacyProposal.data?.content.trim()
+                    ? [proposalEntryPath]
+                    : []),
+                ],
+                proposalRender.result?.status === "ready" &&
+                  !proposalRender.stale &&
+                  !sourceDirty,
+              )
+              return target ? () => void openProposalResult(target) : null
+            }
+          : undefined
+      }
+    />
+  )
 
   useEffect(() => {
     if (
@@ -2953,9 +3068,16 @@ export function PaperWorkbench({
                   workspaceId={workspace.id}
                   autoWorkflow={autoWorkflow}
                   onAgentProgress={receiveAgentProgress}
-                  pendingRequest={initialRequest ?? regionalRequests[0] ?? null}
+                  pendingRequest={
+                    initialRequest ??
+                    resumeRequest ??
+                    regionalRequests[0] ??
+                    null
+                  }
                   onRequestAccepted={(id) => {
-                    if (initialRequest?.id === id) setInitialProjectRequest(null)
+                    if (initialRequest?.id === id)
+                      setInitialProjectRequest(null)
+                    else if (resumeRequest?.id === id) setProposalResume(null)
                     else void acceptRegionalRequest(id)
                   }}
                   stage={nativeStage}

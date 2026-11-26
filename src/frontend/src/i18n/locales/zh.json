@@ -389,6 +389,9 @@
       "timeline": "研究步骤",
       "published": "已发布 {{count}} / {{total}} 个阶段成果",
       "openResult": "查看成果",
+      "resultUnavailable": "当前版本没有可查看的对应成果。",
+      "resumeStep": "继续此步骤",
+      "resumePrompt": "请继续中断的步骤「{{title}}」（步骤 ID：{{step}}）。读取最新项目进度、已保存的章节和我之前的确认，沿用原步骤 ID 完成剩余工作。推进下一阶段前请等我确认。",
       "toolCount": "已调用 {{count}} 次工具",
       "status": {
         "ready": "准备就绪",

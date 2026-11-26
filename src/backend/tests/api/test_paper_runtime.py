@@ -146,30 +146,21 @@ def test_browser_header_is_not_used_as_free_form_prompt_text() -> None:
     assert paper_runtime._browser_language("en;q=0,*;q=1,zh;q=NaN") is None
 
 
-def test_manuscript_workflow_uses_staged_autorebuttal_skills() -> None:
-    """Keep the ordered workflow and skill injection backend-owned."""
+def test_manuscript_workflow_shares_a_skill_across_publication_adapters() -> None:
+    """Keep legacy rebuttal artifacts behind one shared domain skill."""
     from app.services import paper_workflow
 
     workflow = paper_workflow.get_research_workflow("manuscript")
 
     assert workflow.available is True
     assert workflow.stages == ("rebuttal_baseline", "autorebuttal", "ac_summary")
-    assert workflow.skills_by_run_kind["rebuttal_baseline"] == (
-        "rebuttal-baseline",
-        "research-stage-publication",
-    )
-    assert workflow.skills_by_run_kind["autorebuttal"] == (
-        "autorebuttal",
-        "research-stage-publication",
-    )
-    assert workflow.skills_by_run_kind["ac_summary"] == (
-        "ac-summary",
-        "research-stage-publication",
-    )
+    for stage in workflow.stages:
+        assert workflow.skills_by_run_kind[stage] == ("autorebuttal-workflow", "research-stage-publication")
     assert workflow.writable_paths_by_run_kind["autorebuttal"] == ()
     assert workflow.writable_paths_by_run_kind["ac_summary"] == ()
+    assert workflow.prerequisites_by_run_kind["ac_summary"] == ("autorebuttal",)
     assert workflow.prerequisite_satisfied("ac_summary", "autorebuttal", "needs_revision")
-    assert not workflow.prerequisite_satisfied("ac_summary", "autorebuttal", "stale")
+    assert workflow.prerequisite_satisfied("ac_summary", "autorebuttal", "stale")
 
 
 def test_runtime_html_anchors_relative_assets_to_owned_proxy() -> None:
@@ -214,6 +205,7 @@ async def test_runtime_session_uses_scoped_protocol_adapter(
 ) -> None:
     """Keep every provider behind the workspace-local Anthropic endpoint."""
     captured: dict = {}
+    monkeypatch.setattr(paper_runtime.settings, "PAPER_SEARCH_ENABLED", True)
     runtime_engine = create_engine("sqlite://")
     SQLModel.metadata.create_all(runtime_engine, tables=[model.__table__ for model in (
         models.User, models.LLMProvider, models.EmbeddingProvider, models.UserDefaultModel,
@@ -333,9 +325,19 @@ async def test_runtime_session_uses_scoped_protocol_adapter(
     profile = captured["profile"]
     if auto_workflow:
         assert session.session_id == f"{workspace.id.hex}-workflow"
-        assert profile["mainSkills"] == ["research-workflow-coordinator"]
-        assert profile["agents"]["methods"]["model"] == "inherit"
-        assert "proposal-methods" in profile["agents"]["methods"]["skills"]
+        assert profile["mainSkills"] == [
+            "research-workflow-coordinator",
+            "openair-proposal",
+            "research-stage-publication",
+            "typst-author",
+            "research-web-search",
+        ]
+        assert set(profile["agents"]) == {"analysis", "reference-check"}
+        reference_check = profile["agents"]["reference-check"]
+        assert reference_check["model"] == "inherit"
+        assert reference_check["skills"] == ["openair-proposal"]
+        assert "mcp__research_search__search" in reference_check["tools"]
+        assert "Write" not in reference_check["tools"]
         assert "Agent" in profile["toolsSettings"]["allowedTools"]
     assert issued["user_id"] == user.id
     assert issued["provider_type"] == provider_type.value
@@ -363,7 +365,10 @@ async def test_runtime_session_uses_scoped_protocol_adapter(
     assert profile["env"]["ANTHROPIC_AUTH_TOKEN"] == "llm4ad-local-proxy"
     assert profile["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:17821"
     assert profile["contextWindowTokens"] == 200_000
-    assert profile["toolsSettings"]["disallowedTools"] == (["Bash", "WebFetch", "WebSearch"] if workspace_mode == "proposal" else ["WebFetch", "WebSearch", "ToolSearch"])
+    disallowed_tools = ["WebFetch", "WebSearch", "ToolSearch"]
+    if workspace_mode == "proposal":
+        disallowed_tools.insert(0, "Bash")
+    assert profile["toolsSettings"]["disallowedTools"] == disallowed_tools
     assert "upstream-secret" not in session.runtime_url
     assert "gateway-token" not in session.runtime_url
     assert "upstream-secret" not in response.headers.get("set-cookie", "")
