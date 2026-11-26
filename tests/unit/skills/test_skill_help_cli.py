@@ -1,6 +1,7 @@
 """Verify that the CLI reveals one skill topic at a time."""
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from llm4ad.frontend import cli
@@ -60,7 +61,7 @@ def test_skill_topic_returns_only_its_guidance(name, topic, expected, other_topi
 )
 def test_invalid_skill_queries_explain_available_options(arguments, message):
     """Reject invalid lookups before performing normal CLI actions."""
-    response = runner.invoke(cli.app, arguments)
+    response = runner.invoke(cli.app, arguments, env={"COLUMNS": "100"})
     assert response.exit_code == 2
     assert response.stdout == ""
-    assert message in response.stderr
+    assert message in Text.from_ansi(response.stderr).plain
