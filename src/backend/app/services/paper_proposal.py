@@ -155,7 +155,12 @@ def chapter_index(entries: list[tuple[str, bytes]], entry_path: str | None = Non
     fallback = entry_path if entry_path in resources else "proposal.md" if "proposal.md" in resources else None
     if fallback and PurePosixPath(fallback).suffix.lower() in {".md", ".markdown"}:
         return [
-            PaperProposalChapter(id="document", path=fallback, title=_chapter_title(resources[fallback], "申请书正文"))
+            PaperProposalChapter(
+                id="document",
+                path=fallback,
+                title=_chapter_title(resources[fallback], "申请书正文"),
+                has_content=_chapter_has_content(resources[fallback]),
+            )
         ]
     return []
 

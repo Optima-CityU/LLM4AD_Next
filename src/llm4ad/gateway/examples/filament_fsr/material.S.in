@@ -1,0 +1,7 @@
+.section .rodata.fsr_stock,"a",%progbits
+.balign 16
+.global fsr_original
+.global fsr_original_end
+fsr_original:
+.incbin "@STOCK_MATERIAL@"
+fsr_original_end:

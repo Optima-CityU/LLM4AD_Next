@@ -44,6 +44,10 @@ portable package to import into the platform. Read
      --output <output-dir>/my-task.zip
    ```
 
+   Use the skill directory printed by `llm4ad --skill cloud-package --topic validation`
+   from the matching SDK installation, or this Skill's directory in the checkout.
+   Quote the script path when it contains spaces.
+
    The helper snapshots the project into a ZIP, extracts it into a fresh temporary
    directory, validates its config and EVOLVE blocks, evaluates every configured
    data instance using a copy of the candidate directory, and checks that an empty

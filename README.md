@@ -189,10 +189,10 @@ See [use_example](skills/algo-design/use_example/) for a complete TSP + EoH exam
 
 Use a coding agent with local file and command access to prepare your task, then run evolution on the platform.
 
-1. Give your agent the complete [Cloud Package Skill directory](skills/llm4ad-cloud-package/) and paste this prompt:
+1. Install `llm4ad-next` and give your local agent this prompt:
 
    ```text
-   Read skills/llm4ad-cloud-package/SKILL.md and its referenced files in this repository.
+   Run llm4ad --skill cloud-package and use --topic to read the guidance relevant to my task.
    My task: [problem, optimization objective, constraints, and paths to existing code/data].
    Clarify missing requirements and the evaluation method before generating the task.
    Prepare the environment, check the initial code and evaluator, and run real baseline evaluations locally.
@@ -202,7 +202,10 @@ Use a coding agent with local file and command access to prepare your task, then
 2. Open the [platform](https://llm4ad-next.cn/), enter or create a project, then choose **New Task → Import ZIP** and upload the generated package.
 3. Select a platform model, review the imported configuration, and **start evolution**.
 
-The agent needs the full Skill directory, including its references, scripts, and example files. See [supported evolution methods](skills/llm4ad-cloud-package/references/algorithms.md) and the [import guide](skills/llm4ad-cloud-package/references/web-import.md).
+Run `llm4ad --skill list` to discover the installed skills. For remote evaluator setup,
+use `llm4ad --skill gateway` and choose a topic such as `--topic docker`.
+From a repository checkout, agents can also read the [Cloud Package Skill](skills/llm4ad-cloud-package/)
+or the [Evaluator Gateway Skill](skills/llm4ad-evaluator-gateway/) directly.
 
 In the web app, open **Algorithm Evolution Projects → New Task → AI Build (AutoDesign)**. Describe your goal in the conversation and optionally upload references on the right. After real Cloud project validation passes, choose **Start task** to create the task workbench and run it. Existing tasks can still switch to the **AutoDesign Agent** to inspect actual run files, analyze results, and adjust child experiments.
 

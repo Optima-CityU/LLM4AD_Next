@@ -258,6 +258,7 @@ export function isPublishedResearchStage(
 export function researchProgressSteps(
   progress: ResearchAgentProgress | null,
   stageStates: Record<string, PublishedStage>,
+  proposal = false,
 ): ResearchWorkflowStep[] {
   const steps = new Map<string, ResearchWorkflowStep>()
   const explicit = (progress?.workflowSteps ?? []).filter(
@@ -312,7 +313,10 @@ export function researchProgressSteps(
     steps.set(key, { ...step, id: key })
   }
   const result = [...steps.values()]
-  if (progress?.status === "failed" || progress?.status === "interrupted") {
+  if (
+    !proposal &&
+    (progress?.status === "failed" || progress?.status === "interrupted")
+  ) {
     const runId = progress.runId ?? progress.sessionId
     const current = result.reduce(
       (latest, step, index) =>
@@ -325,4 +329,16 @@ export function researchProgressSteps(
       result[current] = { ...result[current], status: progress.status }
   }
   return result
+}
+
+export function currentProposalResearchStep(
+  steps: ResearchWorkflowStep[],
+): ResearchWorkflowStep | undefined {
+  return steps.reduce<ResearchWorkflowStep | undefined>((current, step) => {
+    if (!step.id.startsWith("step:") || step.status === "completed")
+      return current
+    return !current || (step.updatedAt ?? "") >= (current.updatedAt ?? "")
+      ? step
+      : current
+  }, undefined)
 }

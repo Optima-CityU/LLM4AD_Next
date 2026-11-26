@@ -85,6 +85,8 @@ COPY ./examples   /app/backend/examples
 
 # 复制 llm4ad 核心库及根项目配置
 COPY ./src/llm4ad             /src/llm4ad
+COPY ./skills/llm4ad-cloud-package /skills/llm4ad-cloud-package
+COPY ./skills/llm4ad-evaluator-gateway /skills/llm4ad-evaluator-gateway
 COPY ./pyproject.toml     /pyproject.toml
 COPY ./README.md          /README.md
 

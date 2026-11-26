@@ -17,6 +17,9 @@ and Git for real evolution, plus any toolchain required by the chosen task.
 
 Replace the paths with the user's own paths. Use an isolated verification
 environment and a deliverable path outside the source task directory.
+With a matching released SDK, replace the checkout install argument with
+`llm4ad-next==<target-version>` and use the directory shown by that SDK's
+`llm4ad --skill cloud-package --topic validation` for the script path.
 
 ### Windows PowerShell
 

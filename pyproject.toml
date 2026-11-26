@@ -1,6 +1,6 @@
 [project]
 name = "llm4ad-next"
-version = "1.2.0"
+version = "1.2.1"
 description = "Interactive LLM-driven automated algorithm design with evolutionary optimization"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}
@@ -155,7 +155,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/llm4ad"]
+only-include = [
+    "src/llm4ad",
+    "examples/applications/filament_fsr1_single_pass",
+    "skills/llm4ad-cloud-package",
+    "skills/llm4ad-evaluator-gateway",
+]
+dev-mode-dirs = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+"skills" = "llm4ad/skill_resources"
+"examples/applications/filament_fsr1_single_pass" = "llm4ad/gateway/examples/filament_fsr/task"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -164,6 +175,8 @@ include = [
     "/LICENSE",
     "/docs",
     "/examples",
+    "/skills/llm4ad-cloud-package",
+    "/skills/llm4ad-evaluator-gateway",
     "/pyproject.toml",
 ]
 

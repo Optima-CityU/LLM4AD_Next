@@ -389,6 +389,9 @@
       "timeline": "Research steps",
       "published": "{{count}} of {{total}} stages published",
       "openResult": "View deliverable",
+      "resultUnavailable": "This deliverable is unavailable in the current version.",
+      "resumeStep": "Continue this step",
+      "resumePrompt": "Continue the interrupted step {{title}} (step ID: {{step}}). Read the latest workflow context, saved chapters, and my prior decisions. Resume the same step ID and finish its remaining work. Wait for my confirmation before advancing.",
       "toolCount": "{{count}} tool calls",
       "status": {
         "ready": "Ready to begin",

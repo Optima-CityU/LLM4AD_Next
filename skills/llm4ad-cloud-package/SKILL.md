@@ -22,6 +22,10 @@ reply and wait for the answer before setting up dependencies or creating files:
 When the user has already chosen a gateway, ask only about the startup mode if
 it is still open.
 
+To look up standalone guidance from an installed SDK, run `llm4ad --skill cloud-package`
+and read the relevant topic with `--topic`. For gateway setup and the evaluator SDK
+contract, run `llm4ad --skill gateway`.
+
 Follow [references/local-delivery.md](references/local-delivery.md) for the ZIP
 workflow and [references/remote-evaluation.md](references/remote-evaluation.md)
 for gateway setup. Run the selected evaluator on the packaged baseline before

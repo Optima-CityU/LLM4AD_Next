@@ -189,10 +189,10 @@ Read the skill, read the task package, run [N] generations, give me the best alg
 
 使用能在本地读写文件、执行命令的 coding agent 准备任务，再到平台启动进化。
 
-1. 将完整的 [Cloud Package Skill 目录](skills/llm4ad-cloud-package/) 提供给 Agent，复制下面的提示词：
+1. 安装 `llm4ad-next`，然后给本地 Agent 发送以下提示词：
 
    ```text
-   请阅读本仓库 skills/llm4ad-cloud-package/SKILL.md 及其引用文件。
+   请运行 llm4ad --skill cloud-package，再用 --topic 按需读取与本任务相关的说明。
    我的任务：[问题描述、优化目标、约束，以及已有代码/数据的路径]。
    先澄清缺失的需求和真实评估方式，再生成任务。
    请准备环境，检查初始代码和评估器，并在本地完成真实基准评估。
@@ -202,7 +202,10 @@ Read the skill, read the task package, run [N] generations, give me the best alg
 2. 打开[平台](https://llm4ad-next.cn/)，进入或创建项目，选择 **新建任务 → 导入 ZIP**，上传生成的任务包。
 3. 选择平台模型，确认导入的配置，即可**启动进化**。
 
-Agent 需要完整的 Skill 目录，包括引用文档、脚本和示例文件。另见[支持的进化算法](skills/llm4ad-cloud-package/references/algorithms.md)和[导入说明](skills/llm4ad-cloud-package/references/web-import.md)。
+用 `llm4ad --skill list` 查看已随 SDK 提供的技能。配置远程评估时，运行
+`llm4ad --skill gateway` 查看索引，再按需查询，例如加上 `--topic docker`。
+在仓库内也可以直接读取 [Cloud Package Skill](skills/llm4ad-cloud-package/) 或
+[Evaluator Gateway Skill](skills/llm4ad-evaluator-gateway/)。
 
 也可以在网页的**算法演化项目 → 新建任务**中选择 **AI 构建（AutoDesign）**。直接对话描述需求，或在右侧上传可选参考文件；助手构建并真实验证 Cloud 项目后，点击**启动任务**才会创建任务工作台并运行。已有任务仍可切换到 **AutoDesign 助手**，读取真实运行文件、分析结果和调整子任务。
 

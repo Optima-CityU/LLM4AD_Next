@@ -1,0 +1,44 @@
+name: llm4ad-filament
+services:
+  gateway:
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-trixie}
+        UV_IMAGE: ${UV_IMAGE:-ghcr.io/astral-sh/uv:0.9.26}
+        APT_MIRROR: ${APT_MIRROR:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        LLM4AD_PACKAGE: ${LLM4AD_PACKAGE:-llm4ad-next[gateway-ui]}
+    init: true
+    user: "${FILAMENT_GATEWAY_UID:-1000}:${FILAMENT_GATEWAY_GID:-1000}"
+    restart: unless-stopped
+    stop_grace_period: 2m
+    network_mode: host
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+      - apparmor=${FILAMENT_APPARMOR_PROFILE:-unconfined}
+    environment:
+      FILAMENT_DEVICE: ${FILAMENT_DEVICE:?Set the authorized Android device serial or wireless endpoint}
+      FILAMENT_ADB_PORT: ${FILAMENT_ADB_PORT:-5037}
+      FILAMENT_WAKE_SCREEN: ${FILAMENT_WAKE_SCREEN:-0}
+      FILAMENT_RUNNER: /filament/build-android/filament_fsr_baseline
+      FILAMENT_STOCK_MATERIAL: /filament/build-android/stock-easu.filamat
+      FILAMENT_HOST_TOOLS: /filament/sdk/host/bin
+      FILAMENT_FSR_SOURCE: /filament/filament/filament/src/materials/fsr
+      FILAMENT_SCENE: /filament/filament/third_party/models/DamagedHelmet/DamagedHelmet.glb
+      FILAMENT_FOX_SCENE: /filament/filament/third_party/models/Fox/Fox.glb
+      FILAMENT_IBL: /filament/sdk/host/bin/assets/ibl/lightroom_14b/lightroom_14b_ibl.ktx
+      LLM4AD_SERVER_URL: ${LLM4AD_SERVER_URL:-https://llm4ad-next.cn}
+      LLM4AD_GATEWAY_NAME: ${LLM4AD_GATEWAY_NAME:-filament-fsr1}
+      LLM4AD_ALLOWED_USER_IDS: ${LLM4AD_ALLOWED_USER_IDS:?Set the platform user UUIDs}
+      LLM4AD_GATEWAY_UI: ${LLM4AD_GATEWAY_UI:-true}
+      LLM4AD_GATEWAY_UI_HOST: ${LLM4AD_GATEWAY_UI_HOST:-127.0.0.1}
+      LLM4AD_GATEWAY_UI_PORT: ${LLM4AD_GATEWAY_UI_PORT:-8768}
+      LLM4AD_GATEWAY_UI_PASSWORD:
+    volumes:
+      - ${FILAMENT_WORK_DIR:?Set the prepared Filament build and assets directory}:/filament:ro
+      - ${FILAMENT_STATE_DIR:-./state}:/state

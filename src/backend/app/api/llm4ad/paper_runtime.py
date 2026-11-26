@@ -26,8 +26,11 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
+from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, col, select
+from starlette.concurrency import run_in_threadpool
 from websockets.asyncio.client import connect as websocket_connect
 
 from app.api.deps import CurrentUser, SessionDep, TokenDep
@@ -221,11 +224,12 @@ async def _validate_runtime_ticket(ticket: str | None, workspace_id: uuid.UUID) 
         return None
 
 
-def _verify_workspace_owner(workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
+def _verify_workspace_owner(workspace_id: uuid.UUID, user_id: uuid.UUID) -> str:
     with Session(engine) as db:
         workspace = db.get(PaperWorkspace, workspace_id)
         if workspace is None or workspace.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Research workspace not found")
+        return workspace.mode
 
 
 def _native_run_id(workspace_id: uuid.UUID, workflow_stage: str) -> uuid.UUID:
@@ -812,6 +816,8 @@ async def create_runtime_session(
             "get_workflow_context. Algorithm workflows retain publish_stage_result. "
             + (
                 "For proposals, follow the upstream chapter workflow and author-confirmed pacing. "
+                "When continuing after a stop, read fresh workflow context, resume the unfinished logical step by its "
+                "existing ID, and reconcile saved chapters and author decisions before reporting its outcome. "
                 "After a meaningful phase, summarize its actual outcome, offer next actions and wait for the "
                 "author's choice before advancing. A saved draft is not an author-confirmed final document. "
                 "Only the author's confirm-and-layout button requests Typst/PDF conversion. "
@@ -1565,7 +1571,7 @@ async def proxy_runtime_websocket(websocket: WebSocket, workspace_id: uuid.UUID)
         await websocket.close(code=4401, reason="Research runtime session expired")
         return
     try:
-        _verify_workspace_owner(workspace_id, user_id)
+        workspace_mode = _verify_workspace_owner(workspace_id, user_id)
     except HTTPException:
         await websocket.close(code=4404, reason="Research workspace not found")
         return
@@ -1590,7 +1596,9 @@ async def proxy_runtime_websocket(websocket: WebSocket, workspace_id: uuid.UUID)
 
             async def runtime_to_browser() -> None:
                 async for message in upstream:
-                    if not await _runtime_message_is_current(str(workspace_id), message):
+                    if not await _runtime_message_is_current(
+                        str(workspace_id), message, proposal=workspace_mode == "proposal"
+                    ):
                         continue
                     if isinstance(message, bytes):
                         await websocket.send_bytes(message)
@@ -1611,7 +1619,32 @@ async def proxy_runtime_websocket(websocket: WebSocket, workspace_id: uuid.UUID)
         await websocket.close(code=1011, reason="Research runtime connection failed")
 
 
-async def _runtime_message_is_current(workspace_id: str, message: str | bytes) -> bool:
+def _record_proposal_runtime_end(workspace_id: uuid.UUID, payload: dict) -> None:
+    """Apply a confirmed CloudCLI lifecycle event to the matching proposal run."""
+    session_id = payload.get("sessionId")
+    timestamp = payload.get("timestamp")
+    if not isinstance(session_id, str) or not isinstance(timestamp, str):
+        return
+    try:
+        ended_at = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return
+    if ended_at.tzinfo is None:
+        return
+    failed = payload.get("kind") == "complete" and payload.get("success") is False and not payload.get("aborted")
+    try:
+        with Session(engine) as db:
+            run = db.exec(
+                select(PaperAgentRun).where(PaperAgentRun.id == _native_run_id(workspace_id, "workflow")).with_for_update()
+            ).first()
+            if run and run.session_id == session_id and (run.request_payload or {}).get("auto_workflow"):
+                if coordinator.record_proposal_turn_end(db, run, "failed" if failed else "interrupted", ended_at):
+                    db.commit()
+    except SQLAlchemyError:
+        logger.exception("Could not save proposal turn completion for {}", workspace_id)
+
+
+async def _runtime_message_is_current(workspace_id: str, message: str | bytes, *, proposal: bool = False) -> bool:
     """Drop delayed platform failures after a stop while keeping actual chat output."""
     try:
         payload = json.loads(message)
@@ -1619,6 +1652,11 @@ async def _runtime_message_is_current(workspace_id: str, message: str | bytes) -
         return True
     if not isinstance(payload, dict):
         return True
+    if proposal and (
+        payload.get("kind") == "complete"
+        or (payload.get("kind") == "chat_subscribed" and payload.get("isProcessing") is False)
+    ):
+        await run_in_threadpool(_record_proposal_runtime_end, uuid.UUID(workspace_id), payload)
     if payload.get("kind") != "task_notification" or not str(payload.get("id", "")).startswith("platform_notice_"):
         return True
     session_id = payload.get("sessionId")

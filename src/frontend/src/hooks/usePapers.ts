@@ -201,12 +201,12 @@ export function useUpdatePaperModelBinding(workspaceId: string | null) {
   })
 }
 
-export function usePaperSourceFile(
+export function paperSourceFileOptions(
   sourceVersionId: string | null,
   path: string | null,
   contentHash?: string | null,
 ) {
-  return useQuery({
+  return {
     queryKey: ["paper-source-file", sourceVersionId, path, contentHash],
     queryFn: () =>
       Llm4AdPapersService.getSourceFile({
@@ -214,7 +214,15 @@ export function usePaperSourceFile(
         path: path!,
       }),
     enabled: Boolean(sourceVersionId && path),
-  })
+  }
+}
+
+export function usePaperSourceFile(
+  sourceVersionId: string | null,
+  path: string | null,
+  contentHash?: string | null,
+) {
+  return useQuery(paperSourceFileOptions(sourceVersionId, path, contentHash))
 }
 
 export function useDeletePaperSourcePath(workspaceId: string | null) {

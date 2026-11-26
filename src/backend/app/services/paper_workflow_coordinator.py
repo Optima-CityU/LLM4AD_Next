@@ -437,6 +437,34 @@ def record_workflow_step(db: Session, workspace: PaperWorkspace, run: PaperAgent
     return deepcopy(step)
 
 
+def record_proposal_turn_end(db: Session, run: PaperAgentRun, status: str, ended_at: datetime) -> bool:
+    """Persist an unfinished logical step after a confirmed native turn end.
+
+    Args:
+        db: Caller-owned transaction holding the coordinator row lock.
+        run: Proposal coordinator whose native session ended.
+        status: Interrupted or failed according to the runtime event.
+        ended_at: Timestamp from the workspace runtime's event.
+
+    Returns:
+        Whether the current logical step changed.
+    """
+    payload = deepcopy(run.request_payload or {})
+    current = max(payload.get("research_workflow_steps", []), key=lambda step: step.get("updatedAt", ""), default=None)
+    if current is None or current["status"] != "running" or datetime.fromisoformat(current["updatedAt"]) > ended_at:
+        return False
+    current.update(
+        status=status,
+        revision=current.get("revision", 0) + 1,
+        updatedAt=datetime.now(UTC).isoformat(),
+    )
+    payload["research_workflow_sequence"] = payload.get("research_workflow_sequence", 0) + 1
+    run.request_payload = payload
+    db.add(run)
+    db.flush()
+    return True
+
+
 def record_progress_snapshot(db: Session, workspace: PaperWorkspace, run: PaperAgentRun, snapshot: dict) -> dict:
     """Persist observed progress and append a deduplicated event delta.
 

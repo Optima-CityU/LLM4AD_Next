@@ -1,4 +1,5 @@
 import type { PaperProposalChapter } from "@/client"
+import type { ResearchWorkflowStep } from "@/lib/researchAgentProgress"
 
 export type ProposalChapter = PaperProposalChapter
 
@@ -57,4 +58,32 @@ export function proposalDraftChapters(chapters: ProposalChapter[]) {
   return chapters.filter(
     (chapter) => chapter.has_content || chapter.id === "document",
   )
+}
+
+/** Resolve only readable results belonging to this logical step and revision. */
+export function proposalStepResult(
+  step: ResearchWorkflowStep,
+  manifest: string[],
+  chapters: ProposalChapter[],
+  readableSourcePaths: string[],
+  layoutReady: boolean,
+): { view: "document" | "source" | "layout"; path: string | null } | null {
+  if (step.status !== "completed") return null
+  for (const path of step.outputPaths) {
+    if (
+      !manifest.includes(path) ||
+      path === "proposal-state.json" ||
+      path === "proposal-log.md"
+    )
+      continue
+    const chapter = chapters.find(
+      (item) => item.path === path && item.has_content,
+    )
+    if (chapter)
+      return { view: chapter.id === "S4" ? "source" : "document", path }
+    if (readableSourcePaths.includes(path)) return { view: "source", path }
+  }
+  return step.stage === "final_review" && layoutReady
+    ? { view: "layout", path: null }
+    : null
 }
