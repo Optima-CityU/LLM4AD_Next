@@ -4,6 +4,9 @@ Use this route when the user chooses to evaluate on their machine. Confirm their
 OS, required toolchain or devices, and whether they will run the gateway natively
 or in Docker. Use the agreed problem, candidate interface and score definition.
 
+For gateway-specific setup, query `llm4ad --skill gateway` and read the
+`native`, `docker`, or `evaluator` topic as needed.
+
 ## Prepare the task and evaluator
 
 Keep the web task and the evaluator in sibling directories. Export only `my-task/`.

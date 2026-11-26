@@ -1,0 +1,22 @@
+description = "Implement, verify, and run a local evaluator gateway for LLM4AD Next."
+steps = [
+    "Confirm the platform, user authorization, evaluation resources, and preferred startup mode.",
+    "Read the evaluator topic for custom code, and choose the native or Docker topic for deployment.",
+    "Run a real local evaluator check before starting the gateway and binding it to a platform task.",
+]
+
+[topics.evaluator]
+path = "references/evaluator.md"
+description = "Implement the SDK interface, scoring, and evidence reporting."
+
+[topics.native]
+path = "references/native.md"
+description = "Check and start a gateway directly with the installed SDK."
+
+[topics.docker]
+path = "references/docker.md"
+description = "Generate a Compose project and check the evaluator in its container."
+
+[topics.operations]
+path = "references/operations.md"
+description = "Check readiness, diagnose failures, and find results and attachments."

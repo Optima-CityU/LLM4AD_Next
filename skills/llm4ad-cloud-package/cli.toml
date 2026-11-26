@@ -1,0 +1,46 @@
+description = "Build, verify, and export a portable algorithm task ZIP for LLM4AD Next."
+steps = [
+    "Confirm the optimization problem, available code and data, and where evaluation will run.",
+    "Read the configuration and evaluator topics needed for the selected runtime.",
+    "Run the real baseline and export a ZIP only after verification passes. Then follow the import topic.",
+]
+
+[topics.task-definition]
+path = "references/task-definition.md"
+description = "Clarify task inputs, objectives, constraints, and runnable evidence."
+
+[topics.configuration]
+path = "references/configuration.md"
+description = "Choose a portable layout and size repository context and model output."
+
+[topics.evaluator]
+path = "references/evaluator-contract.md"
+description = "Implement a platform task-container evaluator."
+
+[topics.datasets]
+path = "references/dataset-contract.md"
+description = "Prepare data and verify how the evaluator discovers and scores inputs."
+
+[topics.algorithms]
+path = "references/algorithms.md"
+description = "Select a supported evolution method and starting parameters."
+
+[topics.memory]
+path = "references/memory.md"
+description = "Configure task memory and automatic experience extraction."
+
+[topics.validation]
+path = "references/local-delivery.md"
+description = "Verify the real baseline and produce the ZIP and validation report."
+
+[topics.remote-evaluation]
+path = "references/remote-evaluation.md"
+description = "Verify a ZIP whose evaluator runs through a local gateway."
+
+[topics.platforms]
+path = "references/platforms.md"
+description = "Use the correct commands for Windows, macOS, Linux, or Docker."
+
+[topics.import]
+path = "references/web-import.md"
+description = "Import the ZIP and bind a model and, if needed, a remote evaluator."

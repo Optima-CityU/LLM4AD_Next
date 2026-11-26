@@ -192,6 +192,9 @@ COPY ./src/backend/app/templates/nsfc-proposal.typ /app/backend/app/templates/ns
 
 # 复制 llm4ad 核心库及根项目配置
 COPY ./src/llm4ad             /src/llm4ad
+COPY ./skills/llm4ad-cloud-package /app/skills/llm4ad-cloud-package
+COPY ./skills/llm4ad-evaluator-gateway /app/skills/llm4ad-evaluator-gateway
+RUN ln -s /app/skills /skills
 COPY ./examples               /examples
 COPY ./pyproject.toml     /pyproject.toml
 COPY ./README.md          /README.md
@@ -242,7 +245,6 @@ COPY ./src/backend/app/services/research_search.py            /app/paper-agent/r
 COPY ./src/backend/app/services/search_coordination.py        /app/paper-agent/search_coordination.py
 COPY --chmod=0755 ./docker/paper-agent/workspace-entrypoint.sh /app/paper-agent/workspace-entrypoint.sh
 COPY ./skills/llm4ad-task-builder                             /app/skills/llm4ad-task-builder
-COPY ./skills/llm4ad-cloud-package                            /app/skills/llm4ad-cloud-package
 COPY ./skills/autodesign/autodesign                          /app/skills/autodesign
 COPY ./skills/autodesign/run-analysis                        /app/skills/llm4ad-run-analysis
 COPY ./skills/autodesign/task-memory                         /app/skills/llm4ad-task-memory

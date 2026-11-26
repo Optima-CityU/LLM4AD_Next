@@ -29,6 +29,7 @@ app = typer.Typer(
     help="LLM4AD: A Platform for Algorithm Design with Large Language Model",
     add_completion=False,
     no_args_is_help=True,
+    invoke_without_command=True,
 )
 console = Console()
 # Diagnostics for the ``--json`` paths go to stderr so stdout stays a
@@ -46,7 +47,38 @@ app.add_typer(evolve_app, name="evolve")
 app.add_typer(memory_app, name="memory")
 app.add_typer(gateway_app, name="evaluator-gateway")
 
-load_dotenv()
+@app.callback()
+def cli_options(
+    ctx: typer.Context,
+    skill: Annotated[
+        str | None,
+        typer.Option("--skill", help="Read a built-in skill index. Use 'list' to see available skills."),
+    ] = None,
+    topic: Annotated[
+        str | None,
+        typer.Option("--topic", help="Read one topic from the selected skill."),
+    ] = None,
+) -> None:
+    """Handle read-only skill queries before loading runtime configuration."""
+    if skill is None:
+        if topic is not None:
+            raise typer.BadParameter("requires --skill", param_hint="--topic")
+        load_dotenv()
+        return
+    if ctx.invoked_subcommand is not None:
+        raise typer.BadParameter("cannot be combined with a command", param_hint="--skill")
+
+    from llm4ad.frontend.skill_help import read_skill_help
+
+    try:
+        help_text = read_skill_help(skill, topic)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except OSError as exc:
+        typer.echo(f"Could not read the installed skill resources: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(help_text)
+    raise typer.Exit()
 
 @app.command("version")
 def show_version():
