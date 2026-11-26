@@ -1,0 +1,142 @@
+project_name: filament_fsr1_single_pass
+description_en: >-
+  Filament FSR1 mobile EASU on Android Vulkan.
+  Evolve the original single-pass shader on a Mali GPU.
+  Compare 24 aligned frames with native 1080p references using LDR-FLIP.
+description_zh: >-
+  Filament FSR1 移动版单遍超分。在 Mali 真机上演化原版 EASU 着色器，
+  用原生 1080p 参考图和 LDR-FLIP 验证两个场景的 24 帧画质，并测量 GPU 帧耗时。
+random_seed: 42
+base_dir: ./runs
+background: >-
+  Optimize the marked FsrEasuL function body in the original Filament v1.75.0 mobile
+  EASU shader. The target is the single-pass Vulkan path on Android Mali GPUs.
+  Only the body between the EVOLVE markers in ffx_fsr1_mobile.glsl is editable.
+  Preserve the FsrEasuL signature, sampling interfaces, precision qualifiers and every existing
+  preprocessor directive in its original order. In the single-pass path, every exit must
+  assign a valid RGB result to pix. Leave the reference renderer and test scenes unchanged.
+  The gateway compiles the source with the official Filament material compiler and
+  substitutes only this material in the official native renderer.
+  Baseline and candidate render DamagedHelmet orbit and Fox Walk on the same device.
+  LDR-FLIP compares both variants against the same 24 native 1080p frames.
+  Candidates that increase a scene's mean or worst-frame FLIP error receive a low score.
+  The objective is the average of both scenes' median paired improvements in
+  GPU frame P50 time. Consider reducing redundant sample or ALU work while preserving edge detail
+  and suppressing ringing. Keep the method independent of scene content and frame number.
+providers: []
+coder:
+  type: custom
+  provider: default
+  timeout: 300.0
+  max_retries: 2
+  temperature: 0.7
+  context_max_tokens: 24000
+  max_gen_tokens: 16384
+  default_extension: glsl
+  log_to_console: false
+  mutation_prompt_template: |-
+    Implement the proposed optimization inside the FsrEasuL body.
+
+    Plan
+    {insight}
+
+    Benchmark and interface requirements
+    {task_description}
+    {constraints}
+
+    Current editable body
+    ```glsl
+    {original_block}
+    ```
+
+    Return the complete replacement body in exactly one ```glsl:{file_path} fenced block.
+    Include all existing preprocessor directives in their original order and leave the
+    function signature, enclosing braces, EVOLVE markers and explanatory text outside the response.
+planner:
+  type: llm_evolution
+  provider: default
+  selection_strategy: weighted
+  parent_selection_strategy: tournament
+  mask_evolve_blocks: false
+  samplers:
+  - name: init_sampler
+    config:
+      max_tokens: 8192
+  - name: mutation_sampler
+    config:
+      max_tokens: 8192
+  - name: crossover_sampler
+    config:
+      max_tokens: 8192
+evaluator:
+  type: remote
+  gateway_id: null
+  contract:
+    evaluator_id: filament-fsr1-android
+    version: "1"
+    data_version: filament-v1.75.0-mali-helmet-orbit-fox-walk
+    metrics:
+    - name: improvement_pct
+      type: maximize
+    - name: frames_passed
+      type: maximize
+    - name: worst_frame_failing_pixels
+      type: minimize
+  parameters:
+    quality_mode: flip
+  candidate_paths:
+  - ffx_fsr1_mobile.glsl
+  timeout: 450.0
+  max_retries: 1
+  parallel: false
+  batch_size: 1
+  dataset:
+    mode: files
+    files: []
+evolution:
+  type: diverse_island_ga
+  max_generations: 2
+  population_size: 4
+  num_islands: 2
+  island_population_size: 2
+  parallel_islands: false
+  max_llm_concurrency: 1
+  elite_ratio: 0.5
+  mutation_rate: 0.6
+  crossover_rate: 0.4
+  tournament_size: 2
+  parent_selection_strategy: tournament
+  survival_selection_strategy: truncation
+  migration_interval: 2
+  migration_rate: 0.34
+  migration_strategy: best
+  migration_topology: ring
+  adaptive_migration: true
+  migration_stagnation_threshold: 2
+  elite_reevaluation_count: 0
+  early_stop_patience: 3
+  early_stop_threshold: 1.0e-06
+  checkpoint_interval: 1
+  max_checkpoints: 3
+memory:
+  enabled: false
+multimodal:
+  enabled: false
+version_control:
+  enabled: true
+  type: git_worktree
+  local_path: algorithm
+  auto_initialize: true
+  auto_cleanup: true
+  default_branch: main
+repo_analyzer:
+  type: evolve_detector
+  context_lines_before: 52
+  context_lines_after: 2
+  include:
+  - 'ffx_fsr1_mobile.glsl'
+  exclude:
+  - .git/**
+logging:
+  level: INFO
+  console: true
