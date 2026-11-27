@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import shutil
@@ -36,6 +37,58 @@ from app.schemas.evaluation import EvaluationSummary
 def prefix(task_id) -> str:
     """Return the exclusive storage namespace of a task version."""
     return f"evaluation-data/{uuid.UUID(str(task_id))}/"
+
+
+THUMBNAIL_EDGE = 512
+THUMBNAIL_MAX_SOURCE_PIXELS = 64_000_000
+
+
+def thumbnail_key(task_id, sha256: str) -> str:
+    """Return the cached thumbnail key derived from an artifact's content digest.
+
+    Thumbnails live in the task namespace so task deletion removes them too, and
+    the digest makes them immutable: identical bytes always share one thumbnail.
+
+    Args:
+        task_id: Task version that owns the artifact.
+        sha256: Verified content digest of the original image.
+
+    Returns:
+        Object key of the WebP thumbnail.
+    """
+    return prefix(task_id) + f"thumbs/{sha256}_{THUMBNAIL_EDGE}.webp"
+
+
+def render_thumbnail(source) -> bytes | None:
+    """Downscale a raster image into a small WebP preview.
+
+    Args:
+        source: Readable binary file object positioned at the image start.
+
+    Returns:
+        WebP bytes, or ``None`` when the image cannot be decoded safely.
+    """
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(source) as image:
+            # Preserve animation by serving the original instead of a still frame.
+            if getattr(image, "is_animated", False):
+                return None
+            width, height = image.size
+            if width * height > THUMBNAIL_MAX_SOURCE_PIXELS:
+                return None
+            image.draft("RGB", (THUMBNAIL_EDGE, THUMBNAIL_EDGE))
+            frame = ImageOps.exif_transpose(image)
+            transparent = frame.mode in {"RGBA", "LA", "PA"} or "transparency" in frame.info
+            frame = frame.convert("RGBA" if transparent else "RGB")
+            frame.thumbnail((THUMBNAIL_EDGE, THUMBNAIL_EDGE), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            frame.save(output, format="WEBP", quality=80, method=4)
+            return output.getvalue()
+    except Exception:
+        logger.opt(exception=True).warning("Could not render evaluation image thumbnail")
+        return None
 
 
 def outbox_root(task_id, user_id) -> Path:

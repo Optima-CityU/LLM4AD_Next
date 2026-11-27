@@ -60,6 +60,52 @@ export function evaluationPreviewKind(
   return null
 }
 
+export function visibleEvaluationFiles(
+  files: EvaluationFile[],
+): EvaluationFile[] {
+  const unique = [...new Map(files.map((file) => [file.id, file])).values()]
+  // Behavior images can alias named attachments. Keep the named image in the
+  // gallery without removing either immutable attachment from the record.
+  const namedImages = new Set(
+    unique
+      .filter(
+        (file) =>
+          !file.name.startsWith("behavior/") &&
+          evaluationPreviewKind(file) === "image" &&
+          /^[a-f0-9]{64}$/i.test(file.sha256),
+      )
+      .map((file) => file.sha256.toLowerCase()),
+  )
+  return unique.filter(
+    (file) =>
+      !(
+        file.name.startsWith("behavior/") &&
+        evaluationPreviewKind(file) === "image" &&
+        namedImages.has(file.sha256?.toLowerCase())
+      ),
+  )
+}
+
+const IMAGE_DOWNLOAD_EXTENSIONS: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+}
+
+/** Return a basename, adding a known image extension only when none exists. */
+export function evaluationDownloadName(
+  file: Pick<EvaluationFile, "name" | "media_type">,
+): string {
+  const name = file.name.replace(/\\/g, "/").split("/").pop() ?? file.name
+  if (/\.[^.]+$/.test(name)) return name
+  const mediaType = (file.media_type ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase()
+  return name + (IMAGE_DOWNLOAD_EXTENSIONS[mediaType] ?? "")
+}
+
 export function formatEvaluationBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`

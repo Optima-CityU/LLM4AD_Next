@@ -30,6 +30,9 @@ dependencies = [
     "paramiko>=4.0.0",
     "nest-asyncio>=1.6.0",
     "qrcode[pil]>=8.0",
+    # Evaluation image thumbnails are rendered with Pillow; declared directly so
+    # they keep working if qrcode or other transitive users drop it.
+    "pillow>=11.0",
     # AI build (beta): AgentScope core powers the single ReAct agent that runs
     # inside the task-runner container. Core package only — never install
     # agentscope-runtime, whose sandbox spins up its own Docker containers

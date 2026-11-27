@@ -7,12 +7,14 @@ import json
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from llm4ad.evaluator.models import EvaluationRecord
+from loguru import logger
 from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
@@ -24,8 +26,53 @@ from app.services.task_service.auth import get_task_with_auth
 
 router = APIRouter(prefix="/tasks/{task_id}/evaluations", tags=["llm4ad.evaluations"])
 PREVIEW_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+# GIF is left out so animated previews keep playing.
+THUMBNAIL_TYPES = {"image/png", "image/jpeg", "image/webp"}
 TEXT_SUFFIXES = {".json", ".txt", ".md", ".markdown", ".csv", ".log", ".yaml", ".yml", ".xml"}
 STORAGE_ERRORS = (BotoCoreError, ClientError, OSError)
+
+
+def _download_name(name: str, media_type: str) -> str:
+    """Return a basename with a known image extension when it has none.
+
+    Args:
+        name: Logical artifact name, possibly including directories.
+        media_type: Declared original image media type.
+
+    Returns:
+        Download filename without changing existing extensions.
+    """
+    name = name.replace("\\", "/").rsplit("/", 1)[-1]
+    if Path(name).suffix or name.startswith(".") and "." not in name[1:]:
+        return name
+    extensions = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+    return name + extensions.get(media_type.split(";", 1)[0].strip().lower(), "")
+
+
+def _thumbnail_response(data: bytes, name: str) -> Response:
+    """Serve thumbnail bytes with long-lived caching.
+
+    Thumbnail keys are derived from the original's SHA-256, so the bytes behind
+    a given artifact never change and the browser may cache them indefinitely.
+
+    Args:
+        data: WebP thumbnail bytes.
+        name: Original file name, used for the inline file name.
+
+    Returns:
+        The thumbnail response.
+    """
+    filename = quote(Path(name).stem + ".webp", safe="")
+    return Response(
+        data,
+        media_type="image/webp",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cache-Control": "private, max-age=31536000, immutable",
+        },
+    )
 
 
 def _load(task_id, evaluation_id) -> dict | None:
@@ -220,8 +267,15 @@ def evaluation_artifact(
     db: SessionDep,
     current_user: CurrentUser,
     download: bool = True,
+    variant: Literal["original", "thumb"] = "original",
 ):
-    """Verify saved evidence before streaming a download or safe inline preview."""
+    """Verify saved evidence before streaming a download or safe inline preview.
+
+    ``variant=thumb`` serves a cached WebP thumbnail for raster images. The
+    thumbnail is generated from the verified original on first request, so
+    previously uploaded artifacts need no re-upload; if generation fails the
+    original image is served inline instead.
+    """
     detail, objects = _detail(task_id, evaluation_id, db, current_user)
     artifact = next((item for item in detail.record.artifacts if item.id == artifact_id), None)
     key = objects.get(artifact_id)
@@ -234,8 +288,19 @@ def evaluation_artifact(
     )
     if key not in {expected, legacy}:
         raise HTTPException(409, "Artifact storage identity mismatch")
+    name = _download_name(artifact.name, artifact.media_type)
+    thumb = variant == "thumb" and artifact.media_type in THUMBNAIL_TYPES
+    thumb_key = service.thumbnail_key(task_id, artifact.sha256) if thumb else ""
+    if thumb:
+        try:
+            return _thumbnail_response(storage.download(thumb_key), name)
+        except (KeyError, *STORAGE_ERRORS):
+            # Missing on first request (or briefly unreadable): regenerate below.
+            pass
     media_type = "application/octet-stream"
-    if not download:
+    if thumb:
+        media_type = artifact.media_type
+    elif not download:
         from app.core.config import settings
 
         if artifact.size > settings.EVALUATION_PREVIEW_MAX_BYTES:
@@ -274,6 +339,19 @@ def evaluation_artifact(
         temporary.close()
         raise
 
+    if thumb:
+        try:
+            data = service.render_thumbnail(temporary)
+        finally:
+            temporary.seek(0)
+        if data is not None:
+            temporary.close()
+            try:
+                storage.upload(thumb_key, data, content_type="image/webp")
+            except Exception:
+                logger.opt(exception=True).warning("Could not cache evaluation thumbnail {}", thumb_key)
+            return _thumbnail_response(data, name)
+
     def chunks():
         try:
             while chunk := temporary.read(1024 * 1024):
@@ -281,8 +359,7 @@ def evaluation_artifact(
         finally:
             temporary.close()
 
-    name = artifact.name.replace("\\", "/").rsplit("/", 1)[-1]
-    disposition = "attachment" if download else "inline"
+    disposition = "attachment" if download and not thumb else "inline"
     return StreamingResponse(
         chunks(),
         media_type=media_type,

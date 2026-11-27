@@ -5598,6 +5598,7 @@ export type Llm4AdEvaluationsEvaluationArtifactData = {
     download?: boolean;
     evaluationId: string;
     taskId: string;
+    variant?: 'original' | 'thumb';
 };
 
 export type Llm4AdEvaluationsEvaluationArtifactResponse = ((Blob | File));
