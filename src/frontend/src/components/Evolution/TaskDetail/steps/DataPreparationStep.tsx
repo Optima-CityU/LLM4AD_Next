@@ -948,9 +948,7 @@ export default function DataPreparationStep({
                 <div className="shrink-0 h-9 flex items-center justify-between px-3 border-b bg-muted/30">
                   <div className="flex items-center gap-1">
                     <h4 className="text-xs font-medium text-muted-foreground mr-1">
-                      {t("evolution.dataPrep.fileTreeTitle", {
-                        defaultValue: t("evolution.evolveAnnotation.fileTree"),
-                      })}
+                      {t("evolution.evolveAnnotation.fileTree")}
                     </h4>
                     <Tooltip>
                       <TooltipTrigger asChild>

@@ -1539,7 +1539,7 @@ export default function MemoryCardManager({
                 onClick={requestCloseExtraction}
               >
                 <Check className="mr-1 size-4" />
-                {t("memory.common.close")}
+                {t("common.close")}
               </Button>
             )}
           </DialogFooter>
