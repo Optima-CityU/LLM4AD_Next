@@ -49,7 +49,7 @@ export function useArtifactContent(
     enabled: saved && visible && kind !== null,
     retry: false,
     staleTime: Infinity,
-    gcTime: 0,
+    gcTime: 5 * 60 * 1000,
   })
   const [imageUrl, setImageUrl] = useState<string>()
   useEffect(() => {
