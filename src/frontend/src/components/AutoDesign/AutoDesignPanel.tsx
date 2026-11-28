@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import {
+  ApiError,
   type AutoDesignSessionResponse,
   Llm4AdAutodesignService,
   type TaskResponse,
@@ -85,6 +86,11 @@ export default function AutoDesignPanel({
     enabled: Boolean(resolvedId),
     refetchInterval: 5000,
   })
+  const error = taskSession.error ?? session.error
+  const detail =
+    error instanceof ApiError && error.status >= 400 && error.status < 500
+      ? (error.body as { detail?: unknown } | undefined)?.detail
+      : undefined
   if (
     (!taskSession.data && taskSession.isError) ||
     (!session.data && session.isError)
@@ -95,7 +101,8 @@ export default function AutoDesignPanel({
         <Alert variant="destructive">
           <AlertCircle />
           <AlertTitle>{t("autodesign.sessionFailed")}</AlertTitle>
-          <AlertDescription>
+          <AlertDescription className="space-y-2">
+            {typeof detail === "string" && <p>{detail}</p>}
             <Button
               variant="outline"
               size="sm"

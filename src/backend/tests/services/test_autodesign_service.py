@@ -259,6 +259,43 @@ def test_resolve_session_is_stable_per_task_version(environment, make_task):
     assert not db.exec(select(models.PaperSourceVersion)).all()
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_task_session_seeds_sources_and_skips_private_cache_files(environment, make_task, monkeypatch, interrupted):
+    """Finish interrupted seeding without replacing files already edited by the user."""
+    db, user = environment.db, environment.user
+    task = make_task()
+    prefix = f"{task.input_data_path}/knapsack"
+    blocked = [f"{prefix}/{name}" for name in ("solver.pyc", "__pycache__/solver.pyc", ".env", ".pytest_cache/state")]
+    for key in blocked:
+        environment.storage.upload(key, b"should never reach the draft")
+    download = Mock(wraps=environment.storage.download)
+    monkeypatch.setattr(environment.storage, "download", download)
+
+    session_id = None
+    if interrupted:
+        with monkeypatch.context() as patch:
+            patch.setattr(environment.storage, "download", Mock(side_effect=OSError("Object read interrupted")))
+            with pytest.raises(OSError, match="Object read interrupted"):
+                service.resolve_task_session(db, user, task.id)
+        session_id = db.exec(select(models.AutoDesignSession.workspace_id)).one()
+        workspace = db.get(models.PaperWorkspace, session_id)
+        draft = service._source_root(workspace) / "draft" / str(task.id)
+        write_file(draft, "knapsack_evaluator.py", "user edit\n")
+        write_file(draft, "notes.txt", "keep me\n")
+
+    session = service.resolve_task_session(db, user, task.id)
+    assert session_id is None or session.id == session_id
+    workspace = db.get(models.PaperWorkspace, session.id)
+    draft = service._source_root(workspace) / "draft" / str(task.id)
+    assert yaml.safe_load((draft / "config.yaml").read_text())["providers"] == []
+    assert {call.args[0] for call in download.call_args_list}.isdisjoint(blocked)
+    assert not any(path.suffix == ".pyc" or path.name == ".env" for path in draft.rglob("*"))
+    if interrupted:
+        assert (draft / "knapsack_evaluator.py").read_text() == "user edit\n"
+        assert (draft / "notes.txt").read_text() == "keep me\n"
+        assert service.get_context(db, user, session.id).draft_conflicts == ["file:knapsack_evaluator.py"]
+
+
 def test_task_context_reads_requested_version_and_real_persisted_stats(environment, make_task):
     """Include family versions and actual scores without following the active child implicitly."""
     db, user = environment.db, environment.user

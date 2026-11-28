@@ -130,18 +130,21 @@ def synchronize_draft(
         hashes = {name: _hash(value) for name, value in current_files.items()}
         conflicts = []
         if not initialize:
-            if (draft / "config.yaml").is_symlink():
+            config_path = draft / "config.yaml"
+            if draft.is_symlink() or config_path.is_symlink():
                 raise HTTPException(status_code=400, detail="Draft configuration cannot be a symbolic link")
+            draft.mkdir(parents=True, exist_ok=True)
+            seed_missing = not original and not config_path.exists()
             local_bytes = None
             try:
-                local_bytes = (draft / "config.yaml").read_bytes()
+                local_bytes = config_path.read_bytes()
                 local_config = yaml.safe_load(local_bytes.decode("utf-8-sig"))
             except (OSError, ValueError, yaml.YAMLError):
                 local_config = None
-            if not isinstance(local_config, dict):
+            if not seed_missing and not isinstance(local_config, dict):
                 if resolution == "use_task":
                     _write(
-                        draft / "config.yaml",
+                        config_path,
                         yaml.safe_dump(config, allow_unicode=True, sort_keys=False).encode(),
                         draft,
                         _hash(local_bytes) if local_bytes is not None else None,
@@ -153,7 +156,7 @@ def synchronize_draft(
                 merged = _merge(original.get("config", {}), config, local_config, "config", conflicts, resolution)
                 if merged != local_config:
                     _write(
-                        draft / "config.yaml",
+                        config_path,
                         yaml.safe_dump(merged, allow_unicode=True, sort_keys=False).encode(),
                         draft,
                         _hash(local_bytes) if local_bytes is not None else None,
@@ -164,6 +167,9 @@ def synchronize_draft(
                 if not target.is_relative_to(draft.resolve()) or (draft / name).is_symlink():
                     raise HTTPException(status_code=400, detail="Draft input is outside its project")
                 local = _hash(target.read_bytes()) if target.is_file() else None
+                if seed_missing and local is None and name in current_files:
+                    _write(target, current_files[name], draft, expected=None)
+                    continue
                 old, current = old_files.get(name), hashes.get(name)
                 legacy_conflict = (
                     (not original or "file:" + name in original.get("conflicts", []))
@@ -189,6 +195,9 @@ def synchronize_draft(
                                 status_code=409, detail="Draft changed during synchronization; refresh its conflicts"
                             )
                         target.unlink(missing_ok=True)
+            if seed_missing:
+                # Write the configuration last so retries can finish seeding an interrupted draft.
+                _write(config_path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False).encode(), draft, expected=None)
         next_state = (
             (original or {"config": {}, "files": hashes, "revision": ""})
             if conflicts

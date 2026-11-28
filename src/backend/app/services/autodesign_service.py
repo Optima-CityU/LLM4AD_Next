@@ -38,9 +38,9 @@ from app.services import (
 )
 from app.services.paper_workspace_runtime import prepare_paper_workspace_path
 
-_EXCLUDED = {".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", ".uv"}
 _TEXT_DOCUMENT_SUFFIXES = {".txt", ".md", ".markdown", ".rst", ".tex", ".typ", ".bib", ".csv", ".tsv", ".json", ".yaml", ".yml", ".toml"}
 _PACKAGE_IGNORED_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache", "__MACOSX"}
+_EXCLUDED = _PACKAGE_IGNORED_DIRS | {".cache", ".uv"}
 
 
 _SECRET_KEYS = {
@@ -286,7 +286,10 @@ def resolve_task_session(db: Session, current_user: models.User, task_id: uuid.U
     task = task_service.get_task_with_auth(db, task_id, current_user)
     session = db.exec(select(models.AutoDesignSession).where(models.AutoDesignSession.task_id == task.id)).first()
     if session:
-        return get_session(db, current_user, session.workspace_id)
+        _, workspace = _owned(db, current_user, session.workspace_id)
+        if not _running_family_task(db, task):
+            _ensure_draft(workspace, task, session)
+        return _response(db, session, workspace)
     if _running_family_task(db, task):
         raise HTTPException(status_code=409, detail="Task is pending or running; use the task workbench until it stops")
     result = create_session(db, current_user, schemas.AutoDesignSessionCreate(title=task.name, project_id=task.project_id))
@@ -376,7 +379,7 @@ def _input_entries(task: models.Task) -> dict[str, bytes]:
         if strip_root:
             name = name.split("/", 1)[1]
         _relative(name)
-        if not name.endswith(".gitkeep") and not name.endswith(".placeholder"):
+        if _visible(name) and not name.endswith((".gitkeep", ".placeholder")):
             result[name] = storage.download(key)
     return result
 
@@ -428,25 +431,15 @@ def _ensure_draft(workspace: models.PaperWorkspace, task: models.Task, session: 
             existing = _inside(_source_root(workspace), project_path.removeprefix("/workspace/source/"))
             if existing.is_relative_to((_source_root(workspace) / "draft").resolve()) and existing.is_dir():
                 draft = existing
-    cached_inputs = None
-
-    def inputs():
-        nonlocal cached_inputs
-        if cached_inputs is None:
-            cached_inputs = _input_entries(task)
-        return cached_inputs
-
-    created = not draft.exists()
-    if created:
-        draft.mkdir(parents=True, exist_ok=True)
-        for name, content in inputs().items():
-            path = _inside(draft, name)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-        (draft / "config.yaml").write_text(yaml.safe_dump(_portable_config(task), allow_unicode=True), encoding="utf-8")
-        prepare_paper_workspace_path(draft, recursive=True)
-        prepare_paper_workspace_path(draft.parent)
-    autodesign_drafts.synchronize_draft(draft, _draft_state_path(workspace, task), _portable_config(task), _task_source_revision(task), inputs, initialize=created, resolution=resolution)
+    autodesign_drafts.synchronize_draft(
+        draft,
+        _draft_state_path(workspace, task),
+        _portable_config(task),
+        _task_source_revision(task),
+        lambda: _input_entries(task),
+        resolution=resolution,
+    )
+    prepare_paper_workspace_path(draft.parent)
     return draft
 
 
@@ -519,8 +512,10 @@ def get_context(db: Session, current_user: models.User, workspace_id: uuid.UUID,
 
 def _visible(name: str) -> bool:
     """Omit environments, VCS internals and local secret files from file discovery."""
-    parts = PurePosixPath(name).parts
-    return not any(part in _EXCLUDED or part.startswith(".env") or part in {".npmrc", ".pypirc"} for part in parts)
+    path = PurePosixPath(name)
+    return path.suffix.lower() not in {".pyc", ".pyo"} and not any(
+        part in _EXCLUDED or part.startswith(".env") or part in {".npmrc", ".pypirc"} for part in path.parts
+    )
 
 
 def _local_root(
