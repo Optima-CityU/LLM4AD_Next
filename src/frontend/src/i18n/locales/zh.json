@@ -6037,6 +6037,19 @@
     "previous": "上一页",
     "next": "下一页",
     "storageUnavailable": "该历史评估的原始资料已不可读取；仍保留的指标和进度会继续显示。",
-    "storageOffline": "文件存储暂时不可用。已有进度和本地记录仍可查看，连接会自动重试。"
+    "storageOffline": "文件存储暂时不可用。已有进度和本地记录仍可查看，连接会自动重试。",
+    "lightbox": {
+      "title": "图片预览",
+      "close": "关闭",
+      "previous": "上一张",
+      "next": "下一张",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "zoomLevel": "缩放 {{value}}，点击适应窗口",
+      "fit": "适应窗口",
+      "actualSize": "原始大小",
+      "strip": "图片列表",
+      "hint": "← → 切换 · 滚轮缩放 · 拖动平移 · 双击原始大小"
+    }
   }
 }

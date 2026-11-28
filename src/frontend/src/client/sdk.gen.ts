@@ -1404,11 +1404,17 @@ export class Llm4AdEvaluationsService {
     /**
      * Evaluation Artifact
      * Verify saved evidence before streaming a download or safe inline preview.
+     *
+     * ``variant=thumb`` serves a cached WebP thumbnail for raster images. The
+     * thumbnail is generated from the verified original on first request, so
+     * previously uploaded artifacts need no re-upload; if generation fails the
+     * original image is served inline instead.
      * @param data The data for the request.
      * @param data.taskId
      * @param data.evaluationId
      * @param data.artifactId
      * @param data.download
+     * @param data.variant
      * @returns binary Successful Response
      * @throws ApiError
      */
@@ -1422,7 +1428,8 @@ export class Llm4AdEvaluationsService {
                 artifact_id: data.artifactId
             },
             query: {
-                download: data.download
+                download: data.download,
+                variant: data.variant
             },
             errors: {
                 422: 'Validation Error'

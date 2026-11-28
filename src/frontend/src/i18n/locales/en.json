@@ -6039,6 +6039,19 @@
     "storageUnavailable": "The original files for this historical evaluation are unavailable. Any remaining recorded metrics and progress are shown.",
     "storageOffline": "File storage is temporarily unavailable. Available progress and local records remain visible; access will retry automatically.",
     "fileCount_one": "{{count}} file",
-    "fileCount_other": "{{count}} files"
+    "fileCount_other": "{{count}} files",
+    "lightbox": {
+      "title": "Image preview",
+      "close": "Close",
+      "previous": "Previous image",
+      "next": "Next image",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "zoomLevel": "Zoom {{value}}, click to fit",
+      "fit": "Fit to window",
+      "actualSize": "Actual size",
+      "strip": "Images",
+      "hint": "← → switch · scroll to zoom · drag to pan · double-click for actual size"
+    }
   }
 }

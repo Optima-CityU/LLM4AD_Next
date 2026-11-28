@@ -377,6 +377,89 @@ def test_image_bytes_are_available_for_inline_preview(platform):
     assert response.content == png
 
 
+def test_thumbnail_is_generated_lazily_and_cached(platform, monkeypatch):
+    """Existing uploads get a cached WebP thumbnail on first request without re-upload."""
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (2048, 1024), (200, 30, 30)).save(buffer, format="PNG")
+    png = buffer.getvalue()
+    root, record = local_record(platform, name="figures/large.png", data=png, media_type="image/png")
+    service.upload_pending(root, str(platform.task.id))
+    thumb_key = service.thumbnail_key(platform.task.id, record.artifacts[0].sha256)
+    assert thumb_key not in platform.objects
+    thumb_url = url(platform, record, record.artifacts[0]) + "?variant=thumb"
+    response = platform.client.get(thumb_url)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/webp"
+    assert "immutable" in response.headers["cache-control"]
+    assert "inline" in response.headers["content-disposition"]
+    with Image.open(io.BytesIO(response.content)) as thumbnail:
+        assert max(thumbnail.size) == service.THUMBNAIL_EDGE
+    assert platform.objects[thumb_key] == response.content
+
+    def no_original(_key):
+        raise AssertionError("cached thumbnail must not re-read the original")
+
+    monkeypatch.setattr(service.storage, "iter_download", no_original)
+    cached = platform.client.get(thumb_url)
+    assert cached.status_code == 200 and cached.content == response.content
+
+
+@pytest.mark.parametrize(
+    ("image_format", "media_type", "extension"),
+    [("WEBP", "image/webp", "webp"), ("PNG", "image/png", "png")],
+)
+def test_thumbnail_preserves_animated_original(platform, image_format, media_type, extension):
+    """Animated WebP and APNG previews retain every frame without a still cache."""
+    import io
+
+    from PIL import Image
+
+    frames = [Image.new("RGB", (32, 32), color) for color in ("red", "blue")]
+    buffer = io.BytesIO()
+    frames[0].save(
+        buffer, format=image_format, save_all=True, append_images=frames[1:], duration=100, loop=0,
+    )
+    data = buffer.getvalue()
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.is_animated and image.n_frames == 2
+    root, record = local_record(platform, name=f"animated.{extension}", data=data, media_type=media_type)
+    service.upload_pending(root, str(platform.task.id))
+    response = platform.client.get(url(platform, record, record.artifacts[0]) + "?variant=thumb")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == media_type
+    assert "inline" in response.headers["content-disposition"]
+    assert response.content == data
+    assert service.thumbnail_key(platform.task.id, record.artifacts[0].sha256) not in platform.objects
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.is_animated and image.n_frames == 2
+
+
+def test_thumbnail_falls_back_to_original_when_undecodable(platform):
+    """An image Pillow cannot decode is served inline as the verified original."""
+    data = b"not really a png"
+    root, record = local_record(platform, name="broken.png", data=data, media_type="image/png")
+    service.upload_pending(root, str(platform.task.id))
+    response = platform.client.get(url(platform, record, record.artifacts[0]) + "?variant=thumb")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert "inline" in response.headers["content-disposition"]
+    assert response.content == data
+    assert service.thumbnail_key(platform.task.id, record.artifacts[0].sha256) not in platform.objects
+
+
+def test_thumbnail_variant_ignored_for_non_images(platform):
+    """Non-raster artifacts keep the original download behaviour under variant=thumb."""
+    root, record = local_record(platform)
+    service.upload_pending(root, str(platform.task.id))
+    response = platform.client.get(url(platform, record, record.artifacts[0]) + "?variant=thumb")
+    assert response.status_code == 200 and response.content == b'{"value": 42}'
+    assert "attachment" in response.headers["content-disposition"]
+
+
 def test_transfer_lease_waits_cooperatively(platform, monkeypatch):
     """Contending transfers must not freeze a gevent worker's heartbeat loop."""
     import threading
@@ -726,3 +809,27 @@ def test_finalization_requests_recovery_after_terminal_commit(platform, monkeypa
     monkeypatch.setattr(recover_uploads, "delay", recover)
     evolution._finalize_task(execution_id, TaskStatus.FAILED)
     assert queued == [TaskStatus.FAILED]
+
+
+@pytest.mark.parametrize(
+    ("name", "media_type", "expected"),
+    [
+        ("figures/screenshot", "image/png", "screenshot.png"),
+        ("screenshot", "image/jpeg", "screenshot.jpg"),
+        ("screenshot", "image/webp", "screenshot.webp"),
+        ("screenshot", "image/gif", "screenshot.gif"),
+        ("frame.PNG", "image/png", "frame.PNG"),
+        ("frame.custom", "image/png", "frame.custom"),
+        (".hidden", "image/png", ".hidden"),
+        ("data", "application/octet-stream", "data"),
+    ],
+)
+def test_download_filename_adds_missing_image_extension(platform, name, media_type, expected):
+    """Downloads keep original bytes and add only missing image extensions."""
+    data = b"original artifact bytes"
+    root, record = local_record(platform, name=name, data=data, media_type=media_type)
+    service.upload_pending(root, str(platform.task.id))
+    response = platform.client.get(url(platform, record, record.artifacts[0]))
+    assert response.status_code == 200
+    assert response.content == data
+    assert response.headers["content-disposition"] == f"attachment; filename*=UTF-8''{expected}"

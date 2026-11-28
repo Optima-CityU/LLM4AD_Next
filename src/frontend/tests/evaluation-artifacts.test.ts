@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import {
+  evaluationDownloadName,
   evaluationFileTree,
   evaluationNeedsPolling,
   evaluationPreviewKind,
   formatEvaluationBytes,
+  visibleEvaluationFiles,
 } from "../src/lib/evaluationArtifacts.ts"
 
 const file = (name: string, media_type = "application/octet-stream") => ({
@@ -40,6 +42,27 @@ test("only common safe formats receive automatic previews", () => {
   assert.equal(formatEvaluationBytes(1024), "1.0 KiB")
 })
 
+test("gallery hides only byte-identical behavior image aliases", () => {
+  const camera = file("screenshot_main", "image/png")
+  const alias = file("behavior/0-0.png", "image/png")
+  const different = {
+    ...file("behavior/0-1.png", "image/png"),
+    sha256: "b".repeat(64),
+  }
+  const secondCamera = file("screenshot_wall", "image/png")
+  assert.deepEqual(
+    visibleEvaluationFiles([alias, camera, different, secondCamera, camera]),
+    [camera, different, secondCamera],
+  )
+  assert.deepEqual(visibleEvaluationFiles([alias]), [alias])
+  const noHash = { ...camera, sha256: "" }
+  const noHashAlias = { ...alias, sha256: "" }
+  assert.deepEqual(visibleEvaluationFiles([noHash, noHashAlias]), [
+    noHash,
+    noHashAlias,
+  ])
+})
+
 test("remote finalization keeps polling after the parent task stops", () => {
   for (const state of [
     "queued",
@@ -60,4 +83,36 @@ test("remote finalization keeps polling after the parent task stops", () => {
     )
   }
   assert.equal(evaluationNeedsPolling(undefined), false)
+})
+
+test("download names add image extensions without renaming existing files", () => {
+  for (const [mime, extension] of [
+    ["image/png", ".png"],
+    ["image/jpeg", ".jpg"],
+    ["image/webp", ".webp"],
+    ["image/gif", ".gif"],
+  ]) {
+    assert.equal(
+      evaluationDownloadName(file("figures/screenshot", mime)),
+      `screenshot${extension}`,
+    )
+  }
+  assert.equal(
+    evaluationDownloadName(file("figures\\screenshot", "image/png")),
+    "screenshot.png",
+  )
+  assert.equal(
+    evaluationDownloadName(file("frame.PNG", "image/png")),
+    "frame.PNG",
+  )
+  assert.equal(
+    evaluationDownloadName(file("frame.custom", "image/png")),
+    "frame.custom",
+  )
+  assert.equal(evaluationDownloadName(file(".hidden", "image/png")), ".hidden")
+  assert.equal(
+    evaluationDownloadName(file("frame", "IMAGE/PNG; charset=binary")),
+    "frame.png",
+  )
+  assert.equal(evaluationDownloadName(file("data")), "data")
 })

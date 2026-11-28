@@ -1,11 +1,9 @@
-import { useQuery } from "@tanstack/react-query"
-import { Download, FileText, ImageOff, Maximize2 } from "lucide-react"
+import { FileText, ImageOff, Maximize2 } from "lucide-react"
 import { lazy, Suspense, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import Markdown from "react-markdown"
-import { toast } from "sonner"
 
-import { type EvaluationFile, Llm4AdEvaluationsService } from "@/client"
+import type { EvaluationFile } from "@/client"
 import {
   MARKDOWN_REHYPE_PLUGINS,
   MARKDOWN_REMARK_PLUGINS,
@@ -31,94 +29,20 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   evaluationPreviewKind,
   formatEvaluationBytes,
+  visibleEvaluationFiles,
 } from "@/lib/evaluationArtifacts"
 import { resolveEvidenceComparisons } from "@/lib/evidenceComparisons"
+
+import {
+  type ArtifactProps,
+  DownloadArtifact,
+  useArtifactContent,
+} from "./artifactContent"
+import ImageLightbox from "./ImageLightbox"
 
 const ArtifactCodeEditor = lazy(
   () => import("@/components/AutoResearch/ArtifactCodeEditor"),
 )
-
-interface ArtifactProps {
-  taskId: string
-  evaluationId: string
-  file: EvaluationFile
-  saved: boolean
-}
-
-function useArtifactContent(props: ArtifactProps, visible = true) {
-  const { taskId, evaluationId, file, saved } = props
-  const kind = evaluationPreviewKind(file)
-  const query = useQuery({
-    queryKey: ["nodeArtifact", taskId, evaluationId, file.id],
-    queryFn: async () => {
-      const data = await Llm4AdEvaluationsService.evaluationArtifact({
-        taskId,
-        evaluationId,
-        artifactId: file.id,
-        // Raster thumbnails and enlarged views share the authenticated original.
-        download: kind === "image",
-      })
-      const blob = data instanceof Blob ? data : new Blob([data as BlobPart])
-      return kind === "text"
-        ? await blob.text()
-        : blob.slice(0, blob.size, file.media_type)
-    },
-    enabled: saved && visible && kind !== null,
-    retry: false,
-    staleTime: Infinity,
-    gcTime: 0,
-  })
-  const [imageUrl, setImageUrl] = useState<string>()
-  useEffect(() => {
-    if (!(query.data instanceof Blob)) return
-    const url = URL.createObjectURL(query.data)
-    setImageUrl(url)
-    return () => URL.revokeObjectURL(url)
-  }, [query.data])
-  return { ...query, imageUrl }
-}
-
-function DownloadArtifact(props: ArtifactProps) {
-  const { t } = useTranslation()
-  const [busy, setBusy] = useState(false)
-  const download = async () => {
-    setBusy(true)
-    try {
-      const data = await Llm4AdEvaluationsService.evaluationArtifact({
-        taskId: props.taskId,
-        evaluationId: props.evaluationId,
-        artifactId: props.file.id,
-        download: true,
-      })
-      const blob = data instanceof Blob ? data : new Blob([data as BlobPart])
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = props.file.name.split("/").pop() ?? props.file.name
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch {
-      toast.error(t("evaluationData.downloadFailed"))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Button
-      size="icon"
-      variant="ghost"
-      className="size-8 shrink-0"
-      disabled={!props.saved || busy}
-      title={t("evaluationData.download")}
-      aria-label={t("evaluationData.downloadFile", { name: props.file.name })}
-      onClick={() => void download()}
-    >
-      <Download className={busy ? "animate-pulse" : ""} />
-    </Button>
-  )
-}
 
 function ImageThumbnail(
   props: ArtifactProps & { onOpen: () => void; eager?: boolean },
@@ -141,7 +65,7 @@ function ImageThumbnail(
     observer.observe(ref.current)
     return () => observer.disconnect()
   }, [props.eager])
-  const query = useArtifactContent(props, visible)
+  const query = useArtifactContent(props, visible, "thumb")
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <Button
@@ -265,10 +189,12 @@ export default function NodeArtifacts({
   const { t } = useTranslation()
   const [openedId, setOpenedId] = useState<string | null>(null)
   const [comparisonId, setComparisonId] = useState<string>()
-  const uniqueFiles = [
-    ...new Map(files.map((file) => [file.id, file])).values(),
-  ]
+  // Keep explicitly grouped evidence intact, even when it has a behavior alias.
+  const uniqueFiles = comparisons
+    ? [...new Map(files.map((file) => [file.id, file])).values()]
+    : visibleEvaluationFiles(files)
   const opened = files.find((file) => file.id === openedId)
+  const openedKind = opened ? evaluationPreviewKind(opened) : null
   const groups = resolveEvidenceComparisons(comparisons, uniqueFiles)
   const selectedIndex = Math.max(
     0,
@@ -434,8 +360,23 @@ export default function NodeArtifacts({
           </ul>
         </details>
       )}
+      {/* Full-screen lightbox for images */}
+      {opened && openedKind === "image" && (
+        <ImageLightbox
+          files={uniqueFiles.filter(
+            (f) => evaluationPreviewKind(f) === "image",
+          )}
+          openedId={opened.id}
+          taskId={taskId}
+          evaluationId={evaluationId}
+          availableIds={availableIds}
+          onClose={() => setOpenedId(null)}
+        />
+      )}
+
+      {/* Regular dialog for text / non-previewable files */}
       <Dialog
-        open={!!opened}
+        open={!!opened && openedKind !== "image"}
         onOpenChange={(open) => !open && setOpenedId(null)}
       >
         <DialogContent className="flex max-h-[90dvh] min-w-0 flex-col overflow-hidden sm:max-w-5xl">
