@@ -89,11 +89,12 @@ def aggregate_frames(frames: list[dict]) -> dict:
     }
 
 
-def score_static_dataset(report: dict) -> tuple[float, dict] | None:
+def score_static_dataset(report: dict, *, max_psnr_drop_db: float = 0.0) -> tuple[float, dict] | None:
     """Score complete paired measurements against each dataset's PSNR baseline.
 
     Args:
         report: Restored native benchmark report with per-dataset aggregates.
+        max_psnr_drop_db: Allowed mean PSNR reduction per dataset from the same-run baseline.
 
     Returns:
         A finite fitness and its quality assessment, or None for an invalid report.
@@ -110,9 +111,9 @@ def score_static_dataset(report: dict) -> tuple[float, dict] | None:
         if not _finite(delta):
             return None
         deltas[dataset] = delta
-    regressions = {dataset: delta for dataset, delta in deltas.items() if delta < 0}
-    if bool(regressions) != (report.get("status") == "POOR_QUALITY"):
+    if any(delta < 0 for delta in deltas.values()) != (report.get("status") == "POOR_QUALITY"):
         return None
+    regressions = {dataset: delta for dataset, delta in deltas.items() if delta < -max_psnr_drop_db}
     score = float(gain)
     if regressions:
         # Relative gain is at most 100 percent. The offset puts all regressions
@@ -128,6 +129,7 @@ def score_static_dataset(report: dict) -> tuple[float, dict] | None:
         "status": "beyond_reference" if regressions else "within_reference",
         "penalized": bool(regressions),
         "penalty_score": STATIC_QUALITY_SCORE_CAP,
+        "max_psnr_drop_db": max_psnr_drop_db,
         "psnr_delta_by_dataset_db": deltas,
         "reasons": [
             f"{dataset}: mean PSNR is {abs(delta):.6f} dB below its same-run baseline."

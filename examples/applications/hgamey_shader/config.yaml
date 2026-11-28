@@ -15,8 +15,9 @@ background: |
   enforces the fixed PSNR constraints and scores same-run baseline-relative
   latency improvement (%). It never launches Genshin.
   The paired static dataset profile uses native 2x RGB pairs from QRISP and
-  GameIR-SR, requires nonnegative mean PSNR change in both datasets, and scores
-  their equally weighted per-frame latency improvements. Its image attachments
+  GameIR-SR and scores their equally weighted per-frame latency improvements.
+  A candidate may lose up to 0.5 dB in mean PSNR on each dataset relative to
+  the same-run baseline. A larger drop gives a low score. Its image attachments
   contain one representative comparison collage per dataset.
   The game evaluator injects the compiled layer into Genshin and scores a
   frozen weighted combination of A/B FPS, frame presentation P95, GPU activity
@@ -40,7 +41,9 @@ background: |
   reports, restoration evidence and actual image comparisons in node metadata.
   Each candidate uses the selected evaluator, with no elite reevaluation.
 
-  Modify only the EVOLVE_START / EVOLVE_END region in shader.comp. Keep
+  You may redesign or completely rewrite the implementation inside the
+  EVOLVE_START / EVOLVE_END region in shader.comp, including sampling,
+  reconstruction, helper functions and control flow. Keep
   #version 450 and the descriptor interface outside that region unchanged:
   set 0 binding 0 is a readonly rgba8 image2D input_image; set 0 binding 1
   is a writeonly rgba8 image2D output_image. No samplers, push constants,
@@ -104,7 +107,8 @@ evaluator:
   # Select a connected gateway and evaluator before launching the task.
   gateway_id: null
   contract: {}
-  parameters: {}
+  parameters:
+    max_psnr_drop_db: 0.5
   candidate_paths: [shader.comp]
   # Active budget covers compilation, measurement and cleanup, excluding platform queue time.
   timeout: 7200.0

@@ -14,6 +14,16 @@ import aiohttp
 from loguru import logger
 
 from llm4ad.evaluator.models import EvaluationResult
+from llm4ad.gateway.examples.filament_fsr.source import (
+    CONTRACT_VERSION,
+    DATA_VERSION,
+    EVALUATOR_ID,
+    PERFORMANCE_EVALUATOR_ID,
+    SOURCE_NAME,
+    CandidateShaderError,
+    reference_source,
+    validate_candidate,
+)
 from llm4ad.gateway.sdk.bundles import pack_candidate
 
 
@@ -56,6 +66,22 @@ async def evaluate_remote(config, cfg) -> EvaluationResult:
         raise RuntimeError("Remote evaluation requires a platform task runtime")
     if not config.gateway_id:
         raise ValueError("Choose one gateway and evaluator before running this task")
+    # The bundled benchmark uses the same source policy in the task and on the gateway.
+    contract = config.contract
+    if (
+        contract.get("evaluator_id") in (EVALUATOR_ID, PERFORMANCE_EVALUATOR_ID)
+        and contract.get("version") == CONTRACT_VERSION
+        and contract.get("data_version") == DATA_VERSION
+    ):
+        try:
+            validate_candidate(Path(cfg.project_root) / SOURCE_NAME, reference_source())
+        except CandidateShaderError as error:
+            return EvaluationResult(
+                success=False,
+                metrics={},
+                error_message=str(error),
+                metadata={**error.metadata, "failure_type": type(error).__name__},
+            )
     bundle = pack_candidate(cfg.project_root, config.candidate_paths)
     key = hashlib.sha256(
         bundle

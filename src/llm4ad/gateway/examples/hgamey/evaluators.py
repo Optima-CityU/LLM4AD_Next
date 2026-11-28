@@ -10,6 +10,7 @@ from pathlib import Path
 import aiohttp
 
 from llm4ad.evaluator.models import EvaluationResult
+from llm4ad.gateway.sdk import EvaluationConfigurationError, RemoteJob
 
 from .benchmark import canonical, digest
 from .evaluator import HGameyShaderEvaluator
@@ -77,6 +78,26 @@ class HGameyStaticEvaluator(IndependentEvaluator):
 
     evaluation_mode = "static"
 
+    async def before_task(self, job: RemoteJob, reporter, operation: str) -> None:
+        """Reject invalid scoring settings before compilation or device allocation."""
+        if operation != "cancel" and getattr(self.benchmark, "static_pairs", []):
+            limit = job.parameters.get("max_psnr_drop_db", 0.0)
+            if (
+                isinstance(limit, bool)
+                or not isinstance(limit, (int, float))
+                or not math.isfinite(limit)
+                or limit < 0
+            ):
+                raise EvaluationConfigurationError("max_psnr_drop_db must be a finite nonnegative number")
+        await super().before_task(job, reporter, operation)
+
+    def finalize_preparation(self, job: RemoteJob, state: dict) -> dict:
+        """Record the selected tolerance in the job state used for scoring and recovery."""
+        state = super().finalize_preparation(job, state)
+        if getattr(self.benchmark, "static_pairs", []):
+            state["max_psnr_drop_db"] = float(job.parameters.get("max_psnr_drop_db", 0.0))
+        return state
+
     def convert_report(
         self, report: dict, state: dict, *, score_quality_rejection: bool = False
     ) -> EvaluationResult | None:
@@ -93,7 +114,7 @@ class HGameyStaticEvaluator(IndependentEvaluator):
             if isinstance(baseline, dict) and isinstance(baseline.get("psnr_db"), (int, float)):
                 result.monitor_metrics["baseline_psnr_db"] = baseline["psnr_db"]
             if paired and result.success:
-                scored = score_static_dataset(report)
+                scored = score_static_dataset(report, max_psnr_drop_db=state.get("max_psnr_drop_db", 0.0))
                 if scored is None:
                     return None
                 result.score, quality = scored
@@ -101,6 +122,7 @@ class HGameyStaticEvaluator(IndependentEvaluator):
                 result.metrics.update(static_score=result.score, operator_improvement_pct=gain)
                 result.metadata.update(static_datasets=report["static_datasets"], quality_assessment=quality)
                 summary = result.metadata["evaluation_summary"]
+                summary["quality_passed"] = not quality["penalized"]
                 summary["operator_improvement_threshold_met"] = (
                     gain > 0 and gain >= self.benchmark.min_operator_improvement_pct
                 )

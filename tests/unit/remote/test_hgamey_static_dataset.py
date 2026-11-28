@@ -190,7 +190,7 @@ def test_static_job_requires_all_frames_and_publishes_two_collages(tmp_path, fai
         assert adapter.convert_report({**report, "conditions_observed": {"restored": False}}, state) is None
     else:
         assert result.score == 62.5 and not assessment["penalized"]
-        colors = {dataset: (213, 217, 223) for dataset in DATASETS}
+        colors = dict.fromkeys(DATASETS, (213, 217, 223))
     for dataset, color in colors.items():
         path = tmp_path / "evidence" / "collages" / f"{dataset}.png"
         if path.is_file():
@@ -216,6 +216,24 @@ def test_static_fitness_keeps_qualified_candidates_above_quality_penalties():
     penalized, _ = score_static_dataset(degraded)
     lower, _ = score_static_dataset({**degraded, "operator_improvement_pct": 80})
     assert faster > slow > -100 > penalized > lower
+
+
+@pytest.mark.parametrize(("delta", "penalized"), [(-0.4999, False), (-0.5, False), (-0.5001, True)])
+def test_configured_static_psnr_tolerance_applies_to_each_dataset(delta, penalized):
+    """Accept the exact boundary while giving larger regressions a low finite score."""
+    report = {
+        "status": "POOR_QUALITY",
+        "operator_improvement_pct": 44.45,
+        "static_datasets": {
+            "QRISP": {"samples": 8, "psnr_delta_db": 2.0},
+            "GameIR-SR": {"samples": 8, "psnr_delta_db": delta},
+        },
+    }
+    score, assessment = score_static_dataset(report, max_psnr_drop_db=0.5)
+
+    assert assessment["penalized"] is penalized
+    assert assessment["max_psnr_drop_db"] == 0.5
+    assert score <= -100 if penalized else score == 44.45
 
 
 async def test_paired_upload_filters_individual_images_and_duplicates(monkeypatch):

@@ -50,8 +50,11 @@ coder:
     ```
 
     Return the complete replacement body in exactly one ```glsl:{file_path} fenced block.
-    Include all existing preprocessor directives in their original order and leave the
-    function signature, enclosing braces, EVOLVE markers and explanatory text outside the response.
+    Keep each existing #ifdef, #else and #endif in its original order, including repeated
+    FILAMENT_SPLIT_EASU and FILAMENT_FSR_DERINGING branches. Rewrite GLSL statements within
+    those branches. Compare the sequence against the current body, or against the expected
+    sequence in the diagnostic when repairing a rejected candidate.
+    Omit the function signature, enclosing braces, EVOLVE markers and explanatory text.
 planner:
   type: llm_evolution
   provider: default

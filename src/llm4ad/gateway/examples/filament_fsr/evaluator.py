@@ -14,11 +14,20 @@ import tempfile
 from pathlib import Path
 from typing import TypedDict
 
-from llm4ad.gateway.examples.filament_fsr import TASK_TEMPLATE
+from llm4ad.gateway.examples.filament_fsr.source import (
+    CONTRACT_VERSION,
+    DATA_VERSION,
+    EVALUATOR_ID,
+    PERFORMANCE_EVALUATOR_ID,
+    SEED,
+    SOURCE_NAME,
+    CandidateShaderError,
+    reference_source,
+    validate_candidate,
+)
 from llm4ad.gateway.sdk import (
     EvaluationConfigurationError,
     EvaluationContract,
-    EvaluationError,
     EvaluationResult,
     EvaluationUnavailableError,
     GatewayEvaluator,
@@ -31,11 +40,8 @@ from llm4ad.gateway.sdk.check import check_evaluator
 from llm4ad.gateway.sdk.runtime import GatewayBinding, GatewayRuntime
 
 HERE = Path(__file__).resolve().parent
-SEED = TASK_TEMPLATE / "algorithm"
-SOURCE_NAME = "ffx_fsr1_mobile.glsl"
 SHADER_NAME = "ffx_fsr1_mobile.fs"
 MATERIAL_NAME = "fsr_easu_mobile.mat"
-START, END = "    // EVOLVE_START\n", "    // EVOLVE_END\n"
 REMOTE_DIRECTORY = re.compile(r"/data/local/tmp/llm4ad-filament\.[a-zA-Z0-9]+")
 DEVICE_FIXTURES = "/data/local/tmp/llm4ad-filament-fsr1-fixtures"
 FRAME_TIMING = re.compile(r"GPU_FRAME_NS (\d+) (\d+)", re.MULTILINE)
@@ -80,7 +86,7 @@ def run(*arguments: str, timeout: int = 30, candidate: bool = False) -> str:
     if completed.returncode:
         detail = (completed.stdout + "\n" + completed.stderr).strip()
         if candidate and completed.returncode == 1 and not detail.startswith("bwrap:"):
-            raise EvaluationError(f"Candidate material failed to compile: {detail[-3000:]}")
+            raise CandidateShaderError(f"Candidate material failed to compile: {detail[-3000:]}")
         raise EvaluationUnavailableError(detail[-4000:] or f"Process exited with {completed.returncode}")
     return completed.stdout
 
@@ -139,22 +145,6 @@ def prepare_device_fixtures(device: tuple[str, ...], remote: str, work: Path) ->
     )
 
 
-def split_source(source: str) -> tuple[str, str, str]:
-    """Split the shader into its fixed context and its single editable body."""
-    if source.count(START) != 1 or source.count(END) != 1:
-        raise EvaluationError("Keep the original EVOLVE_START and EVOLVE_END markers")
-    before, rest = source.split(START)
-    body, after = rest.split(END)
-    return before, body, after
-
-
-def directives(source: str) -> list[str]:
-    """Read preprocessor directives after normalizing line splicing and comments."""
-    source = re.sub(r"\\\n", "", source)
-    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.DOTALL)
-    return [" ".join(line.split()) for line in source.splitlines() if line.lstrip().startswith("#")]
-
-
 def material_tool(tool: Path, workspace: Path, *arguments: str, candidate: bool = False) -> str:
     """Run the host material tool without network access or host project files."""
     sandbox = shutil.which("bwrap")
@@ -195,24 +185,17 @@ def material_tool(tool: Path, workspace: Path, *arguments: str, candidate: bool 
 
 def compile_material(source: Path, workspace: Path) -> bool:
     """Build the candidate against release templates and detect identical Vulkan code."""
+    reference = reference_source()
+    shader = validate_candidate(source, reference)
     source_dir = local_path("FILAMENT_FSR_SOURCE", directory=True)
     tools = local_path("FILAMENT_HOST_TOOLS", directory=True)
     stock = source_dir / SHADER_NAME
-    if not source.is_file() or source.stat().st_size > 64 * 1024:
-        raise EvaluationError(f"Provide {SOURCE_NAME} in the candidate worktree (maximum 64 KiB)")
-    try:
-        before, body, after = split_source(source.read_text(encoding="utf-8"))
-    except UnicodeError as error:
-        raise EvaluationError("The candidate shader must be UTF-8") from error
-    prefix, original, suffix = split_source((SEED / SOURCE_NAME).read_text(encoding="utf-8"))
-    if stock.read_text(encoding="utf-8") != prefix + original + suffix:
+    if stock.read_text(encoding="utf-8") != "".join(reference):
         raise EvaluationConfigurationError("The bundled seed does not match the official Filament source")
-    if (before, after) != (prefix, suffix) or directives(body) != directives(original):
-        raise EvaluationError("Only edit the marked function body and preserve the original preprocessor directives")
 
     for name in (MATERIAL_NAME, "ffx_a.h", "ffx_fsr1.h"):
         shutil.copyfile(source_dir / name, workspace / name)
-    (workspace / SHADER_NAME).write_text(before + body + after, encoding="utf-8")
+    (workspace / SHADER_NAME).write_text(shader, encoding="utf-8")
     material_tool(
         tools / "matc",
         workspace,
@@ -430,9 +413,9 @@ class Evaluator(GatewayEvaluator):
 
     relaxed_quality = False
     contract = EvaluationContract(
-        evaluator_id="filament-fsr1-android",
-        version="1",
-        data_version="filament-v1.75.0-mali-helmet-orbit-fox-walk",
+        evaluator_id=EVALUATOR_ID,
+        version=CONTRACT_VERSION,
+        data_version=DATA_VERSION,
         metrics=[
             Metric(name="improvement_pct", type=MetricType.MAXIMIZE),
             Metric(name="frames_passed", type=MetricType.MAXIMIZE),
@@ -467,18 +450,17 @@ class Evaluator(GatewayEvaluator):
         serial = os.environ.get("FILAMENT_DEVICE")
         if not serial:
             raise EvaluationConfigurationError("Set FILAMENT_DEVICE to an authorized ADB device")
-        device = connect_device(serial)
-        vulkan = run(*device, "shell", "cmd", "gpu", "vkjson", timeout=10)
-        gpu = re.search(r'"deviceName"\s*:\s*"(Mali[^"]*)"', vulkan)
-        if not gpu:
-            raise EvaluationConfigurationError("This contract requires a Mali Vulkan GPU")
-
         output = Path(job.artifact_dir)
         output.mkdir(parents=True, exist_ok=True)
         reporter.progress("Compiling the candidate with Filament matc", completed=0, total=3)
         with tempfile.TemporaryDirectory(prefix="filament-", dir=output) as directory:
             work = Path(directory)
             identical = compile_material(Path(job.project_root) / SOURCE_NAME, work)
+            device = connect_device(serial)
+            vulkan = run(*device, "shell", "cmd", "gpu", "vkjson", timeout=10)
+            gpu = re.search(r'"deviceName"\s*:\s*"(Mali[^"]*)"', vulkan)
+            if not gpu:
+                raise EvaluationConfigurationError("This contract requires a Mali Vulkan GPU")
             remote = run(*device, "shell", "mktemp", "-d", "/data/local/tmp/llm4ad-filament.XXXXXXXX", timeout=10).strip()
             if not REMOTE_DIRECTORY.fullmatch(remote):
                 raise EvaluationUnavailableError("ADB did not create the expected temporary directory")
@@ -599,7 +581,7 @@ class PerformanceEvaluator(Evaluator):
 
     relaxed_quality = True
     contract = EvaluationContract(
-        evaluator_id="filament-fsr1-android-performance",
+        evaluator_id=PERFORMANCE_EVALUATOR_ID,
         version=Evaluator.contract.version,
         data_version=Evaluator.contract.data_version,
         metrics=[Evaluator.contract.metrics[0]],
