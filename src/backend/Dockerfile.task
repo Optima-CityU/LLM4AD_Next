@@ -263,6 +263,9 @@ COPY ./skills/autorebuttal/ATTRIBUTION.md                     /app/skills/autore
 COPY ./skills/autorebuttal/LICENSE.AutoRebuttal               /app/skills/autorebuttal-shared/LICENSE.AutoRebuttal
 COPY ./skills/autorebuttal/shared                             /app/skills/autorebuttal-shared
 
+# Embedded research workers run without root and copy the bundled skills at startup.
+RUN chmod -R a+rX /app/skills
+
 # ---------- 创建非 root 用户，提升安全性,git 目录权限问题，暂时使用root ----------
 # RUN useradd --create-home --shell /bin/bash taskrunner
 # USER taskrunner
